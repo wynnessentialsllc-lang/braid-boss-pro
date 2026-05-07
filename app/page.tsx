@@ -831,7 +831,7 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
   // the scroll body so action buttons clear the bottom chrome.
   const sheetMaxHeight = maxHeight || "calc(100dvh - 24px)";
   return (
-    <div className="fixed left-0 right-0 top-0 z-50 flex items-end justify-center"
+    <div className="fixed left-0 right-0 bottom-0 z-50 flex items-end justify-center"
       style={{ background: "rgba(26, 15, 8, 0.45)", height: "100dvh" }}
       onClick={onClose}>
       <div className="bbp-sheet w-full max-w-[480px] rounded-t-3xl flex flex-col"
