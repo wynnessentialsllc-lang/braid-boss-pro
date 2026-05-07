@@ -805,7 +805,7 @@ const EmptyState = ({ icon, title, body, cta }: {
   </div>
 );
 
-const Sheet = ({ open, onClose, title, children, maxHeight = "92vh", rightAction }: {
+const Sheet = ({ open, onClose, title, children, maxHeight, rightAction }: {
   open: boolean;
   onClose: () => void;
   title: string;
@@ -814,10 +814,15 @@ const Sheet = ({ open, onClose, title, children, maxHeight = "92vh", rightAction
   rightAction?: React.ReactNode;
 }) => {
   if (!open) return null;
+  // On mobile Safari, 100vh ignores the dynamic browser chrome, so the
+  // bottom of the sheet (and the actions inside) can hide behind the
+  // URL bar or tab bar. Reserve room at the top and pad the scroll
+  // content past the bottom safe-area + tab bar.
+  const sheetMaxHeight = maxHeight || "calc(100vh - 80px)";
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: "rgba(26, 15, 8, 0.45)" }} onClick={onClose}>
       <div className="bbp-sheet w-full max-w-[480px] rounded-t-3xl flex flex-col"
-        style={{ background: C.cream, maxHeight, boxShadow: "0 -20px 60px -20px rgba(0,0,0,0.3)" }}
+        style={{ background: C.cream, maxHeight: sheetMaxHeight, boxShadow: "0 -20px 60px -20px rgba(0,0,0,0.3)" }}
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center pt-3 pb-1">
           <div className="w-10 h-1.5 rounded-full" style={{ background: C.mutedSoft }} />
@@ -829,7 +834,15 @@ const Sheet = ({ open, onClose, title, children, maxHeight = "92vh", rightAction
             <button onClick={onClose} className="p-2 -mr-2 rounded-full" style={{ color: C.coffee }}><X size={22} /></button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto bbp-scroll px-5 py-4">{children}</div>
+        <div className="flex-1 bbp-scroll px-5 pt-4"
+          style={{
+            overflowY: "auto",
+            WebkitOverflowScrolling: "touch",
+            paddingBottom: "calc(140px + env(safe-area-inset-bottom, 0px))",
+            overscrollBehavior: "contain",
+          }}>
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -3757,6 +3770,126 @@ const TimerSessionsScreen = ({ store, onBack }) => {
   );
 };
 // ============================================================
+//  NOTIFICATIONS SHEET
+// ============================================================
+type NotifItem = {
+  id: string;
+  kind: "reminder" | "balance" | "upcoming";
+  tone: "warning" | "danger" | "gold" | "neutral";
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+  meta?: string;
+};
+
+const buildNotifications = (store: any): NotifItem[] => {
+  const items: NotifItem[] = [];
+  const today = todayISO();
+  const now = Date.now();
+  const in7 = addDaysISO(today, 7);
+
+  // Pending appointment reminders
+  const pendingReminders = (store.reminders || []).filter((r: any) => r && r.status === "pending");
+  for (const r of pendingReminders) {
+    const client = store.clientById ? store.clientById(r.clientId) : null;
+    items.push({
+      id: `rem_${r.id}`,
+      kind: "reminder",
+      tone: "warning",
+      icon: <Bell size={16} style={{ color: C.warning }} />,
+      title: `${PURPOSE_LABEL_LOCAL[r.purpose as keyof typeof PURPOSE_LABEL_LOCAL] || "Reminder"} · ${client?.name || r.clientName || "Client"}`,
+      body: r.renderedBody || "Reminder is queued.",
+      meta: r.scheduledFor ? `Scheduled ${fmtRelative(r.scheduledFor)}` : undefined,
+    });
+  }
+
+  // Late balance alerts: appointments past their date with balance > 0 and not cancelled
+  const lateBalance = (store.appointments || []).filter((a: any) =>
+    a && a.status !== "cancelled" && a.status !== "completed" &&
+    Number(a.balanceDue) > 0 && a.date && a.date < today
+  );
+  for (const a of lateBalance) {
+    items.push({
+      id: `bal_${a.id}`,
+      kind: "balance",
+      tone: "danger",
+      icon: <AlertCircle size={16} style={{ color: C.danger }} />,
+      title: `Balance overdue · ${a.clientName || "Client"}`,
+      body: `${fmtMoney(Number(a.balanceDue) || 0, store.business?.currency || "USD")} unpaid for ${a.style || "appointment"}.`,
+      meta: `Was ${fmtDate(a.date)}`,
+    });
+  }
+
+  // Upcoming bookings within 7 days
+  const upcoming = (store.appointments || []).filter((a: any) =>
+    a && a.status !== "cancelled" && a.status !== "completed" &&
+    a.date && a.date >= today && a.date <= in7
+  ).sort((a: any, b: any) =>
+    ((a.date || "") + (a.time || "")).localeCompare((b.date || "") + (b.time || ""))
+  );
+  for (const a of upcoming) {
+    const apptMs = a.date && a.time ? new Date(`${a.date}T${a.time}:00`).getTime() : null;
+    const soon = apptMs && apptMs - now < 48 * 3600000;
+    items.push({
+      id: `up_${a.id}`,
+      kind: "upcoming",
+      tone: soon ? "gold" : "neutral",
+      icon: <Calendar size={16} style={{ color: soon ? C.goldDeep : C.coffee }} />,
+      title: `${a.clientName || "Client"} · ${a.style || "Appointment"}`,
+      body: `${fmtDate(a.date)}${a.time ? ` at ${fmtTime(a.time)}` : ""}`,
+      meta: apptMs ? fmtRelative(new Date(apptMs).toISOString()) : undefined,
+    });
+  }
+
+  return items;
+};
+
+const NotificationsSheet = ({ open, onClose, store }: {
+  open: boolean;
+  onClose: () => void;
+  store: any;
+}) => {
+  const items = useMemo(() => (open ? buildNotifications(store) : []), [
+    open, store.reminders, store.appointments, store.clients, store.business
+  ]);
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Notifications"
+      rightAction={items.length > 0 ? (
+        <span className="px-2.5 py-1 rounded-full text-[11px] font-bold mr-1"
+          style={{ background: C.gold, color: C.espresso, letterSpacing: "0.06em" }}>
+          {items.length}
+        </span>
+      ) : undefined}>
+      {items.length === 0 ? (
+        <EmptyState
+          icon={<Bell size={28} style={{ color: C.gold }} />}
+          title="You're all caught up"
+          body="No reminders, overdue balances, or upcoming bookings need your attention right now."
+        />
+      ) : (
+        <div className="space-y-2 pb-6">
+          {items.map(n => (
+            <Card key={n.id} className="p-3.5 flex items-start gap-3">
+              <div className="rounded-xl p-2 shrink-0" style={{
+                background: n.tone === "danger" ? "rgba(156,61,46,0.10)" :
+                  n.tone === "warning" ? "rgba(201,118,43,0.12)" :
+                    n.tone === "gold" ? "rgba(201,169,97,0.18)" : C.ivory,
+              }}>{n.icon}</div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{n.title}</p>
+                <p className="text-xs mt-0.5 leading-relaxed line-clamp-2" style={{ color: C.coffee }}>{n.body}</p>
+                {n.meta && <p className="text-[11px] mt-1" style={{ color: C.muted }}>{n.meta}</p>}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </Sheet>
+  );
+};
+
+// ============================================================
 //  APP ROOT
 // ============================================================
 export default function App() {
@@ -3771,6 +3904,7 @@ export default function App() {
   const [editingTx, setEditingTx] = useState<EntityRecord | null>(null);
   const [openClientForm, setOpenClientForm] = useState(false);
   const [quickClient, setQuickClient] = useState<EntityRecord | null>(null);
+  const [notifOpen, setNotifOpen] = useState(false);
 
   // Dashboard quick actions
   const openQuickAppt = () => {
@@ -3870,7 +4004,7 @@ export default function App() {
               openSettings={() => setSecondary("settings")}
               openPolicies={() => setSecondary("policies")}
               openSavedQuotes={() => setSecondary("savedQuotes")}
-              openReminders={() => setSecondary("reminders")}
+              openReminders={() => setNotifOpen(true)}
               openPresets={() => setSecondary("presets")}
               openTimer={() => setSecondary("timer")} />
           )}
@@ -3923,6 +4057,9 @@ export default function App() {
       {secondary !== "timer" && store.activeTimer && (
         <TimerMiniPill timer={store.activeTimer} onClick={() => setSecondary("timer")} />
       )}
+
+      {/* Notifications sheet (bell on dashboard) */}
+      <NotificationsSheet open={notifOpen} onClose={() => setNotifOpen(false)} store={store} />
 
       {/* Transaction sheet */}
       <TransactionSheet
