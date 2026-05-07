@@ -805,7 +805,7 @@ const EmptyState = ({ icon, title, body, cta }: {
   </div>
 );
 
-const Sheet = ({ open, onClose, title, children, maxHeight = "92vh", rightAction }: {
+const Sheet = ({ open, onClose, title, children, maxHeight, rightAction }: {
   open: boolean;
   onClose: () => void;
   title: string;
@@ -814,10 +814,15 @@ const Sheet = ({ open, onClose, title, children, maxHeight = "92vh", rightAction
   rightAction?: React.ReactNode;
 }) => {
   if (!open) return null;
+  // On mobile Safari, 100vh ignores the dynamic browser chrome, so the
+  // bottom of the sheet (and the actions inside) can hide behind the
+  // URL bar or tab bar. Reserve room at the top and pad the scroll
+  // content past the bottom safe-area + tab bar.
+  const sheetMaxHeight = maxHeight || "calc(100vh - 80px)";
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: "rgba(26, 15, 8, 0.45)" }} onClick={onClose}>
       <div className="bbp-sheet w-full max-w-[480px] rounded-t-3xl flex flex-col"
-        style={{ background: C.cream, maxHeight, boxShadow: "0 -20px 60px -20px rgba(0,0,0,0.3)" }}
+        style={{ background: C.cream, maxHeight: sheetMaxHeight, boxShadow: "0 -20px 60px -20px rgba(0,0,0,0.3)" }}
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center pt-3 pb-1">
           <div className="w-10 h-1.5 rounded-full" style={{ background: C.mutedSoft }} />
@@ -829,7 +834,15 @@ const Sheet = ({ open, onClose, title, children, maxHeight = "92vh", rightAction
             <button onClick={onClose} className="p-2 -mr-2 rounded-full" style={{ color: C.coffee }}><X size={22} /></button>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto bbp-scroll px-5 py-4">{children}</div>
+        <div className="flex-1 bbp-scroll px-5 pt-4"
+          style={{
+            overflowY: "auto",
+            WebkitOverflowScrolling: "touch",
+            paddingBottom: "calc(140px + env(safe-area-inset-bottom, 0px))",
+            overscrollBehavior: "contain",
+          }}>
+          {children}
+        </div>
       </div>
     </div>
   );
