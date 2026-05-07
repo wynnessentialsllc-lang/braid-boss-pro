@@ -46,16 +46,57 @@ const GlobalStyle = () => (
 );
 
 // ============================================================
+//  TYPES (loose entity shapes — runtime data is dynamic)
+// ============================================================
+// Permissive entity shape: runtime objects are JSON records with dynamic
+// fields. We use a string index signature so dynamic property reads/writes
+// are well-typed without sprinkling explicit casts through the file.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type EntityRecord = { [key: string]: any };
+type StoredEntity = EntityRecord & { id: string };
+
+// ============================================================
 //  STORAGE
 // ============================================================
+const getLocalStorage = (): Storage | null => {
+  if (typeof window === "undefined") return null;
+  try { return window.localStorage; } catch { return null; }
+};
+
 const safeStorage = {
-  async get(key: string) { try { const r = await window.storage.get(key); return r ? r.value : null; } catch { return null; } },
-  async set(key: string, value: any) { try { await window.storage.set(key, typeof value === "string" ? value : JSON.stringify(value)); return true; } catch { return false; } },
-  async delete(key: string) { try { await window.storage.delete(key); return true; } catch { return false; } },
-  async list(prefix: string) { try { const r = await window.storage.list(prefix); return r?.keys || []; } catch { return []; } },
-  async getAllByPrefix(prefix: string) {
+  async get(key: string): Promise<string | null> {
+    const ls = getLocalStorage();
+    if (!ls) return null;
+    try { return ls.getItem(key); } catch { return null; }
+  },
+  async set(key: string, value: unknown): Promise<boolean> {
+    const ls = getLocalStorage();
+    if (!ls) return false;
+    try {
+      ls.setItem(key, typeof value === "string" ? value : JSON.stringify(value));
+      return true;
+    } catch { return false; }
+  },
+  async delete(key: string): Promise<boolean> {
+    const ls = getLocalStorage();
+    if (!ls) return false;
+    try { ls.removeItem(key); return true; } catch { return false; }
+  },
+  async list(prefix: string): Promise<string[]> {
+    const ls = getLocalStorage();
+    if (!ls) return [];
+    try {
+      const keys: string[] = [];
+      for (let i = 0; i < ls.length; i++) {
+        const k = ls.key(i);
+        if (k && k.startsWith(prefix)) keys.push(k);
+      }
+      return keys;
+    } catch { return []; }
+  },
+  async getAllByPrefix(prefix: string): Promise<EntityRecord[]> {
     const keys = await this.list(prefix);
-    const out = [];
+    const out: EntityRecord[] = [];
     for (const k of keys) {
       const v = await this.get(k);
       if (v) { try { out.push(JSON.parse(v)); } catch {} }
@@ -99,6 +140,7 @@ const fmtDuration = (ms: number): string => {
   if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 };
+const fmtHours = (ms: number): string => (ms / 3600000).toFixed(1);
 const fmtRelative = (iso: string): string => {
   if (!iso) return "—";
   const diff = new Date(iso).getTime() - Date.now();
@@ -245,12 +287,12 @@ const buildReminderContext = (appt: any, business: any): any => ({
 
 const planRemindersForAppointment = (appt: any, settings: any, templates: any[], business: any): any[] => {
   if (!settings.enabled) return [];
-  const out = [];
+  const out: EntityRecord[] = [];
   const ctx = buildReminderContext(appt, business);
   const apptDateTime = new Date(`${appt.date}T${appt.time || "10:00"}:00`);
   const channels = settings.defaultChannel === "both" ? ["sms", "email"] : [settings.defaultChannel];
 
-  const queue = [];
+  const queue: { purpose: string; at: Date }[] = [];
   if (settings.timings.confirmation) queue.push({ purpose: "confirmation", at: new Date() });
   if (settings.timings.h48) queue.push({ purpose: "reminder_48h", at: new Date(apptDateTime.getTime() - 48 * 3600000) });
   if (settings.timings.h24) queue.push({ purpose: "reminder_24h", at: new Date(apptDateTime.getTime() - 24 * 3600000) });
@@ -325,19 +367,20 @@ const compressImage = (file: File, maxWidth: number = 1280, quality: number = 0.
       const h = Math.round(img.height * ratio);
       const canvas = document.createElement("canvas");
       canvas.width = w; canvas.height = h;
-      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
       const dataUrl = canvas.toDataURL("image/jpeg", quality);
 
       const tw = Math.min(w, 320);
       const th = Math.round((h / w) * tw);
       const tc = document.createElement("canvas");
       tc.width = tw; tc.height = th;
-      tc.getContext("2d").drawImage(img, 0, 0, tw, th);
+      tc.getContext("2d")?.drawImage(img, 0, 0, tw, th);
       const thumbnailDataUrl = tc.toDataURL("image/jpeg", 0.6);
 
       resolve({ dataUrl, thumbnailDataUrl });
     };
-    img.src = e.target.result;
+    const result = e.target?.result;
+    img.src = typeof result === "string" ? result : "";
   };
   reader.readAsDataURL(file);
 });
@@ -346,20 +389,20 @@ const compressImage = (file: File, maxWidth: number = 1280, quality: number = 0.
 //  STORAGE HOOK
 // ============================================================
 const useStorage = () => {
-  const [business, setBusiness] = useState(DEFAULT_BUSINESS);
-  const [reminderSettings, setReminderSettings] = useState(DEFAULT_REMINDER_SETTINGS);
-  const [reminderTemplates, setReminderTemplates] = useState([]);
-  const [reminders, setReminders] = useState([]);
-  const [clients, setClients] = useState([]);
-  const [appointments, setAppointments] = useState([]);
-  const [quotes, setQuotes] = useState([]);
-  const [transactions, setTransactions] = useState([]);
-  const [policies, setPolicies] = useState([]);
-  const [photos, setPhotos] = useState([]);
-  const [recurringSeries, setRecurringSeries] = useState([]);
-  const [stylePresets, setStylePresets] = useState([]);
-  const [activeTimer, setActiveTimer] = useState(null);
-  const [timerSessions, setTimerSessions] = useState([]);
+  const [business, setBusiness] = useState<EntityRecord>(DEFAULT_BUSINESS);
+  const [reminderSettings, setReminderSettings] = useState<EntityRecord>(DEFAULT_REMINDER_SETTINGS);
+  const [reminderTemplates, setReminderTemplates] = useState<EntityRecord[]>([]);
+  const [reminders, setReminders] = useState<EntityRecord[]>([]);
+  const [clients, setClients] = useState<EntityRecord[]>([]);
+  const [appointments, setAppointments] = useState<EntityRecord[]>([]);
+  const [quotes, setQuotes] = useState<EntityRecord[]>([]);
+  const [transactions, setTransactions] = useState<EntityRecord[]>([]);
+  const [policies, setPolicies] = useState<EntityRecord[]>([]);
+  const [photos, setPhotos] = useState<EntityRecord[]>([]);
+  const [recurringSeries, setRecurringSeries] = useState<EntityRecord[]>([]);
+  const [stylePresets, setStylePresets] = useState<EntityRecord[]>([]);
+  const [activeTimer, setActiveTimer] = useState<EntityRecord | null>(null);
+  const [timerSessions, setTimerSessions] = useState<EntityRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -610,7 +653,7 @@ const Card = ({ children, className = "", style, onClick }: {
     }}>{children}</div>
 );
 
-const Button = ({ children, variant = "primary", onClick, disabled, className = "", icon, type = "button", fullWidth }: {
+const Button = ({ children, variant = "primary", onClick, disabled, className = "", icon, type = "button", fullWidth, size }: {
   children: React.ReactNode;
   variant?: "primary" | "dark" | "outline" | "ghost" | "danger";
   onClick?: () => void;
@@ -619,7 +662,9 @@ const Button = ({ children, variant = "primary", onClick, disabled, className = 
   icon?: React.ReactNode;
   type?: "button" | "submit" | "reset";
   fullWidth?: boolean;
+  size?: string;
 }) => {
+  void size;
   const v = {
     primary: { bg: C.gold, fg: C.espresso, border: C.gold, shadow: "0 6px 18px -8px rgba(168, 137, 63, 0.55)" },
     dark: { bg: C.espresso, fg: C.cream, border: C.espresso, shadow: "0 6px 18px -8px rgba(42, 24, 16, 0.45)" },
@@ -654,21 +699,23 @@ const Field = ({ label, hint, children, suffix }: {
   </label>
 );
 
-const Input = ({ value, onChange, type = "text", placeholder, prefix, ...rest }: {
+const Input = ({ value, onChange, type = "text", placeholder, prefix, suffix, ...rest }: {
   value: string | number;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   type?: string;
   placeholder?: string;
   prefix?: string;
-} & React.InputHTMLAttributes<HTMLInputElement>) => (
+  suffix?: string;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type" | "placeholder" | "prefix">) => (
   <div className="relative">
     {prefix && <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold" style={{ color: C.muted }}>{prefix}</span>}
     <input type={type} value={value ?? ""} onChange={onChange} placeholder={placeholder}
       className="w-full rounded-xl px-3.5 py-3 text-[15px] outline-none transition"
-      style={{ background: C.paper, border: `1px solid ${C.hairline}`, color: C.ink, paddingLeft: prefix ? "1.75rem" : "0.875rem" }}
+      style={{ background: C.paper, border: `1px solid ${C.hairline}`, color: C.ink, paddingLeft: prefix ? "1.75rem" : "0.875rem", paddingRight: suffix ? "2.5rem" : undefined }}
       onFocus={e => e.target.style.borderColor = C.gold}
       onBlur={e => e.target.style.borderColor = C.hairline}
       {...rest} />
+    {suffix && <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-sm font-medium" style={{ color: C.muted }}>{suffix}</span>}
   </div>
 );
 
@@ -922,7 +969,7 @@ const TimerMiniPill = ({ timer, onClick }) => {
 // ============================================================
 //  APPOINTMENT ROW
 // ============================================================
-const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }) => {
+const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: { appt: any; business: any; onClick?: () => void; compact?: boolean; recurringSeries?: any }) => {
   const series = appt.seriesId ? recurringSeries?.find(s => s.id === appt.seriesId) : null;
   const apptDateTime = appt.date && appt.time ? new Date(`${appt.date}T${appt.time}:00`).getTime() : null;
   const isLate = apptDateTime && apptDateTime < Date.now() && appt.status === "scheduled";
@@ -979,14 +1026,14 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
 
   // Suggested rebooks: clients whose last completed appointment was longer ago than typical cadence (4 weeks)
   const suggestedRebooks = useMemo(() => {
-    const byClient = {};
-    appointments.filter(a => a.status === "completed").forEach(a => {
+    const byClient: Record<string, EntityRecord> = {};
+    appointments.filter((a: EntityRecord) => a.status === "completed").forEach((a: EntityRecord) => {
       if (!a.clientId) return;
       if (!byClient[a.clientId] || a.date > byClient[a.clientId].date) byClient[a.clientId] = a;
     });
     const cutoff = addDaysISO(today, -28);
-    const out = Object.values(byClient).filter(a => a.date < cutoff && a.date >= addDaysISO(today, -90));
-    return out.sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3);
+    const out = Object.values(byClient).filter((a) => a.date < cutoff && a.date >= addDaysISO(today, -90));
+    return out.sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(0, 3);
   }, [appointments, today]);
 
   const stats = useMemo(() => {
@@ -1177,13 +1224,13 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
   const { business, upsertQuote } = store;
   const [styleName, setStyleName] = useState("");
   const [hairCost, setHairCost] = useState("");
-  const [hourlyRate, setHourlyRate] = useState(business.hourlyRate);
+  const [hourlyRate, setHourlyRate] = useState<string | number>(business.hourlyRate);
   const [hours, setHours] = useState("");
-  const [travelFee, setTravelFee] = useState(business.defaultTravelFee || 0);
+  const [travelFee, setTravelFee] = useState<string | number>(business.defaultTravelFee || 0);
   const [overhead, setOverhead] = useState("");
-  const [profitMargin, setProfitMargin] = useState(business.profitMargin || 0);
-  const [tipPct, setTipPct] = useState(0);
-  const [addOns, setAddOns] = useState([]);
+  const [profitMargin, setProfitMargin] = useState<string | number>(business.profitMargin || 0);
+  const [tipPct, setTipPct] = useState<string | number>(0);
+  const [addOns, setAddOns] = useState<EntityRecord[]>([]);
   const [savedFlash, setSavedFlash] = useState(false);
   const [labelInput, setLabelInput] = useState("");
   const [showSaveSheet, setShowSaveSheet] = useState(false);
@@ -1349,7 +1396,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
   );
 };
 
-const BreakRow = ({ label, value, bold }) => (
+const BreakRow = ({ label, value, bold }: { label: string; value: string; bold?: boolean }) => (
   <div className="flex items-center justify-between py-1">
     <span className="text-sm" style={{ color: bold ? C.cream : "rgba(245, 235, 217, 0.75)", fontWeight: bold ? 600 : 400 }}>{label}</span>
     <span style={{ color: bold ? C.gold : C.cream, fontWeight: bold ? 700 : 500 }} className="text-sm font-mono">{value}</span>
@@ -1361,7 +1408,7 @@ const BreakRow = ({ label, value, bold }) => (
 const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt }) => {
   const { appointments, business, recurringSeries } = store;
   const [filter, setFilter] = useState("upcoming");
-  const [editing, setEditing] = useState(null);
+  const [editing, setEditing] = useState<EntityRecord | null>(null);
 
   useEffect(() => {
     if (prefillNewAppt) {
@@ -1444,19 +1491,19 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt }) => {
     recurringSeries, upsertSeries, deleteSeries, scheduleRemindersForAppointment,
     appointments, reminderSettings,
   } = store;
-  const [form, setForm] = useState({});
+  const [form, setForm] = useState<EntityRecord>({});
   const [showNewClient, setShowNewClient] = useState(false);
   const [newClientName, setNewClientName] = useState("");
 
   // Recurring
   const [makeRecurring, setMakeRecurring] = useState(false);
   const [cadence, setCadence] = useState("4w");
-  const [customDays, setCustomDays] = useState(28);
-  const [occurrences, setOccurrences] = useState(6);
+  const [customDays, setCustomDays] = useState<string | number>(28);
+  const [occurrences, setOccurrences] = useState<string | number>(6);
 
   // Reminders
   const [remindersEnabled, setRemindersEnabled] = useState(true);
-  const [reminderChannel, setReminderChannel] = useState(null); // null = use default
+  const [reminderChannel, setReminderChannel] = useState<EntityRecord | null>(null); // null = use default
 
   useEffect(() => {
     if (open) {
@@ -1559,7 +1606,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt }) => {
 
     // Generate future occurrences for new series
     if (isFirstInNewSeries) {
-      const days = cadenceDays(cadence, customDays);
+      const days = cadenceDays(cadence, Number(customDays));
       let nextDate = form.date;
       for (let i = 1; i < Number(occurrences); i++) {
         nextDate = addDaysISO(nextDate, days);
@@ -1748,10 +1795,11 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt }) => {
 const PREF_STYLES = ["Knotless", "Box braids", "Boho", "Goddess", "Stitch braids", "Cornrows", "Twists", "Locs", "Sew-in", "Wig install"];
 const SENSITIVITY = ["None", "Mild", "Moderate", "High"];
 
-const Clients = ({ store, openClientPhotos }) => {
+const Clients = ({ store, openClientPhotos }: { store: any; openClientPhotos?: any }) => {
+  void openClientPhotos;
   const { clients, appointments, photos, business } = store;
   const [search, setSearch] = useState("");
-  const [editing, setEditing] = useState(null);
+  const [editing, setEditing] = useState<EntityRecord | null>(null);
 
   const enriched = useMemo(() => clients.map(c => {
     const cAppts = appointments.filter(a => a.clientId === c.id);
@@ -1980,8 +2028,8 @@ const PhotoGallery = ({ clientId, clientName, appointments, photos, upsertPhoto,
   deletePhoto: (id: string) => Promise<void>;
 }) => {
   const [filter, setFilter] = useState("all");
-  const [lightbox, setLightbox] = useState(null); // photo or null
-  const [editingPhoto, setEditingPhoto] = useState(null);
+  const [lightbox, setLightbox] = useState<EntityRecord | null>(null); // photo or null
+  const [editingPhoto, setEditingPhoto] = useState<EntityRecord | null>(null);
   const [showFavOnly, setShowFavOnly] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -2096,7 +2144,7 @@ const PhotoLightbox = ({ photo, photos, onClose, onEdit, onDelete, onToggleFav }
   photo: any;
   photos: any[];
   onClose: () => void;
-  onEdit: () => void;
+  onEdit: (p: any) => void;
   onDelete: (p: any) => Promise<void>;
   onToggleFav: (p: any) => Promise<void>;
 }) => {
@@ -2489,8 +2537,8 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
   openSettings: () => void;
 }) => {
   const [filter, setFilter] = useState("pending"); // pending | sent | failed | all
-  const [openItem, setOpenItem] = useState<any>(null);
-  const [toast, setToast] = useState(null);
+  const [openItem, setOpenItem] = useState<EntityRecord | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     let list = [...store.reminders];
@@ -2703,7 +2751,7 @@ const ReminderSettings = ({ store, onBack }: {
   onBack: () => void;
 }) => {
   const [s, setS] = useState(store.reminderSettings);
-  const [openTpl, setOpenTpl] = useState(null);
+  const [openTpl, setOpenTpl] = useState<EntityRecord | null>(null);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => { setS(store.reminderSettings); }, [store.reminderSettings]);
@@ -2734,15 +2782,15 @@ const ReminderSettings = ({ store, onBack }: {
 
         <SectionTitle>Auto-send for…</SectionTitle>
         <Card className="p-4 space-y-3">
-          {[
+          {([
             ["confirmation", "On booking", "Sent immediately when appointment created"],
-            ["h48", "48 hours before", null],
-            ["h24", "24 hours before", null],
+            ["h48", "48 hours before", ""],
+            ["h24", "24 hours before", ""],
             ["sameDay", "Same-day", `${s.timings.sameDayHoursBefore || 3}h before`],
             ["depositDue", "Deposit due", "When deposit hasn't been recorded"],
             ["balanceDue", "Balance due", "Day of appointment"],
             ["lateAlert", "Late alert", `${s.timings.lateAlertMinutes || 15}m past start time`],
-          ].map(([k, label, hint]) => (
+          ] as [string, string, string][]).map(([k, label, hint]) => (
             <div key={k} className="flex items-center justify-between py-1">
               <div>
                 <p className="text-sm font-medium" style={{ color: C.espresso }}>{label}</p>
@@ -2841,8 +2889,8 @@ const TemplateEditorSheet = ({ template, onClose, onSave, onDelete }: {
 const ActiveTimerScreen = ({ store, prefillAppt, onBack, onComplete }) => {
   const [tick, setTick] = useState(0);
   const [showStop, setShowStop] = useState(false);
-  const [completedSession, setCompletedSession] = useState(null);
-  const [setup, setSetup] = useState(null); // setup state when no active timer
+  const [completedSession, setCompletedSession] = useState<EntityRecord | null>(null);
+  const [setup, setSetup] = useState<EntityRecord | null>(null); // setup state when no active timer
 
   const timer = store.activeTimer;
   const isSimpleMode = !prefillAppt; // simple timer mode for dashboard
@@ -3211,7 +3259,7 @@ const PRESET_CATEGORIES = [
 
 const PresetsScreen = ({ store, onBack, onUsePreset }) => {
   const [search, setSearch] = useState("");
-  const [editing, setEditing] = useState(null);
+  const [editing, setEditing] = useState<EntityRecord | null>(null);
   const [creating, setCreating] = useState(false);
 
   const filtered = useMemo(() => {
@@ -3510,9 +3558,9 @@ const SavedQuotes = ({ store, onBack, onLoadQuote, onConvertToAppt }) => {
 //  POLICIES (V1 reused)
 // ============================================================
 const Policies = ({ store, onBack }) => {
-  const [editing, setEditing] = useState(null);
+  const [editing, setEditing] = useState<EntityRecord | null>(null);
   const [creating, setCreating] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   const blank = () => ({ id: `pol_${uid()}`, title: "", category: "other", body: "", updatedAt: new Date().toISOString() });
 
@@ -3714,15 +3762,15 @@ const TimerSessionsScreen = ({ store, onBack }) => {
 export default function App() {
   const store = useStorage();
   const [active, setActive] = useState("dashboard");
-  const [secondary, setSecondary] = useState(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
-  const [calcPrefill, setCalcPrefill] = useState(null);
-  const [calcPresetPrefill, setCalcPresetPrefill] = useState(null);
-  const [apptPrefill, setApptPrefill] = useState(null);
-  const [timerApptPrefill, setTimerApptPrefill] = useState(null);
+  const [secondary, setSecondary] = useState<string | null>(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
+  const [calcPrefill, setCalcPrefill] = useState<EntityRecord | null>(null);
+  const [calcPresetPrefill, setCalcPresetPrefill] = useState<EntityRecord | null>(null);
+  const [apptPrefill, setApptPrefill] = useState<EntityRecord | null>(null);
+  const [timerApptPrefill, setTimerApptPrefill] = useState<EntityRecord | null>(null);
   const [openTx, setOpenTx] = useState(false);
-  const [editingTx, setEditingTx] = useState(null);
+  const [editingTx, setEditingTx] = useState<EntityRecord | null>(null);
   const [openClientForm, setOpenClientForm] = useState(false);
-  const [quickClient, setQuickClient] = useState(null);
+  const [quickClient, setQuickClient] = useState<EntityRecord | null>(null);
 
   // Dashboard quick actions
   const openQuickAppt = () => {
