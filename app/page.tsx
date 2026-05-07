@@ -823,13 +823,16 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction }: {
   rightAction?: React.ReactNode;
 }) => {
   if (!open) return null;
-  // On mobile Safari, 100vh ignores the dynamic browser chrome, so the
-  // bottom of the sheet (and the actions inside) can hide behind the
-  // URL bar or tab bar. Reserve room at the top and pad the scroll
-  // content past the bottom safe-area + tab bar.
-  const sheetMaxHeight = maxHeight || "calc(100vh - 80px)";
+  // On mobile Safari, 100vh includes the URL bar overlay area, so the
+  // top of a bottom-anchored sheet ends up hidden behind it (you have
+  // to "pull down" to expose the title / grab handle). Use 100dvh so
+  // the sheet sizes against the visible (dynamic) viewport, and pad
+  // the scroll body so action buttons clear the bottom chrome.
+  const sheetMaxHeight = maxHeight || "calc(100dvh - 24px)";
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: "rgba(26, 15, 8, 0.45)" }} onClick={onClose}>
+    <div className="fixed left-0 right-0 top-0 z-50 flex items-end justify-center"
+      style={{ background: "rgba(26, 15, 8, 0.45)", height: "100dvh" }}
+      onClick={onClose}>
       <div className="bbp-sheet w-full max-w-[480px] rounded-t-3xl flex flex-col"
         style={{ background: C.cream, maxHeight: sheetMaxHeight, boxShadow: "0 -20px 60px -20px rgba(0,0,0,0.3)" }}
         onClick={e => e.stopPropagation()}>
