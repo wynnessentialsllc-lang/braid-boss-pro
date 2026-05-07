@@ -49,11 +49,11 @@ const GlobalStyle = () => (
 //  STORAGE
 // ============================================================
 const safeStorage = {
-  async get(key) { try { const r = await window.storage.get(key); return r ? r.value : null; } catch { return null; } },
-  async set(key, value) { try { await window.storage.set(key, typeof value === "string" ? value : JSON.stringify(value)); return true; } catch { return false; } },
-  async delete(key) { try { await window.storage.delete(key); return true; } catch { return false; } },
-  async list(prefix) { try { const r = await window.storage.list(prefix); return r?.keys || []; } catch { return []; } },
-  async getAllByPrefix(prefix) {
+  async get(key: string) { try { const r = await window.storage.get(key); return r ? r.value : null; } catch { return null; } },
+  async set(key: string, value: any) { try { await window.storage.set(key, typeof value === "string" ? value : JSON.stringify(value)); return true; } catch { return false; } },
+  async delete(key: string) { try { await window.storage.delete(key); return true; } catch { return false; } },
+  async list(prefix: string) { try { const r = await window.storage.list(prefix); return r?.keys || []; } catch { return []; } },
+  async getAllByPrefix(prefix: string) {
     const keys = await this.list(prefix);
     const out = [];
     for (const k of keys) {
@@ -68,30 +68,30 @@ const safeStorage = {
 //  HELPERS
 // ============================================================
 const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-const fmtMoney = (n, currency = "USD") => {
+const fmtMoney = (n: number, currency: string = "USD"): string => {
   const num = Number(n) || 0;
   try { return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(num); } catch { return `$${num.toFixed(2)}`; }
 };
-const fmtDate = (iso) => {
+const fmtDate = (iso: string): string => {
   if (!iso) return "—";
   const d = new Date(iso + "T00:00:00");
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 };
-const fmtDateLong = (iso) => {
+const fmtDateLong = (iso: string): string => {
   if (!iso) return "—";
   const d = new Date(iso + "T00:00:00");
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 };
-const fmtTime = (t) => {
+const fmtTime = (t: string): string => {
   if (!t) return "";
   const [h, m] = t.split(":").map(Number);
   const period = h >= 12 ? "PM" : "AM";
   const hh = h % 12 || 12;
   return `${hh}:${String(m).padStart(2, "0")} ${period}`;
 };
-const fmtDuration = (ms) => {
+const fmtDuration = (ms: number): string => {
   const total = Math.floor(ms / 1000);
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
@@ -99,7 +99,7 @@ const fmtDuration = (ms) => {
   if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 };
-const fmtRelative = (iso) => {
+const fmtRelative = (iso: string): string => {
   if (!iso) return "—";
   const diff = new Date(iso).getTime() - Date.now();
   const abs = Math.abs(diff);
@@ -110,17 +110,17 @@ const fmtRelative = (iso) => {
   if (hr < 24) return `${hr}h ${sign}`;
   return `${Math.round(abs / 86400000)}d ${sign}`;
 };
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const initials = (name) => (name || "?").trim().split(/\s+/).slice(0, 2).map(s => s[0]?.toUpperCase() || "").join("");
-const addDaysISO = (iso, days) => {
+const todayISO = (): string => new Date().toISOString().slice(0, 10);
+const initials = (name: string): string => (name || "?").trim().split(/\s+/).slice(0, 2).map(s => s[0]?.toUpperCase() || "").join("");
+const addDaysISO = (iso: string, days: number): string => {
   const d = new Date(iso + "T00:00:00");
   d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
 };
-const cadenceDays = (cadence, customDays) => ({
+const cadenceDays = (cadence: string, customDays: number): number => ({
   "2w": 14, "3w": 21, "4w": 28, "6w": 42, "8w": 56, "monthly": 30, "custom": Number(customDays) || 28
 }[cadence] || 28);
-const cadenceLabel = (c) => ({
+const cadenceLabel = (c: string): string => ({
   "2w": "Every 2 weeks", "3w": "Every 3 weeks", "4w": "Every 4 weeks",
   "6w": "Every 6 weeks", "8w": "Every 8 weeks", "monthly": "Monthly", "custom": "Custom interval"
 }[c] || c);
@@ -231,9 +231,9 @@ const DEFAULT_PRESETS = [
 // ============================================================
 //  REMINDER ENGINE
 // ============================================================
-const renderTemplate = (body, ctx) => body.replace(/\{\{(\w+)\}\}/g, (_, k) => ctx[k] != null ? String(ctx[k]) : "");
+const renderTemplate = (body: string, ctx: any): string => body.replace(/\{\{(\w+)\}\}/g, (_, k) => ctx[k] != null ? String(ctx[k]) : "");
 
-const buildReminderContext = (appt, business) => ({
+const buildReminderContext = (appt: any, business: any): any => ({
   client: (appt.clientName || "there").split(" ")[0],
   style: appt.style || "your appointment",
   date: fmtDate(appt.date),
@@ -243,7 +243,7 @@ const buildReminderContext = (appt, business) => ({
   business: business.businessName || "your stylist",
 });
 
-const planRemindersForAppointment = (appt, settings, templates, business) => {
+const planRemindersForAppointment = (appt: any, settings: any, templates: any[], business: any): any[] => {
   if (!settings.enabled) return [];
   const out = [];
   const ctx = buildReminderContext(appt, business);
@@ -289,7 +289,7 @@ const planRemindersForAppointment = (appt, settings, templates, business) => {
 // ============================================================
 //  PRICING ENGINE
 // ============================================================
-const computePricing = (inputs) => {
+const computePricing = (inputs: any): any => {
   const hairCost = Number(inputs.hairCost) || 0;
   const hourlyRate = Number(inputs.hourlyRate) || 0;
   const hours = Number(inputs.hours) || 0;
@@ -313,7 +313,7 @@ const computePricing = (inputs) => {
 // ============================================================
 //  IMAGE COMPRESSION
 // ============================================================
-const compressImage = (file, maxWidth = 1280, quality = 0.78) => new Promise((resolve, reject) => {
+const compressImage = (file: File, maxWidth: number = 1280, quality: number = 0.78): Promise<{ dataUrl: string; thumbnailDataUrl: string }> => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onerror = reject;
   reader.onload = (e) => {
@@ -595,7 +595,12 @@ const useStorage = () => {
 // ============================================================
 //  PRIMITIVES
 // ============================================================
-const Card = ({ children, className = "", style, onClick }) => (
+const Card = ({ children, className = "", style, onClick }: {
+  children: React.ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
+  onClick?: () => void;
+}) => (
   <div onClick={onClick} className={`rounded-2xl ${className}`}
     style={{
       background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
@@ -605,7 +610,16 @@ const Card = ({ children, className = "", style, onClick }) => (
     }}>{children}</div>
 );
 
-const Button = ({ children, variant = "primary", onClick, disabled, className = "", icon, type = "button", fullWidth }) => {
+const Button = ({ children, variant = "primary", onClick, disabled, className = "", icon, type = "button", fullWidth }: {
+  children: React.ReactNode;
+  variant?: "primary" | "dark" | "outline" | "ghost" | "danger";
+  onClick?: () => void;
+  disabled?: boolean;
+  className?: string;
+  icon?: React.ReactNode;
+  type?: "button" | "submit" | "reset";
+  fullWidth?: boolean;
+}) => {
   const v = {
     primary: { bg: C.gold, fg: C.espresso, border: C.gold, shadow: "0 6px 18px -8px rgba(168, 137, 63, 0.55)" },
     dark: { bg: C.espresso, fg: C.cream, border: C.espresso, shadow: "0 6px 18px -8px rgba(42, 24, 16, 0.45)" },
@@ -622,7 +636,12 @@ const Button = ({ children, variant = "primary", onClick, disabled, className = 
   );
 };
 
-const Field = ({ label, hint, children, suffix }) => (
+const Field = ({ label, hint, children, suffix }: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+  suffix?: string;
+}) => (
   <label className="block">
     <div className="flex items-baseline justify-between mb-1.5">
       <span className="text-[13px] font-semibold tracking-wide uppercase" style={{ color: C.coffee, letterSpacing: "0.06em" }}>{label}</span>
@@ -635,7 +654,13 @@ const Field = ({ label, hint, children, suffix }) => (
   </label>
 );
 
-const Input = ({ value, onChange, type = "text", placeholder, prefix, ...rest }) => (
+const Input = ({ value, onChange, type = "text", placeholder, prefix, ...rest }: {
+  value: string | number;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  type?: string;
+  placeholder?: string;
+  prefix?: string;
+} & React.InputHTMLAttributes<HTMLInputElement>) => (
   <div className="relative">
     {prefix && <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold" style={{ color: C.muted }}>{prefix}</span>}
     <input type={type} value={value ?? ""} onChange={onChange} placeholder={placeholder}
@@ -647,7 +672,12 @@ const Input = ({ value, onChange, type = "text", placeholder, prefix, ...rest })
   </div>
 );
 
-const Textarea = ({ value, onChange, placeholder, rows = 3 }) => (
+const Textarea = ({ value, onChange, placeholder, rows = 3 }: {
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  placeholder?: string;
+  rows?: number;
+}) => (
   <textarea value={value ?? ""} onChange={onChange} placeholder={placeholder} rows={rows}
     className="w-full rounded-xl px-3.5 py-3 text-[15px] outline-none resize-none transition"
     style={{ background: C.paper, border: `1px solid ${C.hairline}`, color: C.ink, lineHeight: 1.5 }}
@@ -655,7 +685,11 @@ const Textarea = ({ value, onChange, placeholder, rows = 3 }) => (
     onBlur={e => e.target.style.borderColor = C.hairline} />
 );
 
-const Select = ({ value, onChange, options }) => (
+const Select = ({ value, onChange, options }: {
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  options: { value: string; label: string }[];
+}) => (
   <div className="relative">
     <select value={value ?? ""} onChange={onChange}
       className="w-full appearance-none rounded-xl px-3.5 py-3 pr-10 text-[15px] outline-none transition"
@@ -666,7 +700,10 @@ const Select = ({ value, onChange, options }) => (
   </div>
 );
 
-const Pill = ({ children, tone = "neutral" }) => {
+const Pill = ({ children, tone = "neutral" }: {
+  children: React.ReactNode;
+  tone?: "neutral" | "gold" | "success" | "warning" | "danger" | "dark";
+}) => {
   const tones = {
     neutral: { bg: C.ivory, fg: C.coffee, border: C.hairline },
     gold: { bg: "#F5E9C8", fg: C.goldDeep, border: "#E5D4A0" },
@@ -682,7 +719,10 @@ const Pill = ({ children, tone = "neutral" }) => {
   );
 };
 
-const Toggle = ({ checked, onChange }) => (
+const Toggle = ({ checked, onChange }: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) => (
   <button onClick={() => onChange(!checked)}
     className="relative inline-flex items-center w-12 h-7 rounded-full transition shrink-0"
     style={{ background: checked ? C.gold : C.mutedSoft, border: `1px solid ${checked ? C.goldDeep : C.hairline}` }}>
@@ -691,14 +731,24 @@ const Toggle = ({ checked, onChange }) => (
   </button>
 );
 
-const SectionTitle = ({ children, action }) => (
+const SectionTitle = ({ children, action }: {
+  children: React.ReactNode;
+  action?: React.ReactNode | { label: string; onClick: () => void };
+}) => (
   <div className="flex items-center justify-between mb-3 mt-1">
     <h3 className="text-[13px] font-bold tracking-widest uppercase" style={{ color: C.muted, letterSpacing: "0.14em" }}>{children}</h3>
-    {action}
+    {action && (React.isValidElement(action) ? action : (
+      <Button variant="outline" size="sm" onClick={(action as any).onClick}>{(action as any).label}</Button>
+    ))}
   </div>
 );
 
-const EmptyState = ({ icon, title, body, cta }) => (
+const EmptyState = ({ icon, title, body, cta }: {
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+  cta?: React.ReactNode;
+}) => (
   <div className="flex flex-col items-center justify-center py-12 px-6 text-center bbp-fade">
     <div className="mb-4 rounded-full p-4" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>{icon}</div>
     <p className="italic mb-1.5" style={{ fontFamily: FONT_DISPLAY, color: C.gold, fontSize: 18 }}>a fresh page awaits</p>
@@ -708,7 +758,14 @@ const EmptyState = ({ icon, title, body, cta }) => (
   </div>
 );
 
-const Sheet = ({ open, onClose, title, children, maxHeight = "92vh", rightAction }) => {
+const Sheet = ({ open, onClose, title, children, maxHeight = "92vh", rightAction }: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+  maxHeight?: string;
+  rightAction?: React.ReactNode;
+}) => {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: "rgba(26, 15, 8, 0.45)" }} onClick={onClose}>
@@ -749,7 +806,12 @@ const FAB = ({ onClick, icon = <Plus size={26} strokeWidth={2.4} />, bottom = 80
 // ============================================================
 //  HEADER + TAB BAR
 // ============================================================
-const Header = ({ title, subtitle, leftAction, rightAction }) => {
+const Header = ({ title, subtitle, leftAction, rightAction }: {
+  title: any;
+  subtitle?: any;
+  leftAction?: any;
+  rightAction?: any;
+}) => {
   const renderAction = (action) => {
     if (!action) return null;
     if (React.isValidElement(action)) return action;
@@ -778,7 +840,10 @@ const Header = ({ title, subtitle, leftAction, rightAction }) => {
   );
 };
 
-const TabBar = ({ active, setActive }) => {
+const TabBar = ({ active, setActive }: {
+  active: string;
+  setActive: (tab: string) => void;
+}) => {
   const tabs = [
     { id: "dashboard", label: "Home", icon: Home },
     { id: "calculator", label: "Quote", icon: CalcIcon },
@@ -1768,10 +1833,15 @@ const PHOTO_CATEGORIES = [
   { value: "scalp", label: "Scalp", color: "#DFB5AC" },
 ];
 
-const ClientSheet = ({ open, client, store, onClose }) => {
+const ClientSheet = ({ open, client, store, onClose }: {
+  open: boolean;
+  client: any;
+  store: any;
+  onClose: () => void;
+}) => {
   const { upsertClient, deleteClient, appointments, photos, business, upsertPhoto, deletePhoto } = store;
   const [tab, setTab] = useState("info");
-  const [form, setForm] = useState({});
+  const [form, setForm] = useState<any>({});
 
   useEffect(() => {
     if (open) {
@@ -1787,18 +1857,18 @@ const ClientSheet = ({ open, client, store, onClose }) => {
   }, [open, client]);
 
   const myAppts = useMemo(() =>
-    form.id ? appointments.filter(a => a.clientId === form.id).sort((a, b) => b.date.localeCompare(a.date)) : []
+    form.id ? appointments.filter((a: any) => a.clientId === form.id).sort((a: any, b: any) => b.date.localeCompare(a.date)) : []
   , [appointments, form.id]);
 
   const myPhotos = useMemo(() =>
-    form.id ? photos.filter(p => p.clientId === form.id).sort((a, b) => (b.takenAt || b.createdAt || "").localeCompare(a.takenAt || a.createdAt || "")) : []
+    form.id ? photos.filter((p: any) => p.clientId === form.id).sort((a: any, b: any) => (b.takenAt || b.createdAt || "").localeCompare(a.takenAt || a.createdAt || "")) : []
   , [photos, form.id]);
 
-  const totalSpent = myAppts.filter(a => a.status === "completed").reduce((s, a) => s + (Number(a.totalPrice) || 0), 0);
+  const totalSpent = myAppts.filter((a: any) => a.status === "completed").reduce((s: number, a: any) => s + (Number(a.totalPrice) || 0), 0);
 
-  const togglePref = (s) => {
+  const togglePref = (s: string) => {
     const has = form.preferredStyles.includes(s);
-    setForm({ ...form, preferredStyles: has ? form.preferredStyles.filter(x => x !== s) : [...form.preferredStyles, s] });
+    setForm({ ...form, preferredStyles: has ? form.preferredStyles.filter((x: string) => x !== s) : [...form.preferredStyles, s] });
   };
 
   const handleSave = async () => {
@@ -1882,11 +1952,11 @@ const ClientSheet = ({ open, client, store, onClose }) => {
           <div className="space-y-2">
             {myAppts.length === 0 ? (
               <p className="text-center text-sm py-6" style={{ color: C.muted }}>No appointments yet.</p>
-            ) : myAppts.map(a => (
+            ) : myAppts.map((a: any) => (
               <div key={a.id} className="flex items-center justify-between py-2.5 px-3 rounded-lg" style={{ background: C.ivory }}>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{a.style || "—"}</p>
-                  <p className="text-xs mt-0.5" style={{ color: C.muted }}>{fmtDate(a.date)} · {STATUS_LABEL[a.status]}</p>
+                  <p className="text-xs mt-0.5" style={{ color: C.muted }}>{fmtDate(a.date)} · {STATUS_LABEL[a.status as keyof typeof STATUS_LABEL]}</p>
                 </div>
                 <span className="font-semibold text-sm shrink-0" style={{ color: C.goldDeep }}>{fmtMoney(a.totalPrice, business.currency)}</span>
               </div>
@@ -1901,21 +1971,28 @@ const ClientSheet = ({ open, client, store, onClose }) => {
 // ============================================================
 //  PHOTO GALLERY (inside client sheet)
 // ============================================================
-const PhotoGallery = ({ clientId, clientName, appointments, photos, upsertPhoto, deletePhoto }) => {
+const PhotoGallery = ({ clientId, clientName, appointments, photos, upsertPhoto, deletePhoto }: {
+  clientId: string;
+  clientName: string;
+  appointments: any[];
+  photos: any[];
+  upsertPhoto: (p: any) => Promise<any>;
+  deletePhoto: (id: string) => Promise<void>;
+}) => {
   const [filter, setFilter] = useState("all");
   const [lightbox, setLightbox] = useState(null); // photo or null
   const [editingPhoto, setEditingPhoto] = useState(null);
   const [showFavOnly, setShowFavOnly] = useState(false);
-  const fileRef = useRef(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  const filtered = photos.filter(p => {
+  const filtered = photos.filter((p: any) => {
     if (showFavOnly && !p.isFavorite) return false;
     if (filter !== "all" && p.category !== filter) return false;
     return true;
   });
 
-  const handleFileChange = async (e) => {
+  const handleFileChange = async (e: any) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true);
@@ -2002,7 +2079,11 @@ const PhotoGallery = ({ clientId, clientName, appointments, photos, upsertPhoto,
   );
 };
 
-const CategoryChip = ({ label, active, onClick }) => (
+const CategoryChip = ({ label, active, onClick }: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) => (
   <button onClick={onClick}
     className="px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider whitespace-nowrap shrink-0"
     style={{
@@ -2011,7 +2092,14 @@ const CategoryChip = ({ label, active, onClick }) => (
     }}>{label}</button>
 );
 
-const PhotoLightbox = ({ photo, photos, onClose, onEdit, onDelete, onToggleFav }) => {
+const PhotoLightbox = ({ photo, photos, onClose, onEdit, onDelete, onToggleFav }: {
+  photo: any;
+  photos: any[];
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: (p: any) => Promise<void>;
+  onToggleFav: (p: any) => Promise<void>;
+}) => {
   if (!photo) return null;
   const idx = photos.findIndex(p => p.id === photo.id);
   const prev = idx > 0 ? photos[idx - 1] : null;
@@ -2055,8 +2143,13 @@ const PhotoLightbox = ({ photo, photos, onClose, onEdit, onDelete, onToggleFav }
   );
 };
 
-const PhotoEditSheet = ({ photo, appointments, onClose, onSave }) => {
-  const [form, setForm] = useState({});
+const PhotoEditSheet = ({ photo, appointments, onClose, onSave }: {
+  photo: any;
+  appointments: any[];
+  onClose: () => void;
+  onSave: (data: any) => void;
+}) => {
+  const [form, setForm] = useState<any>({});
   useEffect(() => {
     if (photo) setForm({
       ...photo,
@@ -2188,7 +2281,15 @@ const Money = ({ store, openTxSheet, editTx, openTimerSessions }) => {
   );
 };
 
-const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet }) => (
+const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet }: {
+  all: any[];
+  income: number;
+  expenses: number;
+  net: number;
+  business: any;
+  editTx: any;
+  openTxSheet: any;
+}) => (
   <div className="px-5">
     {/* totals */}
     <div className="grid grid-cols-3 gap-2 mb-5">
@@ -2231,17 +2332,22 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet })
   </div>
 );
 
-const ProductivityTab = ({ sessions, appointments, business, openTimerSessions }) => {
+const ProductivityTab = ({ sessions, appointments, business, openTimerSessions }: {
+  sessions: any[];
+  appointments: any[];
+  business: any;
+  openTimerSessions: any;
+}) => {
   // hourly earned
-  const totalMs = sessions.reduce((s, x) => s + (x.totalMs - (x.pausedMs || 0)), 0);
-  const totalEarned = sessions.reduce((s, x) => s + (Number(x.totalPrice) || 0), 0);
+  const totalMs = sessions.reduce((s: number, x: any) => s + (x.totalMs - (x.pausedMs || 0)), 0);
+  const totalEarned = sessions.reduce((s: number, x: any) => s + (Number(x.totalPrice) || 0), 0);
   const hours = totalMs / 3600000;
   const hourly = hours > 0 ? totalEarned / hours : 0;
 
   // style ranking — most profitable per hour
   const styleStats = useMemo(() => {
-    const by = {};
-    sessions.forEach(s => {
+    const by: Record<string, any> = {};
+    sessions.forEach((s: any) => {
       const k = (s.style || "Other").trim();
       if (!by[k]) by[k] = { style: k, count: 0, ms: 0, revenue: 0, varianceSum: 0 };
       const activeMs = s.totalMs - (s.pausedMs || 0);
@@ -2261,7 +2367,7 @@ const ProductivityTab = ({ sessions, appointments, business, openTimerSessions }
   }, [sessions]);
 
   const topStyles = styleStats.slice(0, 5);
-  const overrunStyles = styleStats.filter(s => s.avgVariance > 0.2).slice(0, 5);
+  const overrunStyles = styleStats.filter((s: any) => s.avgVariance > 0.2).slice(0, 5);
 
   // utilization (hours worked vs available — assume 40hr available/week reference)
   const utilizationPct = Math.min(100, Math.round((hours / 40) * 100));
@@ -2377,9 +2483,13 @@ const PURPOSE_LABEL_LOCAL = {
   late_alert: "Late alert"
 };
 
-const ReminderInbox = ({ store, onBack, openSettings }) => {
+const ReminderInbox = ({ store, onBack, openSettings }: {
+  store: any;
+  onBack: () => void;
+  openSettings: () => void;
+}) => {
   const [filter, setFilter] = useState("pending"); // pending | sent | failed | all
-  const [openItem, setOpenItem] = useState(null);
+  const [openItem, setOpenItem] = useState<any>(null);
   const [toast, setToast] = useState(null);
 
   const filtered = useMemo(() => {
@@ -2390,9 +2500,9 @@ const ReminderInbox = ({ store, onBack, openSettings }) => {
     return list.sort((a, b) => (a.scheduledFor || "").localeCompare(b.scheduledFor || ""));
   }, [store.reminders, filter]);
 
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 1800); };
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 1800); };
 
-  const handleSimSend = async (r) => {
+  const handleSimSend = async (r: any) => {
     const updated = { ...r, status: "sent", sentAt: new Date().toISOString() };
     await store.upsertReminder(updated);
     setTimeout(async () => {
@@ -2403,12 +2513,12 @@ const ReminderInbox = ({ store, onBack, openSettings }) => {
     showToast("Marked as sent");
   };
 
-  const handleCopy = async (text, kind) => {
+  const handleCopy = async (text: any, kind: any) => {
     try { await navigator.clipboard.writeText(text); showToast(`${kind} copied`); }
     catch { showToast("Copy unavailable"); }
   };
 
-  const handleCancel = async (r) => {
+  const handleCancel = async (r: any) => {
     await store.upsertReminder({ ...r, status: "cancelled" });
     setOpenItem(null);
     showToast("Cancelled");
@@ -2517,7 +2627,17 @@ const ReminderInbox = ({ store, onBack, openSettings }) => {
   );
 };
 
-const ReminderDetailSheet = ({ reminder, client, appointment, template, business, onClose, onSimSend, onCopy, onCancel }) => {
+const ReminderDetailSheet = ({ reminder, client, appointment, template, business, onClose, onSimSend, onCopy, onCancel }: {
+  reminder: any;
+  client: any;
+  appointment: any;
+  template: any;
+  business: any;
+  onClose: () => void;
+  onSimSend: (r: any) => Promise<void>;
+  onCopy: (text: any, kind: any) => Promise<void>;
+  onCancel: (r: any) => Promise<void>;
+}) => {
   if (!reminder) return null;
   const body = reminder.renderedBody || (template ? template.body : "");
   return (
@@ -2578,7 +2698,10 @@ const ReminderDetailSheet = ({ reminder, client, appointment, template, business
 // ============================================================
 //  REMINDER SETTINGS
 // ============================================================
-const ReminderSettings = ({ store, onBack }) => {
+const ReminderSettings = ({ store, onBack }: {
+  store: any;
+  onBack: () => void;
+}) => {
   const [s, setS] = useState(store.reminderSettings);
   const [openTpl, setOpenTpl] = useState(null);
   const [saved, setSaved] = useState(false);
@@ -2625,7 +2748,7 @@ const ReminderSettings = ({ store, onBack }) => {
                 <p className="text-sm font-medium" style={{ color: C.espresso }}>{label}</p>
                 {hint && <p className="text-[11px]" style={{ color: C.muted }}>{hint}</p>}
               </div>
-              <Toggle checked={!!s.timings[k]} onChange={(v) => setS({ ...s, timings: { ...s.timings, [k]: v } })} />
+              <Toggle checked={!!(s.timings || {})[k]} onChange={(v) => setS({ ...s, timings: { ...(s.timings || {}), [k]: v } })} />
             </div>
           ))}
           <Field label="Same-day hours before">
@@ -2655,7 +2778,7 @@ const ReminderSettings = ({ store, onBack }) => {
           Templates
         </SectionTitle>
         <div className="space-y-2">
-          {store.reminderTemplates.map(t => (
+          {store.reminderTemplates.map((t: any) => (
             <Card key={t.id} className="p-3" onClick={() => setOpenTpl(t)}>
               <div className="flex items-center justify-between mb-1">
                 <p className="text-sm font-semibold" style={{ color: C.espresso }}>{PURPOSE_LABEL_LOCAL[t.purpose]}</p>
@@ -2680,7 +2803,12 @@ const ReminderSettings = ({ store, onBack }) => {
   );
 };
 
-const TemplateEditorSheet = ({ template, onClose, onSave, onDelete }) => {
+const TemplateEditorSheet = ({ template, onClose, onSave, onDelete }: {
+  template: any;
+  onClose: () => void;
+  onSave: (t: any) => Promise<void>;
+  onDelete: (id: any) => Promise<void>;
+}) => {
   const [t, setT] = useState(template);
   return (
     <Sheet open={!!template} onClose={onClose} title="Edit template">
