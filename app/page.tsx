@@ -388,6 +388,31 @@ const compressImage = (file: File, maxWidth: number = 1280, quality: number = 0.
 // ============================================================
 //  STORAGE HOOK
 // ============================================================
+async function upsertEntity(
+  prefix: string,
+  setter: React.Dispatch<React.SetStateAction<EntityRecord[]>>,
+  record: any,
+) {
+  const r = { ...record };
+  if (!r.id) { r.id = uid(); r.createdAt = r.createdAt || new Date().toISOString(); }
+  await safeStorage.set(`${prefix}:${r.id}`, r);
+  setter(prev => {
+    const i = prev.findIndex(x => x.id === r.id);
+    if (i >= 0) { const cp = [...prev]; cp[i] = r; return cp; }
+    return [...prev, r];
+  });
+  return r;
+}
+
+async function deleteEntity(
+  prefix: string,
+  setter: React.Dispatch<React.SetStateAction<EntityRecord[]>>,
+  id: string,
+) {
+  await safeStorage.delete(`${prefix}:${id}`);
+  setter(prev => prev.filter(x => x.id !== id));
+}
+
 const useStorage = () => {
   const [business, setBusiness] = useState<EntityRecord>(DEFAULT_BUSINESS);
   const [reminderSettings, setReminderSettings] = useState<EntityRecord>(DEFAULT_REMINDER_SETTINGS);
@@ -452,27 +477,11 @@ const useStorage = () => {
     })();
   }, []);
 
-  const makeUpsert = (prefix, setter) => async (record) => {
-    const r = { ...record };
-    if (!r.id) { r.id = uid(); r.createdAt = r.createdAt || new Date().toISOString(); }
-    await safeStorage.set(`${prefix}:${r.id}`, r);
-    setter(prev => {
-      const i = prev.findIndex(x => x.id === r.id);
-      if (i >= 0) { const cp = [...prev]; cp[i] = r; return cp; }
-      return [...prev, r];
-    });
-    return r;
-  };
-  const makeDelete = (prefix, setter) => async (id) => {
-    await safeStorage.delete(`${prefix}:${id}`);
-    setter(prev => prev.filter(x => x.id !== id));
-  };
-
   const saveBusiness = useCallback(async (next) => { setBusiness(next); await safeStorage.set("settings:business", next); }, []);
   const saveReminderSettings = useCallback(async (next) => { setReminderSettings(next); await safeStorage.set("reminderSettings", next); }, []);
 
-  const upsertClient = useCallback(makeUpsert("clients", setClients), []);
-  const deleteClient = useCallback(makeDelete("clients", setClients), []);
+  const upsertClient = useCallback((record: any) => upsertEntity("clients", setClients, record), []);
+  const deleteClient = useCallback((id: string) => deleteEntity("clients", setClients, id), []);
 
   const upsertAppointment = useCallback(async (a) => {
     const r = { ...a };
@@ -486,10 +495,10 @@ const useStorage = () => {
     });
     return r;
   }, []);
-  const deleteAppointment = useCallback(makeDelete("appointments", setAppointments), []);
+  const deleteAppointment = useCallback((id: string) => deleteEntity("appointments", setAppointments, id), []);
 
-  const upsertQuote = useCallback(makeUpsert("quotes", setQuotes), []);
-  const deleteQuote = useCallback(makeDelete("quotes", setQuotes), []);
+  const upsertQuote = useCallback((record: any) => upsertEntity("quotes", setQuotes, record), []);
+  const deleteQuote = useCallback((id: string) => deleteEntity("quotes", setQuotes, id), []);
 
   const upsertTransaction = useCallback(async (t) => {
     const r = { ...t };
@@ -503,7 +512,7 @@ const useStorage = () => {
     });
     return r;
   }, []);
-  const deleteTransaction = useCallback(makeDelete("transactions", setTransactions), []);
+  const deleteTransaction = useCallback((id: string) => deleteEntity("transactions", setTransactions, id), []);
 
   const upsertPolicy = useCallback(async (p) => {
     const r = { ...p, updatedAt: new Date().toISOString() };
@@ -517,8 +526,8 @@ const useStorage = () => {
     return r;
   }, []);
 
-  const upsertPhoto = useCallback(makeUpsert("photos", setPhotos), []);
-  const deletePhoto = useCallback(makeDelete("photos", setPhotos), []);
+  const upsertPhoto = useCallback((record: any) => upsertEntity("photos", setPhotos, record), []);
+  const deletePhoto = useCallback((id: string) => deleteEntity("photos", setPhotos, id), []);
 
   const upsertPreset = useCallback(async (p) => {
     const r = { ...p, updatedAt: new Date().toISOString() };
@@ -531,7 +540,7 @@ const useStorage = () => {
     });
     return r;
   }, []);
-  const deletePreset = useCallback(makeDelete("stylePresets", setStylePresets), []);
+  const deletePreset = useCallback((id: string) => deleteEntity("stylePresets", setStylePresets, id), []);
   const incrementPresetUse = useCallback(async (id) => {
     const raw = await safeStorage.get(`stylePresets:${id}`);
     if (!raw) return;
@@ -543,15 +552,15 @@ const useStorage = () => {
     } catch {}
   }, []);
 
-  const upsertSeries = useCallback(makeUpsert("recurringSeries", setRecurringSeries), []);
-  const deleteSeries = useCallback(makeDelete("recurringSeries", setRecurringSeries), []);
+  const upsertSeries = useCallback((record: any) => upsertEntity("recurringSeries", setRecurringSeries, record), []);
+  const deleteSeries = useCallback((id: string) => deleteEntity("recurringSeries", setRecurringSeries, id), []);
 
-  const upsertReminder = useCallback(makeUpsert("reminders", setReminders), []);
-  const deleteReminder = useCallback(makeDelete("reminders", setReminders), []);
-  const upsertReminderTemplate = useCallback(makeUpsert("reminderTemplates", setReminderTemplates), []);
-  const deleteReminderTemplate = useCallback(makeDelete("reminderTemplates", setReminderTemplates), []);
+  const upsertReminder = useCallback((record: any) => upsertEntity("reminders", setReminders, record), []);
+  const deleteReminder = useCallback((id: string) => deleteEntity("reminders", setReminders, id), []);
+  const upsertReminderTemplate = useCallback((record: any) => upsertEntity("reminderTemplates", setReminderTemplates, record), []);
+  const deleteReminderTemplate = useCallback((id: string) => deleteEntity("reminderTemplates", setReminderTemplates, id), []);
 
-  const deletePolicy = useCallback(makeDelete("policies", setPolicies), []);
+  const deletePolicy = useCallback((id: string) => deleteEntity("policies", setPolicies, id), []);
 
   const bulkInsertReminders = useCallback(async (list) => {
     for (const r of list) await safeStorage.set(`reminders:${r.id}`, r);
@@ -609,7 +618,7 @@ const useStorage = () => {
     if (next) await safeStorage.set("activeTimer", next);
     else await safeStorage.delete("activeTimer");
   }, []);
-  const upsertTimerSession = useCallback(makeUpsert("timerSessions", setTimerSessions), []);
+  const upsertTimerSession = useCallback((record: any) => upsertEntity("timerSessions", setTimerSessions, record), []);
 
   // helpers/aliases
   const clientById = useCallback((id) => clients.find(c => c.id === id), [clients]);
@@ -942,17 +951,17 @@ const REMINDER_STATUS_TONE = { pending: "warning", sent: "gold", delivered: "suc
 //  TIMER MINI PILL
 // ============================================================
 const TimerMiniPill = ({ timer, onClick }) => {
-  const [, setTick] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (timer?.status !== "running") return;
-    const id = setInterval(() => setTick(t => t + 1), 1000);
+    const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [timer?.status]);
   if (!timer) return null;
 
   const elapsed = timer.status === "paused"
     ? new Date(timer.pausedAt).getTime() - new Date(timer.startedAt).getTime() - timer.totalPausedMs
-    : Date.now() - new Date(timer.startedAt).getTime() - timer.totalPausedMs;
+    : now - new Date(timer.startedAt).getTime() - timer.totalPausedMs;
 
   return (
     <button onClick={onClick}
@@ -983,9 +992,10 @@ const TimerMiniPill = ({ timer, onClick }) => {
 //  APPOINTMENT ROW
 // ============================================================
 const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: { appt: any; business: any; onClick?: () => void; compact?: boolean; recurringSeries?: any }) => {
-  const series = appt.seriesId ? recurringSeries?.find(s => s.id === appt.seriesId) : null;
+  const [now] = useState(() => Date.now());
+  const series = appt.seriesId ? recurringSeries?.find((s: any) => s.id === appt.seriesId) : null;
   const apptDateTime = appt.date && appt.time ? new Date(`${appt.date}T${appt.time}:00`).getTime() : null;
-  const isLate = apptDateTime && apptDateTime < Date.now() && appt.status === "scheduled";
+  const isLate = apptDateTime && apptDateTime < now && appt.status === "scheduled";
 
   return (
     <Card className="p-4 cursor-pointer active:scale-[0.99] transition" onClick={onClick}>
@@ -1140,7 +1150,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
             <button onClick={() => setActive("schedule")} className="text-xs font-semibold flex items-center gap-1" style={{ color: C.goldDeep }}>
               View all <ChevronRight size={14} />
             </button>
-          }>Today's chair</SectionTitle>
+          }>Today&apos;s chair</SectionTitle>
           {todayAppts.length === 0 ? (
             <Card className="p-5 text-center">
               <p className="italic mb-1" style={{ fontFamily: FONT_DISPLAY, color: C.gold, fontSize: 16 }}>a quiet morning</p>
@@ -1251,6 +1261,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
   useEffect(() => {
     if (prefillFromQuote) {
       const q = prefillFromQuote;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-driven prefill, intentional sync
       setStyleName(q.style || ""); setHairCost(q.inputs?.hairCost ?? "");
       setHourlyRate(q.inputs?.hourlyRate ?? business.hourlyRate);
       setHours(q.inputs?.hours ?? ""); setTravelFee(q.inputs?.travelFee ?? 0);
@@ -1264,6 +1275,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
   useEffect(() => {
     if (prefillFromPreset) {
       const p = prefillFromPreset;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
       setStyleName(p.name || "");
       setHairCost(p.hairCost ?? "");
       setHourlyRate(p.hourlyRate ?? business.hourlyRate);
@@ -1425,6 +1437,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt })
 
   useEffect(() => {
     if (prefillNewAppt) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
       setEditing({ ...prefillNewAppt, status: prefillNewAppt.status || "scheduled" });
       clearApptPrefill?.();
     }
@@ -1521,6 +1534,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt }) => {
   useEffect(() => {
     if (open) {
       const existingSeries = appt?.seriesId ? recurringSeries.find(s => s.id === appt.seriesId) : null;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
       setForm({
         clientId: appt?.clientId || "",
         clientName: appt?.clientName || "",
@@ -1555,6 +1569,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt }) => {
     if (form.clientId) {
       const c = clients.find(x => x.id === form.clientId);
       if (c) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
         setForm(prev => ({
           ...prev,
           clientName: c.name,
@@ -1848,7 +1863,7 @@ const Clients = ({ store, openClientPhotos }: { store: any; openClientPhotos?: a
               cta={<Button variant="primary" icon={<Plus size={18} />} onClick={() => setEditing({})}>Add first client</Button>}
             />
           ) : (
-            <div className="text-center py-8 text-sm" style={{ color: C.muted }}>No matches for "{search}"</div>
+            <div className="text-center py-8 text-sm" style={{ color: C.muted }}>No matches for &quot;{search}&quot;</div>
           )
         ) : (
           <div className="space-y-2.5">
@@ -1906,6 +1921,7 @@ const ClientSheet = ({ open, client, store, onClose }: {
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
       setForm({
         id: client?.id, name: client?.name || "",
         phone: client?.phone || "", email: client?.email || "",
@@ -2161,13 +2177,17 @@ const PhotoLightbox = ({ photo, photos, onClose, onEdit, onDelete, onToggleFav }
   onDelete: (p: any) => Promise<void>;
   onToggleFav: (p: any) => Promise<void>;
 }) => {
-  if (!photo) return null;
+  const [current, setCurrent] = useState(photo);
+  const photoId = photo?.id;
+  const prevPhotoIdRef = useRef(photoId);
+  if (prevPhotoIdRef.current !== photoId) {
+    prevPhotoIdRef.current = photoId;
+    setCurrent(photo);
+  }
+  if (!photo || !current) return null;
   const idx = photos.findIndex(p => p.id === photo.id);
   const prev = idx > 0 ? photos[idx - 1] : null;
   const next = idx < photos.length - 1 ? photos[idx + 1] : null;
-  const [current, setCurrent] = useState(photo);
-
-  useEffect(() => { setCurrent(photo); }, [photo?.id]);
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: "rgba(15, 8, 4, 0.96)" }}>
@@ -2212,6 +2232,7 @@ const PhotoEditSheet = ({ photo, appointments, onClose, onSave }: {
 }) => {
   const [form, setForm] = useState<any>({});
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
     if (photo) setForm({
       ...photo,
       caption: photo.caption || "",
@@ -2767,6 +2788,7 @@ const ReminderSettings = ({ store, onBack }: {
   const [openTpl, setOpenTpl] = useState<EntityRecord | null>(null);
   const [saved, setSaved] = useState(false);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
   useEffect(() => { setS(store.reminderSettings); }, [store.reminderSettings]);
 
   const save = async () => {
@@ -2901,6 +2923,7 @@ const TemplateEditorSheet = ({ template, onClose, onSave, onDelete }: {
 // ============================================================
 const ActiveTimerScreen = ({ store, prefillAppt, onBack, onComplete }) => {
   const [tick, setTick] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   const [showStop, setShowStop] = useState(false);
   const [completedSession, setCompletedSession] = useState<EntityRecord | null>(null);
   const [setup, setSetup] = useState<EntityRecord | null>(null); // setup state when no active timer
@@ -2910,7 +2933,7 @@ const ActiveTimerScreen = ({ store, prefillAppt, onBack, onComplete }) => {
 
   useEffect(() => {
     if (timer && timer.status === "running") {
-      const i = setInterval(() => setTick(t => t + 1), 1000);
+      const i = setInterval(() => { setTick(t => t + 1); setNow(Date.now()); }, 1000);
       return () => clearInterval(i);
     }
   }, [timer?.status, timer?.id]);
@@ -2925,6 +2948,7 @@ const ActiveTimerScreen = ({ store, prefillAppt, onBack, onComplete }) => {
         estimatedHours: Number(prefillAppt.hours) || null,
         estimatedTotal: Number(prefillAppt.finalPrice) || null,
       } : { appointmentId: null, clientId: null, clientName: "", style: "", estimatedHours: null, estimatedTotal: null };
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
       setSetup(base);
     }
   }, [timer, prefillAppt, isSimpleMode]);
@@ -3065,7 +3089,7 @@ const ActiveTimerScreen = ({ store, prefillAppt, onBack, onComplete }) => {
   // active timer
   const elapsed = timer.status === "paused"
     ? new Date(timer.pausedAt).getTime() - new Date(timer.startedAt).getTime() - timer.totalPausedMs
-    : Date.now() - new Date(timer.startedAt).getTime() - timer.totalPausedMs;
+    : now - new Date(timer.startedAt).getTime() - timer.totalPausedMs;
 
   const elapsedHr = elapsed / 3600000;
   const earnedNow = timer.estimatedTotal && timer.estimatedHours
@@ -3168,7 +3192,7 @@ const ActiveTimerScreen = ({ store, prefillAppt, onBack, onComplete }) => {
         <Sheet open={showStop} onClose={() => setShowStop(false)} title="Stop session?">
           <div className="space-y-4">
             <p className="text-sm" style={{ color: C.coffee }}>
-              You'll see a summary with how you tracked vs your estimate.
+              You&apos;ll see a summary with how you tracked vs your estimate.
             </p>
             <Card className="p-3" style={{ background: C.ivory }}>
               <div className="flex items-center justify-between"><span className="text-sm" style={{ color: C.muted }}>Time tracked</span>
@@ -3474,6 +3498,7 @@ const PresetEditorSheet = ({ preset, isNew, onClose, onSave, onDelete, onUse }) 
 // ============================================================
 const TransactionSheet = ({ open, tx, onClose, onSave, onDelete, business }) => {
   const [t, setT] = useState(tx || { id: `tx_${uid()}`, type: "expense", date: todayISO(), amount: 0, category: "Hair supplies", note: "" });
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
   useEffect(() => { setT(tx || { id: `tx_${uid()}`, type: "expense", date: todayISO(), amount: 0, category: "Hair supplies", note: "" }); }, [tx]);
 
   const expCats = ["Hair supplies", "Tools", "Booth rent", "Travel", "Marketing", "Education", "Software", "Other"];
@@ -3648,6 +3673,7 @@ const PolicySheet = ({ policy, isNew, onClose, onSave }) => {
 const SettingsScreen = ({ store, onBack, openReminderSettings }) => {
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
   useEffect(() => { setB(store.business); }, [store.business]);
 
   const save = async () => {
@@ -3761,7 +3787,7 @@ const TimerSessionsScreen = ({ store, onBack }) => {
                   </Pill>
                 )}
               </div>
-              {s.notes && <p className="text-[11px] mt-2 italic" style={{ color: C.muted }}>"{s.notes}"</p>}
+              {s.notes && <p className="text-[11px] mt-2 italic" style={{ color: C.muted }}>&quot;{s.notes}&quot;</p>}
             </Card>
           );
         })}
