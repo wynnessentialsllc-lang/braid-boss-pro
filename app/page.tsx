@@ -814,31 +814,38 @@ const EmptyState = ({ icon, title, body, cta }: {
   </div>
 );
 
-const Sheet = ({ open, onClose, title, children, maxHeight, rightAction }: {
+const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAction }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: React.ReactNode;
   maxHeight?: string;
   rightAction?: React.ReactNode;
+  leftAction?: React.ReactNode;
 }) => {
   if (!open) return null;
-  // On mobile Safari, 100vh ignores the dynamic browser chrome, so the
-  // bottom of the sheet (and the actions inside) can hide behind the
-  // URL bar or tab bar. Reserve room at the top and pad the scroll
-  // content past the bottom safe-area + tab bar.
-  const sheetMaxHeight = maxHeight || "calc(100vh - 80px)";
+  // On mobile Safari, 100vh includes the URL bar overlay area, so the
+  // top of a bottom-anchored sheet ends up hidden behind it (you have
+  // to "pull down" to expose the title / grab handle). Use 100dvh so
+  // the sheet sizes against the visible (dynamic) viewport, and pad
+  // the scroll body so action buttons clear the bottom chrome.
+  const sheetMaxHeight = maxHeight || "calc(100dvh - 24px)";
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: "rgba(26, 15, 8, 0.45)" }} onClick={onClose}>
+    <div className="fixed left-0 right-0 bottom-0 z-50 flex items-end justify-center"
+      style={{ background: "rgba(26, 15, 8, 0.45)", height: "100dvh" }}
+      onClick={onClose}>
       <div className="bbp-sheet w-full max-w-[480px] rounded-t-3xl flex flex-col"
         style={{ background: C.cream, maxHeight: sheetMaxHeight, boxShadow: "0 -20px 60px -20px rgba(0,0,0,0.3)" }}
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center pt-3 pb-1">
           <div className="w-10 h-1.5 rounded-full" style={{ background: C.mutedSoft }} />
         </div>
-        <div className="flex items-center justify-between px-5 pb-3 pt-2" style={{ borderBottom: `1px solid ${C.hairline}` }}>
-          <h2 style={{ fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, color: C.espresso }}>{title}</h2>
-          <div className="flex items-center gap-1">
+        <div className="flex items-center justify-between px-5 pb-3 pt-2 gap-2" style={{ borderBottom: `1px solid ${C.hairline}` }}>
+          <div className="flex items-center gap-2 min-w-0">
+            {leftAction}
+            <h2 className="truncate" style={{ fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, color: C.espresso }}>{title}</h2>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
             {rightAction}
             <button onClick={onClose} className="p-2 -mr-2 rounded-full" style={{ color: C.coffee }}><X size={22} /></button>
           </div>
@@ -3870,23 +3877,73 @@ const buildNotifications = (store: any): NotifItem[] => {
   return items;
 };
 
+const DISMISSED_NOTIF_KEY = "dismissedNotifIds";
+
 const NotificationsSheet = ({ open, onClose, store }: {
   open: boolean;
   onClose: () => void;
   store: any;
 }) => {
-  const items = useMemo(() => (open ? buildNotifications(store) : []), [
+  const [dismissed, setDismissed] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      const raw = await safeStorage.get(DISMISSED_NOTIF_KEY);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) setDismissed(parsed.filter((x): x is string => typeof x === "string"));
+        } catch { /* ignore */ }
+      }
+    })();
+  }, [open]);
+
+  const persistDismissed = async (next: string[]) => {
+    setDismissed(next);
+    await safeStorage.set(DISMISSED_NOTIF_KEY, next);
+  };
+
+  const allItems = useMemo(() => (open ? buildNotifications(store) : []), [
     open, store.reminders, store.appointments, store.clients, store.business
   ]);
+  const items = useMemo(() => allItems.filter(n => !dismissed.includes(n.id)), [allItems, dismissed]);
+
+  const dismissOne = (id: string) => {
+    persistDismissed(Array.from(new Set([...dismissed, id])));
+  };
+  const clearAll = () => {
+    if (items.length === 0) return;
+    const ids = items.map(n => n.id);
+    persistDismissed(Array.from(new Set([...dismissed, ...ids])));
+  };
 
   return (
     <Sheet open={open} onClose={onClose} title="Notifications"
-      rightAction={items.length > 0 ? (
-        <span className="px-2.5 py-1 rounded-full text-[11px] font-bold mr-1"
-          style={{ background: C.gold, color: C.espresso, letterSpacing: "0.06em" }}>
-          {items.length}
-        </span>
-      ) : undefined}>
+      leftAction={
+        <button onClick={onClose} aria-label="Back to dashboard"
+          className="p-2 -ml-2 rounded-full active:scale-[0.95] transition"
+          style={{ color: C.coffee }}>
+          <ChevronLeft size={22} />
+        </button>
+      }
+      rightAction={
+        <>
+          {items.length > 0 && (
+            <span className="px-2.5 py-1 rounded-full text-[11px] font-bold"
+              style={{ background: C.gold, color: C.espresso, letterSpacing: "0.06em" }}>
+              {items.length}
+            </span>
+          )}
+          {items.length > 0 && (
+            <button onClick={clearAll}
+              className="px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+              style={{ background: "transparent", color: C.danger, border: `1px solid ${C.danger}`, letterSpacing: "0.08em" }}>
+              Clear all
+            </button>
+          )}
+        </>
+      }>
       {items.length === 0 ? (
         <EmptyState
           icon={<Bell size={28} style={{ color: C.gold }} />}
@@ -3907,6 +3964,11 @@ const NotificationsSheet = ({ open, onClose, store }: {
                 <p className="text-xs mt-0.5 leading-relaxed line-clamp-2" style={{ color: C.coffee }}>{n.body}</p>
                 {n.meta && <p className="text-[11px] mt-1" style={{ color: C.muted }}>{n.meta}</p>}
               </div>
+              <button onClick={() => dismissOne(n.id)} aria-label="Dismiss notification"
+                className="p-2 -mr-1 rounded-full shrink-0 active:scale-[0.92] transition"
+                style={{ color: C.danger }}>
+                <Trash2 size={16} />
+              </button>
             </Card>
           ))}
         </div>
