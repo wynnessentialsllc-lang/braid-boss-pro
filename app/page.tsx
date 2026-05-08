@@ -823,16 +823,38 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
   rightAction?: React.ReactNode;
   leftAction?: React.ReactNode;
 }) => {
+  // iOS Safari's URL bar overlays the page and `100vh` / `100dvh` /
+  // `position: fixed` all behave inconsistently across iOS versions.
+  // The visualViewport API is the only source of truth for the area
+  // the user can actually see, so size the overlay against it directly.
+  const [vv, setVv] = useState<{ height: number; offsetTop: number } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const updateFromVisualViewport = () => {
+      const v = typeof window !== "undefined" ? window.visualViewport : null;
+      if (v) setVv({ height: v.height, offsetTop: v.offsetTop });
+      else setVv({ height: window.innerHeight, offsetTop: 0 });
+    };
+    updateFromVisualViewport();
+    const v = window.visualViewport;
+    v?.addEventListener("resize", updateFromVisualViewport);
+    v?.addEventListener("scroll", updateFromVisualViewport);
+    return () => {
+      v?.removeEventListener("resize", updateFromVisualViewport);
+      v?.removeEventListener("scroll", updateFromVisualViewport);
+    };
+  }, [open]);
   if (!open) return null;
-  // On mobile Safari, 100vh includes the URL bar overlay area, so the
-  // top of a bottom-anchored sheet ends up hidden behind it (you have
-  // to "pull down" to expose the title / grab handle). Use 100dvh so
-  // the sheet sizes against the visible (dynamic) viewport, and pad
-  // the scroll body so action buttons clear the bottom chrome.
-  const sheetMaxHeight = maxHeight || "calc(100dvh - 24px)";
+  const overlayHeight = vv?.height ?? undefined;
+  const overlayTop = vv?.offsetTop ?? 0;
+  const sheetMaxHeight = maxHeight || (overlayHeight ? `${overlayHeight - 24}px` : "calc(100dvh - 24px)");
   return (
-    <div className="fixed left-0 right-0 bottom-0 z-50 flex items-end justify-center"
-      style={{ background: "rgba(26, 15, 8, 0.45)", height: "100dvh" }}
+    <div className="fixed left-0 right-0 z-50 flex items-end justify-center"
+      style={{
+        background: "rgba(26, 15, 8, 0.45)",
+        top: overlayTop,
+        height: overlayHeight ? `${overlayHeight}px` : "100dvh",
+      }}
       onClick={onClose}>
       <div className="bbp-sheet w-full max-w-[480px] rounded-t-3xl flex flex-col"
         style={{ background: C.cream, maxHeight: sheetMaxHeight, boxShadow: "0 -20px 60px -20px rgba(0,0,0,0.3)" }}
