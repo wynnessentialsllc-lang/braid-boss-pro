@@ -230,6 +230,190 @@ const calculatePendingBalance = (appts: any[], todayIso: string): number => {
 const calculateProfit = (income: number, expenses: number): number =>
   roundCents(parseMoney(income) - parseMoney(expenses));
 
+// ---- RETENTION & REBOOKING INTELLIGENCE ---------------------------------
+// Aggregated metrics for a single client. Computed from the full
+// appointment list so a stale local cache can't lie to the dashboard.
+type ClientMetrics = {
+  clientId: string;
+  totalAppts: number;
+  completedAppts: number;
+  cancelledAppts: number;
+  noShowAppts: number;
+  lifetimeValue: number;
+  averageSpend: number;
+  lastAppointmentDate: string | null;
+  daysSinceLast: number | null;
+  averageDaysBetween: number | null;
+  mostBookedStyle: string | null;
+  upcomingAppointmentDate: string | null;
+};
+
+type ClientStatus = "new" | "returning" | "vip" | "inactive" | "at_risk" | "frequent";
+
+const CLIENT_STATUS_LABEL: Record<ClientStatus, string> = {
+  new: "New client",
+  returning: "Returning",
+  vip: "VIP",
+  inactive: "Inactive",
+  at_risk: "At risk",
+  frequent: "Frequent rebooker",
+};
+
+const CLIENT_STATUS_TONE: Record<ClientStatus, "neutral" | "gold" | "success" | "warning" | "danger"> = {
+  new: "neutral",
+  returning: "neutral",
+  vip: "gold",
+  inactive: "warning",
+  at_risk: "danger",
+  frequent: "success",
+};
+
+const daysBetweenISO = (a: string, b: string): number => {
+  if (!a || !b) return 0;
+  const da = new Date(a + "T00:00:00").getTime();
+  const db = new Date(b + "T00:00:00").getTime();
+  if (!Number.isFinite(da) || !Number.isFinite(db)) return 0;
+  return Math.round(Math.abs(db - da) / 86400000);
+};
+
+const calculateClientLifetimeValue = (clientId: string, appointments: any[]): number => {
+  if (!clientId || !Array.isArray(appointments)) return 0;
+  return roundCents(appointments
+    .filter(a => a && a.clientId === clientId)
+    .reduce((s, a) => s + calculateCollectedAmount(a), 0));
+};
+
+const calculateClientMetrics = (clientId: string, appointments: any[], todayIso: string): ClientMetrics => {
+  const empty: ClientMetrics = {
+    clientId,
+    totalAppts: 0,
+    completedAppts: 0,
+    cancelledAppts: 0,
+    noShowAppts: 0,
+    lifetimeValue: 0,
+    averageSpend: 0,
+    lastAppointmentDate: null,
+    daysSinceLast: null,
+    averageDaysBetween: null,
+    mostBookedStyle: null,
+    upcomingAppointmentDate: null,
+  };
+  if (!clientId || !Array.isArray(appointments)) return empty;
+  const mine = appointments.filter(a => a && a.clientId === clientId);
+  if (mine.length === 0) return empty;
+
+  const completed = mine.filter(a => a.status === "completed" || a.paymentStatus === "paid");
+  const cancelled = mine.filter(a => a.status === "cancelled").length;
+  const noShow = mine.filter(a => a.status === "no_show").length;
+
+  const lifetimeValue = roundCents(mine.reduce((s, a) => s + calculateCollectedAmount(a), 0));
+  const averageSpend = completed.length > 0 ? roundCents(lifetimeValue / completed.length) : 0;
+
+  const completedDates = completed
+    .map(a => a.date)
+    .filter((d: any): d is string => typeof d === "string" && d.length >= 8)
+    .sort();
+  const lastAppointmentDate = completedDates.length > 0 ? completedDates[completedDates.length - 1] : null;
+  const daysSinceLast = lastAppointmentDate ? daysBetweenISO(lastAppointmentDate, todayIso) : null;
+
+  // Average rebooking cadence (avg gap between consecutive completed visits).
+  let averageDaysBetween: number | null = null;
+  if (completedDates.length >= 2) {
+    let total = 0;
+    for (let i = 1; i < completedDates.length; i++) {
+      total += daysBetweenISO(completedDates[i - 1], completedDates[i]);
+    }
+    averageDaysBetween = Math.round(total / (completedDates.length - 1));
+  }
+
+  // Most booked style by frequency.
+  const styleCounts: Record<string, number> = {};
+  for (const a of mine) {
+    const k = (a.style || "").trim();
+    if (!k) continue;
+    styleCounts[k] = (styleCounts[k] || 0) + 1;
+  }
+  const mostBookedStyle = Object.entries(styleCounts)
+    .sort(([, a], [, b]) => b - a)
+    .map(([k]) => k)[0] || null;
+
+  // Earliest upcoming non-cancelled / non-completed appointment.
+  const upcoming = mine
+    .filter(a => a.date >= todayIso && a.status !== "cancelled" && a.status !== "completed")
+    .map(a => a.date)
+    .sort()[0] || null;
+
+  return {
+    clientId,
+    totalAppts: mine.length,
+    completedAppts: completed.length,
+    cancelledAppts: cancelled,
+    noShowAppts: noShow,
+    lifetimeValue,
+    averageSpend,
+    lastAppointmentDate,
+    daysSinceLast,
+    averageDaysBetween,
+    mostBookedStyle,
+    upcomingAppointmentDate: upcoming,
+  };
+};
+
+// Status detection. Rules are intentionally simple and rule-based for
+// V1 — a future ML pass can replace `getClientStatus` without touching
+// the UI.
+const getClientStatus = (metrics: ClientMetrics, vipThreshold: number): ClientStatus => {
+  if (!metrics || metrics.totalAppts === 0) return "new";
+  if (metrics.lifetimeValue >= vipThreshold && metrics.completedAppts >= 3) {
+    if (metrics.daysSinceLast != null && metrics.daysSinceLast > 60) return "at_risk";
+    return "vip";
+  }
+  if (metrics.daysSinceLast != null && metrics.daysSinceLast > 90) return "inactive";
+  if (metrics.daysSinceLast != null && metrics.daysSinceLast > 60 && metrics.completedAppts >= 2) return "at_risk";
+  if (metrics.completedAppts >= 3 && metrics.averageDaysBetween != null && metrics.averageDaysBetween <= 35) return "frequent";
+  if (metrics.completedAppts >= 1) return "returning";
+  return "new";
+};
+
+// 0–100 retention score (RFM-lite). Recency dominates because rebooking
+// is the leading indicator that a client is sticking with you.
+const calculateRetentionScore = (metrics: ClientMetrics): number => {
+  if (!metrics || metrics.totalAppts === 0) return 0;
+  // Recency (40 pts): 0 days = 40, 90+ days = 0
+  const recency = metrics.daysSinceLast == null
+    ? 0
+    : Math.max(0, Math.min(40, 40 - (metrics.daysSinceLast / 90) * 40));
+  // Frequency (30 pts): completed visits, capped at 6+ for full credit
+  const frequency = Math.max(0, Math.min(30, (metrics.completedAppts / 6) * 30));
+  // Monetary (30 pts): lifetime value, capped at $1000 for full credit
+  const monetary = Math.max(0, Math.min(30, (metrics.lifetimeValue / 1000) * 30));
+  return Math.round(recency + frequency + monetary);
+};
+
+// Rebooking candidates: clients overdue for their next visit, with a
+// reason string suitable to display next to their name. Sorted by how
+// overdue they are (relative to their own cadence).
+const getRebookingCandidates = (clients: any[], appointments: any[], todayIso: string): { client: any; metrics: ClientMetrics; reason: string; overdueBy: number }[] => {
+  if (!Array.isArray(clients)) return [];
+  const out: { client: any; metrics: ClientMetrics; reason: string; overdueBy: number }[] = [];
+  for (const c of clients) {
+    if (!c || !c.id) continue;
+    const m = calculateClientMetrics(c.id, appointments, todayIso);
+    if (m.upcomingAppointmentDate) continue; // already on the books
+    if (m.completedAppts === 0) continue;     // no history yet
+    if (m.daysSinceLast == null) continue;
+    const cadence = m.averageDaysBetween || 42; // default 6-week touch-up window
+    if (m.daysSinceLast < cadence) continue;
+    const overdueBy = m.daysSinceLast - cadence;
+    let reason = "Time to rebook";
+    if (m.daysSinceLast >= 42 && m.daysSinceLast < 56) reason = "Client may need touch-up";
+    else if (m.daysSinceLast >= 56) reason = "Follow up after 6+ weeks";
+    if (m.lifetimeValue >= 800 && m.daysSinceLast >= 30) reason = "VIP client inactive for 30+ days";
+    out.push({ client: c, metrics: m, reason, overdueBy });
+  }
+  return out.sort((a, b) => b.overdueBy - a.overdueBy);
+};
+
 // Best-effort safe JSON parse so a single corrupted localStorage entry
 // can't take down the app.
 const safeParse = <T,>(raw: string | null | undefined, fallback: T): T => {
@@ -1432,7 +1616,7 @@ const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: {
 //  DASHBOARD
 // ============================================================
 const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, notifBadgeCount = 0 }: { store: any; setActive: any; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; notifBadgeCount?: number }) => {
-  const { business, appointments, transactions, photos, recurringSeries } = store;
+  const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
   const todayAppts = useMemo(() =>
@@ -1544,6 +1728,16 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
           <KpiCard label="Pending balance" value={fmtMoney(stats.pendingBalance, business.currency)} icon={<Clock size={16} />} tone={stats.pendingBalance > 0 ? "warning" : "neutral"} onClick={() => setActive("schedule")} />
           <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} onClick={() => setActive("money")} />
         </div>
+
+        <RetentionInsights
+          clients={clients}
+          appointments={appointments}
+          today={today}
+          business={business}
+          openCommunication={openCommunication}
+          openQuickAppt={openQuickAppt}
+          setActive={setActive}
+        />
 
         <div>
           <SectionTitle>Pending balances</SectionTitle>
@@ -1712,6 +1906,273 @@ const KpiCard = ({ label, value, icon, tone = "neutral", onClick }: { label: any
       </div>
       <p style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: C.espresso, lineHeight: 1 }}>{value}</p>
       {onClick && <p className="text-[10px] font-semibold mt-1.5 flex items-center gap-0.5" style={{ color: C.gold }}>View <ChevronRight size={11} /></p>}
+    </Card>
+  );
+};
+
+const RetentionInsights = ({ clients, appointments, today, business, openCommunication, openQuickAppt, setActive }: {
+  clients: any[];
+  appointments: any[];
+  today: string;
+  business: any;
+  openCommunication?: (ctx: CommContext) => void;
+  openQuickAppt: (prefill?: any) => void;
+  setActive: (tab: string) => void;
+}) => {
+  const insights = useMemo(() => {
+    const safeClients = Array.isArray(clients) ? clients : [];
+    const safeAppts = Array.isArray(appointments) ? appointments : [];
+    if (safeClients.length === 0) {
+      return { hasData: false, candidates: [], topClients: [], inactiveCount: 0, repeatPct: 0, vipThreshold: 0 };
+    }
+    // VIP threshold = 75th percentile of lifetime value across clients
+    // who have at least one completed appointment. Falls back to a flat
+    // $800 floor when sample size is too small.
+    const lifetimes = safeClients
+      .map(c => calculateClientLifetimeValue(c.id, safeAppts))
+      .filter(v => v > 0)
+      .sort((a, b) => a - b);
+    const p75 = lifetimes.length >= 4 ? lifetimes[Math.floor(lifetimes.length * 0.75)] : 800;
+    const vipThreshold = Math.max(p75, 800);
+
+    const enriched = safeClients
+      .map(c => {
+        const m = calculateClientMetrics(c.id, safeAppts, today);
+        return { client: c, metrics: m, status: getClientStatus(m, vipThreshold) };
+      })
+      .filter(x => x.metrics.totalAppts > 0);
+
+    const candidates = getRebookingCandidates(safeClients, safeAppts, today).slice(0, 3);
+    const inactiveCount = enriched.filter(x => x.status === "inactive" || x.status === "at_risk").length;
+
+    // Repeat booking %: clients with 2+ completed visits / clients with any history.
+    const withHistory = enriched.length;
+    const repeats = enriched.filter(x => x.metrics.completedAppts >= 2).length;
+    const repeatPct = withHistory > 0 ? Math.round((repeats / withHistory) * 100) : 0;
+
+    // Top 3 clients this month by collected amount.
+    const monthStart = today.slice(0, 7) + "-01";
+    const topClients = safeClients
+      .map(c => {
+        const monthValue = roundCents(safeAppts
+          .filter(a => a.clientId === c.id && a.date >= monthStart && isIncomeAppt(a))
+          .reduce((s, a) => s + calculateCollectedAmount(a), 0));
+        return { client: c, monthValue };
+      })
+      .filter(x => x.monthValue > 0)
+      .sort((a, b) => b.monthValue - a.monthValue)
+      .slice(0, 3);
+
+    return { hasData: true, candidates, topClients, inactiveCount, repeatPct, vipThreshold };
+  }, [clients, appointments, today]);
+
+  return (
+    <div>
+      <SectionTitle>Retention insights</SectionTitle>
+      {!insights.hasData ? (
+        <Card className="p-5 text-center">
+          <Sparkles size={18} style={{ color: C.gold, margin: "0 auto 6px" }} />
+          <p className="text-sm font-semibold" style={{ color: C.espresso }}>No repeat clients yet</p>
+          <p className="text-xs mt-1" style={{ color: C.muted }}>Your loyal client list will grow here.</p>
+        </Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <Card className="p-3" style={{ background: C.ivory }}>
+              <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Overdue</p>
+              <p className="text-base font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{insights.candidates.length}</p>
+            </Card>
+            <Card className="p-3" style={{ background: C.ivory }}>
+              <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Repeat %</p>
+              <p className="text-base font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{insights.repeatPct}%</p>
+            </Card>
+            <Card className="p-3" style={{ background: C.ivory }}>
+              <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Inactive</p>
+              <p className="text-base font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{insights.inactiveCount}</p>
+            </Card>
+          </div>
+
+          {insights.candidates.length > 0 && (
+            <Card className="p-3.5 mb-3">
+              <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.12em" }}>Time to rebook</p>
+              <div className="space-y-2">
+                {insights.candidates.map(({ client, metrics, reason }) => (
+                  <div key={client.id} className="flex items-center gap-3">
+                    <div className="rounded-full flex items-center justify-center shrink-0"
+                      style={{ width: 32, height: 32, background: `linear-gradient(135deg, ${C.caramel}, ${C.coffee})`, color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 13, fontWeight: 600 }}>
+                      {initials(client.name)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm truncate" style={{ color: C.espresso }}>{client.name}</p>
+                      <p className="text-[11px] truncate" style={{ color: C.muted }}>
+                        {reason} · {metrics.daysSinceLast}d since last
+                      </p>
+                    </div>
+                    <div className="flex gap-1.5 shrink-0">
+                      {openCommunication && (
+                        <button onClick={() => openCommunication({ client, initialKey: "rebooking_nudge" })}
+                          className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+                          style={{ background: "transparent", color: C.goldDeep, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
+                          Remind
+                        </button>
+                      )}
+                      <button onClick={() => openQuickAppt({
+                        clientId: client.id,
+                        clientName: client.name,
+                        clientPhone: client.phone,
+                        clientEmail: client.email,
+                        style: metrics.mostBookedStyle || "",
+                      })}
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+                        style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
+                        Rebook
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {insights.topClients.length > 0 && (
+            <Card className="p-3.5">
+              <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.12em" }}>Top clients this month</p>
+              <div className="space-y-1.5">
+                {insights.topClients.map(({ client, monthValue }, i) => (
+                  <button key={client.id} onClick={() => setActive("clients")} className="w-full flex items-center gap-3 active:scale-[0.99] transition">
+                    <div className="flex items-center justify-center font-bold rounded-full"
+                      style={{ width: 24, height: 24, background: i === 0 ? C.gold : C.ivory, color: i === 0 ? C.espresso : C.coffee, fontFamily: FONT_DISPLAY, fontSize: 12 }}>
+                      {i + 1}
+                    </div>
+                    <p className="flex-1 text-sm font-semibold text-left truncate" style={{ color: C.espresso }}>{client.name}</p>
+                    <p className="text-sm font-mono font-bold" style={{ color: C.goldDeep }}>{fmtMoney(monthValue, business?.currency || "USD")}</p>
+                  </button>
+                ))}
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+const ClientRetentionCard = ({ clientId, clientName, appointments, today, business, openCommunication, onDuplicate }: {
+  clientId: string;
+  clientName?: string;
+  appointments: any[];
+  today: string;
+  business: any;
+  openCommunication?: (ctx: CommContext) => void;
+  onDuplicate?: (prefill: any) => void;
+}) => {
+  const { metrics, status, score, latestCompleted } = useMemo(() => {
+    const m = calculateClientMetrics(clientId, appointments || [], today);
+    const lifetimes = (Array.isArray(appointments) ? appointments : [])
+      .reduce<Record<string, number>>((acc, a) => {
+        if (!a?.clientId) return acc;
+        acc[a.clientId] = (acc[a.clientId] || 0) + calculateCollectedAmount(a);
+        return acc;
+      }, {});
+    const ltvList = Object.values(lifetimes).filter(v => v > 0).sort((a, b) => a - b);
+    const p75 = ltvList.length >= 4 ? ltvList[Math.floor(ltvList.length * 0.75)] : 800;
+    const vipThreshold = Math.max(p75, 800);
+    const s = getClientStatus(m, vipThreshold);
+    const score = calculateRetentionScore(m);
+    const latest = (Array.isArray(appointments) ? appointments : [])
+      .filter(a => a?.clientId === clientId && (a.status === "completed" || a.paymentStatus === "paid"))
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
+    return { metrics: m, status: s, score, latestCompleted: latest };
+  }, [clientId, appointments, today]);
+
+  if (metrics.totalAppts === 0) {
+    return (
+      <Card className="p-4 text-center" style={{ background: C.ivory }}>
+        <Sparkles size={16} style={{ color: C.gold, margin: "0 auto 4px" }} />
+        <p className="text-sm font-semibold" style={{ color: C.espresso }}>No history yet</p>
+        <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>Loyalty stats will appear after the first appointment.</p>
+      </Card>
+    );
+  }
+
+  const handleDuplicate = () => {
+    if (!latestCompleted || !onDuplicate) return;
+    onDuplicate({
+      clientId,
+      clientName,
+      clientPhone: latestCompleted.clientPhone,
+      clientEmail: latestCompleted.clientEmail,
+      style: latestCompleted.style || metrics.mostBookedStyle || "",
+      durationHours: latestCompleted.durationHours,
+      totalPrice: latestCompleted.totalPrice,
+    });
+  };
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Pill tone={CLIENT_STATUS_TONE[status]}>{CLIENT_STATUS_LABEL[status]}</Pill>
+          {metrics.upcomingAppointmentDate && <Pill tone="success">Booked {fmtDate(metrics.upcomingAppointmentDate)}</Pill>}
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>Retention</p>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: score >= 70 ? C.success : score >= 40 ? C.goldDeep : C.danger }}>
+            {score}<span className="text-xs" style={{ color: C.muted }}>/100</span>
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 text-center mb-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted }}>Visits</p>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>{metrics.completedAppts}</p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted }}>Lifetime</p>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.goldDeep }}>{fmtMoney(metrics.lifetimeValue, business?.currency || "USD")}</p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted }}>Avg spend</p>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>{fmtMoney(metrics.averageSpend, business?.currency || "USD")}</p>
+        </div>
+      </div>
+
+      <div className="text-[11px] space-y-0.5" style={{ color: C.muted }}>
+        {metrics.lastAppointmentDate && (
+          <p>Last visit · {fmtDate(metrics.lastAppointmentDate)} ({metrics.daysSinceLast}d ago)</p>
+        )}
+        {metrics.averageDaysBetween != null && (
+          <p>Average rebook cadence · every {metrics.averageDaysBetween} days</p>
+        )}
+        {metrics.mostBookedStyle && (
+          <p>Most booked · {metrics.mostBookedStyle}</p>
+        )}
+        {(metrics.cancelledAppts > 0 || metrics.noShowAppts > 0) && (
+          <p>
+            {metrics.cancelledAppts > 0 && `${metrics.cancelledAppts} cancelled`}
+            {metrics.cancelledAppts > 0 && metrics.noShowAppts > 0 && " · "}
+            {metrics.noShowAppts > 0 && `${metrics.noShowAppts} no-show${metrics.noShowAppts === 1 ? "" : "s"}`}
+          </p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 mt-3">
+        {openCommunication && (
+          <button onClick={() => openCommunication({ client: { id: clientId, name: clientName }, initialKey: "rebooking_nudge" })}
+            className="px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition flex items-center justify-center gap-1.5"
+            style={{ background: "transparent", color: C.goldDeep, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
+            <MessageSquare size={12} /> Rebook reminder
+          </button>
+        )}
+        {latestCompleted && onDuplicate && (
+          <button onClick={handleDuplicate}
+            className="px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition flex items-center justify-center gap-1.5"
+            style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
+            <Repeat size={12} /> Duplicate last
+          </button>
+        )}
+      </div>
     </Card>
   );
 };
@@ -2377,7 +2838,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 const PREF_STYLES = ["Knotless", "Box braids", "Boho", "Goddess", "Stitch braids", "Cornrows", "Twists", "Locs", "Sew-in", "Wig install"];
 const SENSITIVITY = ["None", "Mild", "Moderate", "High"];
 
-const Clients = ({ store, openClientPhotos, openCommunication }: { store: any; openClientPhotos?: any; openCommunication?: (ctx: CommContext) => void }) => {
+const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt }: { store: any; openClientPhotos?: any; openCommunication?: (ctx: CommContext) => void; openQuickAppt?: (prefill?: any) => void }) => {
   void openClientPhotos;
   const { clients, appointments, photos, business } = store;
   const [search, setSearch] = useState("");
@@ -2451,7 +2912,7 @@ const Clients = ({ store, openClientPhotos, openCommunication }: { store: any; o
         )}
       </div>
       <FAB onClick={() => setEditing({})} />
-      <ClientSheet open={!!editing} client={editing} store={store} onClose={() => setEditing(null)} openCommunication={openCommunication} />
+      <ClientSheet open={!!editing} client={editing} store={store} onClose={() => setEditing(null)} openCommunication={openCommunication} openQuickAppt={openQuickAppt} />
     </div>
   );
 };
@@ -2469,12 +2930,13 @@ const PHOTO_CATEGORIES = [
   { value: "scalp", label: "Scalp", color: "#DFB5AC" },
 ];
 
-const ClientSheet = ({ open, client, store, onClose, openCommunication }: {
+const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuickAppt }: {
   open: boolean;
   client: any;
   store: any;
   onClose: () => void;
   openCommunication?: (ctx: CommContext) => void;
+  openQuickAppt?: (prefill?: any) => void;
 }) => {
   const { upsertClient, deleteClient, appointments, photos, business, upsertPhoto, deletePhoto } = store;
   const [tab, setTab] = useState("info");
@@ -2553,6 +3015,17 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication }: {
 
         {tab === "info" && (
           <div className="space-y-4">
+            {form.id && (
+              <ClientRetentionCard
+                clientId={form.id}
+                clientName={form.name}
+                appointments={appointments}
+                today={todayISO()}
+                business={business}
+                openCommunication={openCommunication}
+                onDuplicate={(prefill) => { onClose(); openQuickAppt?.(prefill); }}
+              />
+            )}
             <Field label="Name"><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Full name" /></Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Phone"><Input type="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="555-0123" /></Field>
@@ -4994,7 +5467,7 @@ export default function App() {
               openCommunication={openCommunication} />
           )}
           {active === "clients" && (
-            <Clients store={store} openCommunication={openCommunication} />
+            <Clients store={store} openCommunication={openCommunication} openQuickAppt={openQuickAppt} />
           )}
           {active === "money" && (
             <Money store={store}
