@@ -72,7 +72,7 @@ export const LegalShell = ({
           )}
           {updated && (
             <p className="mt-2 text-[11px]" style={{ color: C.muted }}>
-              Last updated {updated}
+              Last updated: {updated}
             </p>
           )}
         </div>

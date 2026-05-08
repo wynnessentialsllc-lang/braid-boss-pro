@@ -5,7 +5,7 @@ import { LegalShell, LegalSection, LEGAL_TOKENS as C } from "../(legal)/_shell";
 
 const FONT_DISPLAY = `"Cormorant Garamond", Georgia, serif`;
 
-const SUPPORT_EMAIL = "support@braidbosspro.app";
+const SUPPORT_EMAIL = "hello@hairwellnessslab.com";
 
 const composeMail = (subject: string, body: string) =>
   `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;

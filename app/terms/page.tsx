@@ -7,7 +7,7 @@ export default function TermsPage() {
     <LegalShell
       title="Terms of Service"
       intro="Plain language. Read it, use the app, focus on your clients."
-      updated={new Date().toISOString().slice(0, 10)}>
+      updated="May 8, 2026">
 
       <LegalSection title="What Braid Boss Pro is">
         <p>
@@ -72,7 +72,7 @@ export default function TermsPage() {
 
       <LegalSection title="Contact">
         <p>
-          Questions? Email <a href="mailto:support@braidbosspro.app">support@braidbosspro.app</a>.
+          Questions? Contact <a href="mailto:hello@hairwellnessslab.com">hello@hairwellnessslab.com</a>.
         </p>
       </LegalSection>
     </LegalShell>

@@ -7,7 +7,7 @@ export default function PrivacyPage() {
     <LegalShell
       title="Privacy Policy"
       intro="Braid Boss Pro is a tool for independent braiders to organize their business. We treat your data like it’s ours — minimal, scoped to you, and never sold."
-      updated={new Date().toISOString().slice(0, 10)}>
+      updated="May 8, 2026">
 
       <LegalSection title="What we collect">
         <p>The data Braid Boss Pro stores is the data you put in. Specifically:</p>
@@ -65,7 +65,7 @@ export default function PrivacyPage() {
 
       <LegalSection title="Contact">
         <p>
-          Questions or concerns? Email <a href="mailto:support@braidbosspro.app">support@braidbosspro.app</a>.
+          Questions? Contact <a href="mailto:hello@hairwellnessslab.com">hello@hairwellnessslab.com</a>.
         </p>
       </LegalSection>
     </LegalShell>
