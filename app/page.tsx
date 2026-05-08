@@ -97,9 +97,24 @@ const safeStorage = {
   async getAllByPrefix(prefix: string): Promise<EntityRecord[]> {
     const keys = await this.list(prefix);
     const out: EntityRecord[] = [];
+    const seenIds = new Set<string>();
     for (const k of keys) {
       const v = await this.get(k);
-      if (v) { try { out.push(JSON.parse(v)); } catch {} }
+      if (!v) continue;
+      let parsed: any;
+      try { parsed = JSON.parse(v); }
+      catch (err) {
+        if (typeof console !== "undefined") console.warn(`[bbp] dropped corrupt JSON at ${k}`, err);
+        continue;
+      }
+      if (!parsed || typeof parsed !== "object") continue;
+      // Defensive de-dupe: skip if we've already seen this id under this
+      // prefix. Prevents legacy double-writes from showing twice in the
+      // UI until a cleanup pass rewrites them.
+      const id = typeof parsed.id === "string" ? parsed.id : null;
+      if (id && seenIds.has(id)) continue;
+      if (id) seenIds.add(id);
+      out.push(parsed);
     }
     return out;
   }
@@ -143,6 +158,89 @@ const parseMoney = (raw: string | number | null | undefined): number => {
   if (raw === null || raw === undefined || raw === "") return 0;
   const n = typeof raw === "number" ? raw : parseFloat(String(raw).replace(/[^\d.\-]/g, ""));
   return Number.isFinite(n) ? n : 0;
+};
+
+// ---- FINANCE: single source of truth ------------------------------------
+//
+// All money math in the app derives from these helpers. Anything else
+// (Dashboard KPIs, Money tab, client lifetime totals, Pending balance
+// section, notifications) is just display.
+//
+// Round to cents to avoid 0.1 + 0.2 style floating drift before display
+// or persistence.
+const roundCents = (n: number): number => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
+const formatCurrency = (n: unknown, currency: string = "USD"): string => fmtMoney(parseMoney(n as any), currency);
+
+// Normalize a raw appointment record from storage / form input. Fills in
+// defaults so downstream math never has to second-guess undefined fields,
+// and clamps the numeric trio (totalPrice, depositPaid, balanceDue) to a
+// consistent state. Idempotent — passing the same record twice is safe.
+const normalizeAppointment = (raw: any): any => {
+  if (!raw || typeof raw !== "object") return raw;
+  const totalPrice = roundCents(parseMoney(raw.totalPrice));
+  let depositPaid = roundCents(parseMoney(raw.depositPaid));
+  if (depositPaid > totalPrice && totalPrice > 0) depositPaid = totalPrice;
+  if (depositPaid < 0) depositPaid = 0;
+  const balanceDue = roundCents(Math.max(0, totalPrice - depositPaid));
+  let paymentStatus: "paid" | "" | string = raw.paymentStatus || "";
+  if (totalPrice > 0 && balanceDue === 0) paymentStatus = "paid";
+  else if (paymentStatus === "paid") paymentStatus = "";
+  return {
+    ...raw,
+    status: raw.status || "scheduled",
+    totalPrice,
+    depositPaid,
+    balanceDue,
+    paymentStatus,
+  };
+};
+
+// What the salon has actually collected from this appointment so far.
+// Falls back to totalPrice for fully paid records that don't have an
+// explicit depositPaid value (legacy data).
+const calculateCollectedAmount = (appt: any): number => {
+  if (!appt || appt.status === "cancelled") return 0;
+  const deposit = parseMoney(appt.depositPaid);
+  if (deposit > 0) return roundCents(deposit);
+  if (parseMoney(appt.balanceDue) === 0 && parseMoney(appt.totalPrice) > 0) {
+    return roundCents(parseMoney(appt.totalPrice));
+  }
+  return 0;
+};
+
+// True when an appointment counts as income (collected money).
+const isIncomeAppt = (appt: any): boolean => {
+  if (!appt || appt.status === "cancelled") return false;
+  return appt.status === "completed" || appt.paymentStatus === "paid" || calculateCollectedAmount(appt) > 0;
+};
+
+// Sum of outstanding balance across appointments whose payment is
+// pending / partially deposited / overdue. Cancelled and fully-paid
+// records are excluded.
+const calculatePendingBalance = (appts: any[], todayIso: string): number => {
+  if (!Array.isArray(appts)) return 0;
+  return roundCents(appts
+    .filter(a => a && a.status !== "cancelled")
+    .map(a => ({ a, ps: paymentStatusOf(a, todayIso) }))
+    .filter(({ ps }) => ps !== "paid")
+    .reduce((s, { a }) => s + parseMoney(a.balanceDue), 0));
+};
+
+const calculateProfit = (income: number, expenses: number): number =>
+  roundCents(parseMoney(income) - parseMoney(expenses));
+
+// Best-effort safe JSON parse so a single corrupted localStorage entry
+// can't take down the app.
+const safeParse = <T,>(raw: string | null | undefined, fallback: T): T => {
+  if (raw === null || raw === undefined || raw === "") return fallback;
+  try {
+    const v = JSON.parse(raw);
+    return v as T;
+  } catch (err) {
+    if (typeof console !== "undefined") console.warn("[bbp] dropped corrupt JSON in storage", err);
+    return fallback;
+  }
 };
 
 const fmtDate = (iso: string): string => {
@@ -465,11 +563,13 @@ const useStorage = () => {
   useEffect(() => {
     (async () => {
       const bizRaw = await safeStorage.get("settings:business");
-      if (bizRaw) try { setBusiness({ ...DEFAULT_BUSINESS, ...JSON.parse(bizRaw) }); } catch {}
+      const bizParsed = safeParse<EntityRecord | null>(bizRaw, null);
+      if (bizParsed) setBusiness({ ...DEFAULT_BUSINESS, ...bizParsed });
       else await safeStorage.set("settings:business", DEFAULT_BUSINESS);
 
       const rsRaw = await safeStorage.get("reminderSettings");
-      if (rsRaw) try { setReminderSettings({ ...DEFAULT_REMINDER_SETTINGS, ...JSON.parse(rsRaw) }); } catch {}
+      const rsParsed = safeParse<EntityRecord | null>(rsRaw, null);
+      if (rsParsed) setReminderSettings({ ...DEFAULT_REMINDER_SETTINGS, ...rsParsed });
       else await safeStorage.set("reminderSettings", DEFAULT_REMINDER_SETTINGS);
 
       let tpls = await safeStorage.getAllByPrefix("reminderTemplates:");
@@ -481,7 +581,12 @@ const useStorage = () => {
 
       setReminders(await safeStorage.getAllByPrefix("reminders:"));
       setClients(await safeStorage.getAllByPrefix("clients:"));
-      setAppointments(await safeStorage.getAllByPrefix("appointments:"));
+      // Normalize on load: pre-existing appointments may be missing the
+      // numeric defaults / paymentStatus we added later. Run them
+      // through the normalizer so all KPIs see a consistent shape from
+      // the first render after refresh.
+      const rawAppts = await safeStorage.getAllByPrefix("appointments:");
+      setAppointments(rawAppts.map(normalizeAppointment));
       setQuotes(await safeStorage.getAllByPrefix("quotes:"));
       setTransactions(await safeStorage.getAllByPrefix("transactions:"));
       setPhotos(await safeStorage.getAllByPrefix("photos:"));
@@ -503,7 +608,8 @@ const useStorage = () => {
       setStylePresets(pres);
 
       const atRaw = await safeStorage.get("activeTimer");
-      if (atRaw) try { setActiveTimer(JSON.parse(atRaw)); } catch {}
+      const parsedTimer = safeParse<EntityRecord | null>(atRaw, null);
+      if (parsedTimer) setActiveTimer(parsedTimer);
 
       setLoading(false);
     })();
@@ -516,23 +622,24 @@ const useStorage = () => {
   const deleteClient = useCallback((id: string) => deleteEntity("clients", setClients, id), []);
 
   const upsertAppointment = useCallback(async (a) => {
-    const r = { ...a };
-    if (!r.id) { r.id = uid(); r.createdAt = new Date().toISOString(); }
-    r.balanceDue = Number((Number(r.totalPrice || 0) - Number(r.depositPaid || 0)).toFixed(2));
-    // Keep paymentStatus consistent: explicit "paid" override only sticks
-    // while balance is 0; otherwise derive from the deposit/balance state
-    // so a re-edit that adds price reverts the status.
-    if (r.balanceDue <= 0 && Number(r.totalPrice || 0) > 0) {
-      r.paymentStatus = "paid";
-      if (!r.paymentDate) r.paymentDate = todayISO();
-    } else if (r.paymentStatus === "paid") {
-      r.paymentStatus = "";
+    if (!a || typeof a !== "object") {
+      if (typeof console !== "undefined") console.warn("[bbp] upsertAppointment: ignoring non-object input", a);
+      return null;
     }
+    const seeded = { ...a };
+    if (!seeded.id) {
+      seeded.id = uid();
+      seeded.createdAt = new Date().toISOString();
+    }
+    if (seeded.balanceDue == null && parseMoney(seeded.totalPrice) > 0) seeded.paymentStatus = seeded.paymentStatus || "";
+    const r = normalizeAppointment(seeded);
+    if (r.paymentStatus === "paid" && !r.paymentDate) r.paymentDate = todayISO();
     await safeStorage.set(`appointments:${r.id}`, r);
     setAppointments(prev => {
-      const i = prev.findIndex(x => x.id === r.id);
-      if (i >= 0) { const cp = [...prev]; cp[i] = r; return cp; }
-      return [...prev, r];
+      // Dedupe defensively in case storage held two records for the same
+      // id (legacy bug). Keep the new one.
+      const filtered = prev.filter(x => x.id !== r.id);
+      return [...filtered, r];
     });
     return r;
   }, []);
@@ -584,13 +691,11 @@ const useStorage = () => {
   const deletePreset = useCallback((id: string) => deleteEntity("stylePresets", setStylePresets, id), []);
   const incrementPresetUse = useCallback(async (id) => {
     const raw = await safeStorage.get(`stylePresets:${id}`);
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw);
-      parsed.useCount = (parsed.useCount || 0) + 1;
-      await safeStorage.set(`stylePresets:${id}`, parsed);
-      setStylePresets(prev => prev.map(x => x.id === id ? parsed : x));
-    } catch {}
+    const parsed = safeParse<EntityRecord | null>(raw, null);
+    if (!parsed) return;
+    parsed.useCount = (parsed.useCount || 0) + 1;
+    await safeStorage.set(`stylePresets:${id}`, parsed);
+    setStylePresets(prev => prev.map(x => x.id === id ? parsed : x));
   }, []);
 
   const upsertSeries = useCallback((record: any) => upsertEntity("recurringSeries", setRecurringSeries, record), []);
@@ -641,9 +746,8 @@ const useStorage = () => {
 
   const sendReminderNow = useCallback(async (id) => {
     const found = await safeStorage.get(`reminders:${id}`);
-    if (!found) return;
-    let r;
-    try { r = JSON.parse(found); } catch { return; }
+    const r = safeParse<EntityRecord | null>(found, null);
+    if (!r) return;
     const sentRecord = { ...r, status: "sent", sentAt: new Date().toISOString() };
     await safeStorage.set(`reminders:${id}`, sentRecord);
     setReminders(prev => prev.map(x => x.id === id ? sentRecord : x));
@@ -1170,33 +1274,21 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
     const wkISO = wk.toISOString().slice(0, 10);
     const msISO = ms.toISOString().slice(0, 10);
     const completedThisWeek = appointments.filter(a => a.status === "completed" && a.date >= wkISO);
-    // Week revenue = what was actually collected on completed work this
-    // week (deposit + balance), not the quoted total.
-    const weekRevenue = completedThisWeek.reduce((s, a) => {
-      const collected = parseMoney(a.depositPaid) || (Number(a.balanceDue) === 0 ? parseMoney(a.totalPrice) : 0);
-      return s + collected;
-    }, 0);
-    const pendingBalance = appointments
-      .filter(a => a.status !== "cancelled")
-      .map(a => ({ a, ps: paymentStatusOf(a, today) }))
-      .filter(({ ps }) => ps === "pending" || ps === "deposit" || ps === "overdue")
-      .reduce((s, { a }) => s + (Number(a.balanceDue) || 0), 0);
-    const monthIncome = transactions.filter(t => t.type === "income" && t.date >= msISO).reduce((s, t) => s + Number(t.amount), 0)
-      + appointments
-        .filter(a => (a.status === "completed" || a.paymentStatus === "paid") && a.status !== "cancelled" && a.date >= msISO)
-        .reduce((s, a) => {
-          const collected = parseMoney(a.depositPaid) || (Number(a.balanceDue) === 0 ? parseMoney(a.totalPrice) : 0);
-          return s + collected;
-        }, 0);
-    const monthExpense = transactions.filter(t => t.type === "expense" && t.date >= msISO).reduce((s, t) => s + Number(t.amount), 0);
-    return { weekRevenue, weekAppts: completedThisWeek.length, pendingBalance, monthProfit: monthIncome - monthExpense };
+    const weekRevenue = roundCents(completedThisWeek.reduce((s, a) => s + calculateCollectedAmount(a), 0));
+    const pendingBalance = calculatePendingBalance(appointments, today);
+    const txIncomeMonth = transactions.filter(t => t.type === "income" && t.date >= msISO).reduce((s, t) => s + parseMoney(t.amount), 0);
+    const apptIncomeMonth = appointments
+      .filter(a => isIncomeAppt(a) && a.date >= msISO)
+      .reduce((s, a) => s + calculateCollectedAmount(a), 0);
+    const monthIncome = roundCents(txIncomeMonth + apptIncomeMonth);
+    const monthExpense = roundCents(transactions.filter(t => t.type === "expense" && t.date >= msISO).reduce((s, t) => s + parseMoney(t.amount), 0));
+    return { weekRevenue, weekAppts: completedThisWeek.length, pendingBalance, monthProfit: calculateProfit(monthIncome, monthExpense) };
   }, [appointments, transactions, today]);
   const pendingBalanceAppts = useMemo(() =>
     appointments
-      .filter(a => a.status !== "cancelled")
+      .filter(a => a && a.status !== "cancelled")
       .map(a => ({ a, ps: paymentStatusOf(a, today) }))
-      .filter(({ ps }) => ps === "pending" || ps === "deposit" || ps === "overdue")
-      .filter(({ a }) => Number(a.balanceDue) > 0)
+      .filter(({ ps, a }) => ps !== "paid" && parseMoney(a.balanceDue) > 0)
       .sort((x, y) => (x.a.date || "").localeCompare(y.a.date || ""))
   , [appointments, today]);
 
@@ -2080,7 +2172,7 @@ const Clients = ({ store, openClientPhotos }: { store: any; openClientPhotos?: a
     const totalSpent = cAppts
       .filter(a => (a.status === "completed" || a.paymentStatus === "paid") && a.status !== "cancelled")
       .reduce((s, a) => {
-        const collected = parseMoney(a.depositPaid) || (Number(a.balanceDue) === 0 ? parseMoney(a.totalPrice) : 0);
+        const collected = calculateCollectedAmount(a);
         return s + collected;
       }, 0);
     return {
@@ -2195,7 +2287,7 @@ const ClientSheet = ({ open, client, store, onClose }: {
   const totalSpent = myAppts
     .filter((a: any) => (a.status === "completed" || a.paymentStatus === "paid") && a.status !== "cancelled")
     .reduce((s: number, a: any) => {
-      const collected = parseMoney(a.depositPaid) || (Number(a.balanceDue) === 0 ? parseMoney(a.totalPrice) : 0);
+      const collected = calculateCollectedAmount(a);
       return s + collected;
     }, 0);
 
@@ -2564,26 +2656,17 @@ const Money = ({ store, openTxSheet, editTx, openTimerSessions }) => {
 
   const txInRange = useMemo(() => store.transactions.filter(t => t.date >= range.start && t.date <= range.end), [store.transactions, range]);
   const apptIncome = useMemo(() => store.appointments
-    .filter(a =>
-      (a.status === "completed" || a.paymentStatus === "paid") &&
-      a.status !== "cancelled" &&
-      a.date >= range.start && a.date <= range.end
-    )
-    // Income = actually collected. Falls back to total price for fully
-    // paid appointments missing an explicit depositPaid.
-    .map(a => {
-      const collected = parseMoney(a.depositPaid) || (Number(a.balanceDue) === 0 ? parseMoney(a.totalPrice) : 0);
-      return {
-        id: `appt_${a.id}`,
-        type: "income",
-        date: a.date,
-        amount: collected,
-        category: "Service",
-        note: `${a.style || "Service"} — ${store.clientById(a.clientId)?.name || "Client"}`,
-        fromAppt: true,
-        apptId: a.id,
-      };
-    }),
+    .filter((a: any) => isIncomeAppt(a) && a.date >= range.start && a.date <= range.end)
+    .map((a: any) => ({
+      id: `appt_${a.id}`,
+      type: "income",
+      date: a.date,
+      amount: calculateCollectedAmount(a),
+      category: "Service",
+      note: `${a.style || "Service"} — ${store.clientById(a.clientId)?.name || "Client"}`,
+      fromAppt: true,
+      apptId: a.id,
+    })),
     [store.appointments, store.clients, range]);
 
   const all = useMemo(() => [...apptIncome, ...txInRange].sort((a, b) => b.date.localeCompare(a.date)), [apptIncome, txInRange]);
@@ -4162,11 +4245,8 @@ const useNotifications = (store: any) => {
         safeStorage.get(READ_NOTIF_KEY),
       ]);
       const parseList = (raw: string | null): string[] => {
-        if (!raw) return [];
-        try {
-          const parsed = JSON.parse(raw);
-          return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
-        } catch { return []; }
+        const parsed = safeParse<unknown>(raw, []);
+        return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
       };
       if (cancelled) return;
       setDismissed(parseList(rawDismissed));
@@ -4181,6 +4261,27 @@ const useNotifications = (store: any) => {
   ]);
   const items = useMemo(() => allItems.filter(n => !dismissed.includes(n.id)), [allItems, dismissed]);
   const unreadCount = useMemo(() => items.filter(n => !read.includes(n.id)).length, [items, read]);
+
+  // Prune dismissed / read IDs that no longer exist in the live items.
+  // Without this, deleting an appointment leaves its notification id
+  // pinned in storage forever, slowly bloating the persisted list.
+  useEffect(() => {
+    if (!hydrated) return;
+    const liveIds = new Set(allItems.map(n => n.id));
+    const cleanDismissed = dismissed.filter(id => liveIds.has(id));
+    const cleanRead = read.filter(id => liveIds.has(id));
+    if (cleanDismissed.length !== dismissed.length) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- pruning stale ids derived from live data, intentional
+      setDismissed(cleanDismissed);
+      safeStorage.set(DISMISSED_NOTIF_KEY, cleanDismissed);
+    }
+    if (cleanRead.length !== read.length) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- pruning stale ids derived from live data, intentional
+      setRead(cleanRead);
+      safeStorage.set(READ_NOTIF_KEY, cleanRead);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only run when underlying record set changes
+  }, [allItems, hydrated]);
 
   const persist = async (key: string, next: string[], setter: (v: string[]) => void) => {
     setter(next);
