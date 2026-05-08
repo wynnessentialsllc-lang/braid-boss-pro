@@ -243,6 +243,275 @@ const safeParse = <T,>(raw: string | null | undefined, fallback: T): T => {
   }
 };
 
+// ---- RECEIPTS / INVOICES ------------------------------------------------
+type ReceiptRecord = {
+  id: string;
+  type: "receipt" | "invoice";
+  receiptNumber: string;
+  appointmentId?: string;
+  quoteId?: string;
+  clientId?: string;
+  clientName?: string;
+  service?: string;
+  serviceDate?: string;
+  serviceTime?: string;
+  totalPrice: number;
+  depositPaid: number;
+  balanceDue: number;
+  amountCollected: number;
+  paymentStatus?: string;
+  paymentMethod?: string;
+  paymentDate?: string;
+  notes?: string;
+  status: "issued";
+  createdAt: string;
+};
+
+// Stable, padded sequence — the visible suffix is just count, but
+// uniqueness is guaranteed by uid() at the end so two receipts created
+// in the same millisecond don't collide.
+const generateReceiptNumber = (type: "receipt" | "invoice", existingCount: number): string => {
+  const year = new Date().getFullYear();
+  const seq = String(existingCount + 1).padStart(4, "0");
+  const prefix = type === "receipt" ? "R" : "INV";
+  return `${prefix}-${year}-${seq}`;
+};
+
+const buildReceiptFromAppointment = (a: any, type: "receipt" | "invoice", existingCount: number, clientName?: string): ReceiptRecord => {
+  const total = parseMoney(a.totalPrice);
+  const deposit = parseMoney(a.depositPaid);
+  const balance = parseMoney(a.balanceDue ?? Math.max(0, total - deposit));
+  return {
+    id: `rcp_${uid()}`,
+    type,
+    receiptNumber: generateReceiptNumber(type, existingCount),
+    appointmentId: a.id,
+    clientId: a.clientId,
+    clientName: clientName || a.clientName || "Client",
+    service: a.style || "Service",
+    serviceDate: a.date || "",
+    serviceTime: a.time || "",
+    totalPrice: total,
+    depositPaid: deposit,
+    balanceDue: balance,
+    amountCollected: type === "receipt" ? (deposit > 0 ? deposit : (balance === 0 ? total : 0)) : 0,
+    paymentStatus: a.paymentStatus || (balance === 0 && total > 0 ? "paid" : (deposit > 0 ? "partial" : "pending")),
+    paymentMethod: a.paymentMethod || "",
+    paymentDate: a.paymentDate || "",
+    notes: a.paymentNotes || a.notes || "",
+    status: "issued",
+    createdAt: new Date().toISOString(),
+  };
+};
+
+const buildInvoiceFromQuote = (q: any, existingCount: number, clientName?: string): ReceiptRecord => {
+  const total = parseMoney(q.breakdown?.finalPrice ?? q.totalPrice);
+  return {
+    id: `rcp_${uid()}`,
+    type: "invoice",
+    receiptNumber: generateReceiptNumber("invoice", existingCount),
+    quoteId: q.id,
+    clientId: q.clientId,
+    clientName: clientName || q.label || "Client",
+    service: q.style || q.label || "Service",
+    serviceDate: "",
+    serviceTime: "",
+    totalPrice: total,
+    depositPaid: 0,
+    balanceDue: total,
+    amountCollected: 0,
+    paymentStatus: "pending",
+    paymentMethod: "",
+    paymentDate: "",
+    notes: "",
+    status: "issued",
+    createdAt: new Date().toISOString(),
+  };
+};
+
+// PDF rendering. jsPDF is loaded lazily so the homepage bundle isn't
+// inflated for users who never tap "Generate".
+const renderReceiptPdf = async (
+  rcp: ReceiptRecord,
+  business: any,
+  policies?: any[],
+): Promise<{ blob: Blob; filename: string }> => {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const W = doc.internal.pageSize.getWidth();
+  const M = 48;
+  const cream = [250, 245, 236] as const;
+  const espresso = [42, 24, 16] as const;
+  const coffee = [74, 44, 26] as const;
+  const muted = [139, 115, 85] as const;
+  const goldDeep = [168, 137, 63] as const;
+  const hairline = [220, 205, 180] as const;
+  const currency = business?.currency || "USD";
+  const fmt = (n: number) => formatCurrency(n, currency);
+  const isInvoice = rcp.type === "invoice";
+
+  // Page background
+  doc.setFillColor(cream[0], cream[1], cream[2]);
+  doc.rect(0, 0, W, doc.internal.pageSize.getHeight(), "F");
+
+  // Header
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(22);
+  doc.setTextColor(espresso[0], espresso[1], espresso[2]);
+  doc.text(business?.businessName || "Braid Boss Pro", M, 80);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(muted[0], muted[1], muted[2]);
+  if (business?.ownerName) doc.text(business.ownerName, M, 96);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(28);
+  doc.setTextColor(goldDeep[0], goldDeep[1], goldDeep[2]);
+  doc.text(isInvoice ? "INVOICE" : "RECEIPT", W - M, 80, { align: "right" });
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(coffee[0], coffee[1], coffee[2]);
+  doc.text(`#${rcp.receiptNumber}`, W - M, 98, { align: "right" });
+  doc.text(`Issued ${fmtDate(rcp.createdAt.slice(0, 10))}`, W - M, 112, { align: "right" });
+
+  // Gold rule
+  doc.setDrawColor(goldDeep[0], goldDeep[1], goldDeep[2]);
+  doc.setLineWidth(1.5);
+  doc.line(M, 132, W - M, 132);
+
+  // Bill-to block
+  let y = 162;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(muted[0], muted[1], muted[2]);
+  doc.text(isInvoice ? "BILL TO" : "RECEIVED FROM", M, y);
+  y += 16;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(13);
+  doc.setTextColor(espresso[0], espresso[1], espresso[2]);
+  doc.text(rcp.clientName || "Client", M, y);
+
+  // Service block
+  y = 162;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(muted[0], muted[1], muted[2]);
+  doc.text("SERVICE", W - M - 200, y);
+  y += 16;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(13);
+  doc.setTextColor(espresso[0], espresso[1], espresso[2]);
+  doc.text(rcp.service || "Service", W - M - 200, y);
+  y += 16;
+  doc.setFontSize(10);
+  doc.setTextColor(coffee[0], coffee[1], coffee[2]);
+  if (rcp.serviceDate) {
+    const dateLine = `${fmtDateLong(rcp.serviceDate)}${rcp.serviceTime ? ` · ${fmtTime(rcp.serviceTime)}` : ""}`;
+    doc.text(dateLine, W - M - 200, y);
+  }
+
+  // Amounts table
+  y = 230;
+  doc.setDrawColor(hairline[0], hairline[1], hairline[2]);
+  doc.setLineWidth(0.5);
+  doc.line(M, y, W - M, y);
+  y += 24;
+
+  const drawRow = (label: string, value: string, opts?: { bold?: boolean; muted?: boolean }) => {
+    doc.setFont("helvetica", opts?.bold ? "bold" : "normal");
+    doc.setFontSize(opts?.bold ? 12 : 11);
+    if (opts?.muted) doc.setTextColor(muted[0], muted[1], muted[2]);
+    else doc.setTextColor(espresso[0], espresso[1], espresso[2]);
+    doc.text(label, M, y);
+    doc.text(value, W - M, y, { align: "right" });
+    y += 22;
+  };
+
+  drawRow("Total price", fmt(rcp.totalPrice));
+  drawRow("Deposit paid", fmt(rcp.depositPaid), { muted: rcp.depositPaid === 0 });
+  drawRow("Balance due", fmt(rcp.balanceDue), { muted: rcp.balanceDue === 0 });
+  if (!isInvoice) drawRow("Amount collected", fmt(rcp.amountCollected), { bold: true });
+
+  y += 8;
+  doc.line(M, y, W - M, y);
+  y += 22;
+
+  if (rcp.paymentStatus) drawRow("Payment status", String(rcp.paymentStatus).toUpperCase(), { muted: true });
+  if (rcp.paymentMethod) drawRow("Payment method", rcp.paymentMethod);
+  if (rcp.paymentDate) drawRow("Payment date", fmtDateLong(rcp.paymentDate));
+
+  if (rcp.notes) {
+    y += 12;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text("NOTES", M, y);
+    y += 14;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(espresso[0], espresso[1], espresso[2]);
+    const wrapped = doc.splitTextToSize(rcp.notes, W - 2 * M);
+    doc.text(wrapped, M, y);
+    y += wrapped.length * 14;
+  }
+
+  if (isInvoice && Array.isArray(policies) && policies.length > 0) {
+    y += 16;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text("POLICIES", M, y);
+    y += 14;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(coffee[0], coffee[1], coffee[2]);
+    for (const p of policies.slice(0, 3)) {
+      const heading = p.title || p.category || "Policy";
+      const wrapped = doc.splitTextToSize(`${heading}: ${p.body || ""}`, W - 2 * M);
+      doc.text(wrapped, M, y);
+      y += wrapped.length * 11 + 4;
+      if (y > doc.internal.pageSize.getHeight() - 100) break;
+    }
+  }
+
+  // Footer
+  doc.setDrawColor(goldDeep[0], goldDeep[1], goldDeep[2]);
+  doc.setLineWidth(1);
+  doc.line(M, doc.internal.pageSize.getHeight() - 80, W - M, doc.internal.pageSize.getHeight() - 80);
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(11);
+  doc.setTextColor(goldDeep[0], goldDeep[1], goldDeep[2]);
+  doc.text(
+    isInvoice ? "Thank you — payment due upon service." : "Thank you for your business.",
+    W / 2,
+    doc.internal.pageSize.getHeight() - 60,
+    { align: "center" },
+  );
+
+  const blob = doc.output("blob");
+  const filename = `${isInvoice ? "invoice" : "receipt"}-${rcp.receiptNumber}.pdf`;
+  return { blob, filename };
+};
+
+const buildReceiptSummaryText = (rcp: ReceiptRecord, currency: string = "USD"): string => {
+  const fmt = (n: number) => formatCurrency(n, currency);
+  const lines = [
+    `${rcp.type === "invoice" ? "Invoice" : "Receipt"} #${rcp.receiptNumber}`,
+    `Client: ${rcp.clientName || "—"}`,
+    `Service: ${rcp.service || "—"}`,
+    rcp.serviceDate ? `Date: ${fmtDateLong(rcp.serviceDate)}${rcp.serviceTime ? ` ${fmtTime(rcp.serviceTime)}` : ""}` : null,
+    `Total: ${fmt(rcp.totalPrice)}`,
+    `Deposit paid: ${fmt(rcp.depositPaid)}`,
+    `Balance due: ${fmt(rcp.balanceDue)}`,
+    rcp.type === "receipt" ? `Amount collected: ${fmt(rcp.amountCollected)}` : null,
+    rcp.paymentMethod ? `Method: ${rcp.paymentMethod}` : null,
+    rcp.paymentDate ? `Paid on: ${fmtDateLong(rcp.paymentDate)}` : null,
+  ];
+  return lines.filter(Boolean).join("\n");
+};
+
 const fmtDate = (iso: string): string => {
   if (!iso) return "—";
   const d = new Date(iso + "T00:00:00");
@@ -558,6 +827,7 @@ const useStorage = () => {
   const [stylePresets, setStylePresets] = useState<EntityRecord[]>([]);
   const [activeTimer, setActiveTimer] = useState<EntityRecord | null>(null);
   const [timerSessions, setTimerSessions] = useState<EntityRecord[]>([]);
+  const [receipts, setReceipts] = useState<EntityRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -592,6 +862,7 @@ const useStorage = () => {
       setPhotos(await safeStorage.getAllByPrefix("photos:"));
       setRecurringSeries(await safeStorage.getAllByPrefix("recurringSeries:"));
       setTimerSessions(await safeStorage.getAllByPrefix("timerSessions:"));
+      setReceipts(await safeStorage.getAllByPrefix("receipts:"));
 
       let pols = await safeStorage.getAllByPrefix("policies:");
       if (pols.length === 0) {
@@ -764,6 +1035,8 @@ const useStorage = () => {
     else await safeStorage.delete("activeTimer");
   }, []);
   const upsertTimerSession = useCallback((record: any) => upsertEntity("timerSessions", setTimerSessions, record), []);
+  const upsertReceipt = useCallback((record: any) => upsertEntity("receipts", setReceipts, record), []);
+  const deleteReceipt = useCallback((id: string) => deleteEntity("receipts", setReceipts, id), []);
 
   // helpers/aliases
   const clientById = useCallback((id) => clients.find(c => c.id === id), [clients]);
@@ -786,6 +1059,7 @@ const useStorage = () => {
     stylePresets, presets: stylePresets, upsertPreset, deletePreset, incrementPresetUse,
     activeTimer, saveActiveTimer, setTimer: saveActiveTimer,
     timerSessions, upsertTimerSession, addTimerSession: upsertTimerSession,
+    receipts, upsertReceipt, deleteReceipt,
   };
 };
 
@@ -1707,7 +1981,7 @@ const BreakRow = ({ label, value, bold }: { label: string; value: string; bold?:
 // ============================================================
 //  SCHEDULE
 // ============================================================
-const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt }) => {
+const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, openReceipt }: { store: any; prefillNewAppt: any; clearApptPrefill: any; openTimerForAppt: any; openReceipt?: (rcp: ReceiptRecord) => void }) => {
   const { appointments, business, recurringSeries } = store;
   const [filter, setFilter] = useState("upcoming");
   const [editing, setEditing] = useState<EntityRecord | null>(null);
@@ -1770,6 +2044,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt })
         store={store}
         onClose={() => setEditing(null)}
         openTimerForAppt={openTimerForAppt}
+        openReceipt={openReceipt}
       />
     </div>
   );
@@ -1788,11 +2063,11 @@ const RECURRENCE_OPTIONS = [
   { value: "custom", label: "Custom" },
 ];
 
-const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt }) => {
+const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openReceipt }: { open: any; appt: any; store: any; onClose: any; openTimerForAppt: any; openReceipt?: (rcp: ReceiptRecord) => void }) => {
   const {
     upsertAppointment, deleteAppointment, clients, upsertClient, business,
     recurringSeries, upsertSeries, deleteSeries, scheduleRemindersForAppointment,
-    appointments, reminderSettings,
+    appointments, reminderSettings, receipts, upsertReceipt,
   } = store;
   const [form, setForm] = useState<EntityRecord>({});
   const [showNewClient, setShowNewClient] = useState(false);
@@ -2078,6 +2353,27 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt }) => {
               <Textarea value={form.paymentNotes || ""} onChange={e => setForm({ ...form, paymentNotes: e.target.value })} placeholder="Receipt #, tip amount, anything to remember…" rows={2} />
             </Field>
           </div>
+          {form.id && openReceipt && (() => {
+            const showReceipt = parseMoney(form.depositPaid) > 0 || form.paymentStatus === "paid" || form.paymentStatus === "partial" || form.status === "completed";
+            const showInvoice = parseMoney(form.balanceDue) > 0 && form.paymentStatus !== "paid";
+            if (!showReceipt && !showInvoice) return null;
+            const handleGenerate = async (type: "receipt" | "invoice") => {
+              const clientName = clients.find((c: any) => c.id === form.clientId)?.name || form.clientName || "Client";
+              const rcp = buildReceiptFromAppointment(form, type, (receipts || []).length, clientName);
+              const saved = await upsertReceipt(rcp);
+              openReceipt(saved as ReceiptRecord);
+            };
+            return (
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                {showReceipt && (
+                  <Button variant="outline" icon={<Receipt size={14} />} onClick={() => handleGenerate("receipt")}>Generate receipt</Button>
+                )}
+                {showInvoice && (
+                  <Button variant="outline" icon={<FileText size={14} />} onClick={() => handleGenerate("invoice")}>Generate invoice</Button>
+                )}
+              </div>
+            );
+          })()}
         </Card>
 
         {/* RECURRING */}
@@ -2640,7 +2936,7 @@ const PhotoEditSheet = ({ photo, appointments, onClose, onSave }: {
 // ============================================================
 //  MONEY + PRODUCTIVITY
 // ============================================================
-const Money = ({ store, openTxSheet, editTx, openTimerSessions }) => {
+const Money = ({ store, openTxSheet, editTx, openTimerSessions, openReceipt }: { store: any; openTxSheet: any; editTx: any; openTimerSessions: any; openReceipt?: (rcp: ReceiptRecord) => void }) => {
   const [period, setPeriod] = useState("week");
   const [tab, setTab] = useState("money"); // money | productivity
 
@@ -2711,7 +3007,9 @@ const Money = ({ store, openTxSheet, editTx, openTimerSessions }) => {
 
       {tab === "money" ? (
         <MoneyTab all={all} income={income} expenses={expenses} net={net} business={store.business}
-          editTx={editTx} openTxSheet={openTxSheet} />
+          editTx={editTx} openTxSheet={openTxSheet}
+          receipts={store.receipts || []}
+          openReceipt={openReceipt} />
       ) : (
         <ProductivityTab sessions={sessionsInRange} appointments={store.appointments} business={store.business}
           openTimerSessions={openTimerSessions} />
@@ -2720,7 +3018,7 @@ const Money = ({ store, openTxSheet, editTx, openTimerSessions }) => {
   );
 };
 
-const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet }: {
+const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, receipts = [], openReceipt }: {
   all: any[];
   income: number;
   expenses: number;
@@ -2728,6 +3026,8 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet }:
   business: any;
   editTx: any;
   openTxSheet: any;
+  receipts?: any[];
+  openReceipt?: (rcp: ReceiptRecord) => void;
 }) => (
   <div className="px-5">
     {/* totals */}
@@ -2768,6 +3068,42 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet }:
         ))}
       </div>
     )}
+
+    <div className="mt-5">
+      <SectionTitle>Receipts &amp; invoices</SectionTitle>
+      {receipts.length === 0 ? (
+        <EmptyState icon={<Receipt size={28} style={{ color: C.muted }} />}
+          title="No receipts yet"
+          body="Collect a payment to create your first one." />
+      ) : (
+        <div className="space-y-2">
+          {[...receipts]
+            .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+            .slice(0, 12)
+            .map((r: any) => (
+              <Card key={r.id} className="p-3 flex items-center gap-3 cursor-pointer active:scale-[0.99] transition"
+                onClick={() => openReceipt?.(r as ReceiptRecord)}>
+                <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: r.type === "invoice" ? "rgba(201,169,97,0.18)" : "rgba(92,124,74,0.12)" }}>
+                  {r.type === "invoice"
+                    ? <FileText size={18} style={{ color: C.goldDeep }} />
+                    : <Receipt size={18} style={{ color: C.success }} />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>
+                    {r.type === "invoice" ? "Invoice" : "Receipt"} #{r.receiptNumber}
+                  </p>
+                  <p className="text-[11px] truncate" style={{ color: C.muted }}>
+                    {r.clientName || "—"} · {fmtDate((r.createdAt || "").slice(0, 10))}
+                  </p>
+                </div>
+                <p className="text-sm font-mono font-bold" style={{ color: C.espresso }}>
+                  {fmtMoney(r.type === "invoice" ? r.balanceDue : r.amountCollected, business.currency)}
+                </p>
+              </Card>
+            ))}
+        </div>
+      )}
+    </div>
   </div>
 );
 
@@ -3898,7 +4234,7 @@ const TransactionSheet = ({ open, tx, onClose, onSave, onDelete, business }) => 
 // ============================================================
 //  SAVED QUOTES (V1 reused)
 // ============================================================
-const SavedQuotes = ({ store, onBack, onLoadQuote, onConvertToAppt }) => {
+const SavedQuotes = ({ store, onBack, onLoadQuote, onConvertToAppt, openReceipt }: { store: any; onBack: any; onLoadQuote: any; onConvertToAppt: any; openReceipt?: (rcp: ReceiptRecord) => void }) => {
   const [search, setSearch] = useState("");
   const filtered = useMemo(() => {
     let list = [...store.quotes].sort((a, b) => (b.savedAt || "").localeCompare(a.savedAt || ""));
@@ -3940,6 +4276,16 @@ const SavedQuotes = ({ store, onBack, onLoadQuote, onConvertToAppt }) => {
                   <Button variant="outline" onClick={() => onConvertToAppt(q)} icon={<CalendarPlus size={13} />} fullWidth>Book</Button>
                   <Button variant="outline" icon={<Trash2 size={13} />} onClick={() => store.deleteQuote(q.id)} fullWidth>Delete</Button>
                 </div>
+                {openReceipt && (
+                  <Button variant="dark" icon={<FileText size={14} />} fullWidth className="mt-2"
+                    onClick={async () => {
+                      const rcp = buildInvoiceFromQuote({ ...q, totalPrice: q.finalPrice }, (store.receipts || []).length, q.name);
+                      const saved = await store.upsertReceipt(rcp);
+                      openReceipt(saved as ReceiptRecord);
+                    }}>
+                    Generate invoice
+                  </Button>
+                )}
               </Card>
             ))}
           </div>
@@ -4347,6 +4693,160 @@ const PAYMENT_METHODS = [
   { value: "other", label: "Other" },
 ];
 
+// ============================================================
+//  RECEIPT / INVOICE SHEET
+// ============================================================
+const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: {
+  open: boolean;
+  receipt: ReceiptRecord | null;
+  business: any;
+  policies?: any[];
+  onClose: () => void;
+  onDelete?: (id: string) => void | Promise<void>;
+}) => {
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 1600); };
+  if (!receipt) return null;
+
+  const isInvoice = receipt.type === "invoice";
+  const currency = business?.currency || "USD";
+
+  const handleDownload = async () => {
+    setBusy(true);
+    try {
+      const { blob, filename } = await renderReceiptPdf(receipt, business, policies);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast("Downloaded");
+    } catch (err) {
+      console.error(err);
+      showToast("Couldn't generate PDF");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleShare = async () => {
+    setBusy(true);
+    try {
+      const { blob, filename } = await renderReceiptPdf(receipt, business, policies);
+      const file = new File([blob], filename, { type: "application/pdf" });
+      const nav: any = navigator;
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        await nav.share({
+          files: [file],
+          title: `${isInvoice ? "Invoice" : "Receipt"} ${receipt.receiptNumber}`,
+          text: buildReceiptSummaryText(receipt, currency),
+        });
+        showToast("Shared");
+      } else {
+        // Fallback to download — mobile Safari supports navigator.share
+        // but desktop browsers often don't.
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast("Sharing not available — downloaded");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Couldn't share");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(buildReceiptSummaryText(receipt, currency));
+      showToast("Summary copied");
+    } catch {
+      showToast("Copy unavailable");
+    }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title={`${isInvoice ? "Invoice" : "Receipt"} ${receipt.receiptNumber}`}>
+      <div className="space-y-4 pb-2">
+        <Card className="p-4" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+              {isInvoice ? "Bill to" : "Received from"}
+            </span>
+            <span style={{ fontFamily: FONT_DISPLAY, fontSize: 14, color: C.goldDeep }}>
+              #{receipt.receiptNumber}
+            </span>
+          </div>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso, lineHeight: 1.15 }}>
+            {receipt.clientName || "Client"}
+          </p>
+          <p className="text-xs mt-1" style={{ color: C.muted }}>
+            {receipt.service || "Service"}
+            {receipt.serviceDate ? ` · ${fmtDateLong(receipt.serviceDate)}` : ""}
+            {receipt.serviceTime ? ` · ${fmtTime(receipt.serviceTime)}` : ""}
+          </p>
+        </Card>
+
+        <Card className="p-4">
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
+              <span>Total price</span><span className="font-mono">{formatCurrency(receipt.totalPrice, currency)}</span>
+            </div>
+            <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
+              <span>Deposit paid</span><span className="font-mono">{formatCurrency(receipt.depositPaid, currency)}</span>
+            </div>
+            <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
+              <span>Balance due</span><span className="font-mono">{formatCurrency(receipt.balanceDue, currency)}</span>
+            </div>
+            {!isInvoice && (
+              <div className="flex justify-between pt-2 mt-2 text-base font-bold" style={{ borderTop: `1px solid ${C.hairline}`, color: C.espresso }}>
+                <span>Amount collected</span>
+                <span className="font-mono" style={{ color: C.goldDeep }}>
+                  {formatCurrency(receipt.amountCollected, currency)}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2 mt-4 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
+            {receipt.paymentStatus && <Pill tone={receipt.paymentStatus === "paid" ? "success" : receipt.paymentStatus === "partial" ? "gold" : "warning"}>{String(receipt.paymentStatus).toUpperCase()}</Pill>}
+            {receipt.paymentMethod && <Pill tone="neutral">{receipt.paymentMethod}</Pill>}
+            {receipt.paymentDate && <Pill tone="neutral">Paid {fmtDate(receipt.paymentDate)}</Pill>}
+          </div>
+          {receipt.notes && (
+            <p className="text-xs mt-3 italic leading-relaxed" style={{ color: C.muted }}>&quot;{receipt.notes}&quot;</p>
+          )}
+        </Card>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Button variant="primary" icon={<Download size={16} />} disabled={busy} onClick={handleDownload}>Download PDF</Button>
+          <Button variant="dark" icon={<Send size={16} />} disabled={busy} onClick={handleShare}>Share PDF</Button>
+        </div>
+        <Button variant="outline" icon={<Copy size={16} />} fullWidth onClick={handleCopy}>Copy summary text</Button>
+        {onDelete && (
+          <Button variant="danger" icon={<Trash2 size={16} />} fullWidth onClick={async () => { await onDelete(receipt.id); onClose(); }}>
+            Delete this {isInvoice ? "invoice" : "receipt"}
+          </Button>
+        )}
+
+        {toast && (
+          <p className="text-center text-[12px] font-semibold mt-1" style={{ color: C.success }}>{toast}</p>
+        )}
+      </div>
+    </Sheet>
+  );
+};
+
 const NotificationsSheet = ({ open, onClose, items, dismiss, clearAll, markAllRead }: {
   open: boolean;
   onClose: () => void;
@@ -4435,6 +4935,8 @@ export default function App() {
   const [openClientForm, setOpenClientForm] = useState(false);
   const [quickClient, setQuickClient] = useState<EntityRecord | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [activeReceipt, setActiveReceipt] = useState<ReceiptRecord | null>(null);
+  const openReceipt = useCallback((rcp: ReceiptRecord) => setActiveReceipt(rcp), []);
   const notifications = useNotifications(store);
 
   // Dashboard quick actions
@@ -4554,7 +5056,8 @@ export default function App() {
             <Schedule store={store}
               prefillNewAppt={apptPrefill}
               clearApptPrefill={() => setApptPrefill(null)}
-              openTimerForAppt={openTimerForAppt} />
+              openTimerForAppt={openTimerForAppt}
+              openReceipt={openReceipt} />
           )}
           {active === "clients" && (
             <Clients store={store} />
@@ -4563,7 +5066,8 @@ export default function App() {
             <Money store={store}
               openTxSheet={() => { setEditingTx(null); setOpenTx(true); }}
               editTx={(t) => { setEditingTx(t); setOpenTx(true); }}
-              openTimerSessions={() => setSecondary("timerSessions")} />
+              openTimerSessions={() => setSecondary("timerSessions")}
+              openReceipt={openReceipt} />
           )}
         </>
       )}
@@ -4573,7 +5077,8 @@ export default function App() {
       {secondary === "savedQuotes" && (
         <SavedQuotes store={store} onBack={() => setSecondary(null)}
           onLoadQuote={handleLoadQuote}
-          onConvertToAppt={handleConvertQuoteToAppt} />
+          onConvertToAppt={handleConvertQuoteToAppt}
+          openReceipt={openReceipt} />
       )}
       {secondary === "reminders" && <ReminderInbox store={store} onBack={() => setSecondary(null)} openSettings={() => setSecondary("reminderSettings")} />}
       {secondary === "reminderSettings" && <ReminderSettings store={store} onBack={() => setSecondary("reminders")} />}
@@ -4598,6 +5103,16 @@ export default function App() {
         dismiss={notifications.dismiss}
         clearAll={notifications.clearAll}
         markAllRead={notifications.markAllRead}
+      />
+
+      {/* Receipt / Invoice sheet */}
+      <ReceiptSheet
+        open={!!activeReceipt}
+        receipt={activeReceipt}
+        business={store.business}
+        policies={store.policies}
+        onClose={() => setActiveReceipt(null)}
+        onDelete={async (id) => { await store.deleteReceipt(id); }}
       />
 
       {/* Transaction sheet */}
