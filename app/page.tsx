@@ -1310,6 +1310,57 @@ const useStorage = () => {
 // ============================================================
 //  PRIMITIVES
 // ============================================================
+// Visible error boundary. Inside the iOS Capacitor shell, an
+// uncaught render exception inside a secondary screen surfaces as
+// WKWebView's "This page couldn't load" placeholder — which makes
+// the bug feel like a routing / button problem when it's really a
+// React render that threw. This boundary keeps us inside React,
+// renders the actual stack/message, and gives a Back button.
+class ScreenErrorBoundary extends React.Component<
+  { onBack?: () => void; label?: string; children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    // eslint-disable-next-line no-console
+    console.error("[bbp:ScreenErrorBoundary]", this.props.label || "", error, info);
+  }
+  render() {
+    const { error } = this.state;
+    if (!error) return this.props.children;
+    return (
+      <div className="bbp-fade pb-24">
+        <div className="px-5 pt-6 space-y-4">
+          <h2 style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>
+            Something broke loading this screen
+          </h2>
+          <p className="text-xs" style={{ color: C.muted }}>
+            {this.props.label ? `Screen: ${this.props.label}.` : ""} Tap Back and try again.
+          </p>
+          <pre
+            className="text-[11px] whitespace-pre-wrap p-3 rounded-xl"
+            style={{ background: C.ivory, color: C.danger, border: `1px solid ${C.hairline}`, fontFamily: "ui-monospace, monospace" }}>
+            {String(error?.message || error)}
+            {error?.stack ? "\n\n" + error.stack.split("\n").slice(0, 6).join("\n") : ""}
+          </pre>
+          {this.props.onBack && (
+            <button
+              type="button"
+              onClick={() => { this.setState({ error: null }); this.props.onBack?.(); }}
+              className="w-full rounded-xl py-3 text-sm font-bold uppercase tracking-wider"
+              style={{ background: C.espresso, color: C.cream, letterSpacing: "0.1em" }}>
+              Back
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+}
+
 const Card = ({ children, className = "", style, onClick }: {
   children: React.ReactNode;
   className?: string;
@@ -5678,7 +5729,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                 corners) so the appearance is unchanged. */}
             <button
              type="button"
-              onClick={() => { console.log("Account sync tapped"); openAccount(); }}
+              onClick={() => { console.log("[bbp] Account sync tapped"); openAccount(); }}
               className="w-full text-left rounded-2xl p-4 active:scale-[0.99] cursor-pointer select-none transition"
               style={{
                 background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
@@ -8435,33 +8486,50 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} />}
+      {secondary === "settings" && (
+        <ScreenErrorBoundary label="Settings" onBack={() => setSecondary(null)}>
+          <SettingsScreen
+            store={store}
+            onBack={() => setSecondary(null)}
+            openReminderSettings={() => {
+              if (typeof window !== "undefined" && (window as any).__bbpDebugTaps) alert("Reminder settings tapped");
+              setSecondary("reminderSettings");
+            }}
+            openCommunicationLog={() => {
+              if (typeof window !== "undefined" && (window as any).__bbpDebugTaps) alert("Communication log tapped");
+              setSecondary("communicationLog");
+            }}
+            openAccount={() => {
+              if (typeof window !== "undefined" && (window as any).__bbpDebugTaps) alert("Account sync tapped");
+              setSecondary("account");
+            }}
+          />
+        </ScreenErrorBoundary>
+      )}
       {secondary === "account" && (
-        <AccountScreen
-          email={auth.email}
-          mode={auth.mode}
-          sync={sync}
-          userId={auth.userId}
-          openBookingRequests={() => setSecondary("bookingRequests")}
-          // Account is only reached via the Settings card. Returning
-          // to the dashboard skips the Settings scope the user came
-          // from; route back to Settings to keep the mental stack
-          // consistent.
-          onBack={() => setSecondary("settings")}
-          onSignOut={async () => { await auth.signOut(); setSecondary(null); }}
-          onExport={() => {
-            const data = JSON.stringify({
-              business: store.business,
-              clients: store.clients,
-              appointments: store.appointments,
-              quotes: store.quotes,
-              receipts: store.receipts || [],
-              commLog: store.commLog,
-              transactions: store.transactions,
-            }, null, 2);
-            void downloadJson(`braid-boss-pro-${todayISO()}.json`, data);
-          }}
-        />
+        <ScreenErrorBoundary label="Account" onBack={() => setSecondary("settings")}>
+          <AccountScreen
+            email={auth.email}
+            mode={auth.mode}
+            sync={sync}
+            userId={auth.userId}
+            openBookingRequests={() => setSecondary("bookingRequests")}
+            onBack={() => setSecondary("settings")}
+            onSignOut={async () => { await auth.signOut(); setSecondary(null); }}
+            onExport={() => {
+              const data = JSON.stringify({
+                business: store.business,
+                clients: store.clients,
+                appointments: store.appointments,
+                quotes: store.quotes,
+                receipts: store.receipts || [],
+                commLog: store.commLog,
+                transactions: store.transactions,
+              }, null, 2);
+              void downloadJson(`braid-boss-pro-${todayISO()}.json`, data);
+            }}
+          />
+        </ScreenErrorBoundary>
       )}
       {secondary === "savedQuotes" && (
         <SavedQuotes store={store} onBack={() => setSecondary(null)}
@@ -8469,15 +8537,27 @@ export default function App() {
           onConvertToAppt={handleConvertQuoteToAppt}
           openReceipt={openReceipt} />
       )}
-      {secondary === "reminders" && <ReminderInbox store={store} onBack={() => setSecondary(null)} openSettings={() => setSecondary("reminderSettings")} />}
-      {secondary === "reminderSettings" && <ReminderSettings store={store} onBack={() => setSecondary("reminders")} />}
+      {secondary === "reminders" && (
+        <ScreenErrorBoundary label="Reminder inbox" onBack={() => setSecondary(null)}>
+          <ReminderInbox store={store} onBack={() => setSecondary(null)} openSettings={() => setSecondary("reminderSettings")} />
+        </ScreenErrorBoundary>
+      )}
+      {secondary === "reminderSettings" && (
+        <ScreenErrorBoundary label="Reminder settings" onBack={() => setSecondary("settings")}>
+          <ReminderSettings store={store} onBack={() => setSecondary("settings")} />
+        </ScreenErrorBoundary>
+      )}
       {secondary === "presets" && (
         <PresetsScreen store={store} onBack={() => setSecondary(null)} onUsePreset={handleUsePreset} />
       )}
       {secondary === "timerSessions" && <TimerSessionsScreen store={store} onBack={() => setSecondary(null)} />}
       {/* Communication log is only entered from the Settings card.
           Back returns to Settings, not the dashboard. */}
-      {secondary === "communicationLog" && <CommunicationLogScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "communicationLog" && (
+        <ScreenErrorBoundary label="Communication log" onBack={() => setSecondary("settings")}>
+          <CommunicationLogScreen store={store} onBack={() => setSecondary("settings")} />
+        </ScreenErrorBoundary>
+      )}
       {secondary === "analytics" && (
         <AnalyticsScreen
           clients={store.clients}
