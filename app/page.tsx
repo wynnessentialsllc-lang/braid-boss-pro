@@ -2609,7 +2609,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
           <Field label="Hair / product cost"><MoneyInput value={hairCost} onChange={setHairCost} /></Field>
           <Field label="Travel fee"><MoneyInput value={travelFee} onChange={setTravelFee} /></Field>
           <Field label="Hourly rate"><MoneyInput value={hourlyRate} onChange={setHourlyRate} /></Field>
-          <Field label="Hours"><MoneyInput prefix={undefined} suffix="hrs" value={hours} onChange={setHours} /></Field>
+          <Field label="Hours"><MoneyInput prefix="" suffix="hrs" placeholder="6.5" value={hours} onChange={setHours} /></Field>
           <Field label="Overhead" hint="supplies, utils"><MoneyInput value={overhead} onChange={setOverhead} /></Field>
           <Field label="Profit margin" hint="flat $"><MoneyInput value={profitMargin} onChange={setProfitMargin} /></Field>
         </div>
@@ -2639,7 +2639,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
         </div>
 
         <Field label="Tip %" hint="of subtotal">
-          <MoneyInput prefix={undefined} suffix="%" value={tipPct} onChange={setTipPct} />
+          <MoneyInput prefix="" suffix="%" value={tipPct} onChange={setTipPct} />
         </Field>
 
         <Card className="p-5 mt-4" style={{ background: `linear-gradient(180deg, ${C.espresso} 0%, ${C.coffee} 100%)`, border: `1px solid ${C.goldDeep}` }}>
@@ -2997,7 +2997,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         <div className="grid grid-cols-2 gap-3">
           <Field label="Date"><Input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></Field>
           <Field label="Time"><Input type="time" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} /></Field>
-          <Field label="Duration"><MoneyInput prefix={undefined} suffix="hrs" value={form.durationHours} onChange={(v) => setForm({ ...form, durationHours: v })} /></Field>
+          <Field label="Duration"><MoneyInput prefix="" suffix="hrs" placeholder="6.5" value={form.durationHours} onChange={(v) => setForm({ ...form, durationHours: v })} /></Field>
           <Field label="Status">
             <Select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}
               options={[
@@ -3090,10 +3090,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                 <Select value={cadence} onChange={e => setCadence(e.target.value)} options={RECURRENCE_OPTIONS} />
               </Field>
               {cadence === "custom" && (
-                <Field label="Every"><MoneyInput prefix={undefined} suffix="days" allowDecimal={false} value={customDays} onChange={setCustomDays} /></Field>
+                <Field label="Every"><MoneyInput prefix="" suffix="days" allowDecimal={false} value={customDays} onChange={setCustomDays} /></Field>
               )}
               <Field label="Occurrences" hint="this one + future">
-                <MoneyInput prefix={undefined} suffix="appts" allowDecimal={false} value={occurrences} onChange={setOccurrences} />
+                <MoneyInput prefix="" suffix="appts" allowDecimal={false} value={occurrences} onChange={setOccurrences} />
               </Field>
               <p className="text-xs" style={{ color: C.muted }}>
                 Future appointments will be auto-created on the selected cadence. Edit each one individually as needed.
@@ -4240,11 +4240,11 @@ const ReminderSettings = ({ store, onBack }: {
             </div>
           ))}
           <Field label="Same-day hours before">
-            <MoneyInput prefix={undefined} suffix="hrs" allowDecimal={false} value={s.timings.sameDayHoursBefore ?? 3}
+            <MoneyInput prefix="" suffix="hrs" allowDecimal={false} value={s.timings.sameDayHoursBefore ?? 3}
               onChange={(v) => setS({ ...s, timings: { ...s.timings, sameDayHoursBefore: parseMoney(v) || 3 } })} />
           </Field>
           <Field label="Late alert minutes">
-            <MoneyInput prefix={undefined} suffix="min" allowDecimal={false} value={s.timings.lateAlertMinutes ?? 15}
+            <MoneyInput prefix="" suffix="min" allowDecimal={false} value={s.timings.lateAlertMinutes ?? 15}
               onChange={(v) => setS({ ...s, timings: { ...s.timings, lateAlertMinutes: parseMoney(v) || 15 } })} />
           </Field>
         </Card>
@@ -4472,7 +4472,7 @@ const ActiveTimerScreen = ({ store, prefillAppt, onBack, onComplete }) => {
               </Field>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Est. hours">
-                  <MoneyInput prefix={undefined} suffix="hrs" value={setup?.estimatedHours ?? ""} onChange={(v) => setSetup({ ...setup, estimatedHours: v === "" ? null : parseMoney(v) })} />
+                  <MoneyInput prefix="" suffix="hrs" value={setup?.estimatedHours ?? ""} onChange={(v) => setSetup({ ...setup, estimatedHours: v === "" ? null : parseMoney(v) })} />
                 </Field>
                 <Field label="Total price">
                   <MoneyInput value={setup?.estimatedTotal ?? ""} onChange={(v) => setSetup({ ...setup, estimatedTotal: v === "" ? null : parseMoney(v) })} />
@@ -4833,7 +4833,7 @@ const PresetEditorSheet = ({ preset, isNew, onClose, onSave, onDelete, onUse }) 
 
         <SectionTitle>Pricing</SectionTitle>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Hours"><MoneyInput prefix={undefined} suffix="hrs" value={p.estimatedHours ?? ""} onChange={(v) => setP({ ...p, estimatedHours: parseMoney(v) })} /></Field>
+          <Field label="Hours"><MoneyInput prefix="" suffix="hrs" placeholder="6.5" value={p.estimatedHours ?? ""} onChange={(v) => setP({ ...p, estimatedHours: parseMoney(v) })} /></Field>
           <Field label="Hair cost"><MoneyInput value={p.hairCost ?? ""} onChange={(v) => setP({ ...p, hairCost: parseMoney(v) })} /></Field>
           <Field label="Hourly rate"><MoneyInput value={p.hourlyRate ?? ""} onChange={(v) => setP({ ...p, hourlyRate: parseMoney(v) })} /></Field>
           <Field label="Overhead/hr"><MoneyInput value={p.overhead ?? ""} onChange={(v) => setP({ ...p, overhead: parseMoney(v) })} /></Field>
@@ -4860,7 +4860,7 @@ const PresetEditorSheet = ({ preset, isNew, onClose, onSave, onDelete, onUse }) 
 
         <SectionTitle>Deposit</SectionTitle>
         <div className="grid grid-cols-[1fr_140px] gap-3">
-          <Field label="Amount"><MoneyInput prefix={undefined} value={p.defaultDeposit ?? ""} onChange={(v) => setP({ ...p, defaultDeposit: parseMoney(v) })} /></Field>
+          <Field label="Amount"><MoneyInput prefix="" value={p.defaultDeposit ?? ""} onChange={(v) => setP({ ...p, defaultDeposit: parseMoney(v) })} /></Field>
           <Field label="Type">
             <Select value={p.depositType} onChange={e => setP({ ...p, depositType: e.target.value })}
               options={[{ value: "percentage", label: "%" }, { value: "flat", label: "Flat $" }]} />
