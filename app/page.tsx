@@ -5082,6 +5082,150 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
 // ============================================================
 //  TIMER SESSIONS LIST (drilled from productivity)
 // ============================================================
+type BookingRequestRow = {
+  id: string;
+  user_id: string;
+  link_slug: string;
+  client_name: string;
+  client_phone: string | null;
+  client_email: string | null;
+  service_name: string | null;
+  service_duration: number | null;
+  service_price: number | null;
+  preferred_date: string | null;
+  preferred_time: string | null;
+  notes: string | null;
+  status: "pending" | "approved" | "declined" | "converted";
+  appointment_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+const BookingRequestsScreen = ({ userId, onBack, onApprove }: {
+  userId: string | null;
+  onBack: () => void;
+  onApprove: (req: BookingRequestRow) => Promise<string>;
+}) => {
+  const [rows, setRows] = useState<BookingRequestRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"pending" | "all">("pending");
+
+  const fetchRows = useCallback(async () => {
+    if (!userId) return;
+    setLoading(true);
+    try {
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from("booking_requests")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+      setRows((data as BookingRequestRow[]) || []);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetchRows is async and setState is inside its body via setRows; intentional
+  useEffect(() => { fetchRows(); }, [fetchRows]);
+
+  const filtered = useMemo(() =>
+    filter === "pending"
+      ? rows.filter(r => r.status === "pending")
+      : rows,
+    [rows, filter]);
+
+  const setStatus = async (req: BookingRequestRow, status: BookingRequestRow["status"], appointmentId?: string) => {
+    setBusyId(req.id);
+    try {
+      const supabase = getSupabase();
+      const patch: any = { status };
+      if (appointmentId) patch.appointment_id = appointmentId;
+      await supabase.from("booking_requests").update(patch).eq("id", req.id);
+      setRows(prev => prev.map(r => r.id === req.id ? { ...r, ...patch } as BookingRequestRow : r));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="bbp-fade pb-24">
+      <Header title="Booking requests" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
+      <div className="px-5 pt-4 space-y-3">
+        <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          {[{ id: "pending", label: "Pending" }, { id: "all", label: "All" }].map(t => (
+            <button key={t.id} onClick={() => setFilter(t.id as any)}
+              className="flex-1 py-2 rounded-lg text-[13px] font-semibold transition"
+              style={{ background: filter === t.id ? C.espresso : "transparent", color: filter === t.id ? C.cream : C.coffee }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <p className="text-center text-xs py-6" style={{ color: C.muted }}>Loading…</p>
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={<CalendarPlus size={28} style={{ color: C.gold }} />}
+            title="No booking requests yet"
+            body="Share your booking link — incoming requests will land here for you to approve."
+          />
+        ) : (
+          filtered.map(r => (
+            <Card key={r.id} className="p-3.5">
+              <div className="flex items-start justify-between gap-2 mb-1.5 flex-wrap">
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm" style={{ color: C.espresso }}>
+                    {r.client_name}
+                  </p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    {[r.client_phone, r.client_email].filter(Boolean).join(" · ")}
+                  </p>
+                </div>
+                <Pill tone={r.status === "pending" ? "warning"
+                  : r.status === "approved" ? "gold"
+                  : r.status === "converted" ? "success"
+                  : "danger"}>
+                  {r.status.toUpperCase()}
+                </Pill>
+              </div>
+              {(r.service_name || r.preferred_date) && (
+                <p className="text-[12px] mt-1" style={{ color: C.coffee }}>
+                  {r.service_name || "Service"}
+                  {r.preferred_date ? ` · ${fmtDate(r.preferred_date)}` : ""}
+                  {r.preferred_time ? ` at ${fmtTime(r.preferred_time)}` : ""}
+                </p>
+              )}
+              {r.notes && (
+                <p className="text-[11px] mt-1.5 italic" style={{ color: C.muted }}>&quot;{r.notes}&quot;</p>
+              )}
+              <p className="text-[10px] mt-2" style={{ color: C.muted }}>
+                Received {fmtRelative(r.created_at)}
+              </p>
+              {r.status === "pending" && (
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <Button variant="outline" disabled={busyId === r.id}
+                    onClick={() => setStatus(r, "declined")}>
+                    Decline
+                  </Button>
+                  <Button variant="primary" disabled={busyId === r.id}
+                    onClick={async () => {
+                      const apptId = await onApprove(r);
+                      await setStatus(r, "converted", apptId);
+                    }}>
+                    Approve &amp; book
+                  </Button>
+                </div>
+              )}
+            </Card>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
 const CommunicationLogScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const entries = useMemo(() =>
     [...(store.commLog || [])].sort((a: any, b: any) => (b.createdAt || "").localeCompare(a.createdAt || "")),
@@ -6009,7 +6153,7 @@ const SyncStatusPill = ({ state }: { state: SyncState }) => {
   );
 };
 
-const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport }: {
+const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport, openBookingRequests }: {
   email: string | null;
   mode: AuthMode;
   sync: { state: SyncState; lastOk: string | null; pendingCount: number };
@@ -6017,6 +6161,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
   onBack: () => void;
   onSignOut: () => Promise<void>;
   onExport: () => void;
+  openBookingRequests?: () => void;
 }) => {
   const [pushCap, setPushCap] = useState<PushCapability>("unsupported");
   const [pushBusy, setPushBusy] = useState(false);
@@ -6151,6 +6296,99 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
     } catch { /* ignore */ }
   };
 
+  // Public booking link: one slug per user for V1. Slug is generated
+  // client-side and inserted under the owner's RLS context.
+  const [bookingLink, setBookingLink] = useState<{ slug: string; active: boolean; intro: string | null; business_name: string | null } | null>(null);
+  const [bookingBusy, setBookingBusy] = useState(false);
+  const [bookingCopied, setBookingCopied] = useState(false);
+  const [pendingRequests, setPendingRequests] = useState<number>(0);
+
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- depends on window.location which the React Compiler can't statically memoize, intentional
+  const bookingUrl = useMemo(() => {
+    if (!bookingLink?.slug) return null;
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    return `${origin}/book/${encodeURIComponent(bookingLink.slug)}`;
+  }, [bookingLink?.slug]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears booking state when auth context changes, intentional
+    if (mode !== "authed" || !userId) { setBookingLink(null); setPendingRequests(0); return; }
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabase();
+      const [{ data: link }, { count }] = await Promise.all([
+        supabase
+          .from("booking_links")
+          .select("slug, active, intro, business_name")
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from("booking_requests")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", userId)
+          .eq("status", "pending"),
+      ]);
+      if (cancelled) return;
+      setBookingLink(link as any);
+      setPendingRequests(count || 0);
+    })();
+    return () => { cancelled = true; };
+  }, [mode, userId]);
+
+  const generateSlug = () => {
+    // 8 url-safe chars, ~48 bits — enough for V1 personal links.
+    const bytes = new Uint8Array(6);
+    crypto.getRandomValues(bytes);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "").toLowerCase();
+  };
+
+  const handleEnableBooking = async () => {
+    if (!userId) return;
+    setBookingBusy(true);
+    try {
+      const supabase = getSupabase();
+      const slug = generateSlug();
+      const { data, error } = await supabase
+        .from("booking_links")
+        .insert({ user_id: userId, slug, active: true })
+        .select("slug, active, intro, business_name")
+        .single();
+      if (!error && data) setBookingLink(data as any);
+    } finally {
+      setBookingBusy(false);
+    }
+  };
+
+  const handleToggleBooking = async () => {
+    if (!userId || !bookingLink) return;
+    setBookingBusy(true);
+    try {
+      const supabase = getSupabase();
+      const next = !bookingLink.active;
+      await supabase
+        .from("booking_links")
+        .update({ active: next })
+        .eq("user_id", userId)
+        .eq("slug", bookingLink.slug);
+      setBookingLink({ ...bookingLink, active: next });
+    } finally {
+      setBookingBusy(false);
+    }
+  };
+
+  const handleCopyBookingUrl = async () => {
+    if (!bookingUrl) return;
+    try {
+      await navigator.clipboard.writeText(bookingUrl);
+      setBookingCopied(true);
+      setTimeout(() => setBookingCopied(false), 1600);
+    } catch { /* ignore */ }
+  };
+
   return (
     <div className="bbp-fade pb-24">
       <Header title="Account" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
@@ -6212,6 +6450,52 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
               </Button>
             )}
             {pushError && <p className="text-[11px] mt-2" style={{ color: C.danger }}>{pushError}</p>}
+          </Card>
+        )}
+
+        {mode === "authed" && (
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>Public booking link</p>
+              <Pill tone={bookingLink?.active ? "success" : bookingLink ? "warning" : "neutral"}>
+                {bookingLink?.active ? "LIVE" : bookingLink ? "PAUSED" : "OFF"}
+              </Pill>
+            </div>
+            <p className="text-[11px] mb-3" style={{ color: C.muted }}>
+              {bookingLink
+                ? "Share this URL on Instagram, your link-in-bio, or any DM. Requests land below for you to approve."
+                : "Generate a private URL anyone can use to request an appointment with you. You approve every booking."}
+            </p>
+            {bookingLink && bookingUrl && (
+              <div className="rounded-xl p-2.5 mb-3 break-all text-[11px] font-mono" style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}>
+                {bookingUrl}
+              </div>
+            )}
+            {bookingLink ? (
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" icon={<Copy size={14} />} onClick={handleCopyBookingUrl}>{bookingCopied ? "Copied" : "Copy URL"}</Button>
+                <Button variant={bookingLink.active ? "outline" : "primary"} disabled={bookingBusy} onClick={handleToggleBooking}>
+                  {bookingLink.active ? "Pause" : "Resume"}
+                </Button>
+              </div>
+            ) : (
+              <Button variant="primary" icon={<CalendarPlus size={15} />} fullWidth disabled={bookingBusy} onClick={handleEnableBooking}>
+                {bookingBusy ? "Working…" : "Generate booking link"}
+              </Button>
+            )}
+            {bookingLink && openBookingRequests && (
+              <button onClick={openBookingRequests}
+                className="w-full mt-3 flex items-center justify-between rounded-xl p-3 active:scale-[0.99] transition"
+                style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                <div className="text-left">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>
+                    {pendingRequests > 0 ? `${pendingRequests} pending request${pendingRequests === 1 ? "" : "s"}` : "Booking requests"}
+                  </p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Approve to convert into an appointment.</p>
+                </div>
+                <ChevronRight size={18} style={{ color: C.muted }} />
+              </button>
+            )}
           </Card>
         )}
 
@@ -6473,6 +6757,7 @@ export default function App() {
           mode={auth.mode}
           sync={sync}
           userId={auth.userId}
+          openBookingRequests={() => setSecondary("bookingRequests")}
           onBack={() => setSecondary(null)}
           onSignOut={async () => { await auth.signOut(); setSecondary(null); }}
           onExport={() => {
@@ -6506,6 +6791,34 @@ export default function App() {
       )}
       {secondary === "timerSessions" && <TimerSessionsScreen store={store} onBack={() => setSecondary(null)} />}
       {secondary === "communicationLog" && <CommunicationLogScreen store={store} onBack={() => setSecondary(null)} />}
+      {secondary === "bookingRequests" && (
+        <BookingRequestsScreen
+          userId={auth.userId}
+          onBack={() => setSecondary(null)}
+          onApprove={async (req) => {
+            // Approve = create an appointment from the request payload,
+            // then mark the request as converted with the new appt id.
+            const apptId = `appt_${uid()}`;
+            const newAppt: any = {
+              id: apptId,
+              clientName: req.client_name,
+              clientPhone: req.client_phone || "",
+              clientEmail: req.client_email || "",
+              style: req.service_name || "",
+              date: req.preferred_date || todayISO(),
+              time: req.preferred_time || "10:00",
+              durationHours: req.service_duration ?? "",
+              totalPrice: req.service_price ?? 0,
+              depositPaid: 0,
+              status: "scheduled",
+              notes: req.notes || "",
+              createdAt: new Date().toISOString(),
+            };
+            await store.upsertAppointment(newAppt);
+            return apptId;
+          }}
+        />
+      )}
 
       {/* Tab bar — only on primary screens */}
       {secondary === null && <TabBar active={active} setActive={setActive} />}
