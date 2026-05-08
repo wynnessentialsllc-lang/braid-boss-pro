@@ -1,78 +1,318 @@
 // Edge Function: send-push
-// Deploy with:
+//
+// Production Web Push dispatcher for Braid Boss Pro.
+//
+// Deploy:
 //   supabase functions deploy send-push
-//   supabase secrets set VAPID_PUBLIC_KEY=...  VAPID_PRIVATE_KEY=...  VAPID_SUBJECT=mailto:owner@example.com
 //
-// Callable from inside the app (or a future cron) with:
-//   const { data, error } = await supabase.functions.invoke("send-push", {
-//     body: { user_id, payload: { title, body, data: { url } } },
-//   });
+// Required secrets (supabase secrets set …):
+//   VAPID_PUBLIC_KEY     — base64url-encoded VAPID public key
+//   VAPID_PRIVATE_KEY    — base64url-encoded VAPID private key
+//   VAPID_SUBJECT        — mailto: or https: URI identifying the sender
 //
-// V1 implements only Web Push; native iOS / Android dispatch will land
-// when we wrap with Capacitor and integrate APNs / FCM. Until VAPID
-// secrets are configured the function short-circuits with a clear
-// 503 so the rest of the system is testable.
-
+// Auto-provided by the Supabase platform:
+//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+//
+// Caller contract:
+//   The function always sends to the *currently authenticated user*. The
+//   user is resolved from the JWT on the Authorization header — clients
+//   cannot dispatch pushes to other users. (If the body includes a
+//   `user_id` it must match the authed user, otherwise 403.)
+//
+//   Body is optional. When omitted, the function sends a default test
+//   notification ("Your push notifications are working.") which is what
+//   the frontend "Test notification" button uses.
+//
+//   Example:
+//     await supabase.functions.invoke("send-push", {
+//       body: { payload: { title: "…", body: "…", data: { url: "/" } } },
+//     });
+//
+// iOS PWA: Web Push works on iOS 16.4+ when the app is installed to the
+// home screen. The browser-side subscription stores the same VAPID
+// endpoint shape as desktop Chrome/Firefox, so this dispatcher needs no
+// platform branching — but the payload `icon` must be reachable from
+// the installed PWA scope, hence the absolute "/icons/icon-192.png".
+//
 // deno-lint-ignore-file no-explicit-any
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import * as webpush from "https://esm.sh/web-push@3.6.7";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import webpush from "https://esm.sh/web-push@3.6.7";
+
+// ────────────────────────────────────────────────────────────────────────────
+// Env
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") || "";
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") || "";
-const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") || "mailto:owner@example.com";
+const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") || "";
 
-if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
-  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+const VAPID_READY = !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY && VAPID_SUBJECT);
+
+if (VAPID_READY) {
+  try {
+    webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+  } catch (err) {
+    console.error("[send-push] Failed to set VAPID details:", err);
+  }
 }
 
-type Payload = {
-  user_id: string;
-  payload: { title?: string; body?: string; data?: any; tag?: string; icon?: string };
+// ────────────────────────────────────────────────────────────────────────────
+// CORS
+
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Max-Age": "86400",
 };
 
-serve(async (req) => {
-  if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
-  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
-    return new Response(JSON.stringify({ error: "VAPID keys not configured" }), { status: 503, headers: { "content-type": "application/json" } });
+const json = (status: number, body: unknown): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS_HEADERS, "content-type": "application/json" },
+  });
+
+// ────────────────────────────────────────────────────────────────────────────
+// Types
+
+type PushPayload = {
+  title?: string;
+  body?: string;
+  icon?: string;
+  badge?: string;
+  tag?: string;
+  data?: Record<string, unknown>;
+};
+
+type RequestBody = {
+  user_id?: string;
+  payload?: PushPayload;
+};
+
+type SubscriptionRow = {
+  id: string;
+  endpoint: string | null;
+  keys: { p256dh?: string; auth?: string } | null;
+  platform: string | null;
+};
+
+type SendResult = {
+  ok: number;
+  failed: number;
+  pruned: number;
+  total: number;
+  errors: { id: string; status?: number; message: string }[];
+};
+
+// ────────────────────────────────────────────────────────────────────────────
+// Defaults
+
+const DEFAULT_PAYLOAD: Required<Pick<PushPayload, "title" | "body" | "icon">> = {
+  title: "Braid Boss Pro",
+  body: "Your push notifications are working.",
+  icon: "/icons/icon-192.png",
+};
+
+const buildMessage = (input: PushPayload | undefined): string => {
+  const merged: PushPayload = {
+    title: input?.title || DEFAULT_PAYLOAD.title,
+    body: input?.body || DEFAULT_PAYLOAD.body,
+    icon: input?.icon || DEFAULT_PAYLOAD.icon,
+    badge: input?.badge,
+    tag: input?.tag,
+    data: input?.data ?? {},
+  };
+  return JSON.stringify(merged);
+};
+
+// ────────────────────────────────────────────────────────────────────────────
+// Handler
+
+serve(async (req: Request): Promise<Response> => {
+  // Preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
-  let body: Payload;
-  try { body = await req.json(); }
-  catch { return new Response("bad json", { status: 400 }); }
-  if (!body.user_id) return new Response("user_id required", { status: 400 });
+  if (req.method !== "POST") {
+    return json(405, { error: "method not allowed" });
+  }
 
-  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-  const { data: subs, error } = await supabase
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+    console.error("[send-push] Supabase platform env vars missing");
+    return json(500, { error: "server misconfigured" });
+  }
+
+  if (!VAPID_READY) {
+    console.error("[send-push] VAPID secrets not configured");
+    return json(503, {
+      error: "VAPID keys not configured",
+      hint: "Set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT via supabase secrets set",
+    });
+  }
+
+  // ── Auth: resolve the caller from the JWT
+  const authHeader =
+    req.headers.get("Authorization") || req.headers.get("authorization");
+  if (!authHeader || !authHeader.toLowerCase().startsWith("bearer ")) {
+    return json(401, { error: "missing bearer token" });
+  }
+  const jwt = authHeader.slice(7).trim();
+
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+
+  const { data: userResult, error: authError } = await admin.auth.getUser(jwt);
+  if (authError || !userResult?.user) {
+    console.warn("[send-push] auth.getUser failed:", authError?.message);
+    return json(401, { error: "invalid or expired token" });
+  }
+  const authedUserId = userResult.user.id;
+
+  // ── Parse body (optional)
+  let body: RequestBody = {};
+  const contentLength = req.headers.get("content-length");
+  if (contentLength !== "0") {
+    try {
+      const text = await req.text();
+      body = text ? (JSON.parse(text) as RequestBody) : {};
+    } catch (err) {
+      console.warn("[send-push] bad json body:", err);
+      return json(400, { error: "invalid JSON body" });
+    }
+  }
+
+  if (body.user_id && body.user_id !== authedUserId) {
+    console.warn(
+      "[send-push] cross-user dispatch refused. authed=%s requested=%s",
+      authedUserId,
+      body.user_id,
+    );
+    return json(403, { error: "cannot dispatch to another user" });
+  }
+
+  // ── Load this user's enabled web subscriptions
+  const { data: subs, error: subsError } = await admin
     .from("push_subscriptions")
     .select("id, endpoint, keys, platform")
-    .eq("user_id", body.user_id)
+    .eq("user_id", authedUserId)
     .eq("enabled", true)
     .eq("platform", "web");
 
-  if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  if (subsError) {
+    console.error("[send-push] failed to load subscriptions:", subsError);
+    return json(500, {
+      error: "failed to load subscriptions",
+      detail: subsError.message,
+    });
+  }
 
-  const message = JSON.stringify(body.payload || {});
-  const results: { ok: number; failed: number; pruned: number } = { ok: 0, failed: 0, pruned: 0 };
+  const subscriptions = (subs || []) as SubscriptionRow[];
 
-  await Promise.all((subs || []).map(async (s: any) => {
-    if (!s.endpoint || !s.keys) return;
-    try {
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, message);
-      results.ok += 1;
-    } catch (err: any) {
-      // 404 / 410 → endpoint is gone; prune.
-      const code = err?.statusCode || err?.status;
-      if (code === 404 || code === 410) {
-        await supabase.from("push_subscriptions").delete().eq("id", s.id);
-        results.pruned += 1;
-      } else {
-        results.failed += 1;
+  if (subscriptions.length === 0) {
+    console.info(
+      "[send-push] no active web subscriptions for user",
+      authedUserId,
+    );
+    return json(200, {
+      ok: 0,
+      failed: 0,
+      pruned: 0,
+      total: 0,
+      errors: [],
+      message: "No active web subscriptions for this user.",
+    });
+  }
+
+  // ── Dispatch
+  const message = buildMessage(body.payload);
+  const result: SendResult = {
+    ok: 0,
+    failed: 0,
+    pruned: 0,
+    total: subscriptions.length,
+    errors: [],
+  };
+
+  await Promise.all(
+    subscriptions.map(async (s) => {
+      if (!s.endpoint || !s.keys?.p256dh || !s.keys?.auth) {
+        result.failed += 1;
+        result.errors.push({ id: s.id, message: "missing endpoint or keys" });
+        return;
       }
-    }
-  }));
+      try {
+        await webpush.sendNotification(
+          {
+            endpoint: s.endpoint,
+            keys: { p256dh: s.keys.p256dh, auth: s.keys.auth },
+          },
+          message,
+          { TTL: 60 },
+        );
+        result.ok += 1;
+      } catch (err) {
+        const e = err as {
+          statusCode?: number;
+          status?: number;
+          body?: string;
+          message?: string;
+        };
+        const code = e.statusCode ?? e.status;
+        const msg = e.message || e.body || "send failed";
+        if (code === 404 || code === 410) {
+          // Endpoint is permanently dead. Prune.
+          const { error: delErr } = await admin
+            .from("push_subscriptions")
+            .delete()
+            .eq("id", s.id);
+          if (delErr) {
+            console.error(
+              "[send-push] prune failed for %s: %s",
+              s.id,
+              delErr.message,
+            );
+            result.failed += 1;
+            result.errors.push({
+              id: s.id,
+              status: code,
+              message: `prune failed: ${delErr.message}`,
+            });
+          } else {
+            console.info(
+              "[send-push] pruned dead subscription %s (status %s)",
+              s.id,
+              code,
+            );
+            result.pruned += 1;
+          }
+        } else {
+          console.error(
+            "[send-push] send failed for %s (status %s): %s",
+            s.id,
+            code,
+            msg,
+          );
+          result.failed += 1;
+          result.errors.push({ id: s.id, status: code, message: msg });
+        }
+      }
+    }),
+  );
 
-  return new Response(JSON.stringify(results), { status: 200, headers: { "content-type": "application/json" } });
+  console.info(
+    "[send-push] user=%s total=%d ok=%d failed=%d pruned=%d",
+    authedUserId,
+    result.total,
+    result.ok,
+    result.failed,
+    result.pruned,
+  );
+
+  return json(200, result);
 });
