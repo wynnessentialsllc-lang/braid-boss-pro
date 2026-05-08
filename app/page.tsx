@@ -7275,6 +7275,15 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
     return `https://${host}.functions.supabase.co/calendar-feed?token=${encodeURIComponent(feedToken)}`;
   }, [feedToken]);
 
+  // webcal:// is the standard scheme for ICS subscriptions on Apple
+  // and most desktop calendars. Tapping a webcal: link on iOS/macOS
+  // launches the Calendar app's "Subscribe to this calendar?" flow
+  // directly — no Safari "cannot download this file" dialog.
+  const feedWebcalUrl = useMemo(
+    () => (feedUrl ? feedUrl.replace(/^https:\/\//, "webcal://") : null),
+    [feedUrl],
+  );
+
   const handleEnableFeed = async () => {
     if (!userId) return;
     setFeedBusy(true); setFeedError(null);
@@ -7580,11 +7589,30 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
                 {feedUrl}
               </div>
             )}
-            {feedToken ? (
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" icon={<Copy size={14} />} onClick={handleCopyFeedUrl}>{feedCopied ? "Copied" : "Copy URL"}</Button>
-                <Button variant="danger" disabled={feedBusy} onClick={handleRevokeFeed}>Revoke</Button>
-              </div>
+            {feedToken && feedWebcalUrl ? (
+              <>
+                <a
+                  href={feedWebcalUrl}
+                  className="block w-full text-center rounded-xl px-4 py-3 text-sm font-semibold active:scale-[0.99] transition mb-2"
+                  style={{ background: C.espresso, color: C.ivory }}
+                >
+                  Open in Calendar
+                </a>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button variant="outline" icon={<Copy size={14} />} onClick={handleCopyFeedUrl}>{feedCopied ? "Copied" : "Copy URL"}</Button>
+                  <Button variant="danger" disabled={feedBusy} onClick={handleRevokeFeed}>Revoke</Button>
+                </div>
+                <details className="mt-3 text-[11px]" style={{ color: C.muted }}>
+                  <summary className="cursor-pointer font-semibold" style={{ color: C.coffee }}>How to subscribe on each platform</summary>
+                  <div className="mt-2 space-y-1.5 leading-relaxed">
+                    <p><strong>iOS / iPadOS:</strong> tap “Open in Calendar” above, then Subscribe.</p>
+                    <p><strong>Mac Calendar:</strong> File → New Calendar Subscription → paste the URL.</p>
+                    <p><strong>Google Calendar:</strong> Settings → Add calendar → From URL → paste.</p>
+                    <p><strong>Outlook:</strong> Add calendar → Subscribe from web → paste.</p>
+                    <p>If Safari shows “cannot download this file” when you open the URL, that is normal — calendar feeds aren’t meant to be viewed in a browser. Use the button above or one of the steps here.</p>
+                  </div>
+                </details>
+              </>
             ) : (
               <Button variant="primary" icon={<Calendar size={15} />} fullWidth disabled={feedBusy} onClick={handleEnableFeed}>
                 {feedBusy ? "Working…" : "Enable calendar feed"}
