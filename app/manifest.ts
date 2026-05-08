@@ -13,7 +13,7 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Braid Boss Pro",
-    short_name: "Braid Boss",
+    short_name: "Braid Boss Pro",
     description:
       "Appointments, clients, payments, and reminders for braid stylists.",
     start_url: "/",
