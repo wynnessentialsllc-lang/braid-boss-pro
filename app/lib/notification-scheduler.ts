@@ -31,6 +31,29 @@ const PRIORITY_RANK: Record<NotificationRule["priority"], number> = {
   low: 2,
 };
 
+// Pick the closest-in-time appointment reminder per appointment so we
+// never show 48h + 24h + same-day + 2h cards stacked. Highest-
+// resolution alert wins (appt_2h > appt_same_day > appt_24h > appt_48h).
+const REMINDER_PRIORITY: Record<string, number> = {
+  appt_2h: 4, appt_same_day: 3, appt_24h: 2, appt_48h: 1,
+};
+
+const collapseAppointmentReminders = (rules: NotificationRule[]): NotificationRule[] => {
+  const apptBuckets = new Map<string, NotificationRule>();
+  const passthrough: NotificationRule[] = [];
+  for (const r of rules) {
+    if (r.category === "appointment" && r.appointmentId && REMINDER_PRIORITY[r.kind]) {
+      const existing = apptBuckets.get(r.appointmentId);
+      if (!existing || (REMINDER_PRIORITY[r.kind] || 0) > (REMINDER_PRIORITY[existing.kind] || 0)) {
+        apptBuckets.set(r.appointmentId, r);
+      }
+    } else {
+      passthrough.push(r);
+    }
+  }
+  return [...apptBuckets.values(), ...passthrough];
+};
+
 export const runNotificationRules = (input: SchedulerInput): NotificationRule[] => {
   const { clients, appointments, todayIso, nowMs, preferences, vipThreshold = 800 } = input;
 
@@ -41,12 +64,14 @@ export const runNotificationRules = (input: SchedulerInput): NotificationRule[] 
     ...getBusinessInsightNotifications({ appointments, today: todayIso }, preferences),
   ];
 
-  // Dedup by id (last writer wins so the highest-resolution rule for
-  // an appointment, e.g. appt_2h, replaces appt_24h on the same day).
+  // Dedup by id first (id collisions are rare but possible across
+  // generators), then collapse appointment reminders so a single appt
+  // never shows up as multiple stacked cards.
   const byId = new Map<string, NotificationRule>();
   for (const r of all) byId.set(r.id, r);
+  const collapsed = collapseAppointmentReminders(Array.from(byId.values()));
 
-  return Array.from(byId.values()).sort((a, b) => {
+  return collapsed.sort((a, b) => {
     const pr = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
     if (pr !== 0) return pr;
     return (a.scheduledFor || "").localeCompare(b.scheduledFor || "");

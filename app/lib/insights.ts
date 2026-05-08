@@ -17,6 +17,7 @@ export type Insight = {
   category: InsightCategory;
   title: string;
   body: string;
+  why?: string;              // "why this matters" microcopy
   priority: InsightPriority;
   actionLabel?: string;
   actionTarget?: string;     // e.g. "tab:money", "client:abc", "appointment:xyz"
@@ -82,6 +83,7 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
       priority: pendingTotal > 200 ? "high" : "medium",
       title: `${fmt(pendingTotal, currency)} in pending balances`,
       body: "Outstanding money across active appointments. Tap to review and collect.",
+      why: "Pending balances are the fastest cashflow lever — every collection lands in this month's revenue.",
       actionLabel: "View schedule",
       actionTarget: "tab:schedule",
       createdAt: now,
@@ -98,6 +100,7 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
       priority: "high",
       title: `${todayAppts.length} appointment${todayAppts.length === 1 ? "" : "s"} today`,
       body: first?.clientName ? `Starts with ${first.clientName} at ${first.time || "—"}.` : "",
+      why: "Knowing who's coming first helps you prep the chair and order your day.",
       actionLabel: "View schedule",
       actionTarget: "tab:schedule",
       createdAt: now,
@@ -131,6 +134,7 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
         ? `VIP client inactive: ${inactiveCandidate.client.name}`
         : `Send a rebooking reminder to ${inactiveCandidate.client.name}`,
       body: `${inactiveCandidate.days} days since their last visit${isVip ? " — and they're a top spender." : "."}`,
+      why: "Repeat clients are 3-5x cheaper to retain than new clients are to attract. A short personal message goes a long way.",
       actionLabel: "Send reminder",
       actionTarget: `client:${inactiveCandidate.client.id}`,
       createdAt: now,
@@ -160,6 +164,7 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
       priority: "medium",
       title: `Top-earning style this month: ${topStyle[0]}`,
       body: `${fmt(topStyle[1].total, currency)} across ${topStyle[1].count} booking${topStyle[1].count === 1 ? "" : "s"}.`,
+      why: "Knowing which style pays best helps you prioritize what to book and what to promote.",
       actionLabel: "View money",
       actionTarget: "tab:money",
       createdAt: now,

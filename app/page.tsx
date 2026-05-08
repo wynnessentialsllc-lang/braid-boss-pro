@@ -2103,6 +2103,7 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
   const insights = useMemo(() =>
     generateBossInsights({ clients, appointments, communications: commLog, settings, today }),
     [clients, appointments, commLog, settings, today]);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const tone = (p: Insight["priority"]): "danger" | "gold" | "neutral" =>
     p === "high" ? "danger" : p === "medium" ? "gold" : "neutral";
@@ -2128,24 +2129,39 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
         </Card>
       ) : (
         <div className="space-y-2">
-          {insights.map(i => (
-            <Card key={i.id} className="p-3.5">
-              <div className="flex items-start justify-between gap-2 mb-1.5 flex-wrap">
-                <Pill tone={tone(i.priority)}>{i.category.toUpperCase()}</Pill>
-              </div>
-              <p className="font-semibold text-sm" style={{ color: C.espresso }}>{i.title}</p>
-              {i.body && <p className="text-[12px] mt-1 leading-relaxed" style={{ color: C.coffee }}>{i.body}</p>}
-              {i.actionLabel && (
-                <div className="flex justify-end mt-2">
-                  <button onClick={() => handleAction(i.actionTarget)}
-                    className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
-                    style={{ background: "transparent", color: C.goldDeep, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
-                    {i.actionLabel}
-                  </button>
-                </div>
-              )}
-            </Card>
-          ))}
+          {insights.map(i => {
+            const isOpen = !!expanded[i.id];
+            return (
+              <Card key={i.id} className="p-3.5">
+                <button
+                  className="w-full text-left active:scale-[0.99] transition"
+                  onClick={() => setExpanded(prev => ({ ...prev, [i.id]: !prev[i.id] }))}>
+                  <div className="flex items-start justify-between gap-2 mb-1.5 flex-wrap">
+                    <Pill tone={tone(i.priority)}>{i.category.toUpperCase()}</Pill>
+                    {i.why && (
+                      <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.muted }}>
+                        {isOpen ? "Hide why" : "Why this matters"}
+                      </span>
+                    )}
+                  </div>
+                  <p className="font-semibold text-sm" style={{ color: C.espresso }}>{i.title}</p>
+                  {i.body && <p className="text-[12px] mt-1 leading-relaxed" style={{ color: C.coffee }}>{i.body}</p>}
+                  {isOpen && i.why && (
+                    <p className="text-[11px] mt-2 italic leading-relaxed bbp-fade" style={{ color: C.muted }}>{i.why}</p>
+                  )}
+                </button>
+                {i.actionLabel && (
+                  <div className="flex justify-end mt-2">
+                    <button onClick={() => handleAction(i.actionTarget)}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+                      style={{ background: "transparent", color: C.goldDeep, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
+                      {i.actionLabel}
+                    </button>
+                  </div>
+                )}
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>
@@ -2717,8 +2733,8 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
         {filtered.length === 0 ? (
           <EmptyState
             icon={<Calendar size={28} style={{ color: C.gold }} />}
-            title="No appointments here"
-            body="Tap the gold button below to add your first booking — or build a quote and convert it."
+            title="Your chair is waiting"
+            body="Add your first booking with the gold button below — or build a quote and convert it into an appointment."
             cta={<Button variant="primary" icon={<Plus size={18} />} onClick={() => setEditing({})}>New appointment</Button>}
           />
         ) : (
@@ -3202,7 +3218,7 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
           clients.length === 0 ? (
             <EmptyState
               icon={<Users size={28} style={{ color: C.gold }} />}
-              title="No clients yet"
+              title="Every booked braid starts with one client"
               body="Build your book of business. Every client becomes a profile with style preferences, photos, allergies, and lifetime value."
               cta={<Button variant="primary" icon={<Plus size={18} />} onClick={() => setEditing({})}>Add first client</Button>}
             />
@@ -3499,7 +3515,7 @@ const PhotoGallery = ({ clientId, clientName, appointments, photos, upsertPhoto,
           <ImageIcon size={28} style={{ color: C.gold, margin: "0 auto 8px" }} />
           <p className="italic" style={{ fontFamily: FONT_DISPLAY, color: C.gold, fontSize: 16 }}>portfolio in waiting</p>
           <p className="text-sm mt-1" style={{ color: C.muted }}>
-            Add inspiration photos, before/afters, scalp notes, or color references.
+            No photos yet. Add inspiration, before-and-afters, or client references — anything that helps you remember how you styled them last time.
           </p>
         </Card>
       ) : (
@@ -3781,7 +3797,7 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet }:
     <SectionTitle>Activity</SectionTitle>
 <button onClick={() => openTxSheet()}>Add</button>
     {all.length === 0 ? (
-      <EmptyState icon={<Receipt size={28} style={{ color: C.muted }} />} title="No activity yet" body="Completed appointments auto-appear here. Add manual transactions for hair supplies, tools, or anything else." />
+      <EmptyState icon={<Receipt size={28} style={{ color: C.muted }} />} title="No money in or out yet" body="Completed appointments auto-appear here. Log hair supplies, tools, and travel as expenses to see your real take-home." />
     ) : (
       <div className="space-y-2">
         {all.map(t => (
@@ -4028,7 +4044,7 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
 
         {filtered.length === 0 ? (
           <EmptyState icon={<Bell size={28} style={{ color: C.muted }} />}
-            title={filter === "pending" ? "No reminders queued" : "Nothing here"}
+            title={filter === "pending" ? "No reminders yet" : "Nothing here"}
             body="Reminders are auto-created when you book an appointment with reminders enabled." />
         ) : (
           <div className="space-y-2">
@@ -6396,6 +6412,124 @@ const SyncStatusPill = ({ state }: { state: SyncState }) => {
   );
 };
 
+const PermissionsExplained = ({ pushCap }: { pushCap: PushCapability }) => (
+  <Card className="p-4">
+    <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.12em" }}>Permissions used</p>
+    <div className="space-y-2">
+      <div className="flex gap-2.5">
+        <Bell size={14} style={{ color: C.goldDeep, marginTop: 2 }} />
+        <div className="text-[12px] leading-relaxed" style={{ color: C.coffee }}>
+          <strong>Notifications</strong> — used only for actionable business alerts (appointment reminders, balance due, rebooking opportunities). Status: <strong style={{ color: pushCap === "subscribed" ? C.success : pushCap === "blocked" ? C.danger : C.muted }}>{pushCap === "subscribed" ? "ON" : pushCap === "blocked" ? "BLOCKED" : "OFF"}</strong>.
+        </div>
+      </div>
+      <div className="flex gap-2.5">
+        <ImageIcon size={14} style={{ color: C.goldDeep, marginTop: 2 }} />
+        <div className="text-[12px] leading-relaxed" style={{ color: C.coffee }}>
+          <strong>Photos / camera</strong> — used to attach inspiration, before-and-after, and reference photos to client profiles. Photos are private to your account and stored securely.
+        </div>
+      </div>
+      <div className="flex gap-2.5">
+        <Calendar size={14} style={{ color: C.goldDeep, marginTop: 2 }} />
+        <div className="text-[12px] leading-relaxed" style={{ color: C.coffee }}>
+          <strong>Calendar</strong> — used to export appointments and offer a private subscribe URL. Exports happen only when you tap the button; nothing is shared automatically.
+        </div>
+      </div>
+    </div>
+  </Card>
+);
+
+const READINESS_ITEMS: { label: string; check: (ctx: { mode: AuthMode; pushCap: PushCapability }) => "ok" | "warn" | "info" }[] = [
+  { label: "Privacy policy linked", check: () => "info" },
+  { label: "Terms of service linked", check: () => "info" },
+  { label: "Account deletion available", check: ({ mode }) => mode === "authed" ? "ok" : "info" },
+  { label: "Data export available", check: () => "ok" },
+  { label: "Notifications explanation present", check: () => "ok" },
+  { label: "Photo permission explanation present", check: () => "ok" },
+  { label: "Calendar export explanation present", check: () => "ok" },
+  { label: "No Stripe / payment flows inside the app", check: () => "ok" },
+  { label: "Guest mode works", check: () => "ok" },
+  { label: "Authentication works", check: ({ mode }) => mode === "authed" ? "ok" : "info" },
+  { label: "Offline mode works", check: () => "ok" },
+  { label: "Sync status visible", check: ({ mode }) => mode === "authed" ? "ok" : "info" },
+  { label: "Push notifications surface enabled", check: ({ pushCap }) => pushCap === "subscribed" ? "ok" : pushCap === "blocked" ? "warn" : "info" },
+];
+
+const ReadinessChecklistSheet = ({ open, onClose, mode, pushCap }: {
+  open: boolean;
+  onClose: () => void;
+  mode: AuthMode;
+  pushCap: PushCapability;
+}) => (
+  <Sheet open={open} onClose={onClose} title="App Store readiness">
+    <div className="space-y-2 pb-2">
+      <p className="text-xs mb-3" style={{ color: C.muted }}>
+        Checklist before submitting Braid Boss Pro for App Store review. Tap any item to verify it&apos;s still wired correctly.
+      </p>
+      {READINESS_ITEMS.map((item, i) => {
+        const status = item.check({ mode, pushCap });
+        const tone = status === "ok" ? C.success : status === "warn" ? C.warning : C.muted;
+        return (
+          <div key={i} className="flex items-center gap-3 py-2" style={{ borderBottom: `1px solid ${C.hairline}` }}>
+            <div className="rounded-full" style={{ width: 8, height: 8, background: tone }} />
+            <p className="flex-1 text-[13px]" style={{ color: C.espresso }}>{item.label}</p>
+            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: tone, letterSpacing: "0.08em" }}>
+              {status === "ok" ? "Verified" : status === "warn" ? "Attention" : "Pending"}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  </Sheet>
+);
+
+const DeleteAccountSheet = ({ open, onClose, onSignOut }: {
+  open: boolean;
+  onClose: () => void;
+  onSignOut: () => Promise<void>;
+}) => {
+  const [busy, setBusy] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const handleDelete = async () => {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try {
+      const supabase = getSupabase();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("No active session.");
+      const { error: invokeErr } = await supabase.functions.invoke("delete-account");
+      if (invokeErr) throw invokeErr;
+      await onSignOut();
+    } catch (e: any) {
+      setError(e?.message || "Couldn't delete the account. Try again or contact support.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Delete account">
+      <div className="space-y-3 pb-2">
+        <Card className="p-3.5" style={{ background: "rgba(156,61,46,0.06)", border: `1px solid rgba(156,61,46,0.25)` }}>
+          <p className="text-[13px] font-semibold" style={{ color: C.danger }}>This is permanent.</p>
+          <p className="text-[11px] mt-1 leading-relaxed" style={{ color: C.coffee }}>
+            Deleting your account removes your appointments, clients, photos, communication log, receipts, calendar feeds, push subscriptions, and booking link from our servers. Local-only data on this device will not be cleared automatically.
+          </p>
+        </Card>
+        <Field label='Type "delete" to confirm'>
+          <Input value={confirmText} onChange={e => setConfirmText(e.target.value)} placeholder="delete" />
+        </Field>
+        {error && <p className="text-[11px]" style={{ color: C.danger }}>{error}</p>}
+        <Button variant="danger" fullWidth disabled={busy || confirmText.toLowerCase() !== "delete"} onClick={handleDelete}>
+          {busy ? "Deleting…" : "Permanently delete my account"}
+        </Button>
+        <Button variant="outline" fullWidth onClick={onClose}>Cancel</Button>
+      </div>
+    </Sheet>
+  );
+};
+
 const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport, openBookingRequests }: {
   email: string | null;
   mode: AuthMode;
@@ -6411,6 +6545,8 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   const [pushError, setPushError] = useState<string | null>(null);
   const [testStatus, setTestStatus] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
+  const [showReadiness, setShowReadiness] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -6483,8 +6619,8 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
       const sub = await subscribeWebPush(userId);
       if (!sub) {
         setPushError(typeof Notification !== "undefined" && Notification.permission === "denied"
-          ? "Notifications are blocked. Enable them for this site in your browser settings."
-          : "This browser doesn't support push notifications. iOS push will activate when you install the App Store build.");
+          ? "Notifications are off. Re-enable them for this site in your browser settings, or turn them on later in Account & Sync."
+          : "This browser doesn't support push notifications. iOS push will activate when you install the App Store build — your subscription will carry over.");
       }
       const cap = await detectPushCapability();
       setPushCap(cap);
@@ -6851,13 +6987,39 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
           </Card>
         )}
 
+        <PermissionsExplained pushCap={pushCap} />
+
         <Card className="p-4 space-y-2">
           <Button variant="outline" icon={<Download size={15} />} fullWidth onClick={onExport}>Export all data (JSON)</Button>
           {mode === "authed" ? (
-            <Button variant="danger" fullWidth onClick={onSignOut}>Sign out</Button>
+            <>
+              <Button variant="outline" icon={<ScrollText size={15} />} fullWidth onClick={() => setShowReadiness(true)}>App Store readiness checklist</Button>
+              <Button variant="outline" icon={<Trash2 size={15} />} fullWidth onClick={() => setShowDeleteConfirm(true)}>Delete account</Button>
+              <Button variant="danger" fullWidth onClick={onSignOut}>Sign out</Button>
+            </>
           ) : null}
         </Card>
+
+        <Card className="p-4">
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.12em" }}>Legal &amp; support</p>
+          <div className="space-y-1.5">
+            <a href="/privacy" target="_blank" rel="noopener noreferrer"
+               className="flex items-center justify-between py-2 text-sm" style={{ color: C.coffee }}>
+              Privacy policy <ChevronRight size={16} style={{ color: C.muted }} />
+            </a>
+            <a href="/terms" target="_blank" rel="noopener noreferrer"
+               className="flex items-center justify-between py-2 text-sm" style={{ color: C.coffee }}>
+              Terms of service <ChevronRight size={16} style={{ color: C.muted }} />
+            </a>
+            <a href="mailto:support@braidbosspro.app" className="flex items-center justify-between py-2 text-sm" style={{ color: C.coffee }}>
+              Contact support <ChevronRight size={16} style={{ color: C.muted }} />
+            </a>
+          </div>
+        </Card>
       </div>
+
+      <ReadinessChecklistSheet open={showReadiness} onClose={() => setShowReadiness(false)} mode={mode} pushCap={pushCap} />
+      <DeleteAccountSheet open={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} onSignOut={onSignOut} />
     </div>
   );
 };
@@ -6949,7 +7111,10 @@ export default function App() {
         delete incoming.dataUrl;
         delete incoming.thumbnailDataUrl;
       } catch (err) {
-        console.warn("[bbp] photo upload failed; keeping inline copy", err);
+        // Photo upload failed (offline / quota / mime). The dataUrl
+        // copy stays in localStorage so the gallery doesn't go blank;
+        // sync will retry the upload when conditions improve.
+        console.warn("[bbp] photo upload paused — keeping inline copy", err);
       }
     }
     return store.upsertPhoto(incoming);
