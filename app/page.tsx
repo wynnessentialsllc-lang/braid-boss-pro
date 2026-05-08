@@ -6412,6 +6412,176 @@ const SyncStatusPill = ({ state }: { state: SyncState }) => {
   );
 };
 
+type AuthMode2 = "signin" | "signup" | "reset" | "reset_sent";
+
+const AuthSheet = ({ open, initialMode, onClose, onAuthed }: {
+  open: boolean;
+  initialMode: AuthMode2;
+  onClose: () => void;
+  onAuthed?: () => void;
+}) => {
+  const [mode, setMode] = useState<AuthMode2>(initialMode);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Reset transient state every time the sheet (re)opens or the
+  // intent flips. Keeps Sign in → Forgot password → back to Sign in
+  // from leaking errors between flows.
+  useEffect(() => {
+    if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sheet open lifecycle, intentional
+    setMode(initialMode);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sheet open lifecycle, intentional
+    setErr(null);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sheet open lifecycle, intentional
+    setBusy(false);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sheet open lifecycle, intentional
+    setPassword("");
+  }, [open, initialMode]);
+
+  const friendlyError = (raw: string): string => {
+    const s = (raw || "").toLowerCase();
+    if (s.includes("invalid") && s.includes("credentials")) return "That email and password don't match. Try again or reset your password.";
+    if (s.includes("user already registered")) return "An account with this email already exists. Sign in instead?";
+    if (s.includes("password should be")) return "Password is too short — use at least 6 characters.";
+    if (s.includes("network") || s.includes("failed to fetch")) return "Connection failed. Check your network and try again.";
+    if (s.includes("rate limit")) return "Too many attempts. Wait a minute and try again.";
+    return raw || "Something went wrong. Try again in a moment.";
+  };
+
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true); setErr(null);
+    try {
+      const supabase = getSupabase();
+      if (mode === "signin") {
+        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        if (error) throw error;
+        onAuthed?.();
+        onClose();
+      } else if (mode === "signup") {
+        const { error } = await supabase.auth.signUp({ email: email.trim(), password });
+        if (error) throw error;
+        // Some Supabase configs auto-sign-in on signup; if so the
+        // listener will flip mode → authed and the sheet closes
+        // naturally via onClose. If email confirmation is required
+        // we land on the reset_sent screen with a tailored message.
+        setMode("reset_sent");
+      } else if (mode === "reset") {
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+          redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+        });
+        if (error) throw error;
+        setMode("reset_sent");
+      }
+    } catch (e: any) {
+      setErr(friendlyError(e?.message || ""));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const headline = mode === "signin" ? "Welcome back"
+    : mode === "signup" ? "Create your account"
+    : mode === "reset" ? "Reset your password"
+    : "Check your inbox";
+  const sub = mode === "signin" ? "Pick up where you left off — your data syncs across every device."
+    : mode === "signup" ? "Free to start. Cloud-backed from your first booking."
+    : mode === "reset" ? "We'll email you a link to set a new password."
+    : "We sent you an email. Tap the link to finish, then sign in.";
+
+  return (
+    <Sheet open={open} onClose={onClose} title={headline}>
+      <div className="space-y-4 pb-2">
+        <p className="text-sm" style={{ color: C.muted }}>{sub}</p>
+
+        {mode === "reset_sent" ? (
+          <Card className="p-4 text-center" style={{ background: "rgba(92,124,74,0.06)", border: `1px solid rgba(92,124,74,0.25)` }}>
+            <CheckCircle2 size={26} style={{ color: C.success, margin: "0 auto 8px" }} />
+            <p className="text-sm font-semibold" style={{ color: C.espresso }}>{email || "Email"} on its way</p>
+            <p className="text-[12px] mt-1" style={{ color: C.muted }}>
+              The link is good for one hour. Don&apos;t see it? Check spam, or wait 60 seconds and try again.
+            </p>
+            <Button variant="primary" fullWidth className="mt-3" onClick={() => setMode("signin")}>Back to sign in</Button>
+          </Card>
+        ) : (
+          <>
+            <Field label="Email">
+              <Input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                placeholder="you@studio.com"
+                autoComplete={mode === "signup" ? "email" : "username"}
+                inputMode="email" />
+            </Field>
+            {mode !== "reset" && (
+              <Field label="Password" hint={mode === "signup" ? "6+ characters" : undefined}>
+                <Input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete={mode === "signup" ? "new-password" : "current-password"} />
+              </Field>
+            )}
+            {err && (
+              <Card className="p-3" style={{ background: "rgba(156,61,46,0.06)", border: `1px solid rgba(156,61,46,0.25)` }}>
+                <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>
+              </Card>
+            )}
+            <Button variant="primary" fullWidth disabled={busy || !email || (mode !== "reset" && !password)} onClick={submit}>
+              {busy
+                ? (mode === "signin" ? "Signing in…" : mode === "signup" ? "Creating account…" : "Sending email…")
+                : mode === "signin" ? "Sign in"
+                : mode === "signup" ? "Create account"
+                : "Send reset email"}
+            </Button>
+            <div className="flex items-center justify-between text-[12px] pt-1">
+              {mode === "signin" ? (
+                <>
+                  <button onClick={() => setMode("reset")} style={{ color: C.coffee }}>Forgot password?</button>
+                  <button onClick={() => setMode("signup")} style={{ color: C.goldDeep, fontWeight: 600 }}>Create account</button>
+                </>
+              ) : mode === "signup" ? (
+                <button onClick={() => setMode("signin")} style={{ color: C.goldDeep, fontWeight: 600 }}>Back to sign in</button>
+              ) : (
+                <button onClick={() => setMode("signin")} style={{ color: C.goldDeep, fontWeight: 600 }}>Back to sign in</button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </Sheet>
+  );
+};
+
+const GuestModeCard = ({ onSignIn, onCreateAccount }: {
+  onSignIn: () => void;
+  onCreateAccount: () => void;
+}) => (
+  <Card className="p-5" style={{ background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`, border: `1px solid ${C.goldDeep}` }}>
+    <div className="flex items-center gap-2 mb-1">
+      <Pill tone="gold">GUEST MODE</Pill>
+    </div>
+    <p style={{ fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, color: C.espresso, lineHeight: 1.15 }}>
+      Your data lives only on this device.
+    </p>
+    <p className="text-[13px] mt-2 leading-relaxed" style={{ color: C.coffee }}>
+      Create a free account to:
+    </p>
+    <ul className="text-[12px] mt-1.5 space-y-1" style={{ color: C.coffee }}>
+      <li className="flex items-start gap-2"><Check size={13} style={{ color: C.success, marginTop: 2 }} /> Sync across phone, tablet, and laptop</li>
+      <li className="flex items-start gap-2"><Check size={13} style={{ color: C.success, marginTop: 2 }} /> Protect your business data with cloud backup</li>
+      <li className="flex items-start gap-2"><Check size={13} style={{ color: C.success, marginTop: 2 }} /> Restore everything if you lose this device</li>
+      <li className="flex items-start gap-2"><Check size={13} style={{ color: C.success, marginTop: 2 }} /> Receive reminders + retention alerts wherever you are</li>
+    </ul>
+    <div className="grid grid-cols-2 gap-2 mt-4">
+      <Button variant="primary" onClick={onCreateAccount}>Create account</Button>
+      <Button variant="outline" onClick={onSignIn}>Sign in</Button>
+    </div>
+    <p className="text-[11px] text-center mt-3" style={{ color: C.muted }}>
+      Continuing as guest is fine — your local data stays on this device.
+    </p>
+  </Card>
+);
+
 const PermissionsExplained = ({ pushCap }: { pushCap: PushCapability }) => (
   <Card className="p-4">
     <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.12em" }}>Permissions used</p>
@@ -6547,6 +6717,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
   const [showReadiness, setShowReadiness] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [authSheetMode, setAuthSheetMode] = useState<AuthMode2 | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -6826,17 +6997,22 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
     <div className="bbp-fade pb-24">
       <Header title="Account" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
       <div className="px-5 pt-4 space-y-3">
-        <Card className="p-4">
-          <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Signed in as</p>
-          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>
-            {mode === "authed" ? (email || "Account") : "Guest mode"}
-          </p>
-          <p className="text-[11px] mt-1" style={{ color: C.muted }}>
-            {mode === "authed"
-              ? "Your appointments, clients, receipts, and communication log sync across every device you sign in on."
-              : "Data is saved on this device only. Sign in to back up and access it anywhere."}
-          </p>
-        </Card>
+        {mode === "authed" ? (
+          <Card className="p-4">
+            <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Signed in as</p>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>
+              {email || "Account"}
+            </p>
+            <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+              Your appointments, clients, receipts, and communication log sync across every device you sign in on.
+            </p>
+          </Card>
+        ) : (
+          <GuestModeCard
+            onSignIn={() => setAuthSheetMode("signin")}
+            onCreateAccount={() => setAuthSheetMode("signup")}
+          />
+        )}
 
         {mode === "authed" && (
           <Card className="p-4">
@@ -7020,6 +7196,11 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
 
       <ReadinessChecklistSheet open={showReadiness} onClose={() => setShowReadiness(false)} mode={mode} pushCap={pushCap} />
       <DeleteAccountSheet open={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} onSignOut={onSignOut} />
+      <AuthSheet
+        open={!!authSheetMode}
+        initialMode={authSheetMode || "signin"}
+        onClose={() => setAuthSheetMode(null)}
+      />
     </div>
   );
 };
