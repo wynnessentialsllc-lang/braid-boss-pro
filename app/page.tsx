@@ -5670,15 +5670,33 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
         {openAccount && (
           <>
             <SectionTitle>Account</SectionTitle>
-            <Card className="p-4 active:scale-[0.99]" onClick={openAccount}>
-              <div className="flex items-center justify-between">
+            {/* Real <button> instead of Card+onClick. iOS WKWebView
+                routes touches to native button elements reliably; the
+                <div onClick> path was inconsistent on this card.
+                Visual styling mirrors the Card component (gradient
+                background, hairline border, soft shadow, rounded
+                corners) so the appearance is unchanged. */}
+            <button
+              type="button"
+              onClick={() => { console.log("Account sync tapped"); openAccount(); }}
+              className="w-full text-left rounded-2xl p-4 active:scale-[0.99] cursor-pointer select-none transition"
+              style={{
+                background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
+                border: `1px solid ${C.hairline}`,
+                boxShadow: "0 1px 2px rgba(42, 24, 16, 0.04), 0 8px 24px -12px rgba(42, 24, 16, 0.12)",
+                font: "inherit",
+                color: "inherit",
+                appearance: "none",
+                WebkitAppearance: "none",
+              }}>
+              <div className="flex items-center justify-between" style={{ pointerEvents: "none" }}>
                 <div>
                   <p className="text-sm font-semibold" style={{ color: C.espresso }}>Account &amp; sync</p>
                   <p className="text-[11px]" style={{ color: C.muted }}>Sign in to sync · export · sign out</p>
                 </div>
                 <ChevronRight size={18} style={{ color: C.muted }} />
               </div>
-            </Card>
+            </button>
           </>
         )}
 
@@ -5694,15 +5712,31 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
         </Card>
 
         {openCommunicationLog && (
-          <Card className="p-4 active:scale-[0.99] mt-2" onClick={openCommunicationLog}>
-            <div className="flex items-center justify-between">
+          // Real <button> for the same WKWebView reliability reason as
+          // Account & sync above. pointer-events: none on the inner
+          // flex row guarantees taps on the chevron, the labels, or
+          // the dead space between them all bubble up to the button.
+          <button
+            type="button"
+            onClick={() => { console.log("Communication log tapped"); openCommunicationLog(); }}
+            className="w-full text-left rounded-2xl p-4 mt-2 active:scale-[0.99] cursor-pointer select-none transition"
+            style={{
+              background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
+              border: `1px solid ${C.hairline}`,
+              boxShadow: "0 1px 2px rgba(42, 24, 16, 0.04), 0 8px 24px -12px rgba(42, 24, 16, 0.12)",
+              font: "inherit",
+              color: "inherit",
+              appearance: "none",
+              WebkitAppearance: "none",
+            }}>
+            <div className="flex items-center justify-between" style={{ pointerEvents: "none" }}>
               <div>
                 <p className="text-sm font-semibold" style={{ color: C.espresso }}>Communication log</p>
                 <p className="text-[11px]" style={{ color: C.muted }}>{(store.commLog || []).length} message{(store.commLog || []).length === 1 ? "" : "s"} · copies, shares, sends</p>
               </div>
               <ChevronRight size={18} style={{ color: C.muted }} />
             </div>
-          </Card>
+          </button>
         )}
 
         <SectionTitle>Data</SectionTitle>
