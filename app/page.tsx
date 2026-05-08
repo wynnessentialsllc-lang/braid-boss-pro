@@ -1170,14 +1170,24 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
     const wkISO = wk.toISOString().slice(0, 10);
     const msISO = ms.toISOString().slice(0, 10);
     const completedThisWeek = appointments.filter(a => a.status === "completed" && a.date >= wkISO);
-    const weekRevenue = completedThisWeek.reduce((s, a) => s + (Number(a.totalPrice) || 0), 0);
+    // Week revenue = what was actually collected on completed work this
+    // week (deposit + balance), not the quoted total.
+    const weekRevenue = completedThisWeek.reduce((s, a) => {
+      const collected = parseMoney(a.depositPaid) || (Number(a.balanceDue) === 0 ? parseMoney(a.totalPrice) : 0);
+      return s + collected;
+    }, 0);
     const pendingBalance = appointments
       .filter(a => a.status !== "cancelled")
       .map(a => ({ a, ps: paymentStatusOf(a, today) }))
       .filter(({ ps }) => ps === "pending" || ps === "deposit" || ps === "overdue")
       .reduce((s, { a }) => s + (Number(a.balanceDue) || 0), 0);
     const monthIncome = transactions.filter(t => t.type === "income" && t.date >= msISO).reduce((s, t) => s + Number(t.amount), 0)
-      + appointments.filter(a => a.status === "completed" && a.date >= msISO).reduce((s, a) => s + (Number(a.totalPrice) || 0), 0);
+      + appointments
+        .filter(a => (a.status === "completed" || a.paymentStatus === "paid") && a.status !== "cancelled" && a.date >= msISO)
+        .reduce((s, a) => {
+          const collected = parseMoney(a.depositPaid) || (Number(a.balanceDue) === 0 ? parseMoney(a.totalPrice) : 0);
+          return s + collected;
+        }, 0);
     const monthExpense = transactions.filter(t => t.type === "expense" && t.date >= msISO).reduce((s, t) => s + Number(t.amount), 0);
     return { weekRevenue, weekAppts: completedThisWeek.length, pendingBalance, monthProfit: monthIncome - monthExpense };
   }, [appointments, transactions, today]);
@@ -1191,12 +1201,19 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
   , [appointments, today]);
 
   const markApptPaid = async (appt: any) => {
+    const apptDate = appt.date || todayISO();
+    const isPastOrToday = apptDate <= today;
     const updated = {
       ...appt,
-      depositPaid: Number(appt.totalPrice) || 0,
+      depositPaid: parseMoney(appt.totalPrice),
       balanceDue: 0,
       paymentStatus: "paid",
       paymentDate: appt.paymentDate || todayISO(),
+      // If the service has happened, completing the appointment lets the
+      // money tracker + client lifetime total pick it up immediately.
+      status: isPastOrToday && appt.status !== "cancelled" && appt.status !== "no_show"
+        ? "completed"
+        : appt.status,
     };
     await store.upsertAppointment(updated);
   };
@@ -1239,10 +1256,10 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <KpiCard label="Week revenue" value={fmtMoney(stats.weekRevenue, business.currency)} icon={<ArrowUpRight size={16} />} tone="gold" />
-          <KpiCard label="Week clients" value={stats.weekAppts} icon={<Users size={16} />} />
-          <KpiCard label="Pending balance" value={fmtMoney(stats.pendingBalance, business.currency)} icon={<Clock size={16} />} tone={stats.pendingBalance > 0 ? "warning" : "neutral"} />
-          <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} />
+          <KpiCard label="Week revenue" value={fmtMoney(stats.weekRevenue, business.currency)} icon={<ArrowUpRight size={16} />} tone="gold" onClick={() => setActive("money")} />
+          <KpiCard label="Week clients" value={stats.weekAppts} icon={<Users size={16} />} onClick={() => setActive("schedule")} />
+          <KpiCard label="Pending balance" value={fmtMoney(stats.pendingBalance, business.currency)} icon={<Clock size={16} />} tone={stats.pendingBalance > 0 ? "warning" : "neutral"} onClick={() => setActive("schedule")} />
+          <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} onClick={() => setActive("money")} />
         </div>
 
         <div>
@@ -1256,7 +1273,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
           ) : (
             <div className="space-y-2">
               {pendingBalanceAppts.slice(0, 4).map(({ a, ps }) => (
-                <Card key={a.id} className="p-3.5 flex items-center gap-3">
+                <Card key={a.id} className="p-3.5 flex items-center gap-3 cursor-pointer active:scale-[0.99] transition" onClick={() => openQuickAppt(a)}>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                       <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>
@@ -1268,7 +1285,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
                     <span style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: ps === "overdue" ? C.danger : C.goldDeep }}>
                       {fmtMoney(Number(a.balanceDue) || 0, business.currency)}
                     </span>
-                    <button onClick={() => markApptPaid(a)}
+                    <button onClick={(e) => { e.stopPropagation(); markApptPaid(a); }}
                       className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
                       style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
                       Mark paid
@@ -1276,6 +1293,13 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
                   </div>
                 </Card>
               ))}
+              {pendingBalanceAppts.length > 4 && (
+                <button onClick={() => setActive("schedule")}
+                  className="w-full text-center text-xs font-semibold py-2"
+                  style={{ color: C.goldDeep }}>
+                  View all {pendingBalanceAppts.length} pending →
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1372,22 +1396,23 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
   );
 };
 
-const KpiCard = ({ label, value, icon, tone = "neutral" }) => {
-  const tones = {
+const KpiCard = ({ label, value, icon, tone = "neutral", onClick }: { label: any; value: any; icon: any; tone?: string; onClick?: () => void }) => {
+  const tones: Record<string, { accent: string; bg: string }> = {
     neutral: { accent: C.coffee, bg: C.ivory },
     gold: { accent: C.goldDeep, bg: "#F5E9C8" },
     success: { accent: C.success, bg: "#E4EDD8" },
     warning: { accent: C.warning, bg: "#F5DDC0" },
     danger: { accent: C.danger, bg: "#F2D6D0" },
   };
-  const t = tones[tone];
+  const t = tones[tone] || tones.neutral;
   return (
-    <Card className="p-4">
+    <Card className={`p-4 ${onClick ? "cursor-pointer active:scale-[0.98] transition" : ""}`} onClick={onClick}>
       <div className="flex items-center justify-between mb-3">
         <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>{label}</span>
         <div className="rounded-full p-1.5" style={{ background: t.bg, color: t.accent }}>{icon}</div>
       </div>
       <p style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: C.espresso, lineHeight: 1 }}>{value}</p>
+      {onClick && <p className="text-[10px] font-semibold mt-1.5 flex items-center gap-0.5" style={{ color: C.gold }}>View <ChevronRight size={11} /></p>}
     </Card>
   );
 };
@@ -1920,13 +1945,20 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt }) => {
           </div>
           {balanceDue > 0 ? (
             <Button variant="primary" icon={<Check size={16} />} fullWidth
-              onClick={() => setForm({
-                ...form,
-                depositPaid: Number(form.totalPrice) || 0,
-                paymentStatus: "paid",
-                paymentDate: form.paymentDate || todayISO(),
-              })}>
-              Mark as paid
+              onClick={() => {
+                const apptDate = form.date || todayISO();
+                const isPastOrToday = apptDate <= todayISO();
+                setForm({
+                  ...form,
+                  depositPaid: parseMoney(form.totalPrice),
+                  paymentStatus: "paid",
+                  paymentDate: form.paymentDate || todayISO(),
+                  status: isPastOrToday && form.status !== "cancelled" && form.status !== "no_show"
+                    ? "completed"
+                    : form.status,
+                });
+              }}>
+              Collect balance / Mark as paid
             </Button>
           ) : (
             <Button variant="outline" icon={<RefreshCw size={14} />} fullWidth
@@ -2044,11 +2076,17 @@ const Clients = ({ store, openClientPhotos }: { store: any; openClientPhotos?: a
 
   const enriched = useMemo(() => clients.map(c => {
     const cAppts = appointments.filter(a => a.clientId === c.id);
-    const completed = cAppts.filter(a => a.status === "completed");
+    // Lifetime total = sum of what was actually collected, not quoted.
+    const totalSpent = cAppts
+      .filter(a => (a.status === "completed" || a.paymentStatus === "paid") && a.status !== "cancelled")
+      .reduce((s, a) => {
+        const collected = parseMoney(a.depositPaid) || (Number(a.balanceDue) === 0 ? parseMoney(a.totalPrice) : 0);
+        return s + collected;
+      }, 0);
     return {
       ...c,
       apptCount: cAppts.length,
-      totalSpent: completed.reduce((s, a) => s + (Number(a.totalPrice) || 0), 0),
+      totalSpent,
       lastApptDate: cAppts.map(a => a.date).sort().reverse()[0],
       photoCount: photos.filter(p => p.clientId === c.id).length,
     };
@@ -2154,7 +2192,12 @@ const ClientSheet = ({ open, client, store, onClose }: {
     form.id ? photos.filter((p: any) => p.clientId === form.id).sort((a: any, b: any) => (b.takenAt || b.createdAt || "").localeCompare(a.takenAt || a.createdAt || "")) : []
   , [photos, form.id]);
 
-  const totalSpent = myAppts.filter((a: any) => a.status === "completed").reduce((s: number, a: any) => s + (Number(a.totalPrice) || 0), 0);
+  const totalSpent = myAppts
+    .filter((a: any) => (a.status === "completed" || a.paymentStatus === "paid") && a.status !== "cancelled")
+    .reduce((s: number, a: any) => {
+      const collected = parseMoney(a.depositPaid) || (Number(a.balanceDue) === 0 ? parseMoney(a.totalPrice) : 0);
+      return s + collected;
+    }, 0);
 
   const togglePref = (s: string) => {
     const has = form.preferredStyles.includes(s);
@@ -2521,8 +2564,26 @@ const Money = ({ store, openTxSheet, editTx, openTimerSessions }) => {
 
   const txInRange = useMemo(() => store.transactions.filter(t => t.date >= range.start && t.date <= range.end), [store.transactions, range]);
   const apptIncome = useMemo(() => store.appointments
-    .filter(a => a.status === "completed" && a.date >= range.start && a.date <= range.end)
-    .map(a => ({ id: `appt_${a.id}`, type: "income", date: a.date, amount: a.finalPrice || 0, category: "Service", note: `${a.style || "Service"} — ${store.clientById(a.clientId)?.name || "Client"}`, fromAppt: true, apptId: a.id })),
+    .filter(a =>
+      (a.status === "completed" || a.paymentStatus === "paid") &&
+      a.status !== "cancelled" &&
+      a.date >= range.start && a.date <= range.end
+    )
+    // Income = actually collected. Falls back to total price for fully
+    // paid appointments missing an explicit depositPaid.
+    .map(a => {
+      const collected = parseMoney(a.depositPaid) || (Number(a.balanceDue) === 0 ? parseMoney(a.totalPrice) : 0);
+      return {
+        id: `appt_${a.id}`,
+        type: "income",
+        date: a.date,
+        amount: collected,
+        category: "Service",
+        note: `${a.style || "Service"} — ${store.clientById(a.clientId)?.name || "Client"}`,
+        fromAppt: true,
+        apptId: a.id,
+      };
+    }),
     [store.appointments, store.clients, range]);
 
   const all = useMemo(() => [...apptIncome, ...txInRange].sort((a, b) => b.date.localeCompare(a.date)), [apptIncome, txInRange]);
@@ -4276,8 +4337,8 @@ export default function App() {
   const notifications = useNotifications(store);
 
   // Dashboard quick actions
-  const openQuickAppt = () => {
-    setApptPrefill({});
+  const openQuickAppt = (prefill: any = {}) => {
+    setApptPrefill(prefill || {});
     setActive("schedule");
   };
   const openQuickClient = () => {
