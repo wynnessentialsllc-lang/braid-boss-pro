@@ -16,12 +16,12 @@ const FAQ: { q: string; a: string }[] = [
     a: "Yes. Guest mode keeps everything on your device. Create an account later if you want sync, cloud backup, or multi-device access — your local data will migrate up the first time you sign in.",
   },
   {
-    q: "Why don&apos;t I see push notifications on my iPhone?",
-    a: "Browser-based push isn&apos;t supported by every iOS Safari version, and it&apos;s never as reliable as native iOS push. Once we ship the App Store build, you&apos;ll get true iOS push without re-subscribing — your existing setup carries over.",
+    q: "Why don’t I see push notifications on my iPhone?",
+    a: "Browser-based push isn’t supported by every iOS Safari version, and it’s never as reliable as native iOS push. Once we ship the App Store build, you’ll get true iOS push without re-subscribing — your existing setup carries over.",
   },
   {
     q: "Where are my photos stored?",
-    a: "If you&apos;re signed in, photos live in a private storage bucket that only your account can read or write. Each photo is also kept locally as a fast cache. Guest mode keeps photos only on the device.",
+    a: "If you’re signed in, photos live in a private storage bucket that only your account can read or write. Each photo is also kept locally as a fast cache. Guest mode keeps photos only on the device.",
   },
   {
     q: "How do I export my data?",
@@ -70,7 +70,7 @@ export default function SupportPage() {
           />
           <SupportTile
             label="Delete account help"
-            sub="If the in-app delete won&apos;t go through"
+            sub="If the in-app delete won’t go through"
             href={composeMail(
               "[Delete] Braid Boss Pro",
               "Account email:\n\nReason for deletion (optional):\n\n",
@@ -120,7 +120,7 @@ export default function SupportPage() {
 
       <LegalSection title="Service status">
         <p>
-          If something is unresponsive or sync looks stuck, check that you have a working connection first. The app keeps running offline — your changes save locally and upload as soon as you&apos;re back on. If it persists, email{" "}
+          If something is unresponsive or sync looks stuck, check that you have a working connection first. The app keeps running offline — your changes save locally and upload as soon as you’re back on. If it persists, email{" "}
           <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> with the time and what you were doing.
         </p>
       </LegalSection>
