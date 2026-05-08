@@ -6,6 +6,8 @@
 // right behaviour for an in-salon appointment whose hours don't shift
 // with the client's location.
 
+import { downloadIcs as nativeDownloadIcs } from "./native-download";
+
 export type IcsAppointment = {
   id: string;
   date: string;            // YYYY-MM-DD
@@ -136,18 +138,13 @@ export const buildVCalendar = (appts: IcsAppointment[], business?: { businessNam
   return lines.join("\r\n");
 };
 
-// Browser-side download helper. SSR-safe (no-op).
+// Browser-side download helper. SSR-safe (no-op). Routes through the
+// native-download helper so the iOS Capacitor shell can hand the file
+// off to Files / Mail / Calendar via the system share sheet (WKWebView
+// silently ignores <a download>).
 export const downloadIcs = (filename: string, body: string): void => {
   if (typeof window === "undefined") return;
-  const blob = new Blob([body], { type: "text/calendar;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  void nativeDownloadIcs(filename, body);
 };
 
 export const sanitizeFilename = (s: string): string =>

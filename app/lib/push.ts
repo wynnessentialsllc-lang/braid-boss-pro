@@ -1,18 +1,32 @@
 // Push notification subscription layer.
 //
 // Same surface for two transports:
-//   - Web Push (today, browsers): registers the service worker, asks
+//   - Web Push (browsers, PWA): registers the service worker, asks
 //     for permission, subscribes to PushManager, persists the
 //     endpoint + keys to Supabase under the current user.
-//   - Native push (Capacitor / iOS / Android, future wrap): the
-//     Capacitor PushNotifications plugin yields a device token; we
-//     persist that token through the same `registerSubscription`
-//     entry point. The schema already supports both — we just store
-//     `device_token` instead of `endpoint`/`keys`.
+//   - Native push (Capacitor / iOS): the @capacitor/push-notifications
+//     plugin yields a device token via the `registration` listener;
+//     we persist that token under the same row shape (platform="ios",
+//     device_token). WKWebView has no service worker or PushManager,
+//     so the web path short-circuits in native and the native path
+//     short-circuits in the browser.
 
 import { getSupabase } from "./supabase";
 
 const SW_PATH = "/sw.js";
+
+// Capacitor runtime detection. We avoid a static `import` of
+// @capacitor/core so the web bundle never pulls native code in. The
+// `Capacitor` global is injected at runtime by the iOS shell.
+const isNativePlatform = (): boolean => {
+  try {
+    if (typeof window === "undefined") return false;
+    const w = window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } };
+    return !!w.Capacitor?.isNativePlatform?.();
+  } catch {
+    return false;
+  }
+};
 // VAPID public key. Set via NEXT_PUBLIC env at build time. When unset
 // (the current default), Web Push silently no-ops; native pushes via
 // Capacitor still work because they don't need VAPID.
@@ -36,6 +50,30 @@ export type PushCapability =
 
 export const detectPushCapability = async (): Promise<PushCapability> => {
   if (typeof window === "undefined") return "unsupported";
+
+  // Native iOS shell: APNs is always supported on physical devices
+  // (the Simulator returns no token, but we don't need to surface that
+  // separately at this layer). Permission state comes from the
+  // PushNotifications plugin.
+  if (isNativePlatform()) {
+    try {
+      const { PushNotifications } = await import("@capacitor/push-notifications");
+      const status = await PushNotifications.checkPermissions();
+      if (status.receive === "denied") return "blocked";
+      if (status.receive === "granted") {
+        // We don't track per-device subscription state on the client
+        // for native — the Supabase row is the source of truth and
+        // the dashboard already reads it. Treat granted as
+        // "subscribed" so the UI lights up.
+        return "subscribed";
+      }
+      return "default";
+    } catch {
+      return "unsupported";
+    }
+  }
+
+  // Web path: requires service worker + PushManager.
   if (!("serviceWorker" in navigator)) return "unsupported";
   if (!("PushManager" in window)) return "unsupported";
   if (Notification.permission === "denied") return "blocked";
@@ -52,6 +90,10 @@ export const detectPushCapability = async (): Promise<PushCapability> => {
 
 export const registerServiceWorker = async (): Promise<ServiceWorkerRegistration | null> => {
   if (typeof window === "undefined") return null;
+  // Service workers don't run inside Capacitor / WKWebView. Skip
+  // registration to avoid the inevitable error and keep the native
+  // shell quiet.
+  if (isNativePlatform()) return null;
   if (!("serviceWorker" in navigator)) return null;
   try {
     const existing = await navigator.serviceWorker.getRegistration(SW_PATH);
@@ -104,11 +146,90 @@ const persistSubscription = async (
   if (error) throw error;
 };
 
-// Web entry point: ask for permission, register the SW, subscribe to
-// the PushManager, persist to Supabase. Returns the live subscription
-// or null if the environment doesn't support it.
-export const subscribeWebPush = async (userId: string): Promise<PushSubscription | null> => {
+// Native iOS subscribe: APNs registration via Capacitor. Listens once
+// for the registration event, persists the device token, then
+// resolves. Returns true on success, false otherwise. Failures here
+// surface the actual reason via a thrown Error so the UI's
+// extractFunctionError-style helpers can show it inline.
+const subscribeNative = async (userId: string): Promise<boolean> => {
+  const { PushNotifications } = await import("@capacitor/push-notifications");
+
+  // Permission first. iOS shows the system prompt on requestPermissions
+  // if the user hasn't decided yet.
+  const status = await PushNotifications.requestPermissions();
+  if (status.receive !== "granted") return false;
+
+  return await new Promise<boolean>((resolve, reject) => {
+    let settled = false;
+    let regHandle: { remove: () => Promise<void> } | null = null;
+    let errHandle: { remove: () => Promise<void> } | null = null;
+    const timeout = setTimeout(async () => {
+      if (settled) return;
+      settled = true;
+      try { await regHandle?.remove(); } catch { /* ignore */ }
+      try { await errHandle?.remove(); } catch { /* ignore */ }
+      reject(new Error("APNs registration timed out"));
+    }, 30000);
+
+    const cleanup = async () => {
+      clearTimeout(timeout);
+      try { await regHandle?.remove(); } catch { /* ignore */ }
+      try { await errHandle?.remove(); } catch { /* ignore */ }
+    };
+
+    void (async () => {
+      regHandle = await PushNotifications.addListener("registration", async (token) => {
+        if (settled) return;
+        settled = true;
+        try {
+          await registerNativeSubscription(userId, "ios", token.value);
+          await cleanup();
+          resolve(true);
+        } catch (err) {
+          await cleanup();
+          reject(err);
+        }
+      });
+      errHandle = await PushNotifications.addListener("registrationError", async (e) => {
+        if (settled) return;
+        settled = true;
+        await cleanup();
+        const err = (e as { error?: string })?.error || "registration error";
+        reject(new Error(String(err)));
+      });
+      // Kick off the actual APNs registration. The listeners above
+      // resolve once the token (or error) comes back.
+      try {
+        await PushNotifications.register();
+      } catch (err) {
+        if (!settled) {
+          settled = true;
+          await cleanup();
+          reject(err);
+        }
+      }
+    })();
+  });
+};
+
+// Subscribe entry point. Routes through APNs on native iOS, Web Push
+// otherwise. Returns the live web subscription on web, true on native
+// success, null when the platform doesn't support push.
+export const subscribeWebPush = async (
+  userId: string,
+): Promise<PushSubscription | true | null> => {
   if (typeof window === "undefined") return null;
+
+  if (isNativePlatform()) {
+    try {
+      const ok = await subscribeNative(userId);
+      return ok ? true : null;
+    } catch (err) {
+      console.warn("[bbp] native push subscribe failed", err);
+      return null;
+    }
+  }
+
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) return null;
   const perm = await requestPermission();
   if (perm !== "granted") return null;
@@ -150,9 +271,27 @@ export const registerNativeSubscription = async (
   await persistSubscription(userId, { platform, deviceToken });
 };
 
-// Unsubscribe both the browser-side push manager and the Supabase row.
+// Unsubscribe. On native iOS the only thing we can do is delete the
+// stored device-token row (APNs has no client-side unsubscribe call;
+// the user revokes via system settings). On web we tear down the
+// PushSubscription and prune the matching row.
 export const unsubscribeWebPush = async (userId: string): Promise<void> => {
   if (typeof window === "undefined") return;
+
+  if (isNativePlatform()) {
+    try {
+      const supabase = getSupabase();
+      await supabase
+        .from("push_subscriptions")
+        .delete()
+        .eq("user_id", userId)
+        .eq("platform", "ios");
+    } catch (err) {
+      console.warn("[bbp] native unsubscribe failed", err);
+    }
+    return;
+  }
+
   try {
     const reg = await navigator.serviceWorker.getRegistration(SW_PATH);
     const sub = reg ? await reg.pushManager.getSubscription() : null;
@@ -175,6 +314,23 @@ export const unsubscribeWebPush = async (userId: string): Promise<void> => {
 // Called once per app open for the active subscription, if any.
 export const refreshSubscriptionHeartbeat = async (userId: string): Promise<void> => {
   if (typeof window === "undefined") return;
+
+  if (isNativePlatform()) {
+    // No client-side handle to the APNs token after registration is
+    // complete (the plugin doesn't expose a getter). The token was
+    // upserted into push_subscriptions on register; we touch the row
+    // by user_id+platform to keep last_seen_at fresh for stale prune.
+    try {
+      const supabase = getSupabase();
+      await supabase
+        .from("push_subscriptions")
+        .update({ last_seen_at: new Date().toISOString(), enabled: true })
+        .eq("user_id", userId)
+        .eq("platform", "ios");
+    } catch { /* swallow */ }
+    return;
+  }
+
   try {
     const reg = await navigator.serviceWorker.getRegistration(SW_PATH);
     const sub = reg ? await reg.pushManager.getSubscription() : null;

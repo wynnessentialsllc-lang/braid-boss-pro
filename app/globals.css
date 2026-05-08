@@ -23,4 +23,13 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  /* Reserve room for the iOS status bar / dynamic island when the
+     app runs inside the Capacitor shell or as an installed PWA.
+     viewport-fit: cover (set in layout.tsx) makes these env() values
+     resolve to real numbers; in regular Safari they're 0 and this
+     line is a no-op. */
+  padding-top: env(safe-area-inset-top, 0px);
+  /* Per-screen bottom padding (e.g. tab bar) already adds
+     env(safe-area-inset-bottom, 0px); not adding it here would
+     double-pad. Same for left/right — we never use landscape. */
 }
