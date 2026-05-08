@@ -7245,6 +7245,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   const [feedToken, setFeedToken] = useState<string | null>(null);
   const [feedBusy, setFeedBusy] = useState(false);
   const [feedCopied, setFeedCopied] = useState(false);
+  const [feedError, setFeedError] = useState<string | null>(null);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clears feed token when auth context changes, intentional
@@ -7276,7 +7277,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
 
   const handleEnableFeed = async () => {
     if (!userId) return;
-    setFeedBusy(true);
+    setFeedBusy(true); setFeedError(null);
     try {
       const supabase = getSupabase();
       // Token = base64url of 24 random bytes via crypto. Long, opaque,
@@ -7293,8 +7294,9 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
       });
       if (error) throw error;
       setFeedToken(token);
-    } catch (err) {
+    } catch (err: any) {
       console.warn("[bbp] feed enable failed", err);
+      setFeedError(err?.message || "Couldn't enable the calendar feed. Try again.");
     } finally {
       setFeedBusy(false);
     }
@@ -7302,15 +7304,19 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
 
   const handleRevokeFeed = async () => {
     if (!userId || !feedToken) return;
-    setFeedBusy(true);
+    setFeedBusy(true); setFeedError(null);
     try {
       const supabase = getSupabase();
-      await supabase
+      const { error } = await supabase
         .from("calendar_feed_tokens")
         .update({ revoked_at: new Date().toISOString() })
         .eq("user_id", userId)
         .eq("token", feedToken);
+      if (error) throw error;
       setFeedToken(null);
+    } catch (err: any) {
+      console.warn("[bbp] feed revoke failed", err);
+      setFeedError(err?.message || "Couldn't revoke the feed. Try again.");
     } finally {
       setFeedBusy(false);
     }
@@ -7330,6 +7336,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   const [bookingLink, setBookingLink] = useState<{ slug: string; active: boolean; intro: string | null; business_name: string | null } | null>(null);
   const [bookingBusy, setBookingBusy] = useState(false);
   const [bookingCopied, setBookingCopied] = useState(false);
+  const [bookingError, setBookingError] = useState<string | null>(null);
   const [pendingRequests, setPendingRequests] = useState<number>(0);
 
   // eslint-disable-next-line react-hooks/preserve-manual-memoization -- depends on window.location which the React Compiler can't statically memoize, intentional
@@ -7377,7 +7384,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
 
   const handleEnableBooking = async () => {
     if (!userId) return;
-    setBookingBusy(true);
+    setBookingBusy(true); setBookingError(null);
     try {
       const supabase = getSupabase();
       const slug = generateSlug();
@@ -7386,7 +7393,11 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
         .insert({ user_id: userId, slug, active: true })
         .select("slug, active, intro, business_name")
         .single();
-      if (!error && data) setBookingLink(data as any);
+      if (error) throw error;
+      if (data) setBookingLink(data as any);
+    } catch (err: any) {
+      console.warn("[bbp] booking enable failed", err);
+      setBookingError(err?.message || "Couldn't generate a booking link. Try again.");
     } finally {
       setBookingBusy(false);
     }
@@ -7394,16 +7405,20 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
 
   const handleToggleBooking = async () => {
     if (!userId || !bookingLink) return;
-    setBookingBusy(true);
+    setBookingBusy(true); setBookingError(null);
     try {
       const supabase = getSupabase();
       const next = !bookingLink.active;
-      await supabase
+      const { error } = await supabase
         .from("booking_links")
         .update({ active: next })
         .eq("user_id", userId)
         .eq("slug", bookingLink.slug);
+      if (error) throw error;
       setBookingLink({ ...bookingLink, active: next });
+    } catch (err: any) {
+      console.warn("[bbp] booking toggle failed", err);
+      setBookingError(err?.message || "Couldn't update the booking link. Try again.");
     } finally {
       setBookingBusy(false);
     }
@@ -7530,6 +7545,9 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
                 {bookingBusy ? "Working…" : "Generate booking link"}
               </Button>
             )}
+            {bookingError && (
+              <p className="text-[11px] mt-2" style={{ color: C.danger }}>{bookingError}</p>
+            )}
             {bookingLink && openBookingRequests && (
               <button onClick={openBookingRequests}
                 className="w-full mt-3 flex items-center justify-between rounded-xl p-3 active:scale-[0.99] transition"
@@ -7571,6 +7589,9 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
               <Button variant="primary" icon={<Calendar size={15} />} fullWidth disabled={feedBusy} onClick={handleEnableFeed}>
                 {feedBusy ? "Working…" : "Enable calendar feed"}
               </Button>
+            )}
+            {feedError && (
+              <p className="text-[11px] mt-2" style={{ color: C.danger }}>{feedError}</p>
             )}
           </Card>
         )}
