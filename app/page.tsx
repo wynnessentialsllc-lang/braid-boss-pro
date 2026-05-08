@@ -51,6 +51,7 @@ import {
   buildReceiptSummaryText,
 } from "./lib/receipts";
 import { renderReceiptPdf } from "./lib/pdf-render";
+import { getAuthRedirectUrl } from "./lib/site-url";
 import {
   dispatchPush,
   loadDeliveredHistory,
@@ -6581,12 +6582,16 @@ const AuthGate = ({ onContinueGuest }: { onContinueGuest: () => void }) => {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       } else if (tab === "signup") {
-        const { error } = await supabase.auth.signUp({ email, password });
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: getAuthRedirectUrl() },
+        });
         if (error) throw error;
         setMsg("Check your inbox to confirm the account, then sign in.");
       } else {
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: typeof window !== "undefined" ? `${window.location.origin}` : undefined,
+          redirectTo: getAuthRedirectUrl(),
         });
         if (error) throw error;
         setMsg("Reset email sent. Check your inbox.");
@@ -6871,7 +6876,11 @@ const AuthSheet = ({ open, initialMode, onClose, onAuthed }: {
         onAuthed?.();
         onClose();
       } else if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({ email: email.trim(), password });
+        const { error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { emailRedirectTo: getAuthRedirectUrl() },
+        });
         if (error) throw error;
         // Some Supabase configs auto-sign-in on signup; if so the
         // listener will flip mode → authed and the sheet closes
@@ -6880,7 +6889,7 @@ const AuthSheet = ({ open, initialMode, onClose, onAuthed }: {
         setMode("reset_sent");
       } else if (mode === "reset") {
         const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-          redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+          redirectTo: getAuthRedirectUrl(),
         });
         if (error) throw error;
         setMode("reset_sent");
