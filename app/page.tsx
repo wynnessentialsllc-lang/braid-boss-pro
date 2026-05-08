@@ -1,6 +1,21 @@
 "use client";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
+  getSupabase,
+  tryUpsert,
+  tryDelete,
+  trySaveSettings,
+  drainQueue,
+  queueLength,
+  syncClients,
+  syncAppointments,
+  syncQuotes,
+  syncReceipts,
+  syncCommunications,
+  syncNotifications,
+  syncSettings,
+} from "./lib/supabase";
+import {
   Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon,
   Plus, X, ChevronRight, ChevronLeft, Search, Copy, Check, Trash2, Edit3,
   FileText, DollarSign, Clock, Phone, Mail, AlertCircle, Sparkles,
@@ -1173,6 +1188,24 @@ const useStorage = () => {
   // helpers/aliases
   const clientById = useCallback((id) => clients.find(c => c.id === id), [clients]);
 
+  // Used by the cloud-sync layer to atomically replace the in-memory
+  // state from a remote pull. Only fields present on the payload are
+  // replaced; everything else is left alone.
+  const replaceCloudState = useCallback((next: {
+    clients?: any[]; appointments?: any[]; quotes?: any[]; receipts?: any[];
+    commLog?: any[]; business?: any; reminderSettings?: any;
+  }) => {
+    if (next.clients) setClients(next.clients);
+    if (next.appointments) setAppointments(next.appointments.map(normalizeAppointment));
+    if (next.quotes) setQuotes(next.quotes);
+    // Receipts table exists in cloud schema; the local store doesn't
+    // hold them in V1 (handled by PR #11 once merged), so skip when
+    // the setter isn't wired yet.
+    if (next.commLog) setCommLog(next.commLog);
+    if (next.business) setBusiness({ ...DEFAULT_BUSINESS, ...next.business });
+    if (next.reminderSettings) setReminderSettings({ ...DEFAULT_REMINDER_SETTINGS, ...next.reminderSettings });
+  }, []);
+
   return {
     loading,
     business, saveBusiness, setBusiness: saveBusiness,
@@ -1192,6 +1225,7 @@ const useStorage = () => {
     activeTimer, saveActiveTimer, setTimer: saveActiveTimer,
     timerSessions, upsertTimerSession, addTimerSession: upsertTimerSession,
     commLog, upsertCommLogEntry, deleteCommLogEntry,
+    replaceCloudState,
   };
 };
 
@@ -1658,7 +1692,7 @@ const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: {
 // ============================================================
 //  DASHBOARD
 // ============================================================
-const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, notifBadgeCount = 0 }: { store: any; setActive: any; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; notifBadgeCount?: number }) => {
+const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, notifBadgeCount = 0, syncState }: { store: any; setActive: any; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; notifBadgeCount?: number; syncState?: SyncState }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
@@ -1763,7 +1797,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
     <div className="bbp-fade">
       <Header
         title={greeting}
-        subtitle={fmtDateLong(today)}
+        subtitle={syncState ? <span className="inline-flex items-center gap-2">{fmtDateLong(today)}<SyncStatusPill state={syncState} /></span> as any : fmtDateLong(today)}
         leftAction={
           <button onClick={openReminders} className="p-2 rounded-full relative" style={{ color: C.coffee }} aria-label="Notifications">
             <Bell size={20} />
@@ -4852,7 +4886,7 @@ const PolicySheet = ({ policy, isNew, onClose, onSave }) => {
 // ============================================================
 //  SETTINGS (V1 extended with Reminders link)
 // ============================================================
-const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void }) => {
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
@@ -4910,6 +4944,21 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
             <MoneyInput value={b.defaultTravelFee ?? ""} onChange={(v) => setB({ ...b, defaultTravelFee: parseMoney(v) })} />
           </Field>
         </Card>
+
+        {openAccount && (
+          <>
+            <SectionTitle>Account</SectionTitle>
+            <Card className="p-4 active:scale-[0.99]" onClick={openAccount}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Account &amp; sync</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Sign in to sync · export · sign out</p>
+                </div>
+                <ChevronRight size={18} style={{ color: C.muted }} />
+              </div>
+            </Card>
+          </>
+        )}
 
         <SectionTitle>Reminders</SectionTitle>
         <Card className="p-4 active:scale-[0.99]" onClick={openReminderSettings}>
@@ -5550,10 +5599,380 @@ const NotificationsSheet = ({ open, onClose, items, dismiss, clearAll, markAllRe
 };
 
 // ============================================================
+//  AUTH + CLOUD SYNC (V1)
+// ============================================================
+type AuthMode = "loading" | "guest" | "authed";
+
+const GUEST_FLAG_KEY = "bbp-guest-mode";
+const SYNC_LAST_OK_KEY = "bbp-sync-last-ok";
+
+const useAuth = () => {
+  const [mode, setMode] = useState<AuthMode>("loading");
+  const [userId, setUserId] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    const supabase = getSupabase();
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (cancelled) return;
+      const session = data.session;
+      if (session?.user) {
+        setUserId(session.user.id);
+        setEmail(session.user.email ?? null);
+        setMode("authed");
+        return;
+      }
+      const guest = typeof window !== "undefined" && window.localStorage.getItem(GUEST_FLAG_KEY) === "1";
+      setMode(guest ? "guest" : "loading");
+    })();
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUserId(session.user.id);
+        setEmail(session.user.email ?? null);
+        setMode("authed");
+      } else {
+        setUserId(null);
+        setEmail(null);
+        const guest = typeof window !== "undefined" && window.localStorage.getItem(GUEST_FLAG_KEY) === "1";
+        setMode(guest ? "guest" : "loading");
+      }
+    });
+    return () => { cancelled = true; sub.subscription.unsubscribe(); };
+  }, []);
+
+  const continueAsGuest = useCallback(() => {
+    if (typeof window !== "undefined") window.localStorage.setItem(GUEST_FLAG_KEY, "1");
+    setMode("guest");
+  }, []);
+
+  const signOut = useCallback(async () => {
+    const supabase = getSupabase();
+    await supabase.auth.signOut();
+    if (typeof window !== "undefined") window.localStorage.removeItem(GUEST_FLAG_KEY);
+    setMode("loading");
+  }, []);
+
+  return { mode, userId, email, continueAsGuest, signOut };
+};
+
+type SyncState = "idle" | "syncing" | "offline" | "error";
+
+const useCloudSync = (userId: string | null, store: any) => {
+  const [state, setState] = useState<SyncState>("idle");
+  const [lastOk, setLastOk] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    try { return window.localStorage.getItem(SYNC_LAST_OK_KEY); } catch { return null; }
+  });
+  const [pendingCount, setPendingCount] = useState<number>(0);
+  const initialPullDone = useRef(false);
+  const settingsHash = useRef<string>("");
+  // Per-table hash map of records we've already pushed to the cloud,
+  // keyed by record id. Used to skip identical re-pushes and to detect
+  // local deletes (id present in map but absent from the live array).
+  const snap = useRef<Record<string, Map<string, string>>>({
+    clients: new Map(), appointments: new Map(), quotes: new Map(),
+    receipts: new Map(), communications: new Map(),
+  });
+
+  const stamp = () => {
+    const s = new Date().toISOString();
+    setLastOk(s);
+    if (typeof window !== "undefined") window.localStorage.setItem(SYNC_LAST_OK_KEY, s);
+  };
+
+  // Initial pull + one-time migration push on first authed render.
+  useEffect(() => {
+    if (!userId) { initialPullDone.current = false; return; }
+    if (initialPullDone.current) return;
+    initialPullDone.current = true;
+    (async () => {
+      setState("syncing");
+      try {
+        const [clientsCloud, apptsCloud, quotesCloud, receiptsCloud, commsCloud, settingsRow] = await Promise.all([
+          syncClients.pull(userId),
+          syncAppointments.pull(userId),
+          syncQuotes.pull(userId),
+          syncReceipts.pull(userId),
+          syncCommunications.pull(userId),
+          syncSettings.pull(userId),
+        ]);
+
+        // One-time migration: push any local-only records (id absent in
+        // the cloud snapshot) so existing localStorage data lands in the
+        // user's account. Cloud is canonical for everything else.
+        const newOnly = (local: any[], cloud: any[]) => {
+          const ids = new Set(cloud.map((x: any) => x.id));
+          return (Array.isArray(local) ? local : []).filter((x: any) => x?.id && !ids.has(x.id));
+        };
+        const pushQueue: Promise<any>[] = [];
+        for (const r of newOnly(store.clients, clientsCloud)) pushQueue.push(syncClients.upsert(userId, r).catch(() => null));
+        for (const r of newOnly(store.appointments, apptsCloud)) pushQueue.push(syncAppointments.upsert(userId, r).catch(() => null));
+        for (const r of newOnly(store.quotes, quotesCloud)) pushQueue.push(syncQuotes.upsert(userId, r).catch(() => null));
+        for (const r of newOnly(store.receipts || [], receiptsCloud)) pushQueue.push(syncReceipts.upsert(userId, r).catch(() => null));
+        for (const r of newOnly(store.commLog, commsCloud)) pushQueue.push(syncCommunications.upsert(userId, r).catch(() => null));
+        await Promise.all(pushQueue);
+
+        // Re-pull so the local state mirrors what's now in the cloud.
+        const [clients2, appts2, quotes2, receipts2, comms2] = await Promise.all([
+          syncClients.pull(userId),
+          syncAppointments.pull(userId),
+          syncQuotes.pull(userId),
+          syncReceipts.pull(userId),
+          syncCommunications.pull(userId),
+        ]);
+        const business = settingsRow?.data?.business || (settingsRow ? { businessName: settingsRow.business_name, currency: settingsRow.currency } : undefined);
+        const reminderSettings = settingsRow?.reminder_settings || undefined;
+        store.replaceCloudState?.({
+          clients: clients2, appointments: appts2, quotes: quotes2,
+          receipts: receipts2, commLog: comms2, business, reminderSettings,
+        });
+        // Seed the diff snapshot.
+        const seed = (table: string, arr: any[]) => {
+          snap.current[table].clear();
+          for (const r of arr) if (r?.id) snap.current[table].set(r.id, JSON.stringify(r));
+        };
+        seed("clients", clients2);
+        seed("appointments", appts2);
+        seed("quotes", quotes2);
+        seed("receipts", receipts2);
+        seed("communications", comms2);
+
+        stamp();
+        setState("idle");
+      } catch (err) {
+        console.warn("[bbp] initial sync failed", err);
+        setState("error");
+      }
+    })();
+  }, [userId, store]);
+
+  // Diff-push on every store change (after the initial pull). Pushes
+  // only records whose JSON differs from the last successful sync;
+  // deletes anything we'd previously synced that's no longer in state.
+  useEffect(() => {
+    if (!userId || !initialPullDone.current) return;
+    const tables: Array<{ table: import("./lib/supabase").SyncTable; arr: any[]; api: any }> = [
+      { table: "clients", arr: store.clients || [], api: syncClients },
+      { table: "appointments", arr: store.appointments || [], api: syncAppointments },
+      { table: "quotes", arr: store.quotes || [], api: syncQuotes },
+      { table: "receipts", arr: store.receipts || [], api: syncReceipts },
+      { table: "communications", arr: store.commLog || [], api: syncCommunications },
+    ];
+    let dirty = false;
+    setState("syncing");
+    (async () => {
+      for (const { table, arr } of tables) {
+        const seen = new Set<string>();
+        for (const r of arr) {
+          if (!r?.id) continue;
+          seen.add(r.id);
+          const hash = JSON.stringify(r);
+          if (snap.current[table].get(r.id) === hash) continue;
+          dirty = true;
+          await tryUpsert(table, userId, r);
+          snap.current[table].set(r.id, hash);
+        }
+        for (const id of Array.from(snap.current[table].keys())) {
+          if (seen.has(id)) continue;
+          dirty = true;
+          await tryDelete(table, userId, id);
+          snap.current[table].delete(id);
+        }
+      }
+      // Settings: push when business / reminderSettings changes.
+      const sHash = JSON.stringify({ b: store.business, r: store.reminderSettings });
+      if (sHash !== settingsHash.current) {
+        settingsHash.current = sHash;
+        dirty = true;
+        await trySaveSettings(userId, store.business, store.reminderSettings);
+      }
+      setPendingCount(queueLength());
+      if (dirty) stamp();
+      setState(navigator.onLine ? "idle" : "offline");
+    })().catch(() => setState("error"));
+  }, [userId, store.clients, store.appointments, store.quotes, store.receipts, store.commLog, store.business, store.reminderSettings]);
+
+  // Drain the offline write queue whenever connectivity resumes.
+  useEffect(() => {
+    if (!userId || typeof window === "undefined") return;
+    const onOnline = async () => {
+      const result = await drainQueue(userId);
+      setPendingCount(queueLength());
+      if (result.failed === 0) { stamp(); setState("idle"); }
+    };
+    const onOffline = () => setState("offline");
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- offline state is observed network state, intentional
+    if (!navigator.onLine) setState("offline");
+    setPendingCount(queueLength());
+    onOnline();
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, [userId]);
+
+  return { state, lastOk, pendingCount };
+};
+
+const AuthGate = ({ onContinueGuest }: { onContinueGuest: () => void }) => {
+  const [tab, setTab] = useState<"signin" | "signup" | "reset">("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true); setMsg(null); setErr(null);
+    try {
+      const supabase = getSupabase();
+      if (tab === "signin") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      } else if (tab === "signup") {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        setMsg("Check your inbox to confirm the account, then sign in.");
+      } else {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: typeof window !== "undefined" ? `${window.location.origin}` : undefined,
+        });
+        if (error) throw error;
+        setMsg("Reset email sent. Check your inbox.");
+      }
+    } catch (e: any) {
+      setErr(e?.message || "Something went wrong.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center px-5" style={{ minHeight: "100dvh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso }}>
+      <GlobalStyle />
+      <div className="w-full max-w-[400px]">
+        <p className="text-center text-[10px] font-bold tracking-[0.22em] uppercase" style={{ color: C.gold }}>Braid Boss Pro</p>
+        <h1 className="text-center mt-2 mb-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 600, color: C.espresso }}>
+          {tab === "signin" ? "Welcome back" : tab === "signup" ? "Create your account" : "Reset password"}
+        </h1>
+        <p className="text-center text-sm mb-5" style={{ color: C.muted }}>
+          {tab === "signin" ? "Sign in to sync your clients across devices." : tab === "signup" ? "Free to start. Cloud-synced from day one." : "Enter your email and we&apos;ll send a reset link."}
+        </p>
+        <Card className="p-5 space-y-3">
+          <Field label="Email">
+            <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@studio.com" />
+          </Field>
+          {tab !== "reset" && (
+            <Field label="Password">
+              <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
+            </Field>
+          )}
+          {err && <p className="text-xs" style={{ color: C.danger }}>{err}</p>}
+          {msg && <p className="text-xs" style={{ color: C.success }}>{msg}</p>}
+          <Button variant="primary" fullWidth disabled={busy || !email || (tab !== "reset" && !password)} onClick={submit}>
+            {busy ? "Working…" : tab === "signin" ? "Sign in" : tab === "signup" ? "Create account" : "Send reset email"}
+          </Button>
+          <div className="flex items-center justify-between text-[12px] pt-1">
+            {tab === "signin" ? (
+              <>
+                <button onClick={() => { setTab("reset"); setErr(null); setMsg(null); }} style={{ color: C.coffee }}>Forgot password?</button>
+                <button onClick={() => { setTab("signup"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Create account</button>
+              </>
+            ) : (
+              <button onClick={() => { setTab("signin"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Back to sign in</button>
+            )}
+          </div>
+        </Card>
+        <button onClick={onContinueGuest}
+          className="w-full text-center text-[12px] mt-5 py-3"
+          style={{ color: C.muted }}>
+          Continue as guest · data stays on this device
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const SyncStatusPill = ({ state }: { state: SyncState }) => {
+  const label = state === "syncing" ? "Syncing changes…"
+    : state === "offline" ? "Offline"
+    : state === "error" ? "Sync issue"
+    : "Synced";
+  const tone = state === "syncing" ? C.coffee
+    : state === "offline" ? C.warning
+    : state === "error" ? C.danger
+    : C.success;
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+      style={{ background: "rgba(245, 235, 217, 0.6)", color: tone, border: `1px solid ${tone}33`, letterSpacing: "0.08em" }}>
+      <span className="inline-block rounded-full" style={{ width: 6, height: 6, background: tone }} />
+      {label}
+    </span>
+  );
+};
+
+const AccountScreen = ({ email, mode, sync, onBack, onSignOut, onExport }: {
+  email: string | null;
+  mode: AuthMode;
+  sync: { state: SyncState; lastOk: string | null; pendingCount: number };
+  onBack: () => void;
+  onSignOut: () => Promise<void>;
+  onExport: () => void;
+}) => {
+  return (
+    <div className="bbp-fade pb-24">
+      <Header title="Account" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
+      <div className="px-5 pt-4 space-y-3">
+        <Card className="p-4">
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Signed in as</p>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>
+            {mode === "authed" ? (email || "Account") : "Guest mode"}
+          </p>
+          <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+            {mode === "authed"
+              ? "Your appointments, clients, receipts, and communication log sync across every device you sign in on."
+              : "Data is saved on this device only. Sign in to back up and access it anywhere."}
+          </p>
+        </Card>
+
+        {mode === "authed" && (
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>Sync status</p>
+              <SyncStatusPill state={sync.state} />
+            </div>
+            <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+              {sync.state === "offline" ? "You&apos;re offline. Changes will upload as soon as you&apos;re back on."
+                : sync.pendingCount > 0 ? `${sync.pendingCount} change${sync.pendingCount === 1 ? "" : "s"} queued.`
+                : sync.lastOk ? `Last backup ${fmtRelative(sync.lastOk)}.`
+                : "Last backup details will appear after the first sync."}
+            </p>
+          </Card>
+        )}
+
+        <Card className="p-4 space-y-2">
+          <Button variant="outline" icon={<Download size={15} />} fullWidth onClick={onExport}>Export all data (JSON)</Button>
+          {mode === "authed" ? (
+            <Button variant="danger" fullWidth onClick={onSignOut}>Sign out</Button>
+          ) : null}
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
 //  APP ROOT
 // ============================================================
 export default function App() {
+  const auth = useAuth();
   const store = useStorage();
+  const sync = useCloudSync(auth.userId, store);
   const [active, setActive] = useState("dashboard");
   const [secondary, setSecondary] = useState<string | null>(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
   const [calcPrefill, setCalcPrefill] = useState<EntityRecord | null>(null);
@@ -5630,6 +6049,13 @@ export default function App() {
   const handleDeleteTx = async (id) => { await store.deleteTransaction(id); setOpenTx(false); setEditingTx(null); };
   const handleSaveQuickClient = async (c) => { if (!c.name.trim()) return; await store.upsertClient(c); setOpenClientForm(false); setQuickClient(null); };
 
+  // Auth gate: shown when we haven't established a session and the user
+  // hasn't opted into guest mode. All hooks above this guard so the
+  // hook order is stable across renders.
+  if (auth.mode === "loading") {
+    return <AuthGate onContinueGuest={auth.continueAsGuest} />;
+  }
+
   if (store.loading) {
     return (
       <div className="flex items-center justify-center" style={{ minHeight: "100vh", background: C.cream }}>
@@ -5682,6 +6108,7 @@ export default function App() {
               openReminders={() => { setNotifOpen(true); notifications.markAllRead(); }}
               notifBadgeCount={notifications.unreadCount}
               openCommunication={openCommunication}
+              syncState={auth.mode === "authed" ? sync.state : undefined}
               openPresets={() => setSecondary("presets")}
               openTimer={() => setSecondary("timer")} />
           )}
@@ -5715,7 +6142,33 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} />}
+      {secondary === "account" && (
+        <AccountScreen
+          email={auth.email}
+          mode={auth.mode}
+          sync={sync}
+          onBack={() => setSecondary(null)}
+          onSignOut={async () => { await auth.signOut(); setSecondary(null); }}
+          onExport={() => {
+            const data = JSON.stringify({
+              business: store.business,
+              clients: store.clients,
+              appointments: store.appointments,
+              quotes: store.quotes,
+              receipts: ((store as any).receipts || []),
+              commLog: store.commLog,
+              transactions: store.transactions,
+            }, null, 2);
+            const blob = new Blob([data], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = `braid-boss-pro-${todayISO()}.json`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+          }}
+        />
+      )}
       {secondary === "savedQuotes" && (
         <SavedQuotes store={store} onBack={() => setSecondary(null)}
           onLoadQuote={handleLoadQuote}
