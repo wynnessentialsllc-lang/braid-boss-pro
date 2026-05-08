@@ -519,6 +519,15 @@ const useStorage = () => {
     const r = { ...a };
     if (!r.id) { r.id = uid(); r.createdAt = new Date().toISOString(); }
     r.balanceDue = Number((Number(r.totalPrice || 0) - Number(r.depositPaid || 0)).toFixed(2));
+    // Keep paymentStatus consistent: explicit "paid" override only sticks
+    // while balance is 0; otherwise derive from the deposit/balance state
+    // so a re-edit that adds price reverts the status.
+    if (r.balanceDue <= 0 && Number(r.totalPrice || 0) > 0) {
+      r.paymentStatus = "paid";
+      if (!r.paymentDate) r.paymentDate = todayISO();
+    } else if (r.paymentStatus === "paid") {
+      r.paymentStatus = "";
+    }
     await safeStorage.set(`appointments:${r.id}`, r);
     setAppointments(prev => {
       const i = prev.findIndex(x => x.id === r.id);
@@ -1095,11 +1104,14 @@ const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <Pill tone={STATUS_TONE[appt.status] || "neutral"}>{STATUS_LABEL[appt.status] || appt.status}</Pill>
+            {(() => {
+              const ps = paymentStatusOf(appt, todayISO());
+              return appt.status !== "cancelled" ? (
+                <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>
+              ) : null;
+            })()}
             {series && <Pill tone="gold"><Repeat size={10} /> {cadenceLabel(series.cadence)}</Pill>}
             {isLate && <Pill tone="danger">Late</Pill>}
-            {Number(appt.balanceDue) > 0 && appt.status !== "completed" && appt.status !== "cancelled" && (
-              <Pill tone="warning">Bal {fmtMoney(appt.balanceDue, business.currency)}</Pill>
-            )}
           </div>
           <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso, lineHeight: 1.15 }} className="truncate">
             {appt.clientName || "Unnamed client"}
@@ -1124,8 +1136,8 @@ const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: {
 // ============================================================
 //  DASHBOARD
 // ============================================================
-const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer }) => {
-  const { business, appointments, transactions, reminders, photos, recurringSeries } = store;
+const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, notifBadgeCount = 0 }) => {
+  const { business, appointments, transactions, photos, recurringSeries } = store;
   const today = todayISO();
 
   const todayAppts = useMemo(() =>
@@ -1159,15 +1171,36 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
     const msISO = ms.toISOString().slice(0, 10);
     const completedThisWeek = appointments.filter(a => a.status === "completed" && a.date >= wkISO);
     const weekRevenue = completedThisWeek.reduce((s, a) => s + (Number(a.totalPrice) || 0), 0);
-    const pendingBalance = appointments.filter(a => a.status !== "cancelled" && a.status !== "completed")
-      .reduce((s, a) => s + (Number(a.balanceDue) || 0), 0);
+    const pendingBalance = appointments
+      .filter(a => a.status !== "cancelled")
+      .map(a => ({ a, ps: paymentStatusOf(a, today) }))
+      .filter(({ ps }) => ps === "pending" || ps === "deposit" || ps === "overdue")
+      .reduce((s, { a }) => s + (Number(a.balanceDue) || 0), 0);
     const monthIncome = transactions.filter(t => t.type === "income" && t.date >= msISO).reduce((s, t) => s + Number(t.amount), 0)
       + appointments.filter(a => a.status === "completed" && a.date >= msISO).reduce((s, a) => s + (Number(a.totalPrice) || 0), 0);
     const monthExpense = transactions.filter(t => t.type === "expense" && t.date >= msISO).reduce((s, t) => s + Number(t.amount), 0);
     return { weekRevenue, weekAppts: completedThisWeek.length, pendingBalance, monthProfit: monthIncome - monthExpense };
-  }, [appointments, transactions]);
+  }, [appointments, transactions, today]);
+  const pendingBalanceAppts = useMemo(() =>
+    appointments
+      .filter(a => a.status !== "cancelled")
+      .map(a => ({ a, ps: paymentStatusOf(a, today) }))
+      .filter(({ ps }) => ps === "pending" || ps === "deposit" || ps === "overdue")
+      .filter(({ a }) => Number(a.balanceDue) > 0)
+      .sort((x, y) => (x.a.date || "").localeCompare(y.a.date || ""))
+  , [appointments, today]);
 
-  const pendingReminderCount = reminders.filter(r => r.status === "pending").length;
+  const markApptPaid = async (appt: any) => {
+    const updated = {
+      ...appt,
+      depositPaid: Number(appt.totalPrice) || 0,
+      balanceDue: 0,
+      paymentStatus: "paid",
+      paymentDate: appt.paymentDate || todayISO(),
+    };
+    await store.upsertAppointment(updated);
+  };
+
   const recentPhotos = useMemo(() =>
     [...photos].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")).slice(0, 6)
   , [photos]);
@@ -1185,12 +1218,12 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
         title={greeting}
         subtitle={fmtDateLong(today)}
         leftAction={
-          <button onClick={openReminders} className="p-2 rounded-full relative" style={{ color: C.coffee }}>
+          <button onClick={openReminders} className="p-2 rounded-full relative" style={{ color: C.coffee }} aria-label="Notifications">
             <Bell size={20} />
-            {pendingReminderCount > 0 && (
+            {notifBadgeCount > 0 && (
               <span className="absolute top-0 right-0 rounded-full text-[10px] font-bold flex items-center justify-center"
                 style={{ width: 16, height: 16, background: C.gold, color: C.espresso, border: `1.5px solid ${C.cream}` }}>
-                {pendingReminderCount > 9 ? "9+" : pendingReminderCount}
+                {notifBadgeCount > 9 ? "9+" : notifBadgeCount}
               </span>
             )}
           </button>
@@ -1210,6 +1243,41 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
           <KpiCard label="Week clients" value={stats.weekAppts} icon={<Users size={16} />} />
           <KpiCard label="Pending balance" value={fmtMoney(stats.pendingBalance, business.currency)} icon={<Clock size={16} />} tone={stats.pendingBalance > 0 ? "warning" : "neutral"} />
           <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} />
+        </div>
+
+        <div>
+          <SectionTitle>Pending balances</SectionTitle>
+          {pendingBalanceAppts.length === 0 ? (
+            <Card className="p-5 text-center" style={{ background: "rgba(92,124,74,0.08)", border: `1px solid rgba(92,124,74,0.25)` }}>
+              <Sparkles size={18} style={{ color: C.success, margin: "0 auto 6px" }} />
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>All balances collected ✨</p>
+              <p className="text-xs mt-1" style={{ color: C.muted }}>Nothing outstanding right now.</p>
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {pendingBalanceAppts.slice(0, 4).map(({ a, ps }) => (
+                <Card key={a.id} className="p-3.5 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                      <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>
+                    </div>
+                    <p className="font-semibold text-sm truncate" style={{ color: C.espresso }}>{a.clientName || "Unnamed"}</p>
+                    <p className="text-[11px] truncate" style={{ color: C.muted }}>{fmtDate(a.date)} · {a.style || "Service"}</p>
+                  </div>
+                  <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
+                    <span style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: ps === "overdue" ? C.danger : C.goldDeep }}>
+                      {fmtMoney(Number(a.balanceDue) || 0, business.currency)}
+                    </span>
+                    <button onClick={() => markApptPaid(a)}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+                      style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
+                      Mark paid
+                    </button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
 
         {suggestedRebooks.length > 0 && (
@@ -1640,6 +1708,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt }) => {
         totalPrice: sanitizeMoneyInput(appt?.totalPrice ?? 0),
         status: appt?.status || "scheduled",
         notes: appt?.notes || "",
+        paymentStatus: appt?.paymentStatus || "",
+        paymentDate: appt?.paymentDate || "",
+        paymentMethod: appt?.paymentMethod || "",
+        paymentNotes: appt?.paymentNotes || "",
         id: appt?.id,
         seriesId: appt?.seriesId,
       });
@@ -1833,6 +1905,55 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt }) => {
           <span style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: balanceDue > 0 ? C.warning : C.success }}>
             {fmtMoney(balanceDue, business.currency)}
           </span>
+        </Card>
+
+        {/* PAYMENT */}
+        <Card className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <DollarSign size={16} style={{ color: C.gold }} />
+              <span className="font-semibold text-sm" style={{ color: C.espresso }}>Payment</span>
+            </div>
+            <Pill tone={PAYMENT_STATUS_TONE[paymentStatusOf(form, todayISO())]}>
+              {PAYMENT_STATUS_LABEL[paymentStatusOf(form, todayISO())]}
+            </Pill>
+          </div>
+          {balanceDue > 0 ? (
+            <Button variant="primary" icon={<Check size={16} />} fullWidth
+              onClick={() => setForm({
+                ...form,
+                depositPaid: Number(form.totalPrice) || 0,
+                paymentStatus: "paid",
+                paymentDate: form.paymentDate || todayISO(),
+              })}>
+              Mark as paid
+            </Button>
+          ) : (
+            <Button variant="outline" icon={<RefreshCw size={14} />} fullWidth
+              onClick={() => setForm({
+                ...form,
+                depositPaid: 0,
+                paymentStatus: "pending",
+                paymentDate: "",
+                paymentMethod: "",
+                paymentNotes: "",
+              })}>
+              Reset payment
+            </Button>
+          )}
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <Field label="Payment date" hint="optional">
+              <Input type="date" value={form.paymentDate || ""} onChange={e => setForm({ ...form, paymentDate: e.target.value })} />
+            </Field>
+            <Field label="Method" hint="optional">
+              <Select value={form.paymentMethod || ""} onChange={e => setForm({ ...form, paymentMethod: e.target.value })} options={PAYMENT_METHODS} />
+            </Field>
+          </div>
+          <div className="mt-3">
+            <Field label="Payment notes" hint="optional">
+              <Textarea value={form.paymentNotes || ""} onChange={e => setForm({ ...form, paymentNotes: e.target.value })} placeholder="Receipt #, tip amount, anything to remember…" rows={2} />
+            </Field>
+          </div>
         </Card>
 
         {/* RECURRING */}
@@ -3963,46 +4084,115 @@ const buildNotifications = (store: any): NotifItem[] => {
 };
 
 const DISMISSED_NOTIF_KEY = "dismissedNotifIds";
+const READ_NOTIF_KEY = "readNotifIds";
 
-const NotificationsSheet = ({ open, onClose, store }: {
-  open: boolean;
-  onClose: () => void;
-  store: any;
-}) => {
+// Shared notification state so the dashboard badge and the notifications
+// sheet always agree, including across reloads.
+const useNotifications = (store: any) => {
   const [dismissed, setDismissed] = useState<string[]>([]);
+  const [read, setRead] = useState<string[]>([]);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
+    let cancelled = false;
     (async () => {
-      const raw = await safeStorage.get(DISMISSED_NOTIF_KEY);
-      if (raw) {
+      const [rawDismissed, rawRead] = await Promise.all([
+        safeStorage.get(DISMISSED_NOTIF_KEY),
+        safeStorage.get(READ_NOTIF_KEY),
+      ]);
+      const parseList = (raw: string | null): string[] => {
+        if (!raw) return [];
         try {
           const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) setDismissed(parsed.filter((x): x is string => typeof x === "string"));
-        } catch { /* ignore */ }
-      }
+          return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+        } catch { return []; }
+      };
+      if (cancelled) return;
+      setDismissed(parseList(rawDismissed));
+      setRead(parseList(rawRead));
+      setHydrated(true);
     })();
-  }, [open]);
+    return () => { cancelled = true; };
+  }, []);
 
-  const persistDismissed = async (next: string[]) => {
-    setDismissed(next);
-    await safeStorage.set(DISMISSED_NOTIF_KEY, next);
-  };
-
-  const allItems = useMemo(() => (open ? buildNotifications(store) : []), [
-    open, store.reminders, store.appointments, store.clients, store.business
+  const allItems = useMemo(() => buildNotifications(store), [
+    store.reminders, store.appointments, store.clients, store.business
   ]);
   const items = useMemo(() => allItems.filter(n => !dismissed.includes(n.id)), [allItems, dismissed]);
+  const unreadCount = useMemo(() => items.filter(n => !read.includes(n.id)).length, [items, read]);
 
-  const dismissOne = (id: string) => {
-    persistDismissed(Array.from(new Set([...dismissed, id])));
+  const persist = async (key: string, next: string[], setter: (v: string[]) => void) => {
+    setter(next);
+    await safeStorage.set(key, next);
   };
-  const clearAll = () => {
+
+  const dismiss = useCallback((id: string) => {
+    persist(DISMISSED_NOTIF_KEY, Array.from(new Set([...dismissed, id])), setDismissed);
+  }, [dismissed]);
+
+  const clearAll = useCallback(() => {
     if (items.length === 0) return;
     const ids = items.map(n => n.id);
-    persistDismissed(Array.from(new Set([...dismissed, ...ids])));
-  };
+    persist(DISMISSED_NOTIF_KEY, Array.from(new Set([...dismissed, ...ids])), setDismissed);
+  }, [items, dismissed]);
 
+  const markAllRead = useCallback(() => {
+    if (items.length === 0) return;
+    const ids = items.map(n => n.id);
+    persist(READ_NOTIF_KEY, Array.from(new Set([...read, ...ids])), setRead);
+  }, [items, read]);
+
+  return { hydrated, items, unreadCount, dismiss, clearAll, markAllRead };
+};
+
+// Derive a payment status from an appointment record. Honors an explicit
+// override (a.paymentStatus set by "Mark as Paid" or manual edit) and
+// falls back to deposit / balance / date heuristics.
+const paymentStatusOf = (a: any, todayIso: string): "paid" | "deposit" | "pending" | "overdue" => {
+  if (!a) return "pending";
+  if (a.status === "cancelled") return "pending";
+  const total = Number(a.totalPrice) || 0;
+  const balance = Number(a.balanceDue ?? Math.max(0, total - (Number(a.depositPaid) || 0)));
+  const deposit = Number(a.depositPaid) || 0;
+  if (a.paymentStatus === "paid" || balance <= 0 && total > 0) return "paid";
+  const past = a.date && a.date < todayIso;
+  if (balance > 0 && past) return "overdue";
+  if (deposit > 0 && balance > 0) return "deposit";
+  return "pending";
+};
+
+const PAYMENT_STATUS_LABEL: Record<string, string> = {
+  paid: "Paid",
+  deposit: "Deposit paid",
+  pending: "Pending",
+  overdue: "Overdue",
+};
+const PAYMENT_STATUS_TONE: Record<string, "success" | "gold" | "warning" | "danger"> = {
+  paid: "success",
+  deposit: "gold",
+  pending: "warning",
+  overdue: "danger",
+};
+
+const PAYMENT_METHODS = [
+  { value: "", label: "—" },
+  { value: "cash", label: "Cash" },
+  { value: "cashapp", label: "CashApp" },
+  { value: "zelle", label: "Zelle" },
+  { value: "venmo", label: "Venmo" },
+  { value: "card", label: "Card" },
+  { value: "apple_pay", label: "Apple Pay" },
+  { value: "other", label: "Other" },
+];
+
+const NotificationsSheet = ({ open, onClose, items, dismiss, clearAll, markAllRead }: {
+  open: boolean;
+  onClose: () => void;
+  items: NotifItem[];
+  dismiss: (id: string) => void;
+  clearAll: () => void;
+  markAllRead: () => void;
+}) => {
   return (
     <Sheet open={open} onClose={onClose} title="Notifications"
       leftAction={
@@ -4013,21 +4203,12 @@ const NotificationsSheet = ({ open, onClose, store }: {
         </button>
       }
       rightAction={
-        <>
-          {items.length > 0 && (
-            <span className="px-2.5 py-1 rounded-full text-[11px] font-bold"
-              style={{ background: C.gold, color: C.espresso, letterSpacing: "0.06em" }}>
-              {items.length}
-            </span>
-          )}
-          {items.length > 0 && (
-            <button onClick={clearAll}
-              className="px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
-              style={{ background: "transparent", color: C.danger, border: `1px solid ${C.danger}`, letterSpacing: "0.08em" }}>
-              Clear all
-            </button>
-          )}
-        </>
+        items.length > 0 ? (
+          <span className="px-2.5 py-1 rounded-full text-[11px] font-bold"
+            style={{ background: C.gold, color: C.espresso, letterSpacing: "0.06em" }}>
+            {items.length}
+          </span>
+        ) : undefined
       }>
       {items.length === 0 ? (
         <EmptyState
@@ -4036,27 +4217,41 @@ const NotificationsSheet = ({ open, onClose, store }: {
           body="No reminders, overdue balances, or upcoming bookings need your attention right now."
         />
       ) : (
-        <div className="space-y-2 pb-6">
-          {items.map(n => (
-            <Card key={n.id} className="p-3.5 flex items-start gap-3">
-              <div className="rounded-xl p-2 shrink-0" style={{
-                background: n.tone === "danger" ? "rgba(156,61,46,0.10)" :
-                  n.tone === "warning" ? "rgba(201,118,43,0.12)" :
-                    n.tone === "gold" ? "rgba(201,169,97,0.18)" : C.ivory,
-              }}>{n.icon}</div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{n.title}</p>
-                <p className="text-xs mt-0.5 leading-relaxed line-clamp-2" style={{ color: C.coffee }}>{n.body}</p>
-                {n.meta && <p className="text-[11px] mt-1" style={{ color: C.muted }}>{n.meta}</p>}
-              </div>
-              <button onClick={() => dismissOne(n.id)} aria-label="Dismiss notification"
-                className="p-2 -mr-1 rounded-full shrink-0 active:scale-[0.92] transition"
-                style={{ color: C.danger }}>
-                <Trash2 size={16} />
-              </button>
-            </Card>
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <button onClick={markAllRead}
+              className="rounded-xl px-3 py-2.5 text-[12px] font-bold uppercase tracking-wider active:scale-[0.97] transition flex items-center justify-center gap-1.5"
+              style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, letterSpacing: "0.08em" }}>
+              <Check size={14} /> Mark all read
+            </button>
+            <button onClick={clearAll}
+              className="rounded-xl px-3 py-2.5 text-[12px] font-bold uppercase tracking-wider active:scale-[0.97] transition flex items-center justify-center gap-1.5"
+              style={{ background: "transparent", color: C.danger, border: `1px solid ${C.danger}`, letterSpacing: "0.08em" }}>
+              <Trash2 size={14} /> Clear all
+            </button>
+          </div>
+          <div className="space-y-2 pb-6">
+            {items.map(n => (
+              <Card key={n.id} className="p-3.5 flex items-start gap-3">
+                <div className="rounded-xl p-2 shrink-0" style={{
+                  background: n.tone === "danger" ? "rgba(156,61,46,0.10)" :
+                    n.tone === "warning" ? "rgba(201,118,43,0.12)" :
+                      n.tone === "gold" ? "rgba(201,169,97,0.18)" : C.ivory,
+                }}>{n.icon}</div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{n.title}</p>
+                  <p className="text-xs mt-0.5 leading-relaxed line-clamp-2" style={{ color: C.coffee }}>{n.body}</p>
+                  {n.meta && <p className="text-[11px] mt-1" style={{ color: C.muted }}>{n.meta}</p>}
+                </div>
+                <button onClick={() => dismiss(n.id)} aria-label="Dismiss notification"
+                  className="p-2 -mr-1 rounded-full shrink-0 active:scale-[0.92] transition"
+                  style={{ color: C.danger }}>
+                  <Trash2 size={16} />
+                </button>
+              </Card>
+            ))}
+          </div>
+        </>
       )}
     </Sheet>
   );
@@ -4078,6 +4273,7 @@ export default function App() {
   const [openClientForm, setOpenClientForm] = useState(false);
   const [quickClient, setQuickClient] = useState<EntityRecord | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
+  const notifications = useNotifications(store);
 
   // Dashboard quick actions
   const openQuickAppt = () => {
@@ -4177,7 +4373,8 @@ export default function App() {
               openSettings={() => setSecondary("settings")}
               openPolicies={() => setSecondary("policies")}
               openSavedQuotes={() => setSecondary("savedQuotes")}
-              openReminders={() => setNotifOpen(true)}
+              openReminders={() => { setNotifOpen(true); notifications.markAllRead(); }}
+              notifBadgeCount={notifications.unreadCount}
               openPresets={() => setSecondary("presets")}
               openTimer={() => setSecondary("timer")} />
           )}
@@ -4232,7 +4429,14 @@ export default function App() {
       )}
 
       {/* Notifications sheet (bell on dashboard) */}
-      <NotificationsSheet open={notifOpen} onClose={() => setNotifOpen(false)} store={store} />
+      <NotificationsSheet
+        open={notifOpen}
+        onClose={() => setNotifOpen(false)}
+        items={notifications.items}
+        dismiss={notifications.dismiss}
+        clearAll={notifications.clearAll}
+        markAllRead={notifications.markAllRead}
+      />
 
       {/* Transaction sheet */}
       <TransactionSheet
