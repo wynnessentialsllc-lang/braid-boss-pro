@@ -415,6 +415,89 @@ const buildReminderContext = (appt: any, business: any): any => ({
   business: business.businessName || "your stylist",
 });
 
+// ---- CLIENT COMMUNICATION (v1: template-only) ---------------------------
+type CommTemplateKey =
+  | "booking_confirmation"
+  | "deposit_request"
+  | "appointment_reminder"
+  | "balance_due"
+  | "thank_you"
+  | "rebooking_nudge"
+  | "policy";
+
+type CommTemplate = {
+  key: CommTemplateKey;
+  label: string;
+  short: string;
+  body: string;
+};
+
+const COMMUNICATION_TEMPLATES: CommTemplate[] = [
+  {
+    key: "booking_confirmation",
+    label: "Booking confirmation",
+    short: "Confirms a new booking with date, time, and deposit.",
+    body: "Hi {{client}}! You&apos;re booked for {{style}} on {{date}} at {{time}}. Deposit of {{deposit}} secures your seat — balance of {{balance}} due at the appointment. Please arrive with hair freshly washed, fully detangled, and blown out. — {{business}}",
+  },
+  {
+    key: "deposit_request",
+    label: "Deposit request",
+    short: "Asks the client to send the deposit to lock in the date.",
+    body: "Hi {{client}}, your {{style}} appointment on {{date}} at {{time}} isn&apos;t locked in until I receive your deposit of {{deposit}}. Cash, CashApp, or Zelle work. Let me know if you have questions. — {{business}}",
+  },
+  {
+    key: "appointment_reminder",
+    label: "Appointment reminder",
+    short: "Reminds the client a day or two before their appointment.",
+    body: "Hi {{client}}! Just a quick reminder of your {{style}} appointment on {{date}} at {{time}}. Please arrive with hair washed and detangled. Balance due is {{balance}}. See you soon! — {{business}}",
+  },
+  {
+    key: "balance_due",
+    label: "Balance due",
+    short: "Reminds the client to bring the remaining balance.",
+    body: "Hi {{client}}, balance of {{balance}} is due at your {{date}} {{style}} appointment. I accept cash, CashApp, Zelle, and Apple Pay. — {{business}}",
+  },
+  {
+    key: "thank_you",
+    label: "Thank you",
+    short: "A warm thank-you note after the service.",
+    body: "Hi {{client}}, thank you so much for trusting me with your {{style}}! It was a pleasure as always. Don&apos;t forget to wrap nightly with a silk scarf and refresh your edges. I&apos;d love to see you back in 6–8 weeks — text me to lock in your next date. — {{business}}",
+  },
+  {
+    key: "rebooking_nudge",
+    label: "Rebooking nudge",
+    short: "Gentle reminder it's been a while since their last visit.",
+    body: "Hey {{client}}! It&apos;s been a few weeks since your last appointment with me — your hair is probably ready for a refresh. I have openings coming up if you&apos;d like to lock in a date for {{style}} again. — {{business}}",
+  },
+  {
+    key: "policy",
+    label: "Cancellation / no-show policy",
+    short: "Sends the policy text in case of a missed or late appointment.",
+    body: "Hi {{client}}, just a reminder of my policy: cancellations within 48 hours forfeit the deposit, and no-shows are charged 50% of the service total before re-booking. Reach out as soon as you can if anything changes on your end. — {{business}}",
+  },
+];
+
+const buildCommunicationContext = (appt: any, client: any, business: any): any => {
+  const baseAppt = appt || {};
+  return {
+    ...buildReminderContext(baseAppt, business || {}),
+    // Override "client" with the canonical client name when we have one
+    // (covers the case where the user is messaging from a client profile
+    // without an appointment context).
+    client: ((client?.name || baseAppt.clientName || "there") + "").split(" ")[0],
+  };
+};
+
+const renderCommunicationTemplate = (key: CommTemplateKey, appt: any, client: any, business: any): string => {
+  const tpl = COMMUNICATION_TEMPLATES.find(t => t.key === key);
+  if (!tpl) return "";
+  return renderTemplate(tpl.body, buildCommunicationContext(appt, client, business))
+    // Templates are stored with HTML-escaped apostrophes so JSX text is
+    // happy. When rendering for SMS / clipboard / share, decode them.
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"');
+};
+
 const planRemindersForAppointment = (appt: any, settings: any, templates: any[], business: any): any[] => {
   if (!settings.enabled) return [];
   const out: EntityRecord[] = [];
@@ -558,6 +641,7 @@ const useStorage = () => {
   const [stylePresets, setStylePresets] = useState<EntityRecord[]>([]);
   const [activeTimer, setActiveTimer] = useState<EntityRecord | null>(null);
   const [timerSessions, setTimerSessions] = useState<EntityRecord[]>([]);
+  const [commLog, setCommLog] = useState<EntityRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -592,6 +676,7 @@ const useStorage = () => {
       setPhotos(await safeStorage.getAllByPrefix("photos:"));
       setRecurringSeries(await safeStorage.getAllByPrefix("recurringSeries:"));
       setTimerSessions(await safeStorage.getAllByPrefix("timerSessions:"));
+      setCommLog(await safeStorage.getAllByPrefix("commLog:"));
 
       let pols = await safeStorage.getAllByPrefix("policies:");
       if (pols.length === 0) {
@@ -764,6 +849,8 @@ const useStorage = () => {
     else await safeStorage.delete("activeTimer");
   }, []);
   const upsertTimerSession = useCallback((record: any) => upsertEntity("timerSessions", setTimerSessions, record), []);
+  const upsertCommLogEntry = useCallback((record: any) => upsertEntity("commLog", setCommLog, record), []);
+  const deleteCommLogEntry = useCallback((id: string) => deleteEntity("commLog", setCommLog, id), []);
 
   // helpers/aliases
   const clientById = useCallback((id) => clients.find(c => c.id === id), [clients]);
@@ -786,6 +873,7 @@ const useStorage = () => {
     stylePresets, presets: stylePresets, upsertPreset, deletePreset, incrementPresetUse,
     activeTimer, saveActiveTimer, setTimer: saveActiveTimer,
     timerSessions, upsertTimerSession, addTimerSession: upsertTimerSession,
+    commLog, upsertCommLogEntry, deleteCommLogEntry,
   };
 };
 
@@ -1252,7 +1340,7 @@ const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: {
 // ============================================================
 //  DASHBOARD
 // ============================================================
-const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, notifBadgeCount = 0 }) => {
+const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, notifBadgeCount = 0 }: { store: any; setActive: any; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; notifBadgeCount?: number }) => {
   const { business, appointments, transactions, photos, recurringSeries } = store;
   const today = todayISO();
 
@@ -1389,11 +1477,27 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
                     <span style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: ps === "overdue" ? C.danger : C.goldDeep }}>
                       {fmtMoney(Number(a.balanceDue) || 0, business.currency)}
                     </span>
-                    <button onClick={(e) => { e.stopPropagation(); markApptPaid(a); }}
-                      className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
-                      style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
-                      Mark paid
-                    </button>
+                    <div className="flex gap-1.5">
+                      {openCommunication && (
+                        <button onClick={(e) => {
+                          e.stopPropagation();
+                          openCommunication({
+                            appointment: a,
+                            client: store.clientById(a.clientId),
+                            initialKey: "balance_due",
+                          });
+                        }}
+                          className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+                          style={{ background: "transparent", color: C.goldDeep, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
+                          Remind
+                        </button>
+                      )}
+                      <button onClick={(e) => { e.stopPropagation(); markApptPaid(a); }}
+                        className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+                        style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
+                        Mark paid
+                      </button>
+                    </div>
                   </div>
                 </Card>
               ))}
@@ -1719,7 +1823,7 @@ const BreakRow = ({ label, value, bold }: { label: string; value: string; bold?:
 // ============================================================
 //  SCHEDULE
 // ============================================================
-const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt }) => {
+const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, openCommunication }: { store: any; prefillNewAppt: any; clearApptPrefill: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void }) => {
   const { appointments, business, recurringSeries } = store;
   const [filter, setFilter] = useState("upcoming");
   const [editing, setEditing] = useState<EntityRecord | null>(null);
@@ -1782,6 +1886,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt })
         store={store}
         onClose={() => setEditing(null)}
         openTimerForAppt={openTimerForAppt}
+        openCommunication={openCommunication}
       />
     </div>
   );
@@ -1800,7 +1905,7 @@ const RECURRENCE_OPTIONS = [
   { value: "custom", label: "Custom" },
 ];
 
-const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt }) => {
+const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCommunication }: { open: any; appt: any; store: any; onClose: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void }) => {
   const {
     upsertAppointment, deleteAppointment, clients, upsertClient, business,
     recurringSeries, upsertSeries, deleteSeries, scheduleRemindersForAppointment,
@@ -2150,6 +2255,15 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt }) => {
         {form.id && (
           <Button variant="dark" icon={<TimerIcon size={18} />} onClick={handleStartTimer} fullWidth>Start chair timer</Button>
         )}
+        {form.id && openCommunication && (
+          <Button variant="outline" icon={<MessageSquare size={16} />} fullWidth
+            onClick={() => openCommunication({
+              appointment: form,
+              client: clients.find((c: any) => c.id === form.clientId),
+            })}>
+            Send message to client
+          </Button>
+        )}
 
         <div className="grid grid-cols-2 gap-3 pt-2">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -2172,7 +2286,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt }) => {
 const PREF_STYLES = ["Knotless", "Box braids", "Boho", "Goddess", "Stitch braids", "Cornrows", "Twists", "Locs", "Sew-in", "Wig install"];
 const SENSITIVITY = ["None", "Mild", "Moderate", "High"];
 
-const Clients = ({ store, openClientPhotos }: { store: any; openClientPhotos?: any }) => {
+const Clients = ({ store, openClientPhotos, openCommunication }: { store: any; openClientPhotos?: any; openCommunication?: (ctx: CommContext) => void }) => {
   void openClientPhotos;
   const { clients, appointments, photos, business } = store;
   const [search, setSearch] = useState("");
@@ -2246,7 +2360,7 @@ const Clients = ({ store, openClientPhotos }: { store: any; openClientPhotos?: a
         )}
       </div>
       <FAB onClick={() => setEditing({})} />
-      <ClientSheet open={!!editing} client={editing} store={store} onClose={() => setEditing(null)} />
+      <ClientSheet open={!!editing} client={editing} store={store} onClose={() => setEditing(null)} openCommunication={openCommunication} />
     </div>
   );
 };
@@ -2264,11 +2378,12 @@ const PHOTO_CATEGORIES = [
   { value: "scalp", label: "Scalp", color: "#DFB5AC" },
 ];
 
-const ClientSheet = ({ open, client, store, onClose }: {
+const ClientSheet = ({ open, client, store, onClose, openCommunication }: {
   open: boolean;
   client: any;
   store: any;
   onClose: () => void;
+  openCommunication?: (ctx: CommContext) => void;
 }) => {
   const { upsertClient, deleteClient, appointments, photos, business, upsertPhoto, deletePhoto } = store;
   const [tab, setTab] = useState("info");
@@ -2377,6 +2492,12 @@ const ClientSheet = ({ open, client, store, onClose }: {
               <Button variant="outline" onClick={onClose}>Cancel</Button>
               <Button variant="primary" onClick={handleSave} disabled={!form.name?.trim()}>Save</Button>
             </div>
+            {form.id && openCommunication && (
+              <Button variant="outline" icon={<MessageSquare size={16} />} fullWidth
+                onClick={() => openCommunication({ client: form })}>
+                Send message to {form.name?.split(" ")[0] || "client"}
+              </Button>
+            )}
             {form.id && <Button variant="danger" icon={<Trash2 size={16} />} onClick={handleDelete} fullWidth>Delete client</Button>}
           </div>
         )}
@@ -4039,7 +4160,7 @@ const PolicySheet = ({ policy, isNew, onClose, onSave }) => {
 // ============================================================
 //  SETTINGS (V1 extended with Reminders link)
 // ============================================================
-const SettingsScreen = ({ store, onBack, openReminderSettings }) => {
+const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void }) => {
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
@@ -4109,6 +4230,18 @@ const SettingsScreen = ({ store, onBack, openReminderSettings }) => {
           </div>
         </Card>
 
+        {openCommunicationLog && (
+          <Card className="p-4 active:scale-[0.99] mt-2" onClick={openCommunicationLog}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold" style={{ color: C.espresso }}>Communication log</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>{(store.commLog || []).length} message{(store.commLog || []).length === 1 ? "" : "s"} · copies, shares, sends</p>
+              </div>
+              <ChevronRight size={18} style={{ color: C.muted }} />
+            </div>
+          </Card>
+        )}
+
         <SectionTitle>Data</SectionTitle>
         <Card className="p-4 space-y-2">
           <Button variant="outline" icon={<Download size={15} />} onClick={exportData} fullWidth>Export all data (JSON)</Button>
@@ -4128,6 +4261,55 @@ const SettingsScreen = ({ store, onBack, openReminderSettings }) => {
 // ============================================================
 //  TIMER SESSIONS LIST (drilled from productivity)
 // ============================================================
+const CommunicationLogScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const entries = useMemo(() =>
+    [...(store.commLog || [])].sort((a: any, b: any) => (b.createdAt || "").localeCompare(a.createdAt || "")),
+    [store.commLog]);
+
+  const actionTone = (action: string): "success" | "gold" | "neutral" => {
+    if (action === "sent") return "success";
+    if (action === "shared") return "gold";
+    return "neutral";
+  };
+
+  return (
+    <div className="bbp-fade pb-24">
+      <Header title="Communication log" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
+      <div className="px-5 pt-4 space-y-2">
+        {entries.length === 0 ? (
+          <EmptyState
+            icon={<MessageSquare size={28} style={{ color: C.gold }} />}
+            title="No messages sent yet"
+            body="Confirm a booking to start your client trail."
+          />
+        ) : (
+          entries.map((e: any) => (
+            <Card key={e.id} className="p-3.5">
+              <div className="flex items-start justify-between gap-2 mb-1.5 flex-wrap">
+                <p className="font-semibold text-sm" style={{ color: C.espresso }}>
+                  {e.typeLabel || e.type || "Message"} · {e.clientName || "Client"}
+                </p>
+                <Pill tone={actionTone(e.action)}>{(e.action || "draft").toUpperCase()}</Pill>
+              </div>
+              <p className="text-[11px]" style={{ color: C.muted }}>{fmtRelative(e.createdAt)}</p>
+              {e.body && (
+                <p className="text-xs mt-2 leading-relaxed line-clamp-3" style={{ color: C.coffee }}>{e.body}</p>
+              )}
+              <div className="flex justify-end mt-2">
+                <button onClick={() => store.deleteCommLogEntry(e.id)}
+                  className="text-[11px] font-semibold uppercase tracking-wider"
+                  style={{ color: C.danger, letterSpacing: "0.08em" }}>
+                  Remove
+                </button>
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
 const TimerSessionsScreen = ({ store, onBack }) => {
   const sessions = useMemo(() => [...store.timerSessions].sort((a, b) => (b.endedAt || "").localeCompare(a.endedAt || "")), [store.timerSessions]);
   return (
@@ -4359,6 +4541,142 @@ const PAYMENT_METHODS = [
   { value: "other", label: "Other" },
 ];
 
+// ============================================================
+//  CLIENT COMMUNICATION SHEETS
+// ============================================================
+type CommContext = {
+  appointment?: any;
+  client?: any;
+  initialKey?: CommTemplateKey | null;
+};
+
+const CommunicationPickerSheet = ({ open, ctx, onClose, onPick }: {
+  open: boolean;
+  ctx: CommContext | null;
+  onClose: () => void;
+  onPick: (key: CommTemplateKey) => void;
+}) => {
+  if (!ctx) return null;
+  return (
+    <Sheet open={open} onClose={onClose} title="Send a message">
+      <p className="text-xs mb-3" style={{ color: C.muted }}>
+        Pick a template — it will auto-fill {ctx.client?.name || ctx.appointment?.clientName || "the client"}&apos;s details.
+      </p>
+      <div className="space-y-2 pb-2">
+        {COMMUNICATION_TEMPLATES.map(t => (
+          <Card key={t.key} className="p-3.5 cursor-pointer active:scale-[0.99] transition" onClick={() => onPick(t.key)}>
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl p-2 shrink-0" style={{ background: C.ivory }}>
+                <MessageSquare size={16} style={{ color: C.goldDeep }} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-sm" style={{ color: C.espresso }}>{t.label}</p>
+                <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>{t.short}</p>
+              </div>
+              <ChevronRight size={16} style={{ color: C.muted }} />
+            </div>
+          </Card>
+        ))}
+      </div>
+    </Sheet>
+  );
+};
+
+const CommunicationSheet = ({ open, ctx, store, onClose }: {
+  open: boolean;
+  ctx: (CommContext & { templateKey: CommTemplateKey }) | null;
+  store: any;
+  onClose: () => void;
+}) => {
+  const [body, setBody] = useState("");
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 1600); };
+
+  useEffect(() => {
+    if (!open || !ctx) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate body when sheet opens with new ctx, intentional
+    setBody(renderCommunicationTemplate(ctx.templateKey, ctx.appointment || {}, ctx.client, store.business));
+  }, [open, ctx?.templateKey, ctx?.appointment?.id, ctx?.client?.id, store.business]);
+
+  if (!ctx) return null;
+
+  const tpl = COMMUNICATION_TEMPLATES.find(t => t.key === ctx.templateKey);
+  const phone = ctx.client?.phone || ctx.appointment?.clientPhone;
+  const clientName = ctx.client?.name || ctx.appointment?.clientName || "Client";
+
+  const log = (action: "copied" | "shared" | "sent") => {
+    store.upsertCommLogEntry({
+      type: ctx.templateKey,
+      typeLabel: tpl?.label || ctx.templateKey,
+      clientId: ctx.client?.id || ctx.appointment?.clientId,
+      clientName,
+      appointmentId: ctx.appointment?.id,
+      action,
+      body,
+      createdAt: new Date().toISOString(),
+    });
+  };
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(body);
+      log("copied");
+      showToast("Copied");
+    } catch { showToast("Copy unavailable"); }
+  };
+
+  const handleShare = async () => {
+    try {
+      const nav: any = navigator;
+      if (nav.share) {
+        await nav.share({ title: tpl?.label || "Message", text: body });
+        log("shared");
+        showToast("Shared");
+      } else {
+        await navigator.clipboard.writeText(body);
+        log("copied");
+        showToast("Sharing unavailable — copied");
+      }
+    } catch (err: any) {
+      // User-cancelled share is fine; only toast on real errors.
+      if (err?.name !== "AbortError") showToast("Couldn't share");
+    }
+  };
+
+  const handleSms = () => {
+    const num = (phone || "").replace(/[^\d+]/g, "");
+    const href = num ? `sms:${num}?&body=${encodeURIComponent(body)}` : `sms:?&body=${encodeURIComponent(body)}`;
+    log("sent");
+    if (typeof window !== "undefined") window.location.href = href;
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title={tpl?.label || "Message"}>
+      <div className="space-y-4 pb-2">
+        <Card className="p-3.5" style={{ background: C.ivory }}>
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.14em" }}>To</p>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>{clientName}</p>
+          {phone && <p className="text-xs mt-0.5" style={{ color: C.muted }}>{phone}</p>}
+        </Card>
+        <Field label="Message">
+          <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={8} />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Button variant="primary" icon={<Copy size={16} />} onClick={handleCopy}>Copy</Button>
+          <Button variant="dark" icon={<Send size={16} />} onClick={handleShare}>Share</Button>
+        </div>
+        <Button variant="outline" icon={<MessageSquare size={16} />} fullWidth onClick={handleSms}>
+          {phone ? `Send via SMS to ${phone}` : "Open SMS app"}
+        </Button>
+        {toast && <p className="text-center text-[12px] font-semibold" style={{ color: C.success }}>{toast}</p>}
+        <p className="text-[11px] text-center mt-1" style={{ color: C.muted }}>
+          Edits stay in this draft. Tap Copy / Share / Send to log it in your communication trail.
+        </p>
+      </div>
+    </Sheet>
+  );
+};
+
 const NotificationsSheet = ({ open, onClose, items, dismiss, clearAll, markAllRead }: {
   open: boolean;
   onClose: () => void;
@@ -4447,6 +4765,12 @@ export default function App() {
   const [openClientForm, setOpenClientForm] = useState(false);
   const [quickClient, setQuickClient] = useState<EntityRecord | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [commPickerCtx, setCommPickerCtx] = useState<CommContext | null>(null);
+  const [activeComm, setActiveComm] = useState<(CommContext & { templateKey: CommTemplateKey }) | null>(null);
+  const openCommunication = useCallback((next: CommContext) => {
+    if (next.initialKey) setActiveComm({ ...next, templateKey: next.initialKey });
+    else setCommPickerCtx(next);
+  }, []);
   const notifications = useNotifications(store);
 
   // Dashboard quick actions
@@ -4549,6 +4873,7 @@ export default function App() {
               openSavedQuotes={() => setSecondary("savedQuotes")}
               openReminders={() => { setNotifOpen(true); notifications.markAllRead(); }}
               notifBadgeCount={notifications.unreadCount}
+              openCommunication={openCommunication}
               openPresets={() => setSecondary("presets")}
               openTimer={() => setSecondary("timer")} />
           )}
@@ -4566,10 +4891,11 @@ export default function App() {
             <Schedule store={store}
               prefillNewAppt={apptPrefill}
               clearApptPrefill={() => setApptPrefill(null)}
-              openTimerForAppt={openTimerForAppt} />
+              openTimerForAppt={openTimerForAppt}
+              openCommunication={openCommunication} />
           )}
           {active === "clients" && (
-            <Clients store={store} />
+            <Clients store={store} openCommunication={openCommunication} />
           )}
           {active === "money" && (
             <Money store={store}
@@ -4581,7 +4907,7 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} />}
       {secondary === "savedQuotes" && (
         <SavedQuotes store={store} onBack={() => setSecondary(null)}
           onLoadQuote={handleLoadQuote}
@@ -4593,6 +4919,7 @@ export default function App() {
         <PresetsScreen store={store} onBack={() => setSecondary(null)} onUsePreset={handleUsePreset} />
       )}
       {secondary === "timerSessions" && <TimerSessionsScreen store={store} onBack={() => setSecondary(null)} />}
+      {secondary === "communicationLog" && <CommunicationLogScreen store={store} onBack={() => setSecondary(null)} />}
 
       {/* Tab bar — only on primary screens */}
       {secondary === null && <TabBar active={active} setActive={setActive} />}
@@ -4601,6 +4928,23 @@ export default function App() {
       {secondary !== "timer" && store.activeTimer && (
         <TimerMiniPill timer={store.activeTimer} onClick={() => setSecondary("timer")} />
       )}
+
+      {/* Communication picker → individual template sheet */}
+      <CommunicationPickerSheet
+        open={!!commPickerCtx}
+        ctx={commPickerCtx}
+        onClose={() => setCommPickerCtx(null)}
+        onPick={(key) => {
+          if (commPickerCtx) setActiveComm({ ...commPickerCtx, templateKey: key });
+          setCommPickerCtx(null);
+        }}
+      />
+      <CommunicationSheet
+        open={!!activeComm}
+        ctx={activeComm}
+        store={store}
+        onClose={() => setActiveComm(null)}
+      />
 
       {/* Notifications sheet (bell on dashboard) */}
       <NotificationsSheet
