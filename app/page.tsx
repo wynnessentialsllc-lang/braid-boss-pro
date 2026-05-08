@@ -13,8 +13,14 @@ import {
   syncReceipts,
   syncCommunications,
   syncNotifications,
+  syncPhotos,
   syncSettings,
 } from "./lib/supabase";
+import {
+  uploadPhoto,
+  deletePhoto as deletePhotoFromStorage,
+  resolvePhotoUrl,
+} from "./lib/photo-storage";
 import {
   detectPushCapability,
   subscribeWebPush,
@@ -1200,7 +1206,7 @@ const useStorage = () => {
   // replaced; everything else is left alone.
   const replaceCloudState = useCallback((next: {
     clients?: any[]; appointments?: any[]; quotes?: any[]; receipts?: any[];
-    commLog?: any[]; business?: any; reminderSettings?: any;
+    commLog?: any[]; photos?: any[]; business?: any; reminderSettings?: any;
   }) => {
     if (next.clients) setClients(next.clients);
     if (next.appointments) setAppointments(next.appointments.map(normalizeAppointment));
@@ -1209,6 +1215,7 @@ const useStorage = () => {
     // hold them in V1 (handled by PR #11 once merged), so skip when
     // the setter isn't wired yet.
     if (next.commLog) setCommLog(next.commLog);
+    if (next.photos) setPhotos(next.photos);
     if (next.business) setBusiness({ ...DEFAULT_BUSINESS, ...next.business });
     if (next.reminderSettings) setReminderSettings({ ...DEFAULT_REMINDER_SETTINGS, ...next.reminderSettings });
   }, []);
@@ -1436,6 +1443,38 @@ const EmptyState = ({ icon, title, body, cta }: {
     {cta && <div className="mt-5">{cta}</div>}
   </div>
 );
+
+// Resolve a photo URL on demand. Handles three cases: legacy dataUrl,
+// cloud storagePath (private bucket signed URL), or both. Renders an
+// ivory placeholder while the signed URL resolves.
+const CloudPhotoImg = ({ photo, kind = "thumb", alt, style, className, onClick }: {
+  photo: any;
+  kind?: "full" | "thumb";
+  alt?: string;
+  style?: React.CSSProperties;
+  className?: string;
+  onClick?: () => void;
+}) => {
+  const [url, setUrl] = useState<string | null>(() => {
+    if (kind === "thumb" && photo?.thumbnailDataUrl) return photo.thumbnailDataUrl;
+    return photo?.dataUrl || null;
+  });
+  useEffect(() => {
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-driven sync to a derived URL, intentional
+    if (kind === "thumb" && photo?.thumbnailDataUrl) { setUrl(photo.thumbnailDataUrl); return; }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-driven sync to a derived URL, intentional
+    if (kind === "full" && photo?.dataUrl) { setUrl(photo.dataUrl); return; }
+    if (photo?.storagePath || photo?.thumbnailPath) {
+      resolvePhotoUrl(photo, kind).then(u => { if (!cancelled) setUrl(u); }).catch(() => null);
+    }
+    return () => { cancelled = true; };
+  }, [photo?.id, photo?.storagePath, photo?.thumbnailPath, photo?.dataUrl, photo?.thumbnailDataUrl, kind]);
+  if (!url) {
+    return <div className={className} style={{ ...style, background: C.ivory }} onClick={onClick} />;
+  }
+  return <img src={url} alt={alt || ""} style={style} className={className} onClick={onClick} />;
+};
 
 const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAction }: {
   open: boolean;
@@ -1959,7 +1998,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
             <div className="flex gap-2 overflow-x-auto bbp-scroll -mx-1 px-1 pb-1">
               {recentPhotos.map(p => (
                 <div key={p.id} className="rounded-xl shrink-0 overflow-hidden" style={{ width: 90, height: 90, border: `1px solid ${C.hairline}` }}>
-                  <img src={p.thumbnailDataUrl || p.dataUrl} alt={p.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <CloudPhotoImg photo={p} kind="thumb" alt={p.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 </div>
               ))}
             </div>
@@ -3001,7 +3040,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 const PREF_STYLES = ["Knotless", "Box braids", "Boho", "Goddess", "Stitch braids", "Cornrows", "Twists", "Locs", "Sew-in", "Wig install"];
 const SENSITIVITY = ["None", "Mild", "Moderate", "High"];
 
-const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt }: { store: any; openClientPhotos?: any; openCommunication?: (ctx: CommContext) => void; openQuickAppt?: (prefill?: any) => void }) => {
+const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, savePhoto, deletePhoto: deletePhotoProp }: { store: any; openClientPhotos?: any; openCommunication?: (ctx: CommContext) => void; openQuickAppt?: (prefill?: any) => void; savePhoto?: (p: any) => Promise<any>; deletePhoto?: (id: string) => Promise<void> }) => {
   void openClientPhotos;
   const { clients, appointments, photos, business } = store;
   const [search, setSearch] = useState("");
@@ -3075,7 +3114,7 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt }: 
         )}
       </div>
       <FAB onClick={() => setEditing({})} />
-      <ClientSheet open={!!editing} client={editing} store={store} onClose={() => setEditing(null)} openCommunication={openCommunication} openQuickAppt={openQuickAppt} />
+      <ClientSheet open={!!editing} client={editing} store={store} onClose={() => setEditing(null)} openCommunication={openCommunication} openQuickAppt={openQuickAppt} savePhoto={savePhoto} deletePhotoExternal={deletePhotoProp} />
     </div>
   );
 };
@@ -3093,15 +3132,21 @@ const PHOTO_CATEGORIES = [
   { value: "scalp", label: "Scalp", color: "#DFB5AC" },
 ];
 
-const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuickAppt }: {
+const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuickAppt, savePhoto, deletePhotoExternal }: {
   open: boolean;
   client: any;
   store: any;
   onClose: () => void;
   openCommunication?: (ctx: CommContext) => void;
   openQuickAppt?: (prefill?: any) => void;
+  savePhoto?: (p: any) => Promise<any>;
+  deletePhotoExternal?: (id: string) => Promise<void>;
 }) => {
   const { upsertClient, deleteClient, appointments, photos, business, upsertPhoto, deletePhoto } = store;
+  // Prefer the cloud-aware wrappers when wired; fall back to the
+  // store's local-only methods for guest mode.
+  const upsertPhotoFn = savePhoto || upsertPhoto;
+  const deletePhotoFn = deletePhotoExternal || deletePhoto;
   const [tab, setTab] = useState("info");
   const [form, setForm] = useState<any>({});
 
@@ -3148,7 +3193,7 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
   const handleDelete = async () => {
     if (!form.id) return;
     if (!window.confirm(`Delete ${form.name}? Past appointments stay; photos are removed.`)) return;
-    for (const p of myPhotos) await deletePhoto(p.id);
+    for (const p of myPhotos) await deletePhotoFn(p.id);
     await deleteClient(form.id);
     onClose();
   };
@@ -3236,7 +3281,7 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
         )}
 
         {tab === "photos" && form.id && (
-          <PhotoGallery clientId={form.id} clientName={form.name} appointments={myAppts} photos={myPhotos} upsertPhoto={upsertPhoto} deletePhoto={deletePhoto} />
+          <PhotoGallery clientId={form.id} clientName={form.name} appointments={myAppts} photos={myPhotos} upsertPhoto={upsertPhotoFn} deletePhoto={deletePhotoFn} />
         )}
 
         {tab === "history" && form.id && (
@@ -3342,7 +3387,7 @@ const PhotoGallery = ({ clientId, clientName, appointments, photos, upsertPhoto,
             <button key={p.id} onClick={() => setLightbox(p)}
               className="relative aspect-square rounded-xl overflow-hidden active:scale-[0.97] transition"
               style={{ border: `1px solid ${C.hairline}` }}>
-              <img src={p.thumbnailDataUrl || p.dataUrl} alt={p.caption || ""}
+              <CloudPhotoImg photo={p} kind="thumb" alt={p.caption || ""}
                 style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               {p.isFavorite && (
                 <div className="absolute top-1.5 right-1.5 rounded-full p-0.5" style={{ background: "rgba(0,0,0,0.4)" }}>
@@ -3416,7 +3461,7 @@ const PhotoLightbox = ({ photo, photos, onClose, onEdit, onDelete, onToggleFav }
         </div>
       </div>
       <div className="flex-1 flex items-center justify-center p-3 overflow-hidden relative">
-        <img src={current.dataUrl} alt={current.caption || ""}
+        <CloudPhotoImg photo={current} kind="full" alt={current.caption || ""}
           style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 12 }} />
         {prev && (
           <button onClick={() => setCurrent(prev)} className="absolute left-2 p-2 rounded-full" style={{ background: "rgba(0,0,0,0.5)", color: C.gold }}>
@@ -3461,7 +3506,7 @@ const PhotoEditSheet = ({ photo, appointments, onClose, onSave }: {
     <Sheet open={!!photo} onClose={onClose} title="Photo details">
       <div className="space-y-4 pb-6">
         <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${C.hairline}`, maxHeight: 240 }}>
-          <img src={form.dataUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain", maxHeight: 240 }} />
+          <CloudPhotoImg photo={form} kind="full" alt="" style={{ width: "100%", height: "100%", objectFit: "contain", maxHeight: 240 }} />
         </div>
 
         <Field label="Category">
@@ -5680,7 +5725,7 @@ const useCloudSync = (userId: string | null, store: any) => {
   // local deletes (id present in map but absent from the live array).
   const snap = useRef<Record<string, Map<string, string>>>({
     clients: new Map(), appointments: new Map(), quotes: new Map(),
-    receipts: new Map(), communications: new Map(),
+    receipts: new Map(), communications: new Map(), photos: new Map(),
   });
 
   const stamp = () => {
@@ -5697,12 +5742,13 @@ const useCloudSync = (userId: string | null, store: any) => {
     (async () => {
       setState("syncing");
       try {
-        const [clientsCloud, apptsCloud, quotesCloud, receiptsCloud, commsCloud, settingsRow] = await Promise.all([
+        const [clientsCloud, apptsCloud, quotesCloud, receiptsCloud, commsCloud, photosCloud, settingsRow] = await Promise.all([
           syncClients.pull(userId),
           syncAppointments.pull(userId),
           syncQuotes.pull(userId),
           syncReceipts.pull(userId),
           syncCommunications.pull(userId),
+          syncPhotos.pull(userId),
           syncSettings.pull(userId),
         ]);
 
@@ -5719,21 +5765,29 @@ const useCloudSync = (userId: string | null, store: any) => {
         for (const r of newOnly(store.quotes, quotesCloud)) pushQueue.push(syncQuotes.upsert(userId, r).catch(() => null));
         for (const r of newOnly(store.receipts || [], receiptsCloud)) pushQueue.push(syncReceipts.upsert(userId, r).catch(() => null));
         for (const r of newOnly(store.commLog, commsCloud)) pushQueue.push(syncCommunications.upsert(userId, r).catch(() => null));
+        // Photos: only push metadata for items that already have a
+        // storagePath (already uploaded). Items still carrying a
+        // dataUrl will be migrated lazily by handleSavePhoto next time
+        // the user opens the gallery, since a real bucket upload has
+        // to happen first.
+        for (const r of newOnly(store.photos, photosCloud).filter((p: any) => p?.storagePath))
+          pushQueue.push(syncPhotos.upsert(userId, r).catch(() => null));
         await Promise.all(pushQueue);
 
         // Re-pull so the local state mirrors what's now in the cloud.
-        const [clients2, appts2, quotes2, receipts2, comms2] = await Promise.all([
+        const [clients2, appts2, quotes2, receipts2, comms2, photos2] = await Promise.all([
           syncClients.pull(userId),
           syncAppointments.pull(userId),
           syncQuotes.pull(userId),
           syncReceipts.pull(userId),
           syncCommunications.pull(userId),
+          syncPhotos.pull(userId),
         ]);
         const business = settingsRow?.data?.business || (settingsRow ? { businessName: settingsRow.business_name, currency: settingsRow.currency } : undefined);
         const reminderSettings = settingsRow?.reminder_settings || undefined;
         store.replaceCloudState?.({
           clients: clients2, appointments: appts2, quotes: quotes2,
-          receipts: receipts2, commLog: comms2, business, reminderSettings,
+          receipts: receipts2, commLog: comms2, photos: photos2, business, reminderSettings,
         });
         // Seed the diff snapshot.
         const seed = (table: string, arr: any[]) => {
@@ -5745,6 +5799,7 @@ const useCloudSync = (userId: string | null, store: any) => {
         seed("quotes", quotes2);
         seed("receipts", receipts2);
         seed("communications", comms2);
+        seed("photos", photos2);
 
         stamp();
         setState("idle");
@@ -5766,6 +5821,9 @@ const useCloudSync = (userId: string | null, store: any) => {
       { table: "quotes", arr: store.quotes || [], api: syncQuotes },
       { table: "receipts", arr: store.receipts || [], api: syncReceipts },
       { table: "communications", arr: store.commLog || [], api: syncCommunications },
+      // Only sync photo metadata once the bytes have been uploaded;
+      // dataUrl-only records get migrated on next gallery interaction.
+      { table: "photos", arr: (store.photos || []).filter((p: any) => p?.storagePath), api: syncPhotos },
     ];
     let dirty = false;
     setState("syncing");
@@ -5799,7 +5857,7 @@ const useCloudSync = (userId: string | null, store: any) => {
       if (dirty) stamp();
       setState(navigator.onLine ? "idle" : "offline");
     })().catch(() => setState("error"));
-  }, [userId, store.clients, store.appointments, store.quotes, store.receipts, store.commLog, store.business, store.reminderSettings]);
+  }, [userId, store.clients, store.appointments, store.quotes, store.receipts, store.commLog, store.photos, store.business, store.reminderSettings]);
 
   // Drain the offline write queue whenever connectivity resumes.
   useEffect(() => {
@@ -6074,6 +6132,41 @@ export default function App() {
   const [notifOpen, setNotifOpen] = useState(false);
   const [commPickerCtx, setCommPickerCtx] = useState<CommContext | null>(null);
   const [activeComm, setActiveComm] = useState<(CommContext & { templateKey: CommTemplateKey }) | null>(null);
+  // Photo save/delete: when the user is signed in, upload bytes to the
+  // private Supabase Storage 'photos' bucket and persist only the
+  // storage paths (not the inline dataUrls) so cross-device sync is
+  // cheap. In guest mode we keep the existing dataUrl-only behaviour.
+  const handleSavePhoto = useCallback(async (photo: any) => {
+    const incoming = { ...photo };
+    if (auth.userId && (incoming.dataUrl || incoming.thumbnailDataUrl) && !incoming.storagePath) {
+      try {
+        if (!incoming.id) incoming.id = `pho_${uid()}`;
+        const { storagePath, thumbnailPath } = await uploadPhoto(
+          auth.userId,
+          incoming.id,
+          incoming.dataUrl || incoming.thumbnailDataUrl,
+          incoming.thumbnailDataUrl || incoming.dataUrl,
+        );
+        incoming.storagePath = storagePath;
+        incoming.thumbnailPath = thumbnailPath;
+        // Don't persist the heavy dataUrls once we have a storage path —
+        // they're regenerated on demand from the bucket via signed URLs.
+        delete incoming.dataUrl;
+        delete incoming.thumbnailDataUrl;
+      } catch (err) {
+        console.warn("[bbp] photo upload failed; keeping inline copy", err);
+      }
+    }
+    return store.upsertPhoto(incoming);
+  }, [auth.userId, store]);
+
+  const handleDeletePhoto = useCallback(async (id: string) => {
+    if (auth.userId) {
+      await deletePhotoFromStorage(auth.userId, id).catch(() => null);
+    }
+    return store.deletePhoto(id);
+  }, [auth.userId, store]);
+
   const openCommunication = useCallback((next: CommContext) => {
     // Resolve the most relevant appointment when none was passed in
     // (e.g. user tapped "Send message" on a client profile). This is
@@ -6218,7 +6311,7 @@ export default function App() {
               openCommunication={openCommunication} />
           )}
           {active === "clients" && (
-            <Clients store={store} openCommunication={openCommunication} openQuickAppt={openQuickAppt} />
+            <Clients store={store} openCommunication={openCommunication} openQuickAppt={openQuickAppt} savePhoto={handleSavePhoto} deletePhoto={handleDeletePhoto} />
           )}
           {active === "money" && (
             <Money store={store}

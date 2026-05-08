@@ -41,7 +41,8 @@ export type SyncTable =
   | "quotes"
   | "receipts"
   | "communications"
-  | "notifications";
+  | "notifications"
+  | "photos";
 
 // What columns each table has beyond the standard (user_id, id,
 // data, created_at, updated_at). Used to build the upsert payload.
@@ -125,6 +126,16 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     body: r => cleanString(r.body),
     dismissed: r => cleanBool(r.dismissed),
     read_at: r => cleanString(r.readAt),
+  },
+  photos: {
+    client_id: r => cleanString(r.clientId),
+    appointment_id: r => cleanString(r.appointmentId),
+    category: r => cleanString(r.category),
+    caption: r => cleanString(r.caption),
+    taken_at: r => cleanDate(r.takenAt),
+    is_favorite: r => cleanBool(r.isFavorite),
+    storage_path: r => cleanString(r.storagePath),
+    thumbnail_path: r => cleanString(r.thumbnailPath),
   },
 };
 
@@ -223,6 +234,16 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.dismissed = base.dismissed ?? row.dismissed;
       base.readAt = base.readAt ?? row.read_at;
       break;
+    case "photos":
+      base.clientId = base.clientId ?? row.client_id;
+      base.appointmentId = base.appointmentId ?? row.appointment_id;
+      base.category = base.category ?? row.category;
+      base.caption = base.caption ?? row.caption;
+      base.takenAt = base.takenAt ?? row.taken_at;
+      base.isFavorite = base.isFavorite ?? row.is_favorite;
+      base.storagePath = base.storagePath ?? row.storage_path;
+      base.thumbnailPath = base.thumbnailPath ?? row.thumbnail_path;
+      break;
   }
   return base;
 };
@@ -286,6 +307,12 @@ export const syncNotifications = {
   upsert: (userId: string, record: any) => upsertOne("notifications", userId, record),
   delete: (userId: string, id: string) => deleteOne("notifications", userId, id),
   pull: (userId: string) => pullAll("notifications", userId),
+};
+
+export const syncPhotos = {
+  upsert: (userId: string, record: any) => upsertOne("photos", userId, record),
+  delete: (userId: string, id: string) => deleteOne("photos", userId, id),
+  pull: (userId: string) => pullAll("photos", userId),
 };
 
 // ---- Settings (singleton row per user) ---------------------------------
