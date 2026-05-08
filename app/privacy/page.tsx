@@ -1,0 +1,73 @@
+"use client";
+
+import { LegalShell, LegalSection, LegalList } from "../(legal)/_shell";
+
+export default function PrivacyPage() {
+  return (
+    <LegalShell
+      title="Privacy Policy"
+      intro="Braid Boss Pro is a tool for independent braiders to organize their business. We treat your data like it&apos;s ours — minimal, scoped to you, and never sold."
+      updated={new Date().toISOString().slice(0, 10)}>
+
+      <LegalSection title="What we collect">
+        <p>The data Braid Boss Pro stores is the data you put in. Specifically:</p>
+        <LegalList items={[
+          <><strong>Account data</strong> — email and a hashed password (handled by our auth provider, Supabase). We never see your plaintext password.</>,
+          <><strong>Client data</strong> — names, phone, email, preferred styles, allergies, and notes that you record about your clients.</>,
+          <><strong>Appointments</strong> — date, time, service, pricing, payment status, and notes.</>,
+          <><strong>Photos</strong> — inspiration, before-and-after, and reference images you attach to client profiles. Stored privately in our secure storage bucket; only you can read them.</>,
+          <><strong>Notifications</strong> — a record of subscriptions for browser or device push, plus the dismissed/read state of in-app alerts.</>,
+          <><strong>Analytics & insights</strong> — computed in your device or in our backend solely from the data above. We don&apos;t ship your data to a third-party analytics product.</>,
+          <><strong>Public booking links</strong> — the slug you generate, plus any incoming requests submitted to it. Anyone with the slug can submit a request; only you can read the inbox.</>,
+        ]} />
+      </LegalSection>
+
+      <LegalSection title="What we don&apos;t do">
+        <LegalList items={[
+          <>We do <strong>not</strong> sell, rent, or share your data with advertisers or data brokers.</>,
+          <>We do <strong>not</strong> process payments inside the app. There is no Stripe, no payment card collection, and no billing inside Braid Boss Pro. Money you collect from clients happens off-app via the methods you already use (cash, CashApp, Zelle, etc.).</>,
+          <>We do <strong>not</strong> read your photos, notes, or client lists for any purpose other than displaying them back to you.</>,
+        ]} />
+      </LegalSection>
+
+      <LegalSection title="Security">
+        <p>
+          All data is stored in a managed Postgres database with row-level security: your account can only ever read or write rows you own. Photos live in a private storage bucket with the same per-user isolation. Communication between your device and our servers is always over HTTPS.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="Your control">
+        <LegalList items={[
+          <><strong>Export</strong> — Account &amp; Sync → Export all data (JSON). One tap, downloads everything we have for you.</>,
+          <><strong>Deletion</strong> — Account &amp; Sync → Delete account. We delete your auth record and cascade-delete every per-user row in the database. Local-only data on the device is not cleared automatically; uninstall or clear browser storage to remove that.</>,
+          <><strong>Notifications</strong> — Toggle off any time in Account &amp; Sync, or revoke at the OS / browser level.</>,
+          <><strong>Public booking link</strong> — Pause or revoke any time. Revoked links return a 404 immediately.</>,
+        ]} />
+      </LegalSection>
+
+      <LegalSection title="Guest mode">
+        <p>
+          If you use Braid Boss Pro without an account, your data is stored only on the device you&apos;re using and never reaches our servers. Clearing browser storage or uninstalling will erase it permanently.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="Children">
+        <p>
+          Braid Boss Pro is intended for stylists running a business and is not directed at children under 13. Don&apos;t create an account if you&apos;re under 13.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="Changes">
+        <p>
+          If we update this policy in any meaningful way, we&apos;ll surface the change in-app before the next time you sign in. Material changes will require fresh consent.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="Contact">
+        <p>
+          Questions or concerns? Email <a href="mailto:support@braidbosspro.app">support@braidbosspro.app</a>.
+        </p>
+      </LegalSection>
+    </LegalShell>
+  );
+}

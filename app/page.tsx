@@ -7187,7 +7187,8 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
                className="flex items-center justify-between py-2 text-sm" style={{ color: C.coffee }}>
               Terms of service <ChevronRight size={16} style={{ color: C.muted }} />
             </a>
-            <a href="mailto:support@braidbosspro.app" className="flex items-center justify-between py-2 text-sm" style={{ color: C.coffee }}>
+            <a href="/support" target="_blank" rel="noopener noreferrer"
+               className="flex items-center justify-between py-2 text-sm" style={{ color: C.coffee }}>
               Contact support <ChevronRight size={16} style={{ color: C.muted }} />
             </a>
           </div>
