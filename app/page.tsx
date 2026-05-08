@@ -565,12 +565,22 @@ const fmtRelative = (iso: string): string => {
   if (hr < 24) return `${hr}h ${sign}`;
   return `${Math.round(abs / 86400000)}d ${sign}`;
 };
-const todayISO = (): string => new Date().toISOString().slice(0, 10);
+// Format a Date as "YYYY-MM-DD" using its *local* fields. We never use
+// toISOString() for app-facing dates because that returns UTC, which
+// flips a day forward at 5–8pm in US timezones — that's the source of
+// the "today is tomorrow" bug.
+const localDateISO = (d: Date): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+const todayISO = (): string => localDateISO(new Date());
 const initials = (name: string): string => (name || "?").trim().split(/\s+/).slice(0, 2).map(s => s[0]?.toUpperCase() || "").join("");
 const addDaysISO = (iso: string, days: number): string => {
   const d = new Date(iso + "T00:00:00");
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return localDateISO(d);
 };
 const cadenceDays = (cadence: string, customDays: number): number => ({
   "2w": 14, "3w": 21, "4w": 28, "6w": 42, "8w": 56, "monthly": 30, "custom": Number(customDays) || 28
@@ -1817,8 +1827,8 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
     const now = new Date();
     const wk = new Date(now); wk.setDate(now.getDate() - 7);
     const ms = new Date(now.getFullYear(), now.getMonth(), 1);
-    const wkISO = wk.toISOString().slice(0, 10);
-    const msISO = ms.toISOString().slice(0, 10);
+    const wkISO = localDateISO(wk);
+    const msISO = localDateISO(ms);
     const completedThisWeek = appointments.filter(a => a.status === "completed" && a.date >= wkISO);
     const weekRevenue = roundCents(completedThisWeek.reduce((s, a) => s + calculateCollectedAmount(a), 0));
     const pendingBalance = calculatePendingBalance(appointments, today);
@@ -3699,7 +3709,7 @@ const Money = ({ store, openTxSheet, editTx, openTimerSessions }) => {
     else if (period === "month") start.setMonth(now.getMonth() - 1);
     else if (period === "quarter") start.setMonth(now.getMonth() - 3);
     else start.setFullYear(2000);
-    return { start: start.toISOString().slice(0, 10), end: todayISO() };
+    return { start: localDateISO(start), end: todayISO() };
   }, [period]);
 
   const txInRange = useMemo(() => store.transactions.filter(t => t.date >= range.start && t.date <= range.end), [store.transactions, range]);
