@@ -22,6 +22,12 @@ import {
   resolvePhotoUrl,
 } from "./lib/photo-storage";
 import {
+  buildVCalendar,
+  downloadIcs,
+  sanitizeFilename,
+  type IcsAppointment,
+} from "./lib/ics";
+import {
   detectPushCapability,
   subscribeWebPush,
   unsubscribeWebPush,
@@ -2623,9 +2629,21 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
             cta={<Button variant="primary" icon={<Plus size={18} />} onClick={() => setEditing({})}>New appointment</Button>}
           />
         ) : (
-          <div className="space-y-2.5">
-            {filtered.map(a => <AppointmentRow key={a.id} appt={a} business={business} recurringSeries={recurringSeries} onClick={() => setEditing(a)} />)}
-          </div>
+          <>
+            <div className="space-y-2.5">
+              {filtered.map(a => <AppointmentRow key={a.id} appt={a} business={business} recurringSeries={recurringSeries} onClick={() => setEditing(a)} />)}
+            </div>
+            <button
+              className="w-full text-center text-xs font-semibold mt-3 py-2 flex items-center justify-center gap-1.5"
+              style={{ color: C.goldDeep }}
+              onClick={() => {
+                const ics = buildVCalendar(filtered as IcsAppointment[], { businessName: business?.businessName, currency: business?.currency });
+                const fname = sanitizeFilename(`bbp-${filter}`) + ".ics";
+                downloadIcs(fname, ics);
+              }}>
+              <Download size={13} /> Export {filtered.length} appointment{filtered.length === 1 ? "" : "s"} as .ics
+            </button>
+          </>
         )}
       </div>
 
@@ -3016,6 +3034,16 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
               client: clients.find((c: any) => c.id === form.clientId),
             })}>
             Send message to client
+          </Button>
+        )}
+        {form.id && form.date && (
+          <Button variant="outline" icon={<CalendarPlus size={16} />} fullWidth
+            onClick={() => {
+              const ics = buildVCalendar([form as IcsAppointment], { businessName: business?.businessName, currency: business?.currency });
+              const fname = sanitizeFilename(`appt-${form.clientName || "client"}-${form.date}`) + ".ics";
+              downloadIcs(fname, ics);
+            }}>
+            Add to calendar
           </Button>
         )}
 
@@ -6037,6 +6065,92 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
     }
   };
 
+  // Calendar feed token: a single active subscribe URL per user. We
+  // expose only one for V1 — list is sorted desc and we take the first
+  // unrevoked entry.
+  const [feedToken, setFeedToken] = useState<string | null>(null);
+  const [feedBusy, setFeedBusy] = useState(false);
+  const [feedCopied, setFeedCopied] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears feed token when auth context changes, intentional
+    if (mode !== "authed" || !userId) { setFeedToken(null); return; }
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from("calendar_feed_tokens")
+        .select("token, revoked_at")
+        .eq("user_id", userId)
+        .is("revoked_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (!cancelled) setFeedToken(data?.[0]?.token || null);
+    })();
+    return () => { cancelled = true; };
+  }, [mode, userId]);
+
+  const feedUrl = useMemo(() => {
+    if (!feedToken) return null;
+    // Functions URL shape: https://<project>.functions.supabase.co/<fn>
+    // We derive it from the configured supabase URL so it follows
+    // env switches automatically.
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://bjqazhplxqqhftekspfl.supabase.co";
+    const host = url.replace("https://", "").replace(".supabase.co", "");
+    return `https://${host}.functions.supabase.co/calendar-feed?token=${encodeURIComponent(feedToken)}`;
+  }, [feedToken]);
+
+  const handleEnableFeed = async () => {
+    if (!userId) return;
+    setFeedBusy(true);
+    try {
+      const supabase = getSupabase();
+      // Token = base64url of 24 random bytes via crypto. Long, opaque,
+      // safe to include in a URL.
+      const bytes = new Uint8Array(24);
+      crypto.getRandomValues(bytes);
+      let bin = "";
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      const token = btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      const { error } = await supabase.from("calendar_feed_tokens").insert({
+        user_id: userId,
+        token,
+        label: "default",
+      });
+      if (error) throw error;
+      setFeedToken(token);
+    } catch (err) {
+      console.warn("[bbp] feed enable failed", err);
+    } finally {
+      setFeedBusy(false);
+    }
+  };
+
+  const handleRevokeFeed = async () => {
+    if (!userId || !feedToken) return;
+    setFeedBusy(true);
+    try {
+      const supabase = getSupabase();
+      await supabase
+        .from("calendar_feed_tokens")
+        .update({ revoked_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .eq("token", feedToken);
+      setFeedToken(null);
+    } finally {
+      setFeedBusy(false);
+    }
+  };
+
+  const handleCopyFeedUrl = async () => {
+    if (!feedUrl) return;
+    try {
+      await navigator.clipboard.writeText(feedUrl);
+      setFeedCopied(true);
+      setTimeout(() => setFeedCopied(false), 1600);
+    } catch { /* ignore */ }
+  };
+
   return (
     <div className="bbp-fade pb-24">
       <Header title="Account" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
@@ -6098,6 +6212,35 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
               </Button>
             )}
             {pushError && <p className="text-[11px] mt-2" style={{ color: C.danger }}>{pushError}</p>}
+          </Card>
+        )}
+
+        {mode === "authed" && (
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>Calendar feed</p>
+              <Pill tone={feedToken ? "success" : "neutral"}>{feedToken ? "ACTIVE" : "OFF"}</Pill>
+            </div>
+            <p className="text-[11px] mb-3" style={{ color: C.muted }}>
+              {feedToken
+                ? "Subscribe Apple Calendar / Google Calendar / Outlook to this URL — bookings sync automatically. Anyone with the link can view your schedule, so revoke if it leaks."
+                : "Generate a private subscribe URL to push your appointments to Apple Calendar, Google Calendar, or Outlook. You can revoke any time."}
+            </p>
+            {feedToken && feedUrl && (
+              <div className="rounded-xl p-2.5 mb-3 break-all text-[11px] font-mono" style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}>
+                {feedUrl}
+              </div>
+            )}
+            {feedToken ? (
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" icon={<Copy size={14} />} onClick={handleCopyFeedUrl}>{feedCopied ? "Copied" : "Copy URL"}</Button>
+                <Button variant="danger" disabled={feedBusy} onClick={handleRevokeFeed}>Revoke</Button>
+              </div>
+            ) : (
+              <Button variant="primary" icon={<Calendar size={15} />} fullWidth disabled={feedBusy} onClick={handleEnableFeed}>
+                {feedBusy ? "Working…" : "Enable calendar feed"}
+              </Button>
+            )}
           </Card>
         )}
 
