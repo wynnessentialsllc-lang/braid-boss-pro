@@ -28,6 +28,28 @@ import {
   type IcsAppointment,
 } from "./lib/ics";
 import {
+  generateBossInsights,
+  type Insight,
+} from "./lib/insights";
+import {
+  calculateRevenueAnalytics,
+  calculateClientAnalytics,
+  calculateAppointmentAnalytics,
+  calculateStylePerformance,
+  calculateRetentionAnalytics,
+  calculateCommunicationAnalytics,
+} from "./lib/analytics";
+import {
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  type NotificationPreferences,
+} from "./lib/notification-rules";
+import { runNotificationRules, splitDeliverable } from "./lib/notification-scheduler";
+import {
+  dispatchPush,
+  loadDeliveredHistory,
+  saveDeliveredHistory,
+} from "./lib/push-dispatch";
+import {
   detectPushCapability,
   subscribeWebPush,
   unsubscribeWebPush,
@@ -1744,7 +1766,7 @@ const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: {
 // ============================================================
 //  DASHBOARD
 // ============================================================
-const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, notifBadgeCount = 0, syncState }: { store: any; setActive: any; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; notifBadgeCount?: number; syncState?: SyncState }) => {
+const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState }: { store: any; setActive: any; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
@@ -1877,6 +1899,16 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
           <KpiCard label="Pending balance" value={fmtMoney(stats.pendingBalance, business.currency)} icon={<Clock size={16} />} tone={stats.pendingBalance > 0 ? "warning" : "neutral"} onClick={() => setActive("schedule")} />
           <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} onClick={() => setActive("money")} />
         </div>
+
+        <BossInsightsCard
+          clients={clients}
+          appointments={appointments}
+          commLog={store.commLog}
+          settings={{ business }}
+          today={today}
+          setActive={setActive}
+          openAnalytics={openAnalytics}
+        />
 
         <RetentionInsights
           clients={clients}
@@ -2056,6 +2088,67 @@ const KpiCard = ({ label, value, icon, tone = "neutral", onClick }: { label: any
       <p style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: C.espresso, lineHeight: 1 }}>{value}</p>
       {onClick && <p className="text-[10px] font-semibold mt-1.5 flex items-center gap-0.5" style={{ color: C.gold }}>View <ChevronRight size={11} /></p>}
     </Card>
+  );
+};
+
+const BossInsightsCard = ({ clients, appointments, commLog, settings, today, setActive, openAnalytics }: {
+  clients: any[];
+  appointments: any[];
+  commLog: any[];
+  settings: { business: any };
+  today: string;
+  setActive: (tab: string) => void;
+  openAnalytics?: () => void;
+}) => {
+  const insights = useMemo(() =>
+    generateBossInsights({ clients, appointments, communications: commLog, settings, today }),
+    [clients, appointments, commLog, settings, today]);
+
+  const tone = (p: Insight["priority"]): "danger" | "gold" | "neutral" =>
+    p === "high" ? "danger" : p === "medium" ? "gold" : "neutral";
+
+  const handleAction = (target?: string) => {
+    if (!target) return;
+    if (target.startsWith("tab:")) setActive(target.slice(4));
+    // client:/appointment: deep-links land on the relevant tab in V1.
+    else if (target.startsWith("client:")) setActive("clients");
+    else if (target.startsWith("appointment:")) setActive("schedule");
+  };
+
+  return (
+    <div>
+      <SectionTitle action={openAnalytics ? { label: "Analytics", onClick: openAnalytics } : undefined}>
+        Boss insights
+      </SectionTitle>
+      {insights.length === 0 ? (
+        <Card className="p-5 text-center">
+          <Sparkles size={18} style={{ color: C.gold, margin: "0 auto 6px" }} />
+          <p className="text-sm font-semibold" style={{ color: C.espresso }}>Insights warming up</p>
+          <p className="text-xs mt-1" style={{ color: C.muted }}>Your insights will sharpen as you book, collect, and rebook.</p>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {insights.map(i => (
+            <Card key={i.id} className="p-3.5">
+              <div className="flex items-start justify-between gap-2 mb-1.5 flex-wrap">
+                <Pill tone={tone(i.priority)}>{i.category.toUpperCase()}</Pill>
+              </div>
+              <p className="font-semibold text-sm" style={{ color: C.espresso }}>{i.title}</p>
+              {i.body && <p className="text-[12px] mt-1 leading-relaxed" style={{ color: C.coffee }}>{i.body}</p>}
+              {i.actionLabel && (
+                <div className="flex justify-end mt-2">
+                  <button onClick={() => handleAction(i.actionTarget)}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+                    style={{ background: "transparent", color: C.goldDeep, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
+                    {i.actionLabel}
+                  </button>
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -5226,6 +5319,156 @@ const BookingRequestsScreen = ({ userId, onBack, onApprove }: {
   );
 };
 
+const AnalyticsStatRow = ({ label, value, hint }: { label: string; value: any; hint?: string }) => (
+  <div className="flex items-baseline justify-between py-2" style={{ borderBottom: `1px solid ${C.hairline}` }}>
+    <div>
+      <p className="text-[12px] font-semibold" style={{ color: C.coffee }}>{label}</p>
+      {hint && <p className="text-[10px] mt-0.5" style={{ color: C.muted }}>{hint}</p>}
+    </div>
+    <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>{value}</p>
+  </div>
+);
+
+const AnalyticsBar = ({ value, max, color }: { value: number; max: number; color: string }) => (
+  <div className="h-1.5 rounded-full overflow-hidden" style={{ background: C.ivory }}>
+    <div className="h-full rounded-full" style={{ width: `${max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0}%`, background: color, transition: "width 200ms" }} />
+  </div>
+);
+
+const AnalyticsScreen = ({ clients, appointments, commLog, business, today, onBack }: {
+  clients: any[];
+  appointments: any[];
+  commLog: any[];
+  business: any;
+  today: string;
+  onBack: () => void;
+}) => {
+  const revenue = useMemo(() => calculateRevenueAnalytics(appointments, today), [appointments, today]);
+  const clientStats = useMemo(() => calculateClientAnalytics(clients, appointments, today), [clients, appointments, today]);
+  const apptStats = useMemo(() => calculateAppointmentAnalytics(appointments, today), [appointments, today]);
+  const styleStats = useMemo(() => calculateStylePerformance(appointments), [appointments]);
+  const retention = useMemo(() => calculateRetentionAnalytics(clients, appointments, today), [clients, appointments, today]);
+  const comms = useMemo(() => calculateCommunicationAnalytics(commLog), [commLog]);
+
+  const noData = (appointments?.length || 0) === 0;
+  const limitedStyle = styleStats.length === 0;
+  const limitedRetention = retention.repeatBookingRatePct === 0 && retention.rebookingCandidates === 0 && retention.averageDaysBetween === null;
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header title="Analytics" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
+      <div className="px-5 pt-4 space-y-5">
+        {noData ? (
+          <EmptyState
+            icon={<BarChart3 size={28} style={{ color: C.gold }} />}
+            title="No data yet"
+            body="Book your first appointment to unlock analytics."
+          />
+        ) : (
+          <>
+            <div>
+              <SectionTitle>Revenue</SectionTitle>
+              <Card className="p-4">
+                <AnalyticsStatRow label="Revenue this month" value={fmtMoney(revenue.thisMonth, business?.currency)} />
+                <AnalyticsStatRow label="Revenue last month" value={fmtMoney(revenue.lastMonth, business?.currency)} />
+                <AnalyticsStatRow
+                  label="Month-over-month"
+                  value={revenue.momChangePct === null
+                    ? "—"
+                    : `${revenue.momChangePct > 0 ? "+" : ""}${revenue.momChangePct}%`}
+                />
+                <AnalyticsStatRow label="Average ticket" value={fmtMoney(revenue.averageTicket, business?.currency)} />
+                <AnalyticsStatRow label="Top-earning style" value={revenue.topStyle ? `${revenue.topStyle.name}` : "—"} hint={revenue.topStyle ? fmtMoney(revenue.topStyle.revenue, business?.currency) : undefined} />
+                <AnalyticsStatRow label="Pending balances" value={fmtMoney(revenue.pendingBalance, business?.currency)} />
+              </Card>
+            </div>
+
+            <div>
+              <SectionTitle>Clients</SectionTitle>
+              <Card className="p-4">
+                <AnalyticsStatRow label="Total clients" value={clientStats.total} />
+                <AnalyticsStatRow label="New this month" value={clientStats.newThisMonth} />
+                <AnalyticsStatRow label="Repeat client rate" value={`${clientStats.repeatRatePct}%`} />
+                <AnalyticsStatRow label="VIP clients" value={clientStats.vipCount} />
+                <AnalyticsStatRow label="At-risk clients" value={clientStats.atRiskCount} />
+                <AnalyticsStatRow label="Inactive clients" value={clientStats.inactiveCount} />
+              </Card>
+            </div>
+
+            <div>
+              <SectionTitle>Appointments</SectionTitle>
+              <Card className="p-4">
+                <AnalyticsStatRow label="Total this month" value={apptStats.thisMonthTotal} />
+                <AnalyticsStatRow label="Completed" value={apptStats.completed} />
+                <AnalyticsStatRow label="Cancelled" value={apptStats.cancelled} />
+                <AnalyticsStatRow label="No-shows" value={apptStats.noShow} />
+                <AnalyticsStatRow label="Busiest day" value={apptStats.busiestDow ? `${apptStats.busiestDow.name}` : "—"} hint={apptStats.busiestDow ? `${apptStats.busiestDow.count} bookings` : undefined} />
+                <AnalyticsStatRow label="Avg duration" value={apptStats.averageDurationHours > 0 ? `${apptStats.averageDurationHours.toFixed(1)}h` : "—"} />
+              </Card>
+            </div>
+
+            <div>
+              <SectionTitle>Style performance</SectionTitle>
+              {limitedStyle ? (
+                <Card className="p-4 text-center">
+                  <p className="text-xs" style={{ color: C.muted }}>Style trends will appear after a few completed appointments.</p>
+                </Card>
+              ) : (
+                <Card className="p-4 space-y-3">
+                  {styleStats.slice(0, 5).map(s => {
+                    const max = styleStats[0].revenue || 1;
+                    return (
+                      <div key={s.style}>
+                        <div className="flex items-baseline justify-between mb-1">
+                          <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>{s.style}</p>
+                          <p className="text-[12px] font-mono" style={{ color: C.goldDeep }}>{fmtMoney(s.revenue, business?.currency)}</p>
+                        </div>
+                        <AnalyticsBar value={s.revenue} max={max} color={C.goldDeep} />
+                        <p className="text-[10px] mt-1" style={{ color: C.muted }}>
+                          {s.count} booking{s.count === 1 ? "" : "s"} · avg {fmtMoney(s.averagePrice, business?.currency)} · {s.averageDuration > 0 ? `${s.averageDuration.toFixed(1)}h avg · ` : ""}{s.repeatBookingRatePct}% repeats
+                        </p>
+                      </div>
+                    );
+                  })}
+                </Card>
+              )}
+            </div>
+
+            <div>
+              <SectionTitle>Retention</SectionTitle>
+              {limitedRetention ? (
+                <Card className="p-4 text-center">
+                  <p className="text-xs" style={{ color: C.muted }}>Retention insights grow as clients rebook.</p>
+                </Card>
+              ) : (
+                <Card className="p-4">
+                  <AnalyticsStatRow label="Rebooking candidates" value={retention.rebookingCandidates} />
+                  <AnalyticsStatRow label="Average days between" value={retention.averageDaysBetween ?? "—"} />
+                  <AnalyticsStatRow label="Clients overdue (90+ days)" value={retention.overdueCount} />
+                  <AnalyticsStatRow label="Repeat booking rate" value={`${retention.repeatBookingRatePct}%`} />
+                </Card>
+              )}
+            </div>
+
+            <div>
+              <SectionTitle>Communications</SectionTitle>
+              <Card className="p-4">
+                <AnalyticsStatRow label="Messages logged" value={comms.total} />
+                <AnalyticsStatRow label="Sent via SMS" value={comms.sent} />
+                <AnalyticsStatRow label="Shared" value={comms.shared} />
+                <AnalyticsStatRow label="Copied" value={comms.copied} />
+                <AnalyticsStatRow label="Reminders sent" value={comms.remindersSent} />
+                <AnalyticsStatRow label="Rebooking nudges" value={comms.rebookingNudgesSent} />
+                <AnalyticsStatRow label="Balance reminders" value={comms.balanceRemindersSent} />
+              </Card>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const CommunicationLogScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const entries = useMemo(() =>
     [...(store.commLog || [])].sort((a: any, b: any) => (b.createdAt || "").localeCompare(a.createdAt || "")),
@@ -6166,6 +6409,8 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   const [pushCap, setPushCap] = useState<PushCapability>("unsupported");
   const [pushBusy, setPushBusy] = useState(false);
   const [pushError, setPushError] = useState<string | null>(null);
+  const [testStatus, setTestStatus] = useState<string | null>(null);
+  const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
 
   useEffect(() => {
     let cancelled = false;
@@ -6178,6 +6423,58 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
     })();
     return () => { cancelled = true; };
   }, [mode, userId]);
+
+  // Hydrate notification preferences from Supabase settings.data once
+  // signed in. Falls back to the defaults for guest mode.
+  useEffect(() => {
+    if (mode !== "authed" || !userId) return;
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from("settings")
+        .select("data")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (cancelled) return;
+      const stored = (data?.data as any)?.notification_preferences;
+      if (stored && typeof stored === "object") {
+        setPrefs({ ...DEFAULT_NOTIFICATION_PREFERENCES, ...stored });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [mode, userId]);
+
+  const persistPrefs = async (next: NotificationPreferences) => {
+    setPrefs(next);
+    if (mode !== "authed" || !userId) return;
+    const supabase = getSupabase();
+    const { data } = await supabase
+      .from("settings")
+      .select("data")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const blob = (data?.data as any) || {};
+    blob.notification_preferences = next;
+    await supabase
+      .from("settings")
+      .upsert({ user_id: userId, data: blob }, { onConflict: "user_id" });
+  };
+
+  const handleTestNotification = async () => {
+    if (!userId) return;
+    setTestStatus("Sending…");
+    const result = await dispatchPush(userId, {
+      id: `test:${Date.now()}`,
+      kind: "test",
+      category: "appointment",
+      priority: "low",
+      title: "Test from Braid Boss Pro",
+      body: "If you're reading this, push delivery is working.",
+    });
+    setTestStatus(result.ok ? "Sent — check your notifications." : `Couldn't send: ${result.reason || "unknown"}`);
+    setTimeout(() => setTestStatus(null), 4000);
+  };
 
   const handleEnablePush = async () => {
     if (!userId) return;
@@ -6450,6 +6747,32 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
               </Button>
             )}
             {pushError && <p className="text-[11px] mt-2" style={{ color: C.danger }}>{pushError}</p>}
+
+            {pushCap === "subscribed" && (
+              <>
+                <div className="mt-4 pt-3 space-y-2" style={{ borderTop: `1px solid ${C.hairline}` }}>
+                  <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>What to alert me about</p>
+                  {([
+                    ["appointmentReminders", "Appointment reminders", "48h, 24h, same-day, and 2h alerts"],
+                    ["balanceReminders", "Balance reminders", "Outstanding balances and overdue alerts"],
+                    ["retentionReminders", "Retention reminders", "Inactive VIPs and rebooking nudges"],
+                    ["businessInsights", "Business insights", "Daily summaries and pending balance totals"],
+                  ] as [keyof NotificationPreferences, string, string][]).map(([key, label, hint]) => (
+                    <div key={key} className="flex items-center justify-between py-1">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold" style={{ color: C.espresso }}>{label}</p>
+                        <p className="text-[11px]" style={{ color: C.muted }}>{hint}</p>
+                      </div>
+                      <Toggle checked={!!prefs[key]} onChange={(v) => persistPrefs({ ...prefs, [key]: v })} />
+                    </div>
+                  ))}
+                </div>
+                <Button variant="outline" icon={<Bell size={14} />} fullWidth className="mt-3" onClick={handleTestNotification}>
+                  Test notification
+                </Button>
+                {testStatus && <p className="text-[11px] mt-2 text-center" style={{ color: testStatus.startsWith("Couldn't") ? C.danger : C.success }}>{testStatus}</p>}
+              </>
+            )}
           </Card>
         )}
 
@@ -6546,6 +6869,51 @@ export default function App() {
   const auth = useAuth();
   const store = useStorage();
   const sync = useCloudSync(auth.userId, store);
+
+  // Run the notification scheduler once per app open + every 10 min
+  // while the tab stays open. Fail-soft when push isn't supported on
+  // this device (PWA web fallback) — the rules still surface in the
+  // bell via buildNotifications. iOS native push will plug into the
+  // same pipeline once we wrap with Capacitor.
+  useEffect(() => {
+    if (auth.mode !== "authed" || !auth.userId) return;
+    let cancelled = false;
+    let timer: any = null;
+    const run = async () => {
+      try {
+        const cap = await detectPushCapability();
+        if (cap !== "subscribed") return; // no surface to deliver to
+        const supabase = getSupabase();
+        const { data: settingsRow } = await supabase
+          .from("settings")
+          .select("data")
+          .eq("user_id", auth.userId)
+          .maybeSingle();
+        const prefs = ((settingsRow?.data as any)?.notification_preferences) || DEFAULT_NOTIFICATION_PREFERENCES;
+        const rules = runNotificationRules({
+          clients: store.clients,
+          appointments: store.appointments,
+          todayIso: todayISO(),
+          nowMs: Date.now(),
+          preferences: prefs,
+          deliveredHistory: loadDeliveredHistory(),
+        });
+        const history = loadDeliveredHistory();
+        const { toSend } = splitDeliverable(rules, history, new Date());
+        let nextHistory = history;
+        for (const r of toSend.slice(0, 10)) {
+          const result = await dispatchPush(auth.userId!, r);
+          if (result.ok) nextHistory = { ...nextHistory, [r.id]: new Date().toISOString() };
+        }
+        if (toSend.length > 0) saveDeliveredHistory(nextHistory);
+      } catch (err) {
+        console.warn("[bbp] scheduler failed", err);
+      }
+    };
+    run();
+    timer = setInterval(() => { if (!cancelled) run(); }, 10 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [auth.mode, auth.userId, store.clients, store.appointments]);
   const [active, setActive] = useState("dashboard");
   const [secondary, setSecondary] = useState<string | null>(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
   const [calcPrefill, setCalcPrefill] = useState<EntityRecord | null>(null);
@@ -6717,6 +7085,7 @@ export default function App() {
               notifBadgeCount={notifications.unreadCount}
               openCommunication={openCommunication}
               syncState={auth.mode === "authed" ? sync.state : undefined}
+              openAnalytics={() => setSecondary("analytics")}
               openPresets={() => setSecondary("presets")}
               openTimer={() => setSecondary("timer")} />
           )}
@@ -6791,6 +7160,16 @@ export default function App() {
       )}
       {secondary === "timerSessions" && <TimerSessionsScreen store={store} onBack={() => setSecondary(null)} />}
       {secondary === "communicationLog" && <CommunicationLogScreen store={store} onBack={() => setSecondary(null)} />}
+      {secondary === "analytics" && (
+        <AnalyticsScreen
+          clients={store.clients}
+          appointments={store.appointments}
+          commLog={store.commLog}
+          business={store.business}
+          today={todayISO()}
+          onBack={() => setSecondary(null)}
+        />
+      )}
       {secondary === "bookingRequests" && (
         <BookingRequestsScreen
           userId={auth.userId}
