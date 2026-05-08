@@ -1310,57 +1310,6 @@ const useStorage = () => {
 // ============================================================
 //  PRIMITIVES
 // ============================================================
-// Visible error boundary. Inside the iOS Capacitor shell, an
-// uncaught render exception inside a secondary screen surfaces as
-// WKWebView's "This page couldn't load" placeholder — which makes
-// the bug feel like a routing / button problem when it's really a
-// React render that threw. This boundary keeps us inside React,
-// renders the actual stack/message, and gives a Back button.
-class ScreenErrorBoundary extends React.Component<
-  { onBack?: () => void; label?: string; children: React.ReactNode },
-  { error: Error | null }
-> {
-  state = { error: null as Error | null };
-  static getDerivedStateFromError(error: Error) {
-    return { error };
-  }
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // eslint-disable-next-line no-console
-    console.error("[bbp:ScreenErrorBoundary]", this.props.label || "", error, info);
-  }
-  render() {
-    const { error } = this.state;
-    if (!error) return this.props.children;
-    return (
-      <div className="bbp-fade pb-24">
-        <div className="px-5 pt-6 space-y-4">
-          <h2 style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>
-            Something broke loading this screen
-          </h2>
-          <p className="text-xs" style={{ color: C.muted }}>
-            {this.props.label ? `Screen: ${this.props.label}.` : ""} Tap Back and try again.
-          </p>
-          <pre
-            className="text-[11px] whitespace-pre-wrap p-3 rounded-xl"
-            style={{ background: C.ivory, color: C.danger, border: `1px solid ${C.hairline}`, fontFamily: "ui-monospace, monospace" }}>
-            {String(error?.message || error)}
-            {error?.stack ? "\n\n" + error.stack.split("\n").slice(0, 6).join("\n") : ""}
-          </pre>
-          {this.props.onBack && (
-            <button
-              type="button"
-              onClick={() => { this.setState({ error: null }); this.props.onBack?.(); }}
-              className="w-full rounded-xl py-3 text-sm font-bold uppercase tracking-wider"
-              style={{ background: C.espresso, color: C.cream, letterSpacing: "0.1em" }}>
-              Back
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-}
-
 const Card = ({ children, className = "", style, onClick }: {
   children: React.ReactNode;
   className?: string;
@@ -8252,135 +8201,10 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
 // ============================================================
 //  APP ROOT
 // ============================================================
-// Build marker bumped on every PR that affects iOS Capacitor
-// behavior. Surfaced bottom-right in the WKWebView so we can verify
-// at a glance whether the device is running the latest deploy or a
-// cached stale bundle. If the user reports a fix didn't land and the
-// number on-screen doesn't match the latest deploy, we know the
-// problem is bundle staleness (force-quit the app, clear WKWebView
-// cache, or reinstall) — not the code we just shipped.
-const BBP_BUILD_MARKER = "build:54";
-
-// Hardened wrapper. The actual app is `AppInner`; this wrapper traps
-// any render-time exception from anywhere in the tree (including the
-// hooks above the secondary-screen boundaries) and renders the error
-// inline so we never lose visibility to WKWebView's "couldn't load"
-// page. Also persists to localStorage for post-mortem extraction via
-// Safari Web Inspector.
-class TopLevelBoundary extends React.Component<
-  { children: React.ReactNode },
-  { error: Error | null }
-> {
-  state = { error: null as Error | null };
-  static getDerivedStateFromError(error: Error) {
-    return { error };
-  }
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
-    try {
-      // eslint-disable-next-line no-console
-      console.error("[bbp:TopLevelBoundary]", error, info);
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(
-          "bbp-last-error",
-          `${BBP_BUILD_MARKER} | TopLevel: ${error?.message || error}\n${error?.stack?.split("\n").slice(0, 8).join("\n") || ""}`,
-        );
-      }
-    } catch { /* never let the recorder itself throw */ }
-  }
-  render() {
-    const { error } = this.state;
-    if (!error) return this.props.children;
-    return (
-      <div style={{ minHeight: "100dvh", background: "#FAF5EC", padding: "calc(env(safe-area-inset-top, 0px) + 24px) 20px 24px", fontFamily: "ui-monospace, monospace", color: "#2A1810" }}>
-        <h1 style={{ fontFamily: "Georgia, serif", fontSize: 24, fontWeight: 700, marginBottom: 12 }}>
-          App crashed at top level
-        </h1>
-        <p style={{ fontSize: 12, marginBottom: 12, color: "#8B7355" }}>
-          {BBP_BUILD_MARKER}. The error was caught BEFORE WKWebView replaced the page.
-        </p>
-        <pre style={{ fontSize: 11, whiteSpace: "pre-wrap", wordBreak: "break-word", padding: 12, borderRadius: 12, background: "#F5EBD9", color: "#9C3D2E", border: "1px solid rgba(74,44,26,0.12)" }}>
-          {String(error?.message || error)}
-          {error?.stack ? "\n\n" + error.stack.split("\n").slice(0, 8).join("\n") : ""}
-        </pre>
-        <button
-          type="button"
-          onClick={() => this.setState({ error: null })}
-          style={{ marginTop: 16, width: "100%", padding: "12px 16px", borderRadius: 12, background: "#2A1810", color: "#FAF5EC", border: 0, fontSize: 13, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase" }}>
-          Try recovering
-        </button>
-      </div>
-    );
-  }
-}
-
 export default function App() {
-  return (
-    <TopLevelBoundary>
-      <AppInner />
-    </TopLevelBoundary>
-  );
-}
-
-function AppInner() {
   const auth = useAuth();
   const store = useStorage();
   const sync = useCloudSync(auth.userId, store);
-
-  // Visible runtime-error catcher. Inside the iOS Capacitor shell
-  // there's no Safari console you can pop open mid-tap, and WKWebView
-  // hides JS exceptions behind its generic "This page couldn't load"
-  // placeholder when a top-level component throws. This listener
-  // captures both window.onerror and unhandledrejection events and
-  // overlays the actual message in a fixed banner so we finally see
-  // the real exception instead of guessing at the cause.
-  // Persistent error capture. Inside the iOS Capacitor shell,
-  // WKWebView occasionally replaces the entire page with its native
-  // "This page couldn't load" view when an unhandled JS error
-  // escalates — which destroys our JS context before any in-React UI
-  // can display the cause. Persisting to localStorage means the
-  // error survives the WKWebView crash and we can dump it via
-  // Safari Web Inspector:
-  //   localStorage.getItem("bbp-last-error")
-  // Append a timestamped tail of recent errors as a JSON array so we
-  // can see ordering across multiple taps in one session.
-  const [runtimeError, setRuntimeError] = useState<string | null>(null);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const recordError = (label: string, payload: unknown) => {
-      try {
-        const text = `${BBP_BUILD_MARKER} | ${label}: ${
-          typeof payload === "string"
-            ? payload
-            : (payload as any)?.message || JSON.stringify(payload)
-        }`;
-        setRuntimeError(text);
-        // Persistent ring buffer — keep last 5 events.
-        const KEY = "bbp-last-error";
-        const KEY_LIST = "bbp-error-log";
-        try {
-          window.localStorage.setItem(KEY, text);
-          const prev = JSON.parse(window.localStorage.getItem(KEY_LIST) || "[]");
-          prev.push({ at: new Date().toISOString(), text });
-          if (prev.length > 5) prev.splice(0, prev.length - 5);
-          window.localStorage.setItem(KEY_LIST, JSON.stringify(prev));
-        } catch { /* localStorage unavailable / quota */ }
-      } catch { /* never let the recorder itself throw */ }
-    };
-    const onError = (e: ErrorEvent) => {
-      const where = e.filename ? ` @${e.filename}:${e.lineno}:${e.colno}` : "";
-      recordError("window.onerror", `${e.error?.message || e.message || "unknown"}${where}`);
-    };
-    const onRejection = (e: PromiseRejectionEvent) => {
-      const reason: any = e.reason;
-      recordError("unhandledrejection", reason?.message || reason || "no reason");
-    };
-    window.addEventListener("error", onError);
-    window.addEventListener("unhandledrejection", onRejection);
-    return () => {
-      window.removeEventListener("error", onError);
-      window.removeEventListener("unhandledrejection", onRejection);
-    };
-  }, []);
 
   // Run the notification scheduler once per app open + every 10 min
   // while the tab stays open. Fail-soft when push isn't supported on
@@ -8646,50 +8470,29 @@ function AppInner() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && (
-        <ScreenErrorBoundary label="Settings" onBack={() => setSecondary(null)}>
-          <SettingsScreen
-            store={store}
-            onBack={() => setSecondary(null)}
-            openReminderSettings={() => {
-              if (typeof window !== "undefined" && (window as any).__bbpDebugTaps) alert("Reminder settings tapped");
-              setSecondary("reminderSettings");
-            }}
-            openCommunicationLog={() => {
-              if (typeof window !== "undefined" && (window as any).__bbpDebugTaps) alert("Communication log tapped");
-              setSecondary("communicationLog");
-            }}
-            openAccount={() => {
-              if (typeof window !== "undefined" && (window as any).__bbpDebugTaps) alert("Account sync tapped");
-              setSecondary("account");
-            }}
-          />
-        </ScreenErrorBoundary>
-      )}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} />}
       {secondary === "account" && (
-        <ScreenErrorBoundary label="Account" onBack={() => setSecondary("settings")}>
-          <AccountScreen
-            email={auth.email}
-            mode={auth.mode}
-            sync={sync}
-            userId={auth.userId}
-            openBookingRequests={() => setSecondary("bookingRequests")}
-            onBack={() => setSecondary("settings")}
-            onSignOut={async () => { await auth.signOut(); setSecondary(null); }}
-            onExport={() => {
-              const data = JSON.stringify({
-                business: store.business,
-                clients: store.clients,
-                appointments: store.appointments,
-                quotes: store.quotes,
-                receipts: store.receipts || [],
-                commLog: store.commLog,
-                transactions: store.transactions,
-              }, null, 2);
-              void downloadJson(`braid-boss-pro-${todayISO()}.json`, data);
-            }}
-          />
-        </ScreenErrorBoundary>
+        <AccountScreen
+          email={auth.email}
+          mode={auth.mode}
+          sync={sync}
+          userId={auth.userId}
+          openBookingRequests={() => setSecondary("bookingRequests")}
+          onBack={() => setSecondary("settings")}
+          onSignOut={async () => { await auth.signOut(); setSecondary(null); }}
+          onExport={() => {
+            const data = JSON.stringify({
+              business: store.business,
+              clients: store.clients,
+              appointments: store.appointments,
+              quotes: store.quotes,
+              receipts: store.receipts || [],
+              commLog: store.commLog,
+              transactions: store.transactions,
+            }, null, 2);
+            void downloadJson(`braid-boss-pro-${todayISO()}.json`, data);
+          }}
+        />
       )}
       {secondary === "savedQuotes" && (
         <SavedQuotes store={store} onBack={() => setSecondary(null)}
@@ -8697,27 +8500,13 @@ function AppInner() {
           onConvertToAppt={handleConvertQuoteToAppt}
           openReceipt={openReceipt} />
       )}
-      {secondary === "reminders" && (
-        <ScreenErrorBoundary label="Reminder inbox" onBack={() => setSecondary(null)}>
-          <ReminderInbox store={store} onBack={() => setSecondary(null)} openSettings={() => setSecondary("reminderSettings")} />
-        </ScreenErrorBoundary>
-      )}
-      {secondary === "reminderSettings" && (
-        <ScreenErrorBoundary label="Reminder settings" onBack={() => setSecondary("settings")}>
-          <ReminderSettings store={store} onBack={() => setSecondary("settings")} />
-        </ScreenErrorBoundary>
-      )}
+      {secondary === "reminders" && <ReminderInbox store={store} onBack={() => setSecondary(null)} openSettings={() => setSecondary("reminderSettings")} />}
+      {secondary === "reminderSettings" && <ReminderSettings store={store} onBack={() => setSecondary("reminders")} />}
       {secondary === "presets" && (
         <PresetsScreen store={store} onBack={() => setSecondary(null)} onUsePreset={handleUsePreset} />
       )}
       {secondary === "timerSessions" && <TimerSessionsScreen store={store} onBack={() => setSecondary(null)} />}
-      {/* Communication log is only entered from the Settings card.
-          Back returns to Settings, not the dashboard. */}
-      {secondary === "communicationLog" && (
-        <ScreenErrorBoundary label="Communication log" onBack={() => setSecondary("settings")}>
-          <CommunicationLogScreen store={store} onBack={() => setSecondary("settings")} />
-        </ScreenErrorBoundary>
-      )}
+      {secondary === "communicationLog" && <CommunicationLogScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "analytics" && (
         <AnalyticsScreen
           clients={store.clients}
@@ -8824,56 +8613,6 @@ function AppInner() {
         </Sheet>
       )}
 
-      {/* Build marker — bottom right, always visible, tiny so it
-          doesn't intrude on screenshots. Lets us prove on-device
-          which deploy is actually running. */}
-      <div
-        aria-hidden
-        style={{
-          position: "fixed",
-          right: 6,
-          bottom: "calc(env(safe-area-inset-bottom, 0px) + 4px)",
-          zIndex: 9999,
-          fontSize: 9,
-          fontFamily: "ui-monospace, monospace",
-          color: "rgba(74, 44, 26, 0.45)",
-          pointerEvents: "none",
-          letterSpacing: "0.04em",
-        }}>
-        {BBP_BUILD_MARKER}
-      </div>
-
-      {/* Visible runtime-error banner. When a top-level exception
-          fires anywhere in the React tree (or as an unhandled
-          promise rejection), this overlays the real message so we
-          stop seeing WKWebView's generic "This page couldn't load"
-          placeholder. Tap to dismiss. */}
-      {runtimeError && (
-        <div
-          role="alert"
-          onClick={() => setRuntimeError(null)}
-          style={{
-            position: "fixed",
-            top: "calc(env(safe-area-inset-top, 0px) + 8px)",
-            left: 8,
-            right: 8,
-            zIndex: 10000,
-            padding: "10px 12px",
-            borderRadius: 12,
-            background: "rgba(156, 61, 46, 0.95)",
-            color: "#FAF5EC",
-            fontSize: 12,
-            lineHeight: 1.4,
-            boxShadow: "0 6px 20px -8px rgba(0,0,0,0.5)",
-            fontFamily: "ui-monospace, monospace",
-            cursor: "pointer",
-          }}>
-          <div style={{ fontWeight: 700, marginBottom: 4, letterSpacing: "0.06em", textTransform: "uppercase", fontSize: 10 }}>
-            Runtime error · tap to dismiss
-          </div>
-          <div style={{ wordBreak: "break-word" }}>{runtimeError}</div>
-        </div>
-      )}
     </Frame>
   );
 }
