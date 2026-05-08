@@ -6624,6 +6624,20 @@ const READINESS_ITEMS: { label: string; check: (ctx: { mode: AuthMode; pushCap: 
   { label: "Push notifications surface enabled", check: ({ pushCap }) => pushCap === "subscribed" ? "ok" : pushCap === "blocked" ? "warn" : "info" },
 ];
 
+// Returns true when the App Store readiness checklist (an internal QA
+// utility) should be visible. Production users never see it; dev /
+// preview builds always do; explicit admin emails always do regardless
+// of NODE_ENV.
+const isAdminViewer = (email: string | null | undefined): boolean => {
+  if (process.env.NODE_ENV !== "production") return true;
+  const allow = (process.env.NEXT_PUBLIC_ADMIN_EMAIL || "")
+    .split(",")
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (allow.length === 0) return false;
+  return !!email && allow.includes(email.toLowerCase());
+};
+
 const ReadinessChecklistSheet = ({ open, onClose, mode, pushCap }: {
   open: boolean;
   onClose: () => void;
@@ -7169,7 +7183,9 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
           <Button variant="outline" icon={<Download size={15} />} fullWidth onClick={onExport}>Export all data (JSON)</Button>
           {mode === "authed" ? (
             <>
-              <Button variant="outline" icon={<ScrollText size={15} />} fullWidth onClick={() => setShowReadiness(true)}>App Store readiness checklist</Button>
+              {isAdminViewer(email) && (
+                <Button variant="outline" icon={<ScrollText size={15} />} fullWidth onClick={() => setShowReadiness(true)}>App Store readiness checklist</Button>
+              )}
               <Button variant="outline" icon={<Trash2 size={15} />} fullWidth onClick={() => setShowDeleteConfirm(true)}>Delete account</Button>
               <Button variant="danger" fullWidth onClick={onSignOut}>Sign out</Button>
             </>
@@ -7195,7 +7211,9 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
         </Card>
       </div>
 
-      <ReadinessChecklistSheet open={showReadiness} onClose={() => setShowReadiness(false)} mode={mode} pushCap={pushCap} />
+      {isAdminViewer(email) && (
+        <ReadinessChecklistSheet open={showReadiness} onClose={() => setShowReadiness(false)} mode={mode} pushCap={pushCap} />
+      )}
       <DeleteAccountSheet open={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} onSignOut={onSignOut} />
       <AuthSheet
         open={!!authSheetMode}
