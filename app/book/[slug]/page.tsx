@@ -114,7 +114,11 @@ export default function PublicBookingPage() {
       if (!res.ok) throw new Error(body?.error || "Couldn't send request");
       setSubmitted(true);
     } catch (err: any) {
-      setSubmitError(err?.message || "Couldn't send your request. Try again in a moment.");
+      setSubmitError(
+        err?.message
+          ? `Couldn't send your request: ${err.message}. Please try again in a moment.`
+          : "Couldn't send your request. Check your connection and try again.",
+      );
     } finally {
       setSubmitting(false);
     }
