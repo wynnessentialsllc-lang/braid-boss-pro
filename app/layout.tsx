@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -11,6 +11,25 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
+
+// Viewport for both the PWA and the Capacitor iOS shell.
+// - viewportFit: "cover" lets `env(safe-area-inset-*)` produce real
+//   values so the bottom nav clears the home indicator and the header
+//   clears the dynamic island/notch.
+// - userScalable: false / maximumScale: 1 prevents pinch-zoom that
+//   would shove the layout off-grid; we already provide the normal
+//   text-size respect via system Dynamic Type.
+// - themeColor matches manifest backgroundColor so the iOS status bar
+//   blends with the cream surface (statusBarStyle: "default" in
+//   appleWebApp keeps the icons dark).
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+  themeColor: "#FAF5EC",
+};
 
 export const metadata: Metadata = {
   title: "Braid Boss Pro",

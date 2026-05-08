@@ -53,6 +53,11 @@ import {
 import { renderReceiptPdf } from "./lib/pdf-render";
 import { getAuthRedirectUrl } from "./lib/site-url";
 import {
+  downloadJson,
+  downloadPdfBlob,
+} from "./lib/native-download";
+import { openExternal } from "./lib/open-external";
+import {
   computeRebookingOpportunities,
   computeClientRebookingInsight,
   buildRebookingMessage,
@@ -5609,12 +5614,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
       photos: store.photos.map(p => ({ ...p, dataUrl: "[redacted-base64]", thumbnailDataUrl: "[redacted-base64]" })),
       series: store.series, timerSessions: store.timerSessions, presets: store.presets
     };
-    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `braid-boss-pro-export-${todayISO()}.json`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
+    void downloadJson(`braid-boss-pro-export-${todayISO()}.json`, dump);
   };
 
   return (
@@ -6543,15 +6543,8 @@ const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: 
     setBusy(true);
     try {
       const { blob, filename } = await renderReceiptPdf(receipt, business, policies);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      showToast("Downloaded");
+      const result = await downloadPdfBlob(filename, blob);
+      showToast(result.ok ? "Downloaded" : "Couldn't generate PDF");
     } catch (err) {
       console.error(err);
       showToast("Couldn't generate PDF");
@@ -6564,28 +6557,27 @@ const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: 
     setBusy(true);
     try {
       const { blob, filename } = await renderReceiptPdf(receipt, business, policies);
-      const file = new File([blob], filename, { type: "application/pdf" });
-      const nav: any = navigator;
-      if (nav.canShare && nav.canShare({ files: [file] })) {
-        await nav.share({
-          files: [file],
-          title: `${isInvoice ? "Invoice" : "Receipt"} ${receipt.receiptNumber}`,
-          text: buildReceiptSummaryText(receipt, currency),
-        });
-        showToast("Shared");
-      } else {
-        // Fallback to download — mobile Safari supports navigator.share
-        // with files but desktop browsers often don't.
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        showToast("Sharing not available — downloaded");
+      // Inside Capacitor, downloadPdfBlob already routes through the
+      // native share sheet (Filesystem.writeFile + Share.share). Web
+      // gets navigator.share when files are sharable, otherwise the
+      // anchor-download fallback.
+      const isNativeShell = typeof window !== "undefined" &&
+        !!(window as any).Capacitor?.isNativePlatform?.();
+      if (!isNativeShell) {
+        const file = new File([blob], filename, { type: "application/pdf" });
+        const nav: any = navigator;
+        if (nav.canShare && nav.canShare({ files: [file] })) {
+          await nav.share({
+            files: [file],
+            title: `${isInvoice ? "Invoice" : "Receipt"} ${receipt.receiptNumber}`,
+            text: buildReceiptSummaryText(receipt, currency),
+          });
+          showToast("Shared");
+          return;
+        }
       }
+      const result = await downloadPdfBlob(filename, blob);
+      showToast(result.ok ? (isNativeShell ? "Shared" : "Sharing not available — downloaded") : "Couldn't share");
     } catch (err) {
       console.error(err);
       showToast("Couldn't share");
@@ -7628,9 +7620,18 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
     try {
       const sub = await subscribeWebPush(userId);
       if (!sub) {
-        setPushError(typeof Notification !== "undefined" && Notification.permission === "denied"
-          ? "Notifications are off. Re-enable them for this site in your browser settings, or turn them on later in Account & Sync."
-          : "This browser doesn't support push notifications. iOS push will activate when you install the App Store build — your subscription will carry over.");
+        // Inside the iOS Capacitor shell, the "browser doesn't support
+        // push" wording is wrong — APNs is supported, the user just
+        // declined the system prompt. Switch the message accordingly.
+        const isNativeShell = typeof window !== "undefined" &&
+          !!(window as any).Capacitor?.isNativePlatform?.();
+        if (isNativeShell) {
+          setPushError("Notifications are off. Enable them in iOS Settings → Braid Boss Pro → Notifications, then try again.");
+        } else if (typeof Notification !== "undefined" && Notification.permission === "denied") {
+          setPushError("Notifications are off. Re-enable them for this site in your browser settings, or turn them on later in Account & Sync.");
+        } else {
+          setPushError("This browser doesn't support push notifications. iOS push will activate when you install the App Store build — your subscription will carry over.");
+        }
       }
       const cap = await detectPushCapability();
       setPushCap(cap);
@@ -8069,15 +8070,23 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
         <Card className="p-4">
           <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.12em" }}>Legal &amp; support</p>
           <div className="space-y-1.5">
+            {/* Routed through openExternal: web opens a new tab; iOS
+                Capacitor shell opens SFSafariViewController so the
+                back-swipe gesture returns to the app shell with state
+                intact. Same-origin paths get prefixed with the live
+                site URL inside the helper call. */}
             <a href="/privacy" target="_blank" rel="noopener noreferrer"
+               onClick={(e) => { e.preventDefault(); void openExternal(getAuthRedirectUrl("/privacy")); }}
                className="flex items-center justify-between py-2 text-sm" style={{ color: C.coffee }}>
               Privacy policy <ChevronRight size={16} style={{ color: C.muted }} />
             </a>
             <a href="/terms" target="_blank" rel="noopener noreferrer"
+               onClick={(e) => { e.preventDefault(); void openExternal(getAuthRedirectUrl("/terms")); }}
                className="flex items-center justify-between py-2 text-sm" style={{ color: C.coffee }}>
               Terms of service <ChevronRight size={16} style={{ color: C.muted }} />
             </a>
             <a href="/support" target="_blank" rel="noopener noreferrer"
+               onClick={(e) => { e.preventDefault(); void openExternal(getAuthRedirectUrl("/support")); }}
                className="flex items-center justify-between py-2 text-sm" style={{ color: C.coffee }}>
               Contact support <ChevronRight size={16} style={{ color: C.muted }} />
             </a>
@@ -8390,12 +8399,7 @@ export default function App() {
               commLog: store.commLog,
               transactions: store.transactions,
             }, null, 2);
-            const blob = new Blob([data], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url; a.download = `braid-boss-pro-${todayISO()}.json`;
-            document.body.appendChild(a); a.click(); a.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            void downloadJson(`braid-boss-pro-${todayISO()}.json`, data);
           }}
         />
       )}
