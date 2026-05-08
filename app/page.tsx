@@ -4555,6 +4555,24 @@ const ProductivityTab = ({ sessions, appointments, business, openTimerSessions }
 // ============================================================
 //  REMINDER INBOX
 // ============================================================
+// Reminder records have two shapes that both ship in the codebase:
+//   1. templates: { channel: "sms" | "email" }       — string
+//   2. scheduled reminders: { type: "sms",
+//                             channel: { phone, email } }  — object
+// The render sites historically read `.channel.toUpperCase()` which
+// crashed on shape #2 with a startup TypeError when any scheduled
+// reminder existed (Capacitor caught the error and replaced the
+// page with WKWebView's "couldn't load" view). This helper prefers
+// `.type` (the canonical transport tag), falls back to `.channel`
+// when it's a string, and always returns a safe uppercase label.
+const reminderChannelLabel = (r: any): string => {
+  const t = r?.type;
+  if (typeof t === "string" && t) return t.toUpperCase();
+  const c = r?.channel;
+  if (typeof c === "string" && c) return c.toUpperCase();
+  return "SMS";
+};
+
 const PURPOSE_LABEL_LOCAL = {
   confirmation: "Confirmation",
   reminder_48h: "48h reminder",
@@ -4669,7 +4687,7 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
                         </Pill>
                       </div>
                       <p className="text-[11px]" style={{ color: C.muted }}>
-                        {PURPOSE_LABEL_LOCAL[r.purpose] || r.purpose} · {r.channel.toUpperCase()}
+                        {PURPOSE_LABEL_LOCAL[r.purpose] || r.purpose} · {reminderChannelLabel(r)}
                       </p>
                       <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
                         {r.status === "pending" ? `Scheduled ${fmtRelative(r.scheduledFor)}` :
@@ -4733,7 +4751,7 @@ const ReminderDetailSheet = ({ reminder, client, appointment, template, business
           </Card>
           <Card className="p-3" style={{ background: C.ivory }}>
             <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted }}>Channel</p>
-            <p className="text-sm font-semibold" style={{ color: C.espresso }}>{reminder.channel.toUpperCase()}</p>
+            <p className="text-sm font-semibold" style={{ color: C.espresso }}>{reminderChannelLabel(reminder)}</p>
             <p className="text-[11px]" style={{ color: C.muted }}>{reminder.status}</p>
           </Card>
         </div>
@@ -4865,7 +4883,7 @@ const ReminderSettings = ({ store, onBack }: {
             <Card key={t.id} className="p-3" onClick={() => setOpenTpl(t)}>
               <div className="flex items-center justify-between mb-1">
                 <p className="text-sm font-semibold" style={{ color: C.espresso }}>{PURPOSE_LABEL_LOCAL[t.purpose]}</p>
-                <Pill tone="neutral">{t.channel.toUpperCase()}</Pill>
+                <Pill tone="neutral">{reminderChannelLabel(t)}</Pill>
               </div>
               <p className="text-[11px] line-clamp-2" style={{ color: C.muted }}>{t.body}</p>
             </Card>
@@ -5773,7 +5791,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold" style={{ color: C.espresso }}>Reminder settings</p>
-              <p className="text-[11px]" style={{ color: C.muted }}>{store.reminderSettings.enabled ? "Enabled" : "Disabled"} · {store.reminderSettings.defaultChannel.toUpperCase()}</p>
+              <p className="text-[11px]" style={{ color: C.muted }}>{store.reminderSettings?.enabled ? "Enabled" : "Disabled"} · {(store.reminderSettings?.defaultChannel || "sms").toString().toUpperCase()}</p>
             </div>
             <ChevronRight size={18} style={{ color: C.muted }} />
           </div>
