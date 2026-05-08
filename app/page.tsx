@@ -53,6 +53,14 @@ import {
 import { renderReceiptPdf } from "./lib/pdf-render";
 import { getAuthRedirectUrl } from "./lib/site-url";
 import {
+  computeRebookingOpportunities,
+  computeClientRebookingInsight,
+  buildRebookingMessage,
+  summarizeOpportunities,
+  type RebookingOpportunity,
+  type RebookingUrgency,
+} from "./lib/rebooking/rebooking-intelligence";
+import {
   dispatchPush,
   loadDeliveredHistory,
   saveDeliveredHistory,
@@ -1789,6 +1797,361 @@ const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: {
 // ============================================================
 //  DASHBOARD
 // ============================================================
+// ---- REBOOKING OPPORTUNITIES (UI) ---------------------------------------
+// Visual conventions:
+//   high   → danger tone pill (bbp-pulse-gold optional accent on the chip)
+//   medium → warning tone pill
+//   low    → gold tone pill
+const URGENCY_LABEL: Record<RebookingUrgency, string> = {
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
+
+const URGENCY_PILL_TONE: Record<RebookingUrgency, "danger" | "warning" | "gold"> = {
+  high: "danger",
+  medium: "warning",
+  low: "gold",
+};
+
+const formatOverdueLabel = (days: number): string => {
+  if (days >= 1) return `${days}d overdue`;
+  if (days === 0) return "Due today";
+  return `Due in ${Math.abs(days)}d`;
+};
+
+// Lightweight clipboard helper. Used by the "Copy message" CTAs. Falls
+// back to the legacy execCommand path for older mobile webviews.
+const copyTextToClipboard = async (text: string): Promise<boolean> => {
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* fall through */ }
+  try {
+    if (typeof document === "undefined") return false;
+    const el = document.createElement("textarea");
+    el.value = text;
+    el.style.position = "fixed";
+    el.style.opacity = "0";
+    document.body.appendChild(el);
+    el.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(el);
+    return ok;
+  } catch { return false; }
+};
+
+// Premium card. Dashboard surface for the rebooking system. Empty state
+// uses the same Sparkles + cream block as the existing retention card
+// for visual consistency.
+const RebookingOpportunitiesCard = ({
+  opportunities,
+  summary,
+  currency,
+  clients,
+  openQuickAppt,
+  onViewAll,
+}: {
+  opportunities: RebookingOpportunity[];
+  summary: { total: number; high: number; medium: number; low: number; estimated_returning_revenue: number };
+  currency: string;
+  clients: any[];
+  openQuickAppt: (prefill?: any) => void;
+  openCommunication?: (ctx: CommContext) => void;
+  onViewAll: () => void;
+}) => {
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const onCopyMessage = async (op: RebookingOpportunity) => {
+    const ok = await copyTextToClipboard(buildRebookingMessage(op));
+    if (!ok) return;
+    setCopiedId(op.client_id);
+    window.setTimeout(() => setCopiedId(prev => prev === op.client_id ? null : prev), 1600);
+  };
+
+  const onBookAgain = (op: RebookingOpportunity) => {
+    const c = clients.find((x: any) => x?.id === op.client_id);
+    openQuickAppt({
+      clientId: op.client_id,
+      clientName: op.client_name,
+      clientPhone: op.client_phone || c?.phone,
+      clientEmail: op.client_email || c?.email,
+      style: op.last_style || "",
+      totalPrice: op.estimated_value || undefined,
+    });
+  };
+
+  if (summary.total === 0) {
+    return (
+      <div>
+        <SectionTitle>Rebooking opportunities</SectionTitle>
+        <Card className="p-5 text-center">
+          <Sparkles size={18} style={{ color: C.gold, margin: "0 auto 6px" }} />
+          <p className="text-sm font-semibold" style={{ color: C.espresso }}>
+            No rebooking opportunities yet
+          </p>
+          <p className="text-xs mt-1 max-w-xs mx-auto leading-relaxed" style={{ color: C.muted }}>
+            Once clients complete appointments, Braid Boss Pro will spot who may be ready to return.
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <SectionTitle action={
+        <button onClick={onViewAll} className="text-xs font-semibold flex items-center gap-1" style={{ color: C.goldDeep }}>
+          View all <ChevronRight size={14} />
+        </button>
+      }>Rebooking opportunities</SectionTitle>
+      <Card className="p-4" style={{
+        background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
+        border: `1px solid ${C.hairline}`,
+      }}>
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <div className="rounded-xl p-3" style={{ background: C.cream, border: `1px solid ${C.hairline}` }}>
+            <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+              Due / overdue
+            </p>
+            <p className="text-xl font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>
+              {summary.total}
+            </p>
+            <p className="text-[10px] mt-0.5" style={{ color: C.muted }}>
+              {summary.high > 0 && <span style={{ color: C.danger, fontWeight: 600 }}>{summary.high} high</span>}
+              {summary.high > 0 && (summary.medium + summary.low) > 0 && " · "}
+              {summary.medium > 0 && <span style={{ color: C.warning, fontWeight: 600 }}>{summary.medium} med</span>}
+              {summary.medium > 0 && summary.low > 0 && " · "}
+              {summary.low > 0 && <span style={{ color: C.goldDeep, fontWeight: 600 }}>{summary.low} low</span>}
+            </p>
+          </div>
+          <div className="rounded-xl p-3" style={{ background: C.cream, border: `1px solid ${C.hairline}` }}>
+            <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+              Returning revenue
+            </p>
+            <p className="text-xl font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>
+              {fmtMoney(summary.estimated_returning_revenue, currency)}
+            </p>
+            <p className="text-[10px] mt-0.5" style={{ color: C.muted }}>If all rebook</p>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          {opportunities.map(op => (
+            <div key={op.client_id} className="rounded-xl p-3 flex items-start gap-3"
+              style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+              <div className="rounded-full flex items-center justify-center shrink-0"
+                style={{ width: 36, height: 36, background: `linear-gradient(135deg, ${C.caramel}, ${C.coffee})`, color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 14, fontWeight: 600 }}>
+                {initials(op.client_name)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <p className="font-semibold text-sm truncate" style={{ color: C.espresso }}>{op.client_name}</p>
+                  <Pill tone={URGENCY_PILL_TONE[op.urgency]}>{URGENCY_LABEL[op.urgency]}</Pill>
+                </div>
+                <p className="text-[11px] mt-0.5 truncate" style={{ color: C.muted }}>
+                  {op.last_style || "Last appointment"} · {formatOverdueLabel(op.days_overdue)}
+                </p>
+              </div>
+              <div className="flex flex-col gap-1.5 shrink-0">
+                <button onClick={() => onBookAgain(op)}
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+                  style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
+                  Book again
+                </button>
+                <button onClick={() => onCopyMessage(op)}
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+                  style={{ background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}`, letterSpacing: "0.08em" }}>
+                  {copiedId === op.client_id ? "Copied" : "Copy msg"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button onClick={onViewAll}
+          className="w-full mt-3 rounded-xl py-2.5 text-xs font-bold uppercase tracking-wider active:scale-[0.99] transition"
+          style={{ background: C.espresso, color: C.cream, letterSpacing: "0.1em" }}>
+          View all
+        </button>
+      </Card>
+    </div>
+  );
+};
+
+// ---- REBOOKING OPPORTUNITIES (FULL SCREEN) ------------------------------
+// Note: implemented as a top-level inline screen component instead of
+// app/rebooking/page.tsx because the rest of the app's "pages" route
+// through the active-tab state pattern (active === "schedule" |
+// "clients" | "money" | "rebooking") and share the parent <Provider>'s
+// store. A standalone Next.js page here would have to re-load all
+// state via Supabase and de-sync from the in-memory store. See
+// PR description for context.
+const RebookingScreen = ({
+  store,
+  setActive,
+  openQuickAppt,
+  onBack,
+}: {
+  store: any;
+  setActive: (id: string) => void;
+  openQuickAppt: (prefill?: any) => void;
+  onBack: () => void;
+}) => {
+  void setActive;
+  const { appointments = [], clients = [], business } = store;
+  const today = todayISO();
+  const [filter, setFilter] = useState<"all" | RebookingUrgency>("all");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const opportunities = useMemo(
+    () => computeRebookingOpportunities(clients, appointments, today),
+    [clients, appointments, today],
+  );
+  const summary = useMemo(() => summarizeOpportunities(opportunities), [opportunities]);
+  const filtered = useMemo(
+    () => filter === "all" ? opportunities : opportunities.filter(o => o.urgency === filter),
+    [opportunities, filter],
+  );
+
+  const onCopyMessage = async (op: RebookingOpportunity) => {
+    const ok = await copyTextToClipboard(buildRebookingMessage(op));
+    if (!ok) return;
+    setCopiedId(op.client_id);
+    window.setTimeout(() => setCopiedId(prev => prev === op.client_id ? null : prev), 1600);
+  };
+
+  const onBookAgain = (op: RebookingOpportunity) => {
+    const c = clients.find((x: any) => x?.id === op.client_id);
+    openQuickAppt({
+      clientId: op.client_id,
+      clientName: op.client_name,
+      clientPhone: op.client_phone || c?.phone,
+      clientEmail: op.client_email || c?.email,
+      style: op.last_style || "",
+      totalPrice: op.estimated_value || undefined,
+    });
+  };
+
+  const FILTERS: { id: "all" | RebookingUrgency; label: string; count: number }[] = [
+    { id: "all", label: "All", count: summary.total },
+    { id: "high", label: "High", count: summary.high },
+    { id: "medium", label: "Medium", count: summary.medium },
+    { id: "low", label: "Low", count: summary.low },
+  ];
+
+  return (
+    <div className="bbp-fade pb-24">
+      <Header title="Rebooking" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
+      <div className="px-5 pt-4 space-y-3">
+        <div className="grid grid-cols-3 gap-2">
+          <Card className="p-3" style={{ background: C.ivory }}>
+            <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Total</p>
+            <p className="text-xl font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{summary.total}</p>
+          </Card>
+          <Card className="p-3" style={{ background: C.ivory }}>
+            <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Returning rev.</p>
+            <p className="text-xl font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>
+              {fmtMoney(summary.estimated_returning_revenue, business?.currency || "USD")}
+            </p>
+          </Card>
+          <Card className="p-3" style={{ background: C.ivory }}>
+            <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>High urgency</p>
+            <p className="text-xl font-bold" style={{ color: summary.high > 0 ? C.danger : C.espresso, fontFamily: FONT_DISPLAY }}>{summary.high}</p>
+          </Card>
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto bbp-scroll -mx-1 px-1 pb-1">
+          {FILTERS.map(f => {
+            const active = filter === f.id;
+            return (
+              <button key={f.id} onClick={() => setFilter(f.id)}
+                className="px-3.5 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider shrink-0 active:scale-[0.97] transition"
+                style={{
+                  background: active ? C.espresso : C.cream,
+                  color: active ? C.cream : C.coffee,
+                  border: `1px solid ${active ? C.espresso : C.hairline}`,
+                  letterSpacing: "0.08em",
+                }}>
+                {f.label} · {f.count}
+              </button>
+            );
+          })}
+        </div>
+
+        {filtered.length === 0 ? (
+          <Card className="p-6 text-center">
+            <Sparkles size={20} style={{ color: C.gold, margin: "0 auto 8px" }} />
+            <p className="text-sm font-semibold" style={{ color: C.espresso }}>
+              {summary.total === 0 ? "No rebooking opportunities yet" : "Nothing in this filter"}
+            </p>
+            <p className="text-xs mt-1 max-w-xs mx-auto leading-relaxed" style={{ color: C.muted }}>
+              {summary.total === 0
+                ? "Once clients complete appointments, Braid Boss Pro will spot who may be ready to return."
+                : "Try another urgency tier."}
+            </p>
+          </Card>
+        ) : (
+          <div className="space-y-2">
+            {filtered.map(op => (
+              <Card key={op.client_id} className="p-3.5">
+                <div className="flex items-start gap-3">
+                  <div className="rounded-full flex items-center justify-center shrink-0"
+                    style={{ width: 40, height: 40, background: `linear-gradient(135deg, ${C.caramel}, ${C.coffee})`, color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 15, fontWeight: 600 }}>
+                    {initials(op.client_name)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="font-semibold text-sm" style={{ color: C.espresso }}>{op.client_name}</p>
+                      <Pill tone={URGENCY_PILL_TONE[op.urgency]}>{URGENCY_LABEL[op.urgency]}</Pill>
+                    </div>
+                    <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>{op.reason}</p>
+                  </div>
+                  {op.estimated_value != null && (
+                    <p className="text-sm font-bold shrink-0" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>
+                      {fmtMoney(op.estimated_value, business?.currency || "USD")}
+                    </p>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-2 mt-3 text-[10px]" style={{ color: C.muted }}>
+                  <div>
+                    <p className="uppercase tracking-widest font-bold mb-0.5" style={{ letterSpacing: "0.1em" }}>Last seen</p>
+                    <p style={{ color: C.coffee }}>{fmtDate(op.last_appointment_date)}</p>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-widest font-bold mb-0.5" style={{ letterSpacing: "0.1em" }}>Style</p>
+                    <p className="truncate" style={{ color: C.coffee }}>{op.last_style || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-widest font-bold mb-0.5" style={{ letterSpacing: "0.1em" }}>Status</p>
+                    <p style={{ color: op.urgency === "high" ? C.danger : op.urgency === "medium" ? C.warning : C.goldDeep, fontWeight: 600 }}>
+                      {formatOverdueLabel(op.days_overdue)}
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <button onClick={() => onBookAgain(op)}
+                    className="px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+                    style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
+                    Book again
+                  </button>
+                  <button onClick={() => onCopyMessage(op)}
+                    className="px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+                    style={{ background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}`, letterSpacing: "0.08em" }}>
+                    {copiedId === op.client_id ? "Copied" : "Copy message"}
+                  </button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState }: { store: any; setActive: any; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
@@ -1824,17 +2187,19 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
     [appointments, today, upcomingExcludeIds],
   );
 
-  // Suggested rebooks: clients whose last completed appointment was longer ago than typical cadence (4 weeks)
-  const suggestedRebooks = useMemo(() => {
-    const byClient: Record<string, EntityRecord> = {};
-    appointments.filter((a: EntityRecord) => a.status === "completed").forEach((a: EntityRecord) => {
-      if (!a.clientId) return;
-      if (!byClient[a.clientId] || a.date > byClient[a.clientId].date) byClient[a.clientId] = a;
-    });
-    const cutoff = addDaysISO(today, -28);
-    const out = Object.values(byClient).filter((a) => a.date < cutoff && a.date >= addDaysISO(today, -90));
-    return out.sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(0, 3);
-  }, [appointments, today]);
+  // Style-aware rebooking opportunities. Replaces the old generic 28-day
+  // cutoff with per-style windows (knotless 6w, cornrows 3w, …) and
+  // urgency tiering. The dashboard card surfaces the top 3; the full
+  // list lives at active === "rebooking".
+  const rebookingOpportunities = useMemo(
+    () => computeRebookingOpportunities(clients, appointments, today),
+    [clients, appointments, today],
+  );
+  const rebookingSummary = useMemo(
+    () => summarizeOpportunities(rebookingOpportunities),
+    [rebookingOpportunities],
+  );
+  const topRebookings = rebookingOpportunities.slice(0, 3);
 
   const stats = useMemo(() => {
     const now = new Date();
@@ -2001,30 +2366,15 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
           )}
         </div>
 
-        {suggestedRebooks.length > 0 && (
-          <div>
-            <SectionTitle>Suggested rebooks</SectionTitle>
-            <div className="space-y-2">
-              {suggestedRebooks.map(a => (
-                <Card key={a.id} className="p-3.5 flex items-center gap-3">
-                  <div className="rounded-full flex items-center justify-center shrink-0"
-                    style={{ width: 36, height: 36, background: `linear-gradient(135deg, ${C.caramel}, ${C.coffee})`, color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 14, fontWeight: 600 }}>
-                    {initials(a.clientName)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm truncate" style={{ color: C.espresso }}>{a.clientName}</p>
-                    <p className="text-xs truncate" style={{ color: C.muted }}>Last seen {fmtDate(a.date)} · {a.style}</p>
-                  </div>
-                  <button onClick={() => openQuickAppt({ clientId: a.clientId, clientName: a.clientName, style: a.style, totalPrice: a.totalPrice })}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold shrink-0"
-                    style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}` }}>
-                    Rebook
-                  </button>
-                </Card>
-              ))}
-            </div>
-          </div>
-        )}
+        <RebookingOpportunitiesCard
+          opportunities={topRebookings}
+          summary={rebookingSummary}
+          currency={business.currency}
+          clients={clients}
+          openQuickAppt={openQuickAppt}
+          onViewAll={() => setActive("rebooking")}
+        />
+
 
         <div>
           <SectionTitle action={
@@ -3315,6 +3665,63 @@ const PHOTO_CATEGORIES = [
   { value: "scalp", label: "Scalp", color: "#DFB5AC" },
 ];
 
+// Small inline card on the client profile. Hides itself when the
+// client has no completed appointments yet (computeClientRebookingInsight
+// returns null in that case).
+const ClientRebookingInsightCard = ({
+  clientId,
+  appointments,
+  business,
+}: {
+  clientId: string;
+  appointments: any[];
+  business: any;
+}) => {
+  const insight = useMemo(
+    () => computeClientRebookingInsight(clientId, appointments, todayISO()),
+    [clientId, appointments],
+  );
+  if (!insight) return null;
+
+  const STATUS_LABEL = { not_due: "Not due", due_soon: "Due soon", overdue: "Overdue" } as const;
+  const statusTone =
+    insight.status === "overdue" ? C.danger
+    : insight.status === "due_soon" ? C.warning
+    : C.muted;
+
+  return (
+    <Card className="p-4" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+          Rebooking
+        </p>
+        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+          style={{ background: C.cream, color: statusTone, border: `1px solid ${C.hairline}`, letterSpacing: "0.08em" }}>
+          {STATUS_LABEL[insight.status]}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 text-[11px]">
+        <div>
+          <p className="uppercase tracking-widest font-bold mb-0.5" style={{ color: C.muted, letterSpacing: "0.1em", fontSize: 9 }}>Last appointment</p>
+          <p style={{ color: C.coffee, fontWeight: 600 }}>{fmtDate(insight.last_appointment_date)}</p>
+          {insight.last_style && (
+            <p className="text-[10px]" style={{ color: C.muted }}>{insight.last_style}</p>
+          )}
+        </div>
+        <div>
+          <p className="uppercase tracking-widest font-bold mb-0.5" style={{ color: C.muted, letterSpacing: "0.1em", fontSize: 9 }}>Suggested rebook</p>
+          <p style={{ color: C.coffee, fontWeight: 600 }}>{fmtDate(insight.recommended_rebook_date)}</p>
+          {insight.estimated_value != null && (
+            <p className="text-[10px]" style={{ color: C.muted }}>
+              Est. {fmtMoney(insight.estimated_value, business?.currency || "USD")}
+            </p>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+};
+
 const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuickAppt, savePhoto, deletePhotoExternal }: {
   open: boolean;
   client: any;
@@ -3406,6 +3813,13 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
 
         {tab === "info" && (
           <div className="space-y-4">
+            {form.id && (
+              <ClientRebookingInsightCard
+                clientId={form.id}
+                appointments={appointments}
+                business={business}
+              />
+            )}
             {form.id && (
               <ClientCommunicationTimeline
                 clientId={form.id}
@@ -7943,6 +8357,14 @@ export default function App() {
               editTx={(t) => { setEditingTx(t); setOpenTx(true); }}
               openTimerSessions={() => setSecondary("timerSessions")}
               openReceipt={openReceipt} />
+          )}
+          {active === "rebooking" && (
+            <RebookingScreen
+              store={store}
+              setActive={setActive}
+              openQuickAppt={openQuickAppt}
+              onBack={() => setActive("dashboard")}
+            />
           )}
         </>
       )}
