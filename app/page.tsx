@@ -1315,15 +1315,37 @@ const Card = ({ children, className = "", style, onClick }: {
   className?: string;
   style?: React.CSSProperties;
   onClick?: () => void;
-}) => (
-  <div onClick={onClick} className={`rounded-2xl ${className}`}
-    style={{
-      background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
-      border: `1px solid ${C.hairline}`,
-      boxShadow: "0 1px 2px rgba(42, 24, 16, 0.04), 0 8px 24px -12px rgba(42, 24, 16, 0.12)",
-      ...style
-    }}>{children}</div>
-);
+}) => {
+  // When the card is interactive, render with button semantics so:
+  //   1. iOS WKWebView reliably routes the touch to a click event
+  //      (synthetic clicks on plain <div> can be eaten by tap-to-zoom
+  //      detection on some WKWebView versions),
+  //   2. screen readers announce it as a control,
+  //   3. keyboard users can activate it.
+  // Non-interactive cards keep the original <div> for layout.
+  const interactive = typeof onClick === "function";
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!onClick) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onClick();
+    }
+  };
+  return (
+    <div
+      onClick={onClick}
+      onKeyDown={interactive ? handleKeyDown : undefined}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      className={`rounded-2xl ${interactive ? "cursor-pointer select-none" : ""} ${className}`}
+      style={{
+        background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
+        border: `1px solid ${C.hairline}`,
+        boxShadow: "0 1px 2px rgba(42, 24, 16, 0.04), 0 8px 24px -12px rgba(42, 24, 16, 0.12)",
+        ...style
+      }}>{children}</div>
+  );
+};
 
 const Button = ({ children, variant = "primary", onClick, disabled, className = "", icon, type = "button", fullWidth, size }: {
   children: React.ReactNode;
@@ -8387,7 +8409,11 @@ export default function App() {
           sync={sync}
           userId={auth.userId}
           openBookingRequests={() => setSecondary("bookingRequests")}
-          onBack={() => setSecondary(null)}
+          // Account is only reached via the Settings card. Returning
+          // to the dashboard skips the Settings scope the user came
+          // from; route back to Settings to keep the mental stack
+          // consistent.
+          onBack={() => setSecondary("settings")}
           onSignOut={async () => { await auth.signOut(); setSecondary(null); }}
           onExport={() => {
             const data = JSON.stringify({
@@ -8415,7 +8441,9 @@ export default function App() {
         <PresetsScreen store={store} onBack={() => setSecondary(null)} onUsePreset={handleUsePreset} />
       )}
       {secondary === "timerSessions" && <TimerSessionsScreen store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "communicationLog" && <CommunicationLogScreen store={store} onBack={() => setSecondary(null)} />}
+      {/* Communication log is only entered from the Settings card.
+          Back returns to Settings, not the dashboard. */}
+      {secondary === "communicationLog" && <CommunicationLogScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "analytics" && (
         <AnalyticsScreen
           clients={store.clients}
