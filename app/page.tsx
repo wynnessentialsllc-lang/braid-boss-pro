@@ -1063,7 +1063,7 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
 };
 
 const FAB = ({ onClick, icon = <Plus size={26} strokeWidth={2.4} />, bottom = 80 }) => (
-  <button onClick={onClick} className="fixed z-30 active:scale-95 transition"
+  <button onClick={onClick} className="fixed z-40 active:scale-95 transition"
     style={{
       right: 18, bottom,
       width: 58, height: 58, borderRadius: "50%",
@@ -1126,7 +1126,19 @@ const TabBar = ({ active, setActive }: {
     { id: "money", label: "Money", icon: TrendingUp },
   ];
   return (
-    <nav className="sticky bottom-0 z-20" style={{ background: C.paper, borderTop: `1px solid ${C.hairline}`, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+    // Fixed to the viewport bottom (not sticky) so short pages like the
+    // empty Client Photos tab don't float the nav up over content. Stays
+    // centered inside the 480px shell on tablet / desktop. Z-index sits
+    // below the sheet overlay (z-50) so modals always cover it.
+    <nav
+      className="bbp-tabbar fixed left-1/2 z-40 w-full max-w-[480px]"
+      style={{
+        bottom: 0,
+        transform: "translateX(-50%)",
+        background: C.paper,
+        borderTop: `1px solid ${C.hairline}`,
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+      }}>
       <div className="flex items-center justify-around px-2 py-2">
         {tabs.map(t => {
           const Icon = t.icon;
@@ -4521,7 +4533,7 @@ export default function App() {
   }
 
   return (
-    <Frame>
+    <Frame withTabBar={secondary === null}>
       <GlobalStyle />
 
       {secondary === null && (
@@ -4625,10 +4637,22 @@ export default function App() {
   );
 }
 
-const Frame = ({ children }) => (
-  <div style={{ minHeight: "100vh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso }}>
+const Frame = ({ children, withTabBar = false }: { children: React.ReactNode; withTabBar?: boolean }) => (
+  <div style={{ minHeight: "100dvh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso }}>
     <GlobalStyle />
-    <div className="mx-auto relative" style={{ maxWidth: 480, minHeight: "100vh", background: C.cream, boxShadow: "0 0 60px -10px rgba(42,24,16,0.12)" }}>
+    <div
+      className="mx-auto relative"
+      style={{
+        maxWidth: 480,
+        minHeight: "100dvh",
+        background: C.cream,
+        boxShadow: "0 0 60px -10px rgba(42,24,16,0.12)",
+        // Reserve space at the bottom so primary-screen content can scroll
+        // past the fixed tab bar without being hidden behind it. Each
+        // screen still sets its own `pb-XX` for in-flow spacing; this
+        // baseline guarantees the last item is reachable on iOS.
+        paddingBottom: withTabBar ? "calc(72px + env(safe-area-inset-bottom, 0px))" : undefined,
+      }}>
       {children}
     </div>
   </div>
