@@ -27,6 +27,37 @@ export const saveDeliveredHistory = (history: Record<string, string>) => {
   catch { /* quota */ }
 };
 
+// supabase-js wraps Edge Function failures in three error classes:
+//  - FunctionsFetchError ("Failed to send a request to the Edge
+//    Function") — network / function crashed on import / CORS.
+//  - FunctionsHttpError — function returned non-2xx with a body.
+//  - FunctionsRelayError — Supabase gateway problem.
+// FunctionsHttpError stashes the original Response on
+// error.context, so we can dig out the function's own JSON
+// `error` / `detail` fields and surface them to the user.
+const extractFunctionError = async (error: unknown): Promise<string> => {
+  if (!error) return "unknown error";
+  const fallback =
+    (error as { message?: string })?.message || "unknown error";
+  const ctx = (error as { context?: unknown }).context;
+  if (ctx instanceof Response) {
+    try {
+      const body = await ctx.clone().json();
+      if (body && typeof body === "object") {
+        const b = body as { error?: string; detail?: string; message?: string };
+        const text = b.error || b.detail || b.message;
+        if (text) return text;
+      }
+    } catch {
+      try {
+        const text = (await ctx.clone().text()).trim();
+        if (text) return text.slice(0, 240);
+      } catch { /* ignore */ }
+    }
+  }
+  return fallback;
+};
+
 export const dispatchPush = async (
   userId: string,
   rule: NotificationRule,
@@ -38,7 +69,7 @@ export const dispatchPush = async (
     const { data, error } = await supabase.functions.invoke("send-push", {
       body: { user_id: userId, payload },
     });
-    if (error) return { ok: false, reason: error.message };
+    if (error) return { ok: false, reason: await extractFunctionError(error) };
     if (data && typeof data === "object") {
       const r = data as { ok?: number; total?: number; errors?: { message?: string }[] };
       if (typeof r.total === "number" && r.total > 0 && r.ok === 0) {
@@ -52,17 +83,20 @@ export const dispatchPush = async (
 };
 
 // Send a default test push to the currently authenticated user. The
-// Edge Function fills in the title/body/icon defaults when no payload
-// is provided, so this helper just invokes with an empty body.
+// Edge Function treats `{ type: "test" }` (or an empty body) as a
+// signal to fill in the title/body/icon defaults so the same default
+// copy lives in one place — the function.
 export const sendTestPush = async (): Promise<{ ok: boolean; reason?: string }> => {
   const supabase = getSupabase();
   try {
-    const { data, error } = await supabase.functions.invoke("send-push", { body: {} });
-    if (error) return { ok: false, reason: error.message };
+    const { data, error } = await supabase.functions.invoke("send-push", {
+      body: { type: "test" },
+    });
+    if (error) return { ok: false, reason: await extractFunctionError(error) };
     if (data && typeof data === "object") {
       const r = data as { ok?: number; total?: number; message?: string; errors?: { message?: string }[] };
       if (r.total === 0) {
-        return { ok: false, reason: r.message || "no active subscriptions on this device" };
+        return { ok: false, reason: r.message || "No push subscription on this device. Enable push first." };
       }
       if (typeof r.total === "number" && r.total > 0 && r.ok === 0) {
         return { ok: false, reason: r.errors?.[0]?.message || "no successful delivery" };

@@ -38,7 +38,13 @@
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import webpush from "https://esm.sh/web-push@3.6.7";
+// IMPORTANT: use the npm: specifier (not esm.sh). Supabase Edge
+// Functions run on Deno with Node compat, and `web-push` relies on
+// node:crypto / node:url which esm.sh does not always shim correctly
+// — that's the symptom that surfaces in supabase-js as
+// "Failed to send a request to the Edge Function" because the function
+// crashes on import and never serves the request.
+import webpush from "npm:web-push@3.6.7";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Env
@@ -90,6 +96,10 @@ type PushPayload = {
 
 type RequestBody = {
   user_id?: string;
+  // Shorthand: `{ type: "test" }` is treated like an empty body so the
+  // server-side defaults render. Anything else in `type` is reserved
+  // for future use (e.g. "appointment_reminder").
+  type?: string;
   payload?: PushPayload;
 };
 
@@ -132,8 +142,9 @@ const buildMessage = (input: PushPayload | undefined): string => {
 // ────────────────────────────────────────────────────────────────────────────
 // Handler
 
-serve(async (req: Request): Promise<Response> => {
-  // Preflight
+const handle = async (req: Request): Promise<Response> => {
+  // Preflight — must work BEFORE any other check so the browser can
+  // get past the CORS preflight even if env / auth is misconfigured.
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
@@ -315,4 +326,17 @@ serve(async (req: Request): Promise<Response> => {
   );
 
   return json(200, result);
+};
+
+// Top-level wrapper: any unexpected throw still produces a JSON
+// response with CORS headers so the browser sees a proper response
+// instead of "Failed to send a request to the Edge Function".
+serve(async (req: Request): Promise<Response> => {
+  try {
+    return await handle(req);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[send-push] unhandled error:", message, err);
+    return json(500, { error: "internal error", detail: message });
+  }
 });
