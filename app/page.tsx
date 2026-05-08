@@ -2057,6 +2057,62 @@ const RetentionInsights = ({ clients, appointments, today, business, openCommuni
   );
 };
 
+const AppointmentCommHistory = ({ appointmentId, commLog }: { appointmentId: string; commLog: any[] }) => {
+  const entries = useMemo(() =>
+    (Array.isArray(commLog) ? commLog : [])
+      .filter(e => e && e.appointmentId === appointmentId)
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")),
+    [commLog, appointmentId]);
+  if (entries.length === 0) return null;
+  return (
+    <Card className="p-3.5" style={{ background: C.ivory }}>
+      <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.12em" }}>Messages sent</p>
+      <div className="flex flex-wrap gap-1.5">
+        {entries.slice(0, 6).map((e: any) => (
+          <Pill key={e.id} tone={e.action === "sent" ? "success" : e.action === "shared" ? "gold" : "neutral"}>
+            {e.typeLabel || e.type} · {fmtRelative(e.createdAt)}
+          </Pill>
+        ))}
+      </div>
+    </Card>
+  );
+};
+
+const ClientCommunicationTimeline = ({ clientId, commLog }: { clientId: string; commLog: any[] }) => {
+  const entries = useMemo(() =>
+    (Array.isArray(commLog) ? commLog : [])
+      .filter(e => e && e.clientId === clientId)
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+      .slice(0, 6),
+    [commLog, clientId]);
+
+  if (entries.length === 0) return null;
+
+  const actionTone = (action: string): "success" | "gold" | "neutral" => {
+    if (action === "sent") return "success";
+    if (action === "shared") return "gold";
+    return "neutral";
+  };
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>Communication timeline</p>
+        <span className="text-[10px]" style={{ color: C.muted }}>{entries.length} recent</span>
+      </div>
+      <div className="space-y-1.5">
+        {entries.map((e: any) => (
+          <div key={e.id} className="flex items-center gap-2">
+            <Pill tone={actionTone(e.action)}>{(e.action || "draft").toUpperCase()}</Pill>
+            <p className="flex-1 text-[12px] truncate" style={{ color: C.coffee }}>{e.typeLabel || e.type || "Message"}</p>
+            <span className="text-[10px] shrink-0" style={{ color: C.muted }}>{fmtRelative(e.createdAt)}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+};
+
 const ClientRetentionCard = ({ clientId, clientName, appointments, today, business, openCommunication, onDuplicate }: {
   clientId: string;
   clientName?: string;
@@ -2807,6 +2863,9 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         {form.id && (
           <Button variant="dark" icon={<TimerIcon size={18} />} onClick={handleStartTimer} fullWidth>Start chair timer</Button>
         )}
+        {form.id && (
+          <AppointmentCommHistory appointmentId={form.id} commLog={store.commLog || []} />
+        )}
         {form.id && openCommunication && (
           <Button variant="outline" icon={<MessageSquare size={16} />} fullWidth
             onClick={() => openCommunication({
@@ -3015,6 +3074,12 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
 
         {tab === "info" && (
           <div className="space-y-4">
+            {form.id && (
+              <ClientCommunicationTimeline
+                clientId={form.id}
+                commLog={store.commLog || []}
+              />
+            )}
             {form.id && (
               <ClientRetentionCard
                 clientId={form.id}
@@ -4913,56 +4978,88 @@ const TimerSessionsScreen = ({ store, onBack }) => {
 // ============================================================
 //  NOTIFICATIONS SHEET
 // ============================================================
+// ============================================================
+//  INTERNAL NOTIFICATIONS — what the salon owner needs to act on.
+//  Outbound client communications (booking confirmations, 24h / 48h
+//  reminders, balance-due texts, etc.) intentionally do NOT live here.
+//  Those belong in:
+//    - the Communication Log (Settings → Communication log)
+//    - per-appointment communication history
+//    - per-client communication timeline (ClientSheet)
+// ============================================================
+type NotifCategory = "system" | "finance" | "retention" | "appointment" | "communication_status";
+
 type NotifItem = {
   id: string;
-  kind: "reminder" | "balance" | "upcoming";
-  tone: "warning" | "danger" | "gold" | "neutral";
+  category: NotifCategory;
+  kind: string;
+  tone: "warning" | "danger" | "gold" | "neutral" | "success";
   icon: React.ReactNode;
   title: string;
   body: string;
   meta?: string;
 };
 
+// Categories that contribute to the bell badge. communication_status
+// items are informational only and never count as "unread / actionable".
+const ACTIONABLE_CATEGORIES: ReadonlyArray<NotifCategory> = ["system", "finance", "retention", "appointment"];
+const isActionableCategory = (c: NotifCategory) => ACTIONABLE_CATEGORIES.includes(c);
+
+// Builder for typed internal notifications. Lets feature code create
+// new alerts without re-stating the discriminator each time and gives us
+// a single place to enforce the "no message body" rule for outbound
+// comms.
+const createInternalNotification = (input: Omit<NotifItem, "icon"> & { icon?: React.ReactNode }): NotifItem => ({
+  ...input,
+  icon: input.icon ?? <Bell size={16} style={{ color: C.coffee }} />,
+});
+
+// Convenience for logging an outbound client communication. The Comm
+// sheets call this; nothing here ends up in the bell.
+const logClientCommunication = (
+  upsertCommLogEntry: (entry: any) => Promise<any> | void,
+  payload: { templateKey: string; templateLabel?: string; action: "copied" | "shared" | "sent" | "draft"; clientId?: string; clientName?: string; appointmentId?: string; body?: string },
+) => upsertCommLogEntry({
+  type: payload.templateKey,
+  typeLabel: payload.templateLabel,
+  action: payload.action,
+  clientId: payload.clientId,
+  clientName: payload.clientName,
+  appointmentId: payload.appointmentId,
+  body: payload.body,
+  createdAt: new Date().toISOString(),
+});
+
 const buildNotifications = (store: any): NotifItem[] => {
   const items: NotifItem[] = [];
   const today = todayISO();
   const now = Date.now();
   const in7 = addDaysISO(today, 7);
+  const safeAppts = Array.isArray(store?.appointments) ? store.appointments : [];
+  const safeReminders = Array.isArray(store?.reminders) ? store.reminders : [];
+  const safeClients = Array.isArray(store?.clients) ? store.clients : [];
+  const currency = store?.business?.currency || "USD";
 
-  // Pending appointment reminders
-  const pendingReminders = (store.reminders || []).filter((r: any) => r && r.status === "pending");
-  for (const r of pendingReminders) {
-    const client = store.clientById ? store.clientById(r.clientId) : null;
-    items.push({
-      id: `rem_${r.id}`,
-      kind: "reminder",
-      tone: "warning",
-      icon: <Bell size={16} style={{ color: C.warning }} />,
-      title: `${PURPOSE_LABEL_LOCAL[r.purpose as keyof typeof PURPOSE_LABEL_LOCAL] || "Reminder"} · ${client?.name || r.clientName || "Client"}`,
-      body: r.renderedBody || "Reminder is queued.",
-      meta: r.scheduledFor ? `Scheduled ${fmtRelative(r.scheduledFor)}` : undefined,
-    });
-  }
-
-  // Late balance alerts: appointments past their date with balance > 0 and not cancelled
-  const lateBalance = (store.appointments || []).filter((a: any) =>
+  // FINANCE — overdue balances (actionable)
+  const lateBalance = safeAppts.filter((a: any) =>
     a && a.status !== "cancelled" && a.status !== "completed" &&
-    Number(a.balanceDue) > 0 && a.date && a.date < today
+    parseMoney(a.balanceDue) > 0 && a.date && a.date < today
   );
   for (const a of lateBalance) {
     items.push({
       id: `bal_${a.id}`,
-      kind: "balance",
+      category: "finance",
+      kind: "balance_overdue",
       tone: "danger",
       icon: <AlertCircle size={16} style={{ color: C.danger }} />,
       title: `Balance overdue · ${a.clientName || "Client"}`,
-      body: `${fmtMoney(Number(a.balanceDue) || 0, store.business?.currency || "USD")} unpaid for ${a.style || "appointment"}.`,
+      body: `${fmtMoney(parseMoney(a.balanceDue), currency)} unpaid for ${a.style || "appointment"}.`,
       meta: `Was ${fmtDate(a.date)}`,
     });
   }
 
-  // Upcoming bookings within 7 days
-  const upcoming = (store.appointments || []).filter((a: any) =>
+  // APPOINTMENT — upcoming within 7 days (action: prep / confirm)
+  const upcoming = safeAppts.filter((a: any) =>
     a && a.status !== "cancelled" && a.status !== "completed" &&
     a.date && a.date >= today && a.date <= in7
   ).sort((a: any, b: any) =>
@@ -4973,12 +5070,83 @@ const buildNotifications = (store: any): NotifItem[] => {
     const soon = apptMs && apptMs - now < 48 * 3600000;
     items.push({
       id: `up_${a.id}`,
-      kind: "upcoming",
+      category: "appointment",
+      kind: "upcoming_appointment",
       tone: soon ? "gold" : "neutral",
       icon: <Calendar size={16} style={{ color: soon ? C.goldDeep : C.coffee }} />,
       title: `${a.clientName || "Client"} · ${a.style || "Appointment"}`,
       body: `${fmtDate(a.date)}${a.time ? ` at ${fmtTime(a.time)}` : ""}`,
       meta: apptMs ? fmtRelative(new Date(apptMs).toISOString()) : undefined,
+    });
+  }
+
+  // APPOINTMENT — no-show follow-up (within last 30 days)
+  const recentNoShow = safeAppts.filter((a: any) => {
+    if (!a || a.status !== "no_show" || !a.date) return false;
+    const days = Math.round((new Date(today + "T00:00:00").getTime() - new Date(a.date + "T00:00:00").getTime()) / 86400000);
+    return days >= 0 && days <= 30;
+  });
+  for (const a of recentNoShow) {
+    items.push({
+      id: `noshow_${a.id}`,
+      category: "appointment",
+      kind: "no_show_followup",
+      tone: "warning",
+      icon: <AlertTriangle size={16} style={{ color: C.warning }} />,
+      title: `No-show · ${a.clientName || "Client"}`,
+      body: `${a.style || "Appointment"} on ${fmtDate(a.date)}. Decide on policy fee or follow-up.`,
+    });
+  }
+
+  // RETENTION — overdue rebooking candidates (top 3)
+  const candidates = getRebookingCandidates(safeClients, safeAppts, today).slice(0, 3);
+  for (const c of candidates) {
+    items.push({
+      id: `reb_${c.client.id}`,
+      category: "retention",
+      kind: "rebooking_overdue",
+      tone: "gold",
+      icon: <Sparkles size={16} style={{ color: C.goldDeep }} />,
+      title: `${c.reason} · ${c.client.name || "Client"}`,
+      body: `${c.metrics.daysSinceLast ?? 0}d since last visit${c.metrics.mostBookedStyle ? ` · prefers ${c.metrics.mostBookedStyle}` : ""}.`,
+    });
+  }
+
+  // COMMUNICATION_STATUS — failed sends only (no rendered message
+  // bodies). Pending / sent / delivered reminders intentionally do not
+  // appear here; they live in the Reminder inbox + Communication log.
+  const failed = safeReminders.filter((r: any) => r && r.status === "failed");
+  for (const r of failed) {
+    items.push({
+      id: `cs_${r.id}`,
+      category: "communication_status",
+      kind: "reminder_failed",
+      tone: "danger",
+      icon: <XCircle size={16} style={{ color: C.danger }} />,
+      title: `Reminder failed to send · ${r.clientName || "Client"}`,
+      body: `${PURPOSE_LABEL_LOCAL[r.purpose as keyof typeof PURPOSE_LABEL_LOCAL] || "Reminder"} couldn't be delivered. Re-send manually if needed.`,
+    });
+  }
+
+  // COMMUNICATION_STATUS — lightweight summary of reminders queued for
+  // today / tomorrow. One aggregate row, NOT one row per message.
+  const queuedTodayOrTomorrow = safeReminders.filter((r: any) => {
+    if (!r || r.status !== "pending" || !r.scheduledFor) return false;
+    const d = new Date(r.scheduledFor);
+    if (!Number.isFinite(d.getTime())) return false;
+    const diff = d.getTime() - now;
+    return diff >= 0 && diff <= 48 * 3600000;
+  });
+  if (queuedTodayOrTomorrow.length > 0) {
+    items.push({
+      id: "cs_queue_summary",
+      category: "communication_status",
+      kind: "reminders_queued",
+      tone: "neutral",
+      icon: <Send size={16} style={{ color: C.muted }} />,
+      title: `${queuedTodayOrTomorrow.length} reminder${queuedTodayOrTomorrow.length === 1 ? "" : "s"} queued`,
+      body: "Outgoing client messages scheduled for the next 48h.",
+      meta: "View in Reminder inbox",
     });
   }
 
@@ -5018,7 +5186,12 @@ const useNotifications = (store: any) => {
     store.reminders, store.appointments, store.clients, store.business
   ]);
   const items = useMemo(() => allItems.filter(n => !dismissed.includes(n.id)), [allItems, dismissed]);
-  const unreadCount = useMemo(() => items.filter(n => !read.includes(n.id)).length, [items, read]);
+  // Badge counts only actionable (system / finance / retention /
+  // appointment) categories. Communication-status rows are info-only.
+  const unreadCount = useMemo(
+    () => items.filter(n => isActionableCategory(n.category) && !read.includes(n.id)).length,
+    [items, read],
+  );
 
   // Prune dismissed / read IDs that no longer exist in the live items.
   // Without this, deleting an appointment leaves its notification id
