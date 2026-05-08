@@ -16,6 +16,13 @@ import {
   syncSettings,
 } from "./lib/supabase";
 import {
+  detectPushCapability,
+  subscribeWebPush,
+  unsubscribeWebPush,
+  refreshSubscriptionHeartbeat,
+  type PushCapability,
+} from "./lib/push";
+import {
   Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon,
   Plus, X, ChevronRight, ChevronLeft, Search, Copy, Check, Trash2, Edit3,
   FileText, DollarSign, Clock, Phone, Mail, AlertCircle, Sparkles,
@@ -5916,14 +5923,62 @@ const SyncStatusPill = ({ state }: { state: SyncState }) => {
   );
 };
 
-const AccountScreen = ({ email, mode, sync, onBack, onSignOut, onExport }: {
+const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport }: {
   email: string | null;
   mode: AuthMode;
   sync: { state: SyncState; lastOk: string | null; pendingCount: number };
+  userId: string | null;
   onBack: () => void;
   onSignOut: () => Promise<void>;
   onExport: () => void;
 }) => {
+  const [pushCap, setPushCap] = useState<PushCapability>("unsupported");
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const cap = await detectPushCapability();
+      if (!cancelled) setPushCap(cap);
+      if (mode === "authed" && userId && cap === "subscribed") {
+        refreshSubscriptionHeartbeat(userId).catch(() => null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [mode, userId]);
+
+  const handleEnablePush = async () => {
+    if (!userId) return;
+    setPushBusy(true); setPushError(null);
+    try {
+      const sub = await subscribeWebPush(userId);
+      if (!sub) {
+        setPushError(typeof Notification !== "undefined" && Notification.permission === "denied"
+          ? "Notifications are blocked. Enable them for this site in your browser settings."
+          : "This browser doesn't support push notifications. iOS push will activate when you install the App Store build.");
+      }
+      const cap = await detectPushCapability();
+      setPushCap(cap);
+    } catch (err: any) {
+      setPushError(err?.message || "Couldn't subscribe to push.");
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const handleDisablePush = async () => {
+    if (!userId) return;
+    setPushBusy(true); setPushError(null);
+    try {
+      await unsubscribeWebPush(userId);
+      const cap = await detectPushCapability();
+      setPushCap(cap);
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
   return (
     <div className="bbp-fade pb-24">
       <Header title="Account" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
@@ -5952,6 +6007,39 @@ const AccountScreen = ({ email, mode, sync, onBack, onSignOut, onExport }: {
                 : sync.lastOk ? `Last backup ${fmtRelative(sync.lastOk)}.`
                 : "Last backup details will appear after the first sync."}
             </p>
+          </Card>
+        )}
+
+        {mode === "authed" && (
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>Push notifications</p>
+              <Pill tone={pushCap === "subscribed" ? "success" : pushCap === "blocked" ? "danger" : "neutral"}>
+                {pushCap === "subscribed" ? "ON"
+                  : pushCap === "blocked" ? "BLOCKED"
+                  : pushCap === "unsupported" ? "UNAVAILABLE"
+                  : "OFF"}
+              </Pill>
+            </div>
+            <p className="text-[11px] mb-3" style={{ color: C.muted }}>
+              {pushCap === "subscribed"
+                ? "You'll get alerts on this device for failed sends, overdue balances, and rebooking nudges."
+                : pushCap === "blocked"
+                  ? "Notifications are blocked for this site. Re-enable them in your browser settings."
+                  : pushCap === "unsupported"
+                    ? "This browser doesn't support web push. Push notifications will activate on iOS when you install the App Store build."
+                    : "Get a quiet ping when something needs your attention. You can turn this off any time."}
+            </p>
+            {pushCap === "subscribed" ? (
+              <Button variant="outline" fullWidth disabled={pushBusy} onClick={handleDisablePush}>
+                {pushBusy ? "Working…" : "Turn off push"}
+              </Button>
+            ) : (
+              <Button variant="primary" icon={<Bell size={15} />} fullWidth disabled={pushBusy || pushCap === "unsupported" || pushCap === "blocked"} onClick={handleEnablePush}>
+                {pushBusy ? "Working…" : "Enable push notifications"}
+              </Button>
+            )}
+            {pushError && <p className="text-[11px] mt-2" style={{ color: C.danger }}>{pushError}</p>}
           </Card>
         )}
 
@@ -6148,6 +6236,7 @@ export default function App() {
           email={auth.email}
           mode={auth.mode}
           sync={sync}
+          userId={auth.userId}
           onBack={() => setSecondary(null)}
           onSignOut={async () => { await auth.signOut(); setSecondary(null); }}
           onExport={() => {
