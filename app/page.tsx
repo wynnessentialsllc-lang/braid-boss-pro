@@ -477,25 +477,116 @@ const COMMUNICATION_TEMPLATES: CommTemplate[] = [
   },
 ];
 
-const buildCommunicationContext = (appt: any, client: any, business: any): any => {
-  const baseAppt = appt || {};
+// Resolves the most relevant appointment for a given client, so the
+// communication layer can hydrate {{date}} {{time}} {{style}} {{deposit}}
+// {{balance}} {{total}} placeholders even when the user opens a template
+// straight from a client profile (no appointment selected). Priority:
+//   1. Nearest upcoming appointment on/after today that isn't cancelled
+//      or completed (handles "scheduled" / "confirmed").
+//   2. Any appointment dated today (catches edge cases the date sort missed).
+//   3. Most recent appointment that isn't cancelled / completed (active
+//      booking with an outstanding balance, late check-in, etc.).
+//   4. null — caller falls back to graceful copy.
+const getClientAppointmentContext = (clientId: string | null | undefined, appointments: any[]): any | null => {
+  if (!clientId || !Array.isArray(appointments)) return null;
+  const todayIso = todayISO();
+  const mine = appointments.filter(a => a && a.clientId === clientId && a.date);
+  if (mine.length === 0) return null;
+  const sortKey = (a: any) => `${a.date || ""}${a.time || ""}`;
+
+  const upcoming = mine
+    .filter(a => a.date >= todayIso && a.status !== "cancelled" && a.status !== "completed")
+    .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+  if (upcoming.length > 0) return upcoming[0];
+
+  const today = mine.filter(a => a.date === todayIso);
+  if (today.length > 0) return today[0];
+
+  const unfinished = mine
+    .filter(a => a.status !== "cancelled" && a.status !== "completed")
+    .sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
+  if (unfinished.length > 0) return unfinished[0];
+
+  return null;
+};
+
+// Build the placeholder dictionary for communication templates.
+// Empty / missing values render as graceful copy ("TBD", "the deposit",
+// etc.) instead of "—" or "$0.00", except when an amount is explicitly
+// zero on a real appointment (legitimate result).
+const buildCommunicationContext = (appt: any, client: any, business: any): Record<string, string> => {
+  const hasAppt = !!appt && (appt.id || appt.date || appt.totalPrice != null);
+  const currency = business?.currency || "USD";
+  const fmtCur = (n: number) => formatCurrency(n, currency);
+
+  const dateRaw = appt?.date;
+  const timeRaw = appt?.time;
+  const totalNum = parseMoney(appt?.totalPrice);
+  const depositNum = parseMoney(appt?.depositPaid);
+  const balanceNum = appt?.balanceDue != null
+    ? parseMoney(appt.balanceDue)
+    : Math.max(0, totalNum - depositNum);
+
+  // Date / time guards: skip placeholder dashes; coerce to "TBD" when
+  // the underlying value is missing or invalid.
+  let dateStr = "TBD";
+  if (dateRaw) {
+    const formatted = fmtDate(dateRaw);
+    if (formatted && formatted !== "—") dateStr = formatted;
+  }
+  let timeStr = "TBD";
+  if (timeRaw) {
+    const formatted = fmtTime(timeRaw);
+    if (formatted) timeStr = formatted;
+  }
+
+  // Money guards: only show $0.00 when we have an appointment AND the
+  // value is explicitly zero. Otherwise fall back to descriptive copy.
+  const moneyOrCopy = (n: number, fallback: string): string => {
+    if (hasAppt && (totalNum > 0 || depositNum > 0)) return fmtCur(n);
+    return fallback;
+  };
+
+  const clientName = ((client?.name || appt?.clientName || "there") + "").split(/\s+/)[0] || "there";
+  const businessName = business?.businessName || "your stylist";
+  const styleStr = (appt?.style && String(appt.style).trim()) || "your appointment";
+
+  const paymentStatus = (() => {
+    if (!hasAppt) return "pending";
+    if (appt?.paymentStatus) return String(appt.paymentStatus);
+    if (totalNum > 0 && balanceNum === 0) return "paid";
+    if (depositNum > 0 && balanceNum > 0) return "partial";
+    return "pending";
+  })();
+
   return {
-    ...buildReminderContext(baseAppt, business || {}),
-    // Override "client" with the canonical client name when we have one
-    // (covers the case where the user is messaging from a client profile
-    // without an appointment context).
-    client: ((client?.name || baseAppt.clientName || "there") + "").split(" ")[0],
+    client: clientName,
+    style: styleStr,
+    date: dateStr,
+    time: timeStr,
+    deposit: moneyOrCopy(depositNum, "the deposit"),
+    balance: moneyOrCopy(balanceNum, "the remaining balance"),
+    total: moneyOrCopy(totalNum, "the service total"),
+    business: businessName,
+    paymentStatus,
   };
 };
 
 const renderCommunicationTemplate = (key: CommTemplateKey, appt: any, client: any, business: any): string => {
   const tpl = COMMUNICATION_TEMPLATES.find(t => t.key === key);
   if (!tpl) return "";
-  return renderTemplate(tpl.body, buildCommunicationContext(appt, client, business))
-    // Templates are stored with HTML-escaped apostrophes so JSX text is
-    // happy. When rendering for SMS / clipboard / share, decode them.
-    .replace(/&apos;/g, "'")
-    .replace(/&quot;/g, '"');
+  const ctx = buildCommunicationContext(appt, client, business);
+  // Templates are authored with HTML-escaped apostrophes so JSX text is
+  // happy in the picker preview. Decode them when emitting plain text
+  // for clipboard / share / SMS so apostrophes look natural.
+  let body = renderTemplate(tpl.body, ctx).replace(/&apos;/g, "'").replace(/&quot;/g, '"');
+  // If we couldn't resolve any appointment context at all, append a soft
+  // line so the message still reads cleanly instead of showing TBDs.
+  const noAppt = !appt || (!appt.id && !appt.date && !appt.totalPrice);
+  if (noAppt && (body.includes("TBD") || body.includes("the deposit") || body.includes("the remaining balance"))) {
+    body = body.replace(/\s+$/, "") + "\n\nReach out to finalize your appointment details.";
+  }
+  return body;
 };
 
 const planRemindersForAppointment = (appt: any, settings: any, templates: any[], business: any): any[] => {
@@ -4768,9 +4859,17 @@ export default function App() {
   const [commPickerCtx, setCommPickerCtx] = useState<CommContext | null>(null);
   const [activeComm, setActiveComm] = useState<(CommContext & { templateKey: CommTemplateKey }) | null>(null);
   const openCommunication = useCallback((next: CommContext) => {
-    if (next.initialKey) setActiveComm({ ...next, templateKey: next.initialKey });
-    else setCommPickerCtx(next);
-  }, []);
+    // Resolve the most relevant appointment when none was passed in
+    // (e.g. user tapped "Send message" on a client profile). This is
+    // what populates {{date}} {{time}} {{style}} {{deposit}} {{balance}}
+    // {{total}} for every entry point in one place.
+    const clientId = next.client?.id || next.appointment?.clientId;
+    const resolvedAppt = next.appointment
+      || getClientAppointmentContext(clientId, store.appointments);
+    const finalCtx: CommContext = { ...next, appointment: resolvedAppt || undefined };
+    if (next.initialKey) setActiveComm({ ...finalCtx, templateKey: next.initialKey });
+    else setCommPickerCtx(finalCtx);
+  }, [store.appointments]);
   const notifications = useNotifications(store);
 
   // Dashboard quick actions
