@@ -1495,7 +1495,7 @@ const Toggle = ({ checked, onChange }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
 }) => (
-  <button onClick={() => onChange(!checked)}
+  <button type="button" onClick={() => onChange(!checked)}
     className="relative inline-flex items-center w-12 h-7 rounded-full transition shrink-0"
     style={{ background: checked ? C.gold : C.mutedSoft, border: `1px solid ${checked ? C.goldDeep : C.hairline}` }}>
     <span className="inline-block w-5 h-5 rounded-full bg-white shadow transition-transform"
@@ -1617,7 +1617,7 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {rightAction}
-            <button onClick={onClose} className="p-2 -mr-2 rounded-full" style={{ color: C.coffee }}><X size={22} /></button>
+            <button type="button" onClick={onClose} className="p-2 -mr-2 rounded-full" style={{ color: C.coffee }}><X size={22} /></button>
           </div>
         </div>
         <div className="flex-1 bbp-scroll px-5 pt-4"
@@ -1635,7 +1635,7 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
 };
 
 const FAB = ({ onClick, icon = <Plus size={26} strokeWidth={2.4} />, bottom = 80 }) => (
-  <button onClick={onClick} className="fixed z-40 active:scale-95 transition"
+  <button type="button" onClick={onClick} className="fixed z-40 active:scale-95 transition"
     style={{
       right: 18, bottom,
       width: 58, height: 58, borderRadius: "50%",
@@ -1663,7 +1663,7 @@ const Header = ({ title, subtitle, leftAction, rightAction }: {
     if (React.isValidElement(action)) return action;
     if (action.icon && action.onClick) {
       return (
-        <button onClick={action.onClick} className="p-2 rounded-full transition active:scale-[0.95]" style={{ color: C.coffee }}>
+        <button type="button" onClick={action.onClick} className="p-2 rounded-full transition active:scale-[0.95]" style={{ color: C.coffee }}>
           {action.icon}
         </button>
       );
@@ -1716,7 +1716,7 @@ const TabBar = ({ active, setActive }: {
           const Icon = t.icon;
           const isActive = active === t.id;
           return (
-            <button key={t.id} onClick={() => setActive(t.id)}
+            <button type="button" key={t.id} onClick={() => setActive(t.id)}
               className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition"
               style={{ color: isActive ? C.espresso : C.mutedSoft }}>
               <div className="relative">
@@ -1753,7 +1753,7 @@ const TimerMiniPill = ({ timer, onClick }) => {
     : now - new Date(timer.startedAt).getTime() - timer.totalPausedMs;
 
   return (
-    <button onClick={onClick}
+    <button type="button" onClick={onClick}
       className="fixed z-40 active:scale-[0.97] transition flex items-center gap-3 px-4 py-2.5 rounded-full"
       style={{
         bottom: 84, left: "50%", transform: "translateX(-50%)",
@@ -1930,7 +1930,7 @@ const RebookingOpportunitiesCard = ({
   return (
     <div>
       <SectionTitle action={
-        <button onClick={onViewAll} className="text-xs font-semibold flex items-center gap-1" style={{ color: C.goldDeep }}>
+        <button type="button" onClick={onViewAll} className="text-xs font-semibold flex items-center gap-1" style={{ color: C.goldDeep }}>
           View all <ChevronRight size={14} />
         </button>
       }>Rebooking opportunities</SectionTitle>
@@ -1983,12 +1983,12 @@ const RebookingOpportunitiesCard = ({
                 </p>
               </div>
               <div className="flex flex-col gap-1.5 shrink-0">
-                <button onClick={() => onBookAgain(op)}
+                <button type="button" onClick={() => onBookAgain(op)}
                   className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
                   style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
                   Book again
                 </button>
-                <button onClick={() => onCopyMessage(op)}
+                <button type="button" onClick={() => onCopyMessage(op)}
                   className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
                   style={{ background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}`, letterSpacing: "0.08em" }}>
                   {copiedId === op.client_id ? "Copied" : "Copy msg"}
@@ -1998,7 +1998,7 @@ const RebookingOpportunitiesCard = ({
           ))}
         </div>
 
-        <button onClick={onViewAll}
+        <button type="button" onClick={onViewAll}
           className="w-full mt-3 rounded-xl py-2.5 text-xs font-bold uppercase tracking-wider active:scale-[0.99] transition"
           style={{ background: C.espresso, color: C.cream, letterSpacing: "0.1em" }}>
           View all
@@ -2094,7 +2094,7 @@ const RebookingScreen = ({
           {FILTERS.map(f => {
             const active = filter === f.id;
             return (
-              <button key={f.id} onClick={() => setFilter(f.id)}
+              <button type="button" key={f.id} onClick={() => setFilter(f.id)}
                 className="px-3.5 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider shrink-0 active:scale-[0.97] transition"
                 style={{
                   background: active ? C.espresso : C.cream,
@@ -2159,12 +2159,12 @@ const RebookingScreen = ({
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2 mt-3">
-                  <button onClick={() => onBookAgain(op)}
+                  <button type="button" onClick={() => onBookAgain(op)}
                     className="px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
                     style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
                     Book again
                   </button>
-                  <button onClick={() => onCopyMessage(op)}
+                  <button type="button" onClick={() => onCopyMessage(op)}
                     className="px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
                     style={{ background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}`, letterSpacing: "0.08em" }}>
                     {copiedId === op.client_id ? "Copied" : "Copy message"}
@@ -2288,7 +2288,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
         title={greeting}
         subtitle={syncState ? <span className="inline-flex items-center gap-2">{fmtDateLong(today)}<SyncStatusPill display={computeSyncDisplay(syncState, 0, "authed", null)} /></span> as any : fmtDateLong(today)}
         leftAction={
-          <button onClick={openReminders} className="p-2 rounded-full relative" style={{ color: C.coffee }} aria-label="Notifications">
+          <button type="button" onClick={openReminders} className="p-2 rounded-full relative" style={{ color: C.coffee }} aria-label="Notifications">
             <Bell size={20} />
             {notifBadgeCount > 0 && (
               <span className="absolute top-0 right-0 rounded-full text-[10px] font-bold flex items-center justify-center"
@@ -2298,7 +2298,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
             )}
           </button>
         }
-        rightAction={<button onClick={openSettings} className="p-2 rounded-full" style={{ color: C.coffee }}><SettingsIcon size={20} /></button>}
+        rightAction={<button type="button" onClick={openSettings} className="p-2 rounded-full" style={{ color: C.coffee }}><SettingsIcon size={20} /></button>}
       />
 
       <div className="px-5 pt-4 pb-28 space-y-5">
@@ -2360,7 +2360,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
                     </span>
                     <div className="flex gap-1.5">
                       {openCommunication && (
-                        <button onClick={(e) => {
+                        <button type="button" onClick={(e) => {
                           e.stopPropagation();
                           openCommunication({
                             appointment: a,
@@ -2373,7 +2373,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
                           Remind
                         </button>
                       )}
-                      <button onClick={(e) => { e.stopPropagation(); markApptPaid(a); }}
+                      <button type="button" onClick={(e) => { e.stopPropagation(); markApptPaid(a); }}
                         className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
                         style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
                         Mark paid
@@ -2383,7 +2383,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
                 </Card>
               ))}
               {pendingBalanceAppts.length > 4 && (
-                <button onClick={() => setActive("schedule")}
+                <button type="button" onClick={() => setActive("schedule")}
                   className="w-full text-center text-xs font-semibold py-2"
                   style={{ color: C.goldDeep }}>
                   View all {pendingBalanceAppts.length} pending →
@@ -2405,7 +2405,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
 
         <div>
           <SectionTitle action={
-            <button onClick={() => setActive("schedule")} className="text-xs font-semibold flex items-center gap-1" style={{ color: C.goldDeep }}>
+            <button type="button" onClick={() => setActive("schedule")} className="text-xs font-semibold flex items-center gap-1" style={{ color: C.goldDeep }}>
               View all <ChevronRight size={14} />
             </button>
           }>Today&apos;s chair</SectionTitle>
@@ -2534,7 +2534,7 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
             return (
               <Card key={i.id} className="p-3.5">
                 <button
-                  className="w-full text-left active:scale-[0.99] transition"
+                  type="button" className="w-full text-left active:scale-[0.99] transition"
                   onClick={() => setExpanded(prev => ({ ...prev, [i.id]: !prev[i.id] }))}>
                   <div className="flex items-start justify-between gap-2 mb-1.5 flex-wrap">
                     <Pill tone={tone(i.priority)}>{i.category.toUpperCase()}</Pill>
@@ -2552,7 +2552,7 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
                 </button>
                 {i.actionLabel && (
                   <div className="flex justify-end mt-2">
-                    <button onClick={() => handleAction(i.actionTarget)}
+                    <button type="button" onClick={() => handleAction(i.actionTarget)}
                       className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
                       style={{ background: "transparent", color: C.goldDeep, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
                       {i.actionLabel}
@@ -2668,13 +2668,13 @@ const RetentionInsights = ({ clients, appointments, today, business, openCommuni
                     </div>
                     <div className="flex gap-1.5 shrink-0">
                       {openCommunication && (
-                        <button onClick={() => openCommunication({ client, initialKey: "rebooking_nudge" })}
+                        <button type="button" onClick={() => openCommunication({ client, initialKey: "rebooking_nudge" })}
                           className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
                           style={{ background: "transparent", color: C.goldDeep, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
                           Remind
                         </button>
                       )}
-                      <button onClick={() => openQuickAppt({
+                      <button type="button" onClick={() => openQuickAppt({
                         clientId: client.id,
                         clientName: client.name,
                         clientPhone: client.phone,
@@ -2697,7 +2697,7 @@ const RetentionInsights = ({ clients, appointments, today, business, openCommuni
               <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.12em" }}>Top clients this month</p>
               <div className="space-y-1.5">
                 {insights.topClients.map(({ client, monthValue }, i) => (
-                  <button key={client.id} onClick={() => setActive("clients")} className="w-full flex items-center gap-3 active:scale-[0.99] transition">
+                  <button type="button" key={client.id} onClick={() => setActive("clients")} className="w-full flex items-center gap-3 active:scale-[0.99] transition">
                     <div className="flex items-center justify-center font-bold rounded-full"
                       style={{ width: 24, height: 24, background: i === 0 ? C.gold : C.ivory, color: i === 0 ? C.espresso : C.coffee, fontFamily: FONT_DISPLAY, fontSize: 12 }}>
                       {i + 1}
@@ -2873,14 +2873,14 @@ const ClientRetentionCard = ({ clientId, clientName, appointments, today, busine
 
       <div className="grid grid-cols-2 gap-2 mt-3">
         {openCommunication && (
-          <button onClick={() => openCommunication({ client: { id: clientId, name: clientName }, initialKey: "rebooking_nudge" })}
+          <button type="button" onClick={() => openCommunication({ client: { id: clientId, name: clientName }, initialKey: "rebooking_nudge" })}
             className="px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition flex items-center justify-center gap-1.5"
             style={{ background: "transparent", color: C.goldDeep, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
             <MessageSquare size={12} /> Rebook reminder
           </button>
         )}
         {latestCompleted && onDuplicate && (
-          <button onClick={handleDuplicate}
+          <button type="button" onClick={handleDuplicate}
             className="px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition flex items-center justify-center gap-1.5"
             style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
             <Repeat size={12} /> Duplicate last
@@ -2892,7 +2892,7 @@ const ClientRetentionCard = ({ clientId, clientName, appointments, today, busine
 };
 
 const QuickTile = ({ icon, label, onClick }) => (
-  <button onClick={onClick} className="rounded-2xl p-4 text-left active:scale-[0.97] transition flex flex-col items-start gap-2"
+  <button type="button" onClick={onClick} className="rounded-2xl p-4 text-left active:scale-[0.97] transition flex flex-col items-start gap-2"
     style={{ background: C.espresso, color: C.cream, boxShadow: "0 8px 24px -16px rgba(42, 24, 16, 0.4)" }}>
     <div className="rounded-full p-2" style={{ background: "rgba(201, 169, 97, 0.18)", color: C.gold }}>{icon}</div>
     <span className="font-semibold text-[14px]">{label}</span>
@@ -2985,12 +2985,12 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
     <div className="bbp-fade">
       <Header
         title="Pricing Calculator"
-        leftAction={<button onClick={openPresets} className="p-2 rounded-full" style={{ color: C.coffee }}><Layers size={20} /></button>}
-        rightAction={<button onClick={openSavedQuotes} className="p-2 rounded-full" style={{ color: C.coffee }}><FileText size={20} /></button>}
+        leftAction={<button type="button" onClick={openPresets} className="p-2 rounded-full" style={{ color: C.coffee }}><Layers size={20} /></button>}
+        rightAction={<button type="button" onClick={openSavedQuotes} className="p-2 rounded-full" style={{ color: C.coffee }}><FileText size={20} /></button>}
       />
 
       <div className="px-5 pt-4 pb-32 space-y-4">
-        <button onClick={openPresets}
+        <button type="button" onClick={openPresets}
           className="w-full p-3 rounded-xl flex items-center gap-3 text-left active:scale-[0.99] transition"
           style={{ background: C.ivory, border: `1px dashed ${C.caramel}`, color: C.coffee }}>
           <div className="rounded-full p-2" style={{ background: C.gold, color: C.espresso }}><Layers size={16} /></div>
@@ -3017,7 +3017,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="text-[13px] font-semibold tracking-wide uppercase" style={{ color: C.coffee, letterSpacing: "0.06em" }}>Add-ons</span>
-            <button onClick={addAddOn} className="flex items-center gap-1 text-xs font-semibold" style={{ color: C.goldDeep }}>
+            <button type="button" onClick={addAddOn} className="flex items-center gap-1 text-xs font-semibold" style={{ color: C.goldDeep }}>
               <Plus size={14} /> Add row
             </button>
           </div>
@@ -3031,7 +3031,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
                 <div key={a.id} className="flex items-center gap-2">
                   <div className="flex-1"><Input value={a.name} onChange={e => updateAddOn(a.id, "name", e.target.value)} placeholder="Add-on name" /></div>
                   <div className="w-24"><MoneyInput value={a.amount} onChange={(v) => updateAddOn(a.id, "amount", v)} /></div>
-                  <button onClick={() => removeAddOn(a.id)} className="p-2 rounded-lg" style={{ color: C.danger }}><Trash2 size={18} /></button>
+                  <button type="button" onClick={() => removeAddOn(a.id)} className="p-2 rounded-lg" style={{ color: C.danger }}><Trash2 size={18} /></button>
                 </div>
               ))}
             </div>
@@ -3122,7 +3122,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
       <div className="px-5 pt-4 pb-32 space-y-4">
         <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
           {[{ id: "upcoming", label: "Upcoming" }, { id: "today", label: "Today" }, { id: "past", label: "Past" }, { id: "all", label: "All" }].map(t => (
-            <button key={t.id} onClick={() => setFilter(t.id)}
+            <button type="button" key={t.id} onClick={() => setFilter(t.id)}
               className="flex-1 py-2 rounded-lg text-[13px] font-semibold transition"
               style={{ background: filter === t.id ? C.espresso : "transparent", color: filter === t.id ? C.cream : C.coffee }}>
               {t.label}
@@ -3143,7 +3143,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
               {filtered.map(a => <AppointmentRow key={a.id} appt={a} business={business} recurringSeries={recurringSeries} onClick={() => setEditing(a)} />)}
             </div>
             <button
-              className="w-full text-center text-xs font-semibold mt-3 py-2 flex items-center justify-center gap-1.5"
+              type="button" className="w-full text-center text-xs font-semibold mt-3 py-2 flex items-center justify-center gap-1.5"
               style={{ color: C.goldDeep }}
               onClick={() => {
                 const ics = buildVCalendar(filtered as IcsAppointment[], { businessName: business?.businessName, currency: business?.currency });
@@ -3829,7 +3829,7 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
         {form.id && (
           <div className="flex p-1 rounded-xl mb-4" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
             {["info", "photos", "history"].map(t => (
-              <button key={t} onClick={() => setTab(t)}
+              <button type="button" key={t} onClick={() => setTab(t)}
                 className="flex-1 py-2 rounded-lg text-[13px] font-semibold transition capitalize"
                 style={{ background: tab === t ? C.espresso : "transparent", color: tab === t ? C.cream : C.coffee }}>
                 {t === "photos" ? `Photos${myPhotos.length ? ` · ${myPhotos.length}` : ""}` : t}
@@ -3874,7 +3874,7 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
                 {PREF_STYLES.map(s => {
                   const on = (form.preferredStyles || []).includes(s);
                   return (
-                    <button key={s} onClick={() => togglePref(s)}
+                    <button type="button" key={s} onClick={() => togglePref(s)}
                       className="px-3 py-1.5 rounded-full text-[12px] font-semibold transition"
                       style={{ background: on ? C.gold : C.paper, color: on ? C.espresso : C.coffee, border: `1px solid ${on ? C.goldDeep : C.hairline}` }}>
                       {s}
@@ -3978,12 +3978,12 @@ const PhotoGallery = ({ clientId, clientName, appointments, photos, upsertPhoto,
       <input ref={fileRef} type="file" accept="image/*" onChange={handleFileChange} style={{ display: "none" }} />
 
       <div className="flex gap-2 mb-3">
-        <button onClick={() => fileRef.current?.click()} disabled={uploading}
+        <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
           className="flex-1 rounded-xl px-4 py-3 text-sm font-bold flex items-center justify-center gap-2"
           style={{ background: C.gold, color: C.espresso, border: `1.5px solid ${C.goldDeep}` }}>
           {uploading ? "Uploading…" : <><Camera size={16} /> Add photo</>}
         </button>
-        <button onClick={() => setShowFavOnly(!showFavOnly)}
+        <button type="button" onClick={() => setShowFavOnly(!showFavOnly)}
           className="rounded-xl px-3 py-3"
           style={{ background: showFavOnly ? C.espresso : C.paper, color: showFavOnly ? C.gold : C.coffee, border: `1.5px solid ${showFavOnly ? C.espresso : C.hairline}` }}>
           <Star size={16} fill={showFavOnly ? C.gold : "none"} />
@@ -4008,7 +4008,7 @@ const PhotoGallery = ({ clientId, clientName, appointments, photos, upsertPhoto,
       ) : (
         <div className="grid grid-cols-3 gap-1.5">
           {filtered.map(p => (
-            <button key={p.id} onClick={() => setLightbox(p)}
+            <button type="button" key={p.id} onClick={() => setLightbox(p)}
               className="relative aspect-square rounded-xl overflow-hidden active:scale-[0.97] transition"
               style={{ border: `1px solid ${C.hairline}` }}>
               <CloudPhotoImg photo={p} kind="thumb" alt={p.caption || ""}
@@ -4044,7 +4044,7 @@ const CategoryChip = ({ label, active, onClick }: {
   active: boolean;
   onClick: () => void;
 }) => (
-  <button onClick={onClick}
+  <button type="button" onClick={onClick}
     className="px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider whitespace-nowrap shrink-0"
     style={{
       background: active ? C.espresso : C.paper, color: active ? C.gold : C.coffee,
@@ -4075,25 +4075,25 @@ const PhotoLightbox = ({ photo, photos, onClose, onEdit, onDelete, onToggleFav }
   return (
     <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: "rgba(15, 8, 4, 0.96)" }}>
       <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid rgba(201, 169, 97, 0.2)` }}>
-        <button onClick={onClose} className="p-2 rounded-full" style={{ color: C.gold }}><X size={22} /></button>
+        <button type="button" onClick={onClose} className="p-2 rounded-full" style={{ color: C.gold }}><X size={22} /></button>
         <div className="flex items-center gap-3">
-          <button onClick={() => onToggleFav(current)} className="p-2 rounded-full" style={{ color: current.isFavorite ? C.gold : C.mutedSoft }}>
+          <button type="button" onClick={() => onToggleFav(current)} className="p-2 rounded-full" style={{ color: current.isFavorite ? C.gold : C.mutedSoft }}>
             <Star size={20} fill={current.isFavorite ? C.gold : "none"} />
           </button>
-          <button onClick={() => onEdit(current)} className="p-2 rounded-full" style={{ color: C.gold }}><Edit3 size={18} /></button>
-          <button onClick={() => onDelete(current)} className="p-2 rounded-full" style={{ color: C.danger }}><Trash2 size={18} /></button>
+          <button type="button" onClick={() => onEdit(current)} className="p-2 rounded-full" style={{ color: C.gold }}><Edit3 size={18} /></button>
+          <button type="button" onClick={() => onDelete(current)} className="p-2 rounded-full" style={{ color: C.danger }}><Trash2 size={18} /></button>
         </div>
       </div>
       <div className="flex-1 flex items-center justify-center p-3 overflow-hidden relative">
         <CloudPhotoImg photo={current} kind="full" alt={current.caption || ""}
           style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 12 }} />
         {prev && (
-          <button onClick={() => setCurrent(prev)} className="absolute left-2 p-2 rounded-full" style={{ background: "rgba(0,0,0,0.5)", color: C.gold }}>
+          <button type="button" onClick={() => setCurrent(prev)} className="absolute left-2 p-2 rounded-full" style={{ background: "rgba(0,0,0,0.5)", color: C.gold }}>
             <ChevronLeft size={22} />
           </button>
         )}
         {next && (
-          <button onClick={() => setCurrent(next)} className="absolute right-2 p-2 rounded-full" style={{ background: "rgba(0,0,0,0.5)", color: C.gold }}>
+          <button type="button" onClick={() => setCurrent(next)} className="absolute right-2 p-2 rounded-full" style={{ background: "rgba(0,0,0,0.5)", color: C.gold }}>
             <ChevronRight size={22} />
           </button>
         )}
@@ -4138,7 +4138,7 @@ const PhotoEditSheet = ({ photo, appointments, onClose, onSave }: {
             {PHOTO_CATEGORIES.map(c => {
               const on = form.category === c.value;
               return (
-                <button key={c.value} onClick={() => setForm({ ...form, category: c.value })}
+                <button type="button" key={c.value} onClick={() => setForm({ ...form, category: c.value })}
                   className="px-3 py-1.5 rounded-full text-[12px] font-semibold transition"
                   style={{ background: on ? C.gold : C.paper, color: on ? C.espresso : C.coffee, border: `1px solid ${on ? C.goldDeep : C.hairline}` }}>
                   {c.label}
@@ -4220,7 +4220,7 @@ const Money = ({ store, openTxSheet, editTx, openTimerSessions, openReceipt }: {
         {/* tab segmented */}
         <div className="flex p-1 rounded-2xl mb-4" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
           {[{ id: "money", label: "Money", icon: <DollarSign size={14} /> }, { id: "productivity", label: "Productivity", icon: <BarChart3 size={14} /> }].map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
+            <button type="button" key={t.id} onClick={() => setTab(t.id)}
               className="flex-1 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
               style={{
                 background: tab === t.id ? C.espresso : "transparent",
@@ -4233,7 +4233,7 @@ const Money = ({ store, openTxSheet, editTx, openTimerSessions, openReceipt }: {
         {/* period chips */}
         <div className="flex gap-2 overflow-x-auto bbp-scroll mb-4">
           {[["week", "7d"], ["month", "30d"], ["quarter", "90d"], ["all", "All"]].map(([k, l]) => (
-            <button key={k} onClick={() => setPeriod(k)}
+            <button type="button" key={k} onClick={() => setPeriod(k)}
               className="px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition"
               style={{
                 background: period === k ? C.espresso : "transparent",
@@ -4286,7 +4286,7 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
     </div>
 
     <SectionTitle>Activity</SectionTitle>
-<button onClick={() => openTxSheet()}>Add</button>
+<button type="button" onClick={() => openTxSheet()}>Add</button>
     {all.length === 0 ? (
       <EmptyState icon={<Receipt size={28} style={{ color: C.muted }} />} title="No money in or out yet" body="Completed appointments auto-appear here. Log hair supplies, tools, and travel as expenses to see your real take-home." />
     ) : (
@@ -4548,7 +4548,7 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
           ["sent", "Sent", store.reminders.filter(r => r.status === "sent" || r.status === "delivered").length],
           ["failed", "Failed", store.reminders.filter(r => r.status === "failed").length],
           ["all", "All", store.reminders.length]].map(([k, l, n]) => (
-            <button key={k} onClick={() => setFilter(k)}
+            <button type="button" key={k} onClick={() => setFilter(k)}
               className="px-3.5 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5"
               style={{
                 background: filter === k ? C.espresso : "transparent",
@@ -5036,7 +5036,7 @@ const ActiveTimerScreen = ({ store, prefillAppt, onBack, onComplete }) => {
       color: C.cream
     }}>
       <div className="flex items-center justify-between px-5 pt-12 pb-4">
-        <button onClick={onBack} className="rounded-full p-2"
+        <button type="button" onClick={onBack} className="rounded-full p-2"
           style={{ background: "rgba(245,235,217,0.1)", color: C.cream }}>
           <ChevronLeft size={20} />
         </button>
@@ -5096,24 +5096,24 @@ const ActiveTimerScreen = ({ store, prefillAppt, onBack, onComplete }) => {
       {/* controls */}
       <div className="px-5 grid grid-cols-3 gap-2 pb-12">
         {timer.status === "running" ? (
-          <button onClick={pause}
+          <button type="button" onClick={pause}
             className="py-4 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition"
             style={{ background: "rgba(245,235,217,0.12)", color: C.cream, border: `1.5px solid rgba(245,235,217,0.2)` }}>
             <Pause size={18} fill={C.cream} /> Pause
           </button>
         ) : (
-          <button onClick={resume}
+          <button type="button" onClick={resume}
             className="py-4 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition"
             style={{ background: C.gold, color: C.espresso }}>
             <Play size={18} fill={C.espresso} /> Resume
           </button>
         )}
-        <button onClick={reset}
+        <button type="button" onClick={reset}
           className="py-4 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition"
           style={{ background: C.warning, color: C.cream }}>
           <RefreshCw size={16} /> Reset
         </button>
-        <button onClick={() => setShowStop(true)}
+        <button type="button" onClick={() => setShowStop(true)}
           className="py-4 rounded-2xl font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition"
           style={{ background: C.danger, color: C.cream }}>
           <Square size={16} fill={C.cream} /> Stop
@@ -5318,7 +5318,7 @@ const PresetCard = ({ preset, business, onClick, onUse }) => {
         {preset.estimatedHours}h · {preset.braidSize}
       </p>
       <p className="text-base font-bold mb-2" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{fmtMoney(totalEst, business.currency)}</p>
-      <button onClick={(e) => { e.stopPropagation(); onUse(); }}
+      <button type="button" onClick={(e) => { e.stopPropagation(); onUse(); }}
         className="w-full py-1.5 rounded-lg text-[11px] font-bold uppercase transition active:scale-[0.97]"
         style={{ background: C.espresso, color: C.cream, letterSpacing: "0.08em" }}>
         Use
@@ -5370,7 +5370,7 @@ const PresetEditorSheet = ({ preset, isNew, onClose, onSave, onDelete, onUse }) 
         <SectionTitle>Default add-ons</SectionTitle>
 
 <button
-  type="button"
+ type="button"
   onClick={addAddOn}
   className="mb-3 rounded-xl px-4 py-2 text-sm font-semibold"
 >
@@ -5380,7 +5380,7 @@ const PresetEditorSheet = ({ preset, isNew, onClose, onSave, onDelete, onUse }) 
           <div key={i} className="grid grid-cols-[1fr_90px_36px] gap-2 items-center">
             <Input value={a.name} onChange={e => updateAddOn(i, "name", e.target.value)} placeholder="Add-on name" />
             <MoneyInput value={a.amount ?? ""} onChange={(v) => updateAddOn(i, "amount", parseMoney(v))} />
-            <button onClick={() => removeAddOn(i)} className="rounded-xl p-2"
+            <button type="button" onClick={() => removeAddOn(i)} className="rounded-xl p-2"
               style={{ background: "rgba(156,61,46,0.1)", color: C.danger }}><X size={16} /></button>
           </div>
         ))}
@@ -5442,7 +5442,7 @@ const TransactionSheet = ({ open, tx, onClose, onSave, onDelete, business }) => 
       <div className="space-y-4">
         <div className="flex p-1 rounded-2xl" style={{ background: C.ivory }}>
           {[{ k: "income", l: "Income" }, { k: "expense", l: "Expense" }].map(o => (
-            <button key={o.k} onClick={() => setT({ ...t, type: o.k, category: o.k === "expense" ? "Hair supplies" : "Service" })}
+            <button type="button" key={o.k} onClick={() => setT({ ...t, type: o.k, category: o.k === "expense" ? "Hair supplies" : "Service" })}
               className="flex-1 py-2 rounded-xl text-xs font-bold transition"
               style={{ background: t.type === o.k ? (o.k === "income" ? C.success : C.danger) : "transparent", color: t.type === o.k ? C.cream : C.coffee }}>
               {o.l}
@@ -5677,7 +5677,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                 background, hairline border, soft shadow, rounded
                 corners) so the appearance is unchanged. */}
             <button
-              type="button"
+             type="button"
               onClick={() => { console.log("Account sync tapped"); openAccount(); }}
               className="w-full text-left rounded-2xl p-4 active:scale-[0.99] cursor-pointer select-none transition"
               style={{
@@ -5717,7 +5717,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
           // flex row guarantees taps on the chevron, the labels, or
           // the dead space between them all bubble up to the button.
           <button
-            type="button"
+           type="button"
             onClick={() => { console.log("Communication log tapped"); openCommunicationLog(); }}
             className="w-full text-left rounded-2xl p-4 mt-2 active:scale-[0.99] cursor-pointer select-none transition"
             style={{
@@ -5831,7 +5831,7 @@ const BookingRequestsScreen = ({ userId, onBack, onApprove }: {
       <div className="px-5 pt-4 space-y-3">
         <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
           {[{ id: "pending", label: "Pending" }, { id: "all", label: "All" }].map(t => (
-            <button key={t.id} onClick={() => setFilter(t.id as any)}
+            <button type="button" key={t.id} onClick={() => setFilter(t.id as any)}
               className="flex-1 py-2 rounded-lg text-[13px] font-semibold transition"
               style={{ background: filter === t.id ? C.espresso : "transparent", color: filter === t.id ? C.cream : C.coffee }}>
               {t.label}
@@ -6087,7 +6087,7 @@ const CommunicationLogScreen = ({ store, onBack }: { store: any; onBack: () => v
                 <p className="text-xs mt-2 leading-relaxed line-clamp-3" style={{ color: C.coffee }}>{e.body}</p>
               )}
               <div className="flex justify-end mt-2">
-                <button onClick={() => store.deleteCommLogEntry(e.id)}
+                <button type="button" onClick={() => store.deleteCommLogEntry(e.id)}
                   className="text-[11px] font-semibold uppercase tracking-wider"
                   style={{ color: C.danger, letterSpacing: "0.08em" }}>
                   Remove
@@ -6733,7 +6733,7 @@ const NotificationsSheet = ({ open, onClose, items, dismiss, clearAll, markAllRe
   return (
     <Sheet open={open} onClose={onClose} title="Notifications"
       leftAction={
-        <button onClick={onClose} aria-label="Back to dashboard"
+        <button type="button" onClick={onClose} aria-label="Back to dashboard"
           className="p-2 -ml-2 rounded-full active:scale-[0.95] transition"
           style={{ color: C.coffee }}>
           <ChevronLeft size={22} />
@@ -6756,12 +6756,12 @@ const NotificationsSheet = ({ open, onClose, items, dismiss, clearAll, markAllRe
       ) : (
         <>
           <div className="grid grid-cols-2 gap-2 mb-3">
-            <button onClick={markAllRead}
+            <button type="button" onClick={markAllRead}
               className="rounded-xl px-3 py-2.5 text-[12px] font-bold uppercase tracking-wider active:scale-[0.97] transition flex items-center justify-center gap-1.5"
               style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, letterSpacing: "0.08em" }}>
               <Check size={14} /> Mark all read
             </button>
-            <button onClick={clearAll}
+            <button type="button" onClick={clearAll}
               className="rounded-xl px-3 py-2.5 text-[12px] font-bold uppercase tracking-wider active:scale-[0.97] transition flex items-center justify-center gap-1.5"
               style={{ background: "transparent", color: C.danger, border: `1px solid ${C.danger}`, letterSpacing: "0.08em" }}>
               <Trash2 size={14} /> Clear all
@@ -6780,7 +6780,7 @@ const NotificationsSheet = ({ open, onClose, items, dismiss, clearAll, markAllRe
                   <p className="text-xs mt-0.5 leading-relaxed line-clamp-2" style={{ color: C.coffee }}>{n.body}</p>
                   {n.meta && <p className="text-[11px] mt-1" style={{ color: C.muted }}>{n.meta}</p>}
                 </div>
-                <button onClick={() => dismiss(n.id)} aria-label="Dismiss notification"
+                <button type="button" onClick={() => dismiss(n.id)} aria-label="Dismiss notification"
                   className="p-2 -mr-1 rounded-full shrink-0 active:scale-[0.92] transition"
                   style={{ color: C.danger }}>
                   <Trash2 size={16} />
@@ -7093,15 +7093,15 @@ const AuthGate = ({ onContinueGuest }: { onContinueGuest: () => void }) => {
           <div className="flex items-center justify-between text-[12px] pt-1">
             {tab === "signin" ? (
               <>
-                <button onClick={() => { setTab("reset"); setErr(null); setMsg(null); }} style={{ color: C.coffee }}>Forgot password?</button>
-                <button onClick={() => { setTab("signup"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Create account</button>
+                <button type="button" onClick={() => { setTab("reset"); setErr(null); setMsg(null); }} style={{ color: C.coffee }}>Forgot password?</button>
+                <button type="button" onClick={() => { setTab("signup"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Create account</button>
               </>
             ) : (
-              <button onClick={() => { setTab("signin"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Back to sign in</button>
+              <button type="button" onClick={() => { setTab("signin"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Back to sign in</button>
             )}
           </div>
         </Card>
-        <button onClick={onContinueGuest}
+        <button type="button" onClick={onContinueGuest}
           className="w-full text-center text-[12px] mt-5 py-3"
           style={{ color: C.muted }}>
           Continue as guest · data stays on this device
@@ -7251,7 +7251,7 @@ const SyncStatusCard = ({ mode, sync }: {
       )}
 
       <button
-        onClick={() => setExpanded((v) => !v)}
+        type="button" onClick={() => setExpanded((v) => !v)}
         className="w-full text-left mt-3 pt-3 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider"
         style={{ color: C.muted, letterSpacing: "0.08em", borderTop: `1px solid ${C.hairline}` }}
         aria-expanded={expanded}>
@@ -7416,13 +7416,13 @@ const AuthSheet = ({ open, initialMode, onClose, onAuthed }: {
             <div className="flex items-center justify-between text-[12px] pt-1">
               {mode === "signin" ? (
                 <>
-                  <button onClick={() => setMode("reset")} style={{ color: C.coffee }}>Forgot password?</button>
-                  <button onClick={() => setMode("signup")} style={{ color: C.goldDeep, fontWeight: 600 }}>Create account</button>
+                  <button type="button" onClick={() => setMode("reset")} style={{ color: C.coffee }}>Forgot password?</button>
+                  <button type="button" onClick={() => setMode("signup")} style={{ color: C.goldDeep, fontWeight: 600 }}>Create account</button>
                 </>
               ) : mode === "signup" ? (
-                <button onClick={() => setMode("signin")} style={{ color: C.goldDeep, fontWeight: 600 }}>Back to sign in</button>
+                <button type="button" onClick={() => setMode("signin")} style={{ color: C.goldDeep, fontWeight: 600 }}>Back to sign in</button>
               ) : (
-                <button onClick={() => setMode("signin")} style={{ color: C.goldDeep, fontWeight: 600 }}>Back to sign in</button>
+                <button type="button" onClick={() => setMode("signin")} style={{ color: C.goldDeep, fontWeight: 600 }}>Back to sign in</button>
               )}
             </div>
           </>
@@ -7927,7 +7927,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
                 </p>
               </div>
               <button
-                onClick={onSignOut}
+                type="button" onClick={onSignOut}
                 aria-label="Sign out"
                 className="shrink-0 inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[12px] font-semibold active:scale-[0.99] transition"
                 style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}
@@ -8042,7 +8042,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
               <p className="text-[11px] mt-2" style={{ color: C.danger }}>{bookingError}</p>
             )}
             {bookingLink && openBookingRequests && (
-              <button onClick={openBookingRequests}
+              <button type="button" onClick={openBookingRequests}
                 className="w-full mt-3 flex items-center justify-between rounded-xl p-3 active:scale-[0.99] transition"
                 style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
                 <div className="text-left">
