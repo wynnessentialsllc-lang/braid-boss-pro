@@ -414,6 +414,49 @@ const getRebookingCandidates = (clients: any[], appointments: any[], todayIso: s
   return out.sort((a, b) => b.overdueBy - a.overdueBy);
 };
 
+// ---- DASHBOARD ORCHESTRATION --------------------------------------------
+// The dashboard surfaces the same appointment data through three lenses
+// (Pending Balances → Today's Chair → Coming Up). Each card has a single
+// purpose and an appointment should only appear in the most relevant
+// one. These helpers own the inclusion / exclusion math so the JSX
+// stays a thin renderer.
+
+const getPendingBalanceAppointments = (appointments: any[], todayIso: string): any[] => {
+  if (!Array.isArray(appointments)) return [];
+  return appointments
+    .filter(a => a && a.status !== "cancelled")
+    .filter(a => parseMoney(a.balanceDue) > 0)
+    .filter(a => paymentStatusOf(a, todayIso) !== "paid")
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+};
+
+const getTodaysAppointments = (appointments: any[], todayIso: string, excludeIds: Set<string> = new Set()): any[] => {
+  if (!Array.isArray(appointments)) return [];
+  const today = appointments
+    .filter(a => a && a.status !== "cancelled" && a.date === todayIso)
+    .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+  // If excluding pending-balance items would leave Today's Chair empty,
+  // we fall back to the un-filtered list so the section never goes silent
+  // when there really is something happening today.
+  const filtered = today.filter(a => !excludeIds.has(a.id));
+  return filtered.length > 0 ? filtered : today;
+};
+
+const getUpcomingAppointments = (
+  appointments: any[],
+  todayIso: string,
+  excludeIds: Set<string> = new Set(),
+  limit: number = 3,
+): any[] => {
+  if (!Array.isArray(appointments)) return [];
+  return appointments
+    .filter(a => a && a.status !== "cancelled" && a.status !== "completed")
+    .filter(a => a.date && a.date > todayIso)
+    .filter(a => !excludeIds.has(a.id))
+    .sort((a, b) => ((a.date || "") + (a.time || "")).localeCompare((b.date || "") + (b.time || "")))
+    .slice(0, limit);
+};
+
 // Best-effort safe JSON parse so a single corrupted localStorage entry
 // can't take down the app.
 const safeParse = <T,>(raw: string | null | undefined, fallback: T): T => {
@@ -1619,16 +1662,36 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
-  const todayAppts = useMemo(() =>
-    appointments.filter(a => a.date === today && a.status !== "cancelled")
-      .sort((a, b) => (a.time || "").localeCompare(b.time || ""))
-  , [appointments, today]);
-
-  const upcomingAppts = useMemo(() =>
-    appointments.filter(a => a.date >= today && a.status !== "cancelled" && a.status !== "completed")
-      .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")))
-      .slice(0, 3)
-  , [appointments, today]);
+  // Dashboard orchestration: each section gets a focused, de-duped list
+  // so the same appointment never renders in more than one card.
+  // Order of resolution matters — Pending Balances claims first, then
+  // Today's Chair, then Coming Up. See the helpers in finance utilities.
+  const pendingBalanceAppts = useMemo(
+    () => getPendingBalanceAppointments(appointments, today),
+    [appointments, today],
+  );
+  const pendingIds = useMemo(
+    () => new Set<string>(pendingBalanceAppts.map((a: any) => a.id).filter(Boolean)),
+    [pendingBalanceAppts],
+  );
+  const todayAppts = useMemo(
+    () => getTodaysAppointments(appointments, today, pendingIds),
+    [appointments, today, pendingIds],
+  );
+  const todayIds = useMemo(
+    () => new Set<string>(todayAppts.map((a: any) => a.id).filter(Boolean)),
+    [todayAppts],
+  );
+  const upcomingExcludeIds = useMemo(() => {
+    const s = new Set<string>();
+    pendingIds.forEach(id => s.add(id));
+    todayIds.forEach(id => s.add(id));
+    return s;
+  }, [pendingIds, todayIds]);
+  const upcomingAppts = useMemo(
+    () => getUpcomingAppointments(appointments, today, upcomingExcludeIds, 3),
+    [appointments, today, upcomingExcludeIds],
+  );
 
   // Suggested rebooks: clients whose last completed appointment was longer ago than typical cadence (4 weeks)
   const suggestedRebooks = useMemo(() => {
@@ -1659,13 +1722,13 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
     const monthExpense = roundCents(transactions.filter(t => t.type === "expense" && t.date >= msISO).reduce((s, t) => s + parseMoney(t.amount), 0));
     return { weekRevenue, weekAppts: completedThisWeek.length, pendingBalance, monthProfit: calculateProfit(monthIncome, monthExpense) };
   }, [appointments, transactions, today]);
-  const pendingBalanceAppts = useMemo(() =>
-    appointments
-      .filter(a => a && a.status !== "cancelled")
-      .map(a => ({ a, ps: paymentStatusOf(a, today) }))
-      .filter(({ ps, a }) => ps !== "paid" && parseMoney(a.balanceDue) > 0)
-      .sort((x, y) => (x.a.date || "").localeCompare(y.a.date || ""))
-  , [appointments, today]);
+  // Pending balance rows for the dashboard list, projected from the
+  // canonical `pendingBalanceAppts` (which is what the dedupe sets use)
+  // so the rendered list and the dedupe key set can never disagree.
+  const pendingBalanceRows = useMemo(
+    () => pendingBalanceAppts.map((a: any) => ({ a, ps: paymentStatusOf(a, today) })),
+    [pendingBalanceAppts, today],
+  );
 
   const markApptPaid = async (appt: any) => {
     const apptDate = appt.date || todayISO();
@@ -1749,7 +1812,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
             </Card>
           ) : (
             <div className="space-y-2">
-              {pendingBalanceAppts.slice(0, 4).map(({ a, ps }) => (
+              {pendingBalanceRows.slice(0, 4).map(({ a, ps }) => (
                 <Card key={a.id} className="p-3.5 flex items-center gap-3 cursor-pointer active:scale-[0.99] transition" onClick={() => openQuickAppt(a)}>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
