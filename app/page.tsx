@@ -1871,7 +1871,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
     <div className="bbp-fade">
       <Header
         title={greeting}
-        subtitle={syncState ? <span className="inline-flex items-center gap-2">{fmtDateLong(today)}<SyncStatusPill state={syncState} /></span> as any : fmtDateLong(today)}
+        subtitle={syncState ? <span className="inline-flex items-center gap-2">{fmtDateLong(today)}<SyncStatusPill display={computeSyncDisplay(syncState, 0, "authed", null)} /></span> as any : fmtDateLong(today)}
         leftAction={
           <button onClick={openReminders} className="p-2 rounded-full relative" style={{ color: C.coffee }} aria-label="Notifications">
             <Bell size={20} />
@@ -6394,23 +6394,182 @@ const AuthGate = ({ onContinueGuest }: { onContinueGuest: () => void }) => {
   );
 };
 
-const SyncStatusPill = ({ state }: { state: SyncState }) => {
-  const label = state === "syncing" ? "Syncing changes…"
-    : state === "offline" ? "Offline"
-    : state === "error" ? "Sync issue"
-    : "Synced";
-  const tone = state === "syncing" ? C.coffee
-    : state === "offline" ? C.warning
-    : state === "error" ? C.danger
-    : C.success;
+// One place that turns the raw SyncState + pending queue length +
+// auth mode into the human language we want to show. Keeps the pill
+// and the card body in sync, and never reaches for red unless
+// something has actually failed.
+type SyncDisplayKind =
+  | "synced"
+  | "syncing"
+  | "queued"
+  | "offline"
+  | "failed"
+  | "guest";
+
+type SyncDisplay = {
+  kind: SyncDisplayKind;
+  label: string;        // for the pill
+  body: string;         // longer copy for the card
+  tone: string;         // C.success / C.coffee / C.gold / C.warning / C.danger / C.muted
+};
+
+const computeSyncDisplay = (
+  state: SyncState | undefined,
+  pendingCount: number = 0,
+  mode: AuthMode | undefined,
+  lastOk: string | null,
+): SyncDisplay => {
+  const safePending = Number.isFinite(pendingCount) && pendingCount > 0 ? pendingCount : 0;
+  if (mode === "guest") {
+    return {
+      kind: "guest",
+      label: "On this device",
+      body: "Guest mode stores data only on this device.",
+      tone: C.coffee,
+    };
+  }
+  if (state === "syncing") {
+    return {
+      kind: "syncing",
+      label: "Syncing…",
+      body: "Backing up your latest changes to the cloud.",
+      tone: C.coffee,
+    };
+  }
+  if (state === "offline") {
+    return {
+      kind: "offline",
+      label: safePending > 0 ? "Waiting for connection" : "Offline",
+      body: safePending > 0
+        ? `${safePending} change${safePending === 1 ? "" : "s"} waiting to upload — they'll sync automatically when connection returns.`
+        : "You're offline. Changes will sync automatically when connection returns.",
+      tone: C.gold,
+    };
+  }
+  if (safePending > 0) {
+    return {
+      kind: "queued",
+      label: "Changes queued",
+      body: `${safePending} change${safePending === 1 ? "" : "s"} waiting to upload.`,
+      tone: C.gold,
+    };
+  }
+  if (state === "error") {
+    // Only mark as a hard failure when there's a queue *and* the last
+    // attempt failed. With no queue and a recent successful sync, an
+    // earlier transient error isn't worth scaring the user about.
+    if (!lastOk || safePending > 0) {
+      return {
+        kind: "failed",
+        label: "Sync failed",
+        body: "We couldn't reach the cloud just now. Your changes are safe on this device — we'll retry automatically.",
+        tone: C.danger,
+      };
+    }
+  }
+  // Default: healthy.
+  return {
+    kind: "synced",
+    label: lastOk ? "Synced" : "Cloud backup active",
+    body: lastOk
+      ? "All changes backed up."
+      : "Your business data securely syncs between this device and your cloud backup.",
+    tone: C.success,
+  };
+};
+
+const SYNCED_ENTITIES = [
+  "Appointments",
+  "Clients",
+  "Receipts",
+  "Quotes",
+  "Communication log",
+  "Photos (metadata + securely stored bytes)",
+  "Settings",
+];
+
+const SyncStatusCard = ({ mode, sync }: {
+  mode: AuthMode;
+  sync: { state: SyncState; lastOk: string | null; pendingCount: number };
+}) => {
+  const [expanded, setExpanded] = useState(false);
+  const display = useMemo(
+    () => computeSyncDisplay(sync.state, sync.pendingCount, mode, sync.lastOk),
+    [sync.state, sync.pendingCount, sync.lastOk, mode],
+  );
+
+  const detailItems: { label: string; value: string }[] = [];
+  if (mode === "authed") {
+    detailItems.push({
+      label: "Last synced",
+      value: sync.lastOk ? fmtRelative(sync.lastOk) : "Not yet — first sync runs after you sign in",
+    });
+    detailItems.push({
+      label: "Pending changes",
+      value: sync.pendingCount > 0 ? `${sync.pendingCount}` : "None",
+    });
+  }
+
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
-      style={{ background: "rgba(245, 235, 217, 0.6)", color: tone, border: `1px solid ${tone}33`, letterSpacing: "0.08em" }}>
-      <span className="inline-block rounded-full" style={{ width: 6, height: 6, background: tone }} />
-      {label}
-    </span>
+    <Card className="p-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+          Sync &amp; backup
+        </p>
+        <SyncStatusPill display={display} />
+      </div>
+      <p className="text-[12px] mt-2 leading-relaxed" style={{ color: C.coffee }}>
+        {display.body}
+      </p>
+
+      {detailItems.length > 0 && (
+        <div className="mt-3 pt-3 space-y-1.5" style={{ borderTop: `1px solid ${C.hairline}` }}>
+          {detailItems.map((d) => (
+            <div key={d.label} className="flex items-center justify-between text-[11px]">
+              <span style={{ color: C.muted }}>{d.label}</span>
+              <span style={{ color: C.espresso }}>{d.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full text-left mt-3 pt-3 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider"
+        style={{ color: C.muted, letterSpacing: "0.08em", borderTop: `1px solid ${C.hairline}` }}
+        aria-expanded={expanded}>
+        <span>{expanded ? "Hide what syncs" : "What syncs"}</span>
+        <ChevronRight size={12} style={{ transform: expanded ? "rotate(90deg)" : "none", transition: "transform 150ms" }} />
+      </button>
+      {expanded && (
+        <div className="mt-2 bbp-fade">
+          <p className="text-[11px] leading-relaxed" style={{ color: C.coffee }}>
+            Your business data syncs securely between <strong>this device</strong> and your <strong>cloud backup</strong>.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {SYNCED_ENTITIES.map((label) => (
+              <li key={label} className="flex items-start gap-2 text-[12px]" style={{ color: C.coffee }}>
+                <Check size={12} style={{ color: C.success, marginTop: 4 }} />
+                <span>{label}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[11px] mt-2" style={{ color: C.muted }}>
+            Cloud backup runs automatically — sign in on a new device and your data follows.
+          </p>
+        </div>
+      )}
+    </Card>
   );
 };
+
+const SyncStatusPill = ({ display }: { display: SyncDisplay }) => (
+  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+    style={{ background: "rgba(245, 235, 217, 0.6)", color: display.tone, border: `1px solid ${display.tone}33`, letterSpacing: "0.08em" }}>
+    <span className="inline-block rounded-full" style={{ width: 6, height: 6, background: display.tone }} />
+    {display.label}
+  </span>
+);
 
 type AuthMode2 = "signin" | "signup" | "reset" | "reset_sent";
 
@@ -7014,20 +7173,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
           />
         )}
 
-        {mode === "authed" && (
-          <Card className="p-4">
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>Sync status</p>
-              <SyncStatusPill state={sync.state} />
-            </div>
-            <p className="text-[11px] mt-1" style={{ color: C.muted }}>
-              {sync.state === "offline" ? "You&apos;re offline. Changes will upload as soon as you&apos;re back on."
-                : sync.pendingCount > 0 ? `${sync.pendingCount} change${sync.pendingCount === 1 ? "" : "s"} queued.`
-                : sync.lastOk ? `Last backup ${fmtRelative(sync.lastOk)}.`
-                : "Last backup details will appear after the first sync."}
-            </p>
-          </Card>
-        )}
+        {mode === "authed" && <SyncStatusCard mode={mode} sync={sync} />}
 
         {mode === "authed" && (
           <Card className="p-4">
