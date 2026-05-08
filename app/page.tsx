@@ -55,6 +55,7 @@ import {
   dispatchPush,
   loadDeliveredHistory,
   saveDeliveredHistory,
+  sendTestPush,
 } from "./lib/push-dispatch";
 import {
   detectPushCapability,
@@ -7193,14 +7194,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   const handleTestNotification = async () => {
     if (!userId) return;
     setTestStatus("Sending…");
-    const result = await dispatchPush(userId, {
-      id: `test:${Date.now()}`,
-      kind: "test",
-      category: "appointment",
-      priority: "low",
-      title: "Test from Braid Boss Pro",
-      body: "If you're reading this, push delivery is working.",
-    });
+    const result = await sendTestPush();
     setTestStatus(result.ok ? "Sent — check your notifications." : `Couldn't send: ${result.reason || "unknown"}`);
     setTimeout(() => setTestStatus(null), 4000);
   };

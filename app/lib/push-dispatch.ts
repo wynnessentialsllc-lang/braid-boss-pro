@@ -35,10 +35,39 @@ export const dispatchPush = async (
   const supabase = getSupabase();
   const payload = formatNotificationPayload(rule);
   try {
-    const { error } = await supabase.functions.invoke("send-push", {
+    const { data, error } = await supabase.functions.invoke("send-push", {
       body: { user_id: userId, payload },
     });
     if (error) return { ok: false, reason: error.message };
+    if (data && typeof data === "object") {
+      const r = data as { ok?: number; total?: number; errors?: { message?: string }[] };
+      if (typeof r.total === "number" && r.total > 0 && r.ok === 0) {
+        return { ok: false, reason: r.errors?.[0]?.message || "no successful delivery" };
+      }
+    }
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, reason: e?.message || "invoke failed" };
+  }
+};
+
+// Send a default test push to the currently authenticated user. The
+// Edge Function fills in the title/body/icon defaults when no payload
+// is provided, so this helper just invokes with an empty body.
+export const sendTestPush = async (): Promise<{ ok: boolean; reason?: string }> => {
+  const supabase = getSupabase();
+  try {
+    const { data, error } = await supabase.functions.invoke("send-push", { body: {} });
+    if (error) return { ok: false, reason: error.message };
+    if (data && typeof data === "object") {
+      const r = data as { ok?: number; total?: number; message?: string; errors?: { message?: string }[] };
+      if (r.total === 0) {
+        return { ok: false, reason: r.message || "no active subscriptions on this device" };
+      }
+      if (typeof r.total === "number" && r.total > 0 && r.ok === 0) {
+        return { ok: false, reason: r.errors?.[0]?.message || "no successful delivery" };
+      }
+    }
     return { ok: true };
   } catch (e: any) {
     return { ok: false, reason: e?.message || "invoke failed" };
