@@ -1,0 +1,31 @@
+# Supabase project configuration for Braid Boss Pro.
+#
+# Most settings live in the dashboard; the only thing pinned here is
+# the per-function JWT policy, which the dashboard does not always
+# preserve across redeploys.
+#
+# Apply with:  supabase functions deploy <name>  (the policy is read
+# from this file by the CLI on each deploy).
+
+[functions.send-push]
+# We verify the JWT inside the function via auth.getUser(jwt) so we
+# can return a structured 401 with CORS headers instead of the
+# platform's bare gateway error.
+verify_jwt = false
+
+[functions.booking-request]
+# Anonymous endpoint — the public /book/<slug> form posts here. We
+# validate the slug + sanitise inputs inside the function before
+# inserting under the salon owner's user_id via the service role.
+verify_jwt = false
+
+[functions.calendar-feed]
+# Anonymous GET — Apple Calendar / Google Calendar / Outlook
+# subscribe directly to this URL and CANNOT send an Authorization
+# header. We gate access with the opaque token query param instead.
+verify_jwt = false
+
+[functions.delete-account]
+# Verifies the JWT inside the function so we can require the user to
+# type "delete" to confirm before cascading their data.
+verify_jwt = false
