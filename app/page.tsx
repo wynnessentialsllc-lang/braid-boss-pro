@@ -73,7 +73,7 @@ import {
   CalendarPlus, UserPlus, Receipt, ScrollText, Image as ImageIcon, Camera,
   Star, Heart, Repeat, Play, Pause, Square, Timer as TimerIcon, Zap, Award,
   BarChart3, Layers, MessageSquare, Send, AlertTriangle, CheckCircle2,
-  XCircle, Filter
+  XCircle, Filter, LogOut
 } from "lucide-react";
 
 /* ============================================================
@@ -7448,11 +7448,24 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
       <div className="px-5 pt-4 space-y-3">
         {mode === "authed" ? (
           <Card className="p-4">
-            <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Signed in as</p>
-            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>
-              {email || "Account"}
-            </p>
-            <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+            <div className="flex items-start gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Signed in as</p>
+                <p className="break-all" style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>
+                  {email || "Account"}
+                </p>
+              </div>
+              <button
+                onClick={onSignOut}
+                aria-label="Sign out"
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[12px] font-semibold active:scale-[0.99] transition"
+                style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}
+              >
+                <LogOut size={14} />
+                Sign out
+              </button>
+            </div>
+            <p className="text-[11px] mt-3" style={{ color: C.muted }}>
               Your appointments, clients, receipts, and communication log sync across every device you sign in on.
             </p>
           </Card>
