@@ -53,6 +53,12 @@ import {
 import { renderReceiptPdf } from "./lib/pdf-render";
 import { getAuthRedirectUrl } from "./lib/site-url";
 import {
+  LIFETIME_PRICE_LABEL,
+  isPaymentLinkConfigured,
+  openCheckout,
+  useLifetimeAccess,
+} from "./lib/premium";
+import {
   downloadJson,
   downloadPdfBlob,
 } from "./lib/native-download";
@@ -7647,6 +7653,8 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   const [showReadiness, setShowReadiness] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [authSheetMode, setAuthSheetMode] = useState<AuthMode2 | null>(null);
+  const lifetimeAccess = useLifetimeAccess(userId);
+  const paymentLinkReady = isPaymentLinkConfigured();
 
   useEffect(() => {
     let cancelled = false;
@@ -7980,6 +7988,78 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
             onSignIn={() => setAuthSheetMode("signin")}
             onCreateAccount={() => setAuthSheetMode("signup")}
           />
+        )}
+
+        {mode === "authed" && userId && (
+          lifetimeAccess === true ? (
+            <Card className="p-4">
+              <div className="flex items-center gap-3">
+                <div
+                  aria-hidden
+                  style={{
+                    width: 36, height: 36, borderRadius: 999, display: "grid", placeItems: "center",
+                    background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+                    color: C.paper,
+                  }}
+                >
+                  <Sparkles size={18} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.goldDeep, letterSpacing: "0.12em" }}>
+                    Lifetime Access
+                  </p>
+                  <p className="text-sm font-semibold mt-0.5" style={{ color: C.espresso }}>
+                    Activated — thank you.
+                  </p>
+                </div>
+              </div>
+            </Card>
+          ) : (
+            <Card className="p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div
+                  aria-hidden
+                  style={{
+                    width: 36, height: 36, borderRadius: 999, display: "grid", placeItems: "center",
+                    background: C.ivory, border: `1px solid ${C.hairline}`, color: C.caramel,
+                  }}
+                >
+                  <Sparkles size={18} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+                    Lifetime Access
+                  </p>
+                  <p className="text-sm font-semibold mt-0.5" style={{ color: C.espresso }}>
+                    Unlock everything for {LIFETIME_PRICE_LABEL}
+                  </p>
+                </div>
+              </div>
+              <p className="text-[11px] mb-3" style={{ color: C.muted }}>
+                One-time payment. No subscription. Tied to your account
+                so it follows you to every device.
+              </p>
+              <button
+                type="button"
+                disabled={!paymentLinkReady}
+                onClick={() => { void openCheckout(userId); }}
+                className="w-full rounded-2xl py-3 text-[14px] font-semibold active:scale-[0.99] transition disabled:opacity-60"
+                style={{
+                  background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+                  color: C.paper,
+                  border: `1px solid ${C.goldDeep}`,
+                  boxShadow: "0 8px 20px -10px rgba(168, 137, 63, 0.6)",
+                }}
+              >
+                {paymentLinkReady ? `Unlock for ${LIFETIME_PRICE_LABEL}` : "Coming soon"}
+              </button>
+              {!paymentLinkReady && (
+                <p className="text-[11px] mt-2" style={{ color: C.muted }}>
+                  Stripe Payment Link not configured yet.
+                </p>
+              )}
+            </Card>
+          )
         )}
 
         {mode === "authed" && <SyncStatusCard mode={mode} sync={sync} />}
