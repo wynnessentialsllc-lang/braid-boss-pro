@@ -41,6 +41,13 @@ create policy "profiles_self_insert" on public.profiles
 revoke update on public.profiles from authenticated;
 grant update (updated_at) on public.profiles to authenticated;
 
+-- Make sure the table itself is readable / insertable by signed-in
+-- users. Without these, RLS lets the row through but the table-level
+-- privilege blocks the query, so the app sees an empty result and
+-- thinks the user hasn't paid.
+grant select on public.profiles to authenticated;
+grant insert on public.profiles to authenticated;
+
 -- Auto-bump updated_at.
 create or replace function public.profiles_touch_updated_at()
 returns trigger
