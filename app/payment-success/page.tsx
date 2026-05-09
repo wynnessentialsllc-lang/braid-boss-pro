@@ -13,6 +13,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getSupabase } from "../lib/supabase";
+import { cacheLifetimeAccess } from "../lib/premium";
 
 const C = {
   espresso: "#2A1810",
@@ -74,6 +75,11 @@ function PaymentSuccessInner() {
           setErrorMessage(json?.error || `Verification failed (${res.status}).`);
           return;
         }
+        // Cache the unlock locally so the main app shows premium
+        // instantly when the user navigates back, even before the
+        // Supabase select round-trip completes.
+        const userId = sessionData.session?.user?.id;
+        if (userId) cacheLifetimeAccess(userId, true);
         setStatus("activated");
       } catch (e: any) {
         if (cancelled) return;
