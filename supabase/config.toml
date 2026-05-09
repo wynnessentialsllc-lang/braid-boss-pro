@@ -21,6 +21,28 @@ verify_jwt = false
 # the request under the salon owner's user_id via the service role.
 verify_jwt = false
 
+[functions.stripe-webhook]
+# PUBLIC. Stripe's webhook delivery does not (and cannot) carry a
+# Supabase JWT — we authenticate the request instead by verifying
+# the Stripe-Signature header inside the function via
+# STRIPE_WEBHOOK_SECRET. Bypassing JWT verification is the standard
+# Stripe pattern.
+verify_jwt = false
+
+[functions.create-checkout-session]
+# Verifies the JWT inside the function (we read auth.getUser(jwt)
+# off the supabase admin client) so we can mint a session bound to
+# the real, server-known user.id rather than anything the client
+# claims. Disabled at the platform level so we control the failure
+# response shape with proper CORS.
+verify_jwt = false
+
+[functions.verify-checkout-session]
+# Same pattern as create-checkout-session. The function reads the
+# bearer token, calls auth.getUser, and rejects if the session
+# belongs to a different user.
+verify_jwt = false
+
 # Authenticated functions (verify_jwt = true is the default, listed
 # here for documentation only — no entry needed):
 #
