@@ -26,7 +26,7 @@ import { getSupabase } from "./supabase";
 //       https://braidbosspro.app/payment-success?session_id={CHECKOUT_SESSION_ID}
 //   - Save and copy the resulting buy.stripe.com URL into the constant
 //     below.
-export const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/REPLACE_ME";
+export const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/3cI3co3S24hUdms5hv97G00";
 
 export const LIFETIME_PRICE_LABEL = "$9.99";
 
