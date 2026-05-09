@@ -88,13 +88,34 @@ export const hasReachedGuestLimit = (
 };
 
 // Convenience hook: read profiles.lifetime_access for the signed-in
-// user. Returns false while loading so the UI conservatively assumes
-// "not premium" (we'd rather show the upgrade card briefly than flash
-// premium state).
+// user. Reads the localStorage fast-path written by /payment-success
+// so a fresh purchase shows premium instantly without waiting for the
+// Supabase round-trip. The DB read still runs and reconciles.
+//
+// Listens to both window `focus` and document `visibilitychange`.
+// WKWebView (Capacitor) doesn't fire `focus` after
+// SFSafariViewController dismisses, so the redundancy is intentional —
+// `visibilitychange` is what reliably fires when the app foregrounds.
+const lifetimeCacheKey = (userId: string) => `bbp-lifetime:${userId}`;
+const readCachedLifetime = (userId: string): boolean => {
+  if (typeof window === "undefined") return false;
+  try { return window.localStorage.getItem(lifetimeCacheKey(userId)) === "1"; }
+  catch { return false; }
+};
+const writeCachedLifetime = (userId: string, unlocked: boolean): void => {
+  if (typeof window === "undefined") return;
+  try {
+    if (unlocked) window.localStorage.setItem(lifetimeCacheKey(userId), "1");
+    else window.localStorage.removeItem(lifetimeCacheKey(userId));
+  } catch { /* quota / private mode */ }
+};
+
 export const usePremiumStatus = (
   userId: string | null,
 ): { premium: boolean; loading: boolean } => {
-  const [premium, setPremium] = useState(false);
+  const [premium, setPremium] = useState<boolean>(() =>
+    userId ? readCachedLifetime(userId) : false,
+  );
   const [loading, setLoading] = useState(!!userId);
 
   useEffect(() => {
@@ -105,7 +126,9 @@ export const usePremiumStatus = (
     }
     let cancelled = false;
     setLoading(true);
-    (async () => {
+    setPremium(readCachedLifetime(userId));
+
+    const refresh = async () => {
       try {
         const { getSupabase } = await import("./supabase");
         const supabase = getSupabase();
@@ -115,29 +138,28 @@ export const usePremiumStatus = (
           .eq("id", userId)
           .maybeSingle();
         if (cancelled) return;
-        setPremium(!!data?.lifetime_access);
+        const next = !!data?.lifetime_access;
+        setPremium(next);
+        writeCachedLifetime(userId, next);
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    };
+    void refresh();
 
-    const onFocus = () => {
-      (async () => {
-        const { getSupabase } = await import("./supabase");
-        const supabase = getSupabase();
-        const { data } = await supabase
-          .from("profiles")
-          .select("lifetime_access")
-          .eq("id", userId)
-          .maybeSingle();
-        if (cancelled) return;
-        setPremium(!!data?.lifetime_access);
-      })();
+    const onFocus = () => { void refresh(); };
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        void refresh();
+      }
     };
     window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       cancelled = true;
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [userId]);
 

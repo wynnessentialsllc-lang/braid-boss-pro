@@ -61,13 +61,37 @@ export const openCheckout = async (userId: string): Promise<void> => {
   window.location.href = url;
 };
 
+// localStorage fast-path. Set by /payment-success the moment
+// /api/verify-payment confirms the unlock, so the next hook mount —
+// even before Supabase replies — already shows premium. The DB read
+// still runs in the background and reconciles if the cache is wrong
+// (e.g. a refund). Key includes the userId so the cache can never
+// leak premium status across accounts on the same device.
+const lifetimeCacheKey = (userId: string) => `bbp-lifetime:${userId}`;
+
+export const cacheLifetimeAccess = (userId: string, unlocked: boolean): void => {
+  if (typeof window === "undefined") return;
+  try {
+    if (unlocked) window.localStorage.setItem(lifetimeCacheKey(userId), "1");
+    else window.localStorage.removeItem(lifetimeCacheKey(userId));
+  } catch { /* quota / private mode */ }
+};
+
+const readCachedLifetime = (userId: string): boolean => {
+  if (typeof window === "undefined") return false;
+  try { return window.localStorage.getItem(lifetimeCacheKey(userId)) === "1"; }
+  catch { return false; }
+};
+
 // Read profiles.lifetime_access for the signed-in user. Returns null
 // while loading so callers can render a skeleton instead of flashing
-// the paywall.
+// the paywall — except when the localStorage fast-path already says
+// "yes," in which case we open as `true` immediately.
 export const useLifetimeAccess = (userId: string | null): boolean | null => {
-  const [unlocked, setUnlocked] = useState<boolean | null>(
-    userId ? null : false,
-  );
+  const [unlocked, setUnlocked] = useState<boolean | null>(() => {
+    if (!userId) return false;
+    return readCachedLifetime(userId) ? true : null;
+  });
 
   useEffect(() => {
     if (!userId) {
@@ -76,33 +100,36 @@ export const useLifetimeAccess = (userId: string | null): boolean | null => {
     }
     let cancelled = false;
     const supabase = getSupabase();
-    (async () => {
+    const refresh = async () => {
       const { data } = await supabase
         .from("profiles")
         .select("lifetime_access")
         .eq("id", userId)
         .maybeSingle();
       if (cancelled) return;
-      setUnlocked(!!data?.lifetime_access);
-    })();
+      const next = !!data?.lifetime_access;
+      setUnlocked(next);
+      cacheLifetimeAccess(userId, next);
+    };
+    void refresh();
 
-    // Re-check on focus so a successful checkout in another tab/in the
-    // SFSafariViewController surfaces immediately when the user returns.
-    const onFocus = () => {
-      (async () => {
-        const { data } = await supabase
-          .from("profiles")
-          .select("lifetime_access")
-          .eq("user_id", userId)
-          .maybeSingle();
-        if (cancelled) return;
-        setUnlocked(!!data?.lifetime_access);
-      })();
+    // Re-check whenever the app comes back to the foreground. WKWebView
+    // (Capacitor) doesn't reliably fire `focus` after SFSafariViewController
+    // dismisses, so listen to `visibilitychange` and Capacitor's App
+    // `resume` event as well.
+    const onFocus = () => { void refresh(); };
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        void refresh();
+      }
     };
     window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       cancelled = true;
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [userId]);
 
