@@ -69,6 +69,19 @@ import {
   type GatedFeature,
 } from "./lib/guest-limits";
 import {
+  type Discount,
+  type DiscountInput,
+  type DiscountSummary,
+  NO_DISCOUNT,
+  DISCOUNT_PRESETS,
+  DISCOUNTS_EMPTY_COPY,
+  computeDiscountAmount,
+  formatDiscountValue,
+  selectableDiscounts,
+  useDiscounts,
+  validateDiscount,
+} from "./lib/discounts";
+import {
   downloadJson,
   downloadPdfBlob,
 } from "./lib/native-download";
@@ -966,7 +979,14 @@ const planRemindersForAppointment = (appt: any, settings: any, templates: any[],
 // ============================================================
 //  PRICING ENGINE
 // ============================================================
-const computePricing = (inputs: any): any => {
+// Discount is applied BEFORE tip — the tip then calculates from the
+// discounted subtotal so the stylist isn't accidentally tipping out
+// the original price. Total floors at $0 even if a misconfigured
+// fixed-amount discount would otherwise push it negative.
+const computePricing = (
+  inputs: any,
+  discount?: { discount_type: "fixed" | "percentage"; value: number } | null,
+): any => {
   const hairCost = Number(inputs.hairCost) || 0;
   const hourlyRate = Number(inputs.hourlyRate) || 0;
   const hours = Number(inputs.hours) || 0;
@@ -976,11 +996,15 @@ const computePricing = (inputs: any): any => {
   const tipPct = Number(inputs.tipPct) || 0;
   const addOnsTotal = (inputs.addOns || []).reduce((s, a) => s + (Number(a.amount) || 0), 0);
   const labor = hourlyRate * hours;
-  const subtotal = hairCost + labor + travelFee + addOnsTotal + overhead + profitMargin;
+  const subtotalBeforeDiscount = hairCost + labor + travelFee + addOnsTotal + overhead + profitMargin;
+  const discountAmount = computeDiscountAmount(subtotalBeforeDiscount, discount);
+  const subtotal = Math.max(0, subtotalBeforeDiscount - discountAmount);
   const tipAmount = subtotal * (tipPct / 100);
   const finalPrice = subtotal + tipAmount;
   return {
     hairCost, labor, hourlyRate, hours, travelFee, addOnsTotal, overhead, profitMargin, tipPct,
+    subtotalBeforeDiscount: Number(subtotalBeforeDiscount.toFixed(2)),
+    discountAmount: Number(discountAmount.toFixed(2)),
     subtotal: Number(subtotal.toFixed(2)),
     tipAmount: Number(tipAmount.toFixed(2)),
     finalPrice: Number(finalPrice.toFixed(2)),
@@ -2979,14 +3003,43 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
     }
   }, [prefillFromPreset]);
 
+  // Selectable discount applied to this quote. Stored as the full
+  // selected row so we can also surface a "discount may eat your
+  // profit" warning. Defaults to none — the user has to opt in.
+  const [selectedDiscountId, setSelectedDiscountId] = useState<string | null>(null);
+  const allDiscounts: Discount[] = store.discountsApi?.discounts || [];
+  const availableDiscounts = useMemo(
+    () => selectableDiscounts(allDiscounts),
+    [allDiscounts],
+  );
+  const selectedDiscount = useMemo(
+    () => availableDiscounts.find(d => d.id === selectedDiscountId) || null,
+    [availableDiscounts, selectedDiscountId],
+  );
+  // If a selected discount becomes inactive / expires, drop it silently.
+  useEffect(() => {
+    if (selectedDiscountId && !selectedDiscount) setSelectedDiscountId(null);
+  }, [selectedDiscountId, selectedDiscount]);
+
   const inputs = { hairCost, hourlyRate, hours, travelFee, overhead, profitMargin, tipPct, addOns };
-  const result = useMemo(() => computePricing(inputs), [hairCost, hourlyRate, hours, travelFee, overhead, profitMargin, tipPct, addOns]);
+  const result = useMemo(
+    () => computePricing(inputs, selectedDiscount),
+    [hairCost, hourlyRate, hours, travelFee, overhead, profitMargin, tipPct, addOns, selectedDiscount],
+  );
+
+  // Profit estimate for the warning banner: what the stylist set as
+  // their target margin, minus the dollar value of the discount. If
+  // the discount swallows the whole margin, surface a soft warning.
+  const profitWarning =
+    selectedDiscount && Number(profitMargin) > 0 && result.discountAmount > Number(profitMargin)
+      ? "This discount may reduce your profit below your target margin."
+      : null;
 
   const reset = () => {
     setStyleName(""); setHairCost(""); setHourlyRate(business.hourlyRate);
     setHours(""); setTravelFee(business.defaultTravelFee || 0);
     setOverhead(""); setProfitMargin(business.profitMargin || 0);
-    setTipPct(0); setAddOns([]); setLabelInput("");
+    setTipPct(0); setAddOns([]); setLabelInput(""); setSelectedDiscountId(null);
   };
 
   const addAddOn = () => setAddOns([...addOns, { id: uid(), name: "", amount: "" }]);
@@ -2998,11 +3051,16 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
     await actuallySave(labelInput || styleName);
   };
   const actuallySave = async (label) => {
-    const quote = {
+    const quote: any = {
       label: label || styleName || "Untitled quote",
       style: styleName,
       inputs: { hairCost, hourlyRate, hours, travelFee, overhead, profitMargin, tipPct, addOns },
       breakdown: result,
+      // Snapshot the discount so historical quotes don't reprice if
+      // the discount is later renamed or deleted.
+      discountId: selectedDiscount?.id ?? null,
+      discountName: selectedDiscount?.name ?? null,
+      discountAmount: result.discountAmount || 0,
     };
     await upsertQuote(quote);
     setShowSaveSheet(false);
@@ -3071,7 +3129,34 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
           )}
         </div>
 
-        <Field label="Tip %" hint="of subtotal">
+        <Field label="Discount" hint={availableDiscounts.length === 0 ? "Create a Studio Offer in Settings → Discounts." : "Optional. Applied before tip."}>
+          <Select
+            value={selectedDiscountId || ""}
+            onChange={e => setSelectedDiscountId(e.target.value || null)}
+            options={availableDiscounts.length === 0
+              ? [{ value: "", label: "No discounts available" }]
+              : [
+                  { value: "", label: "No discount" },
+                  ...availableDiscounts.map(d => ({
+                    value: d.id,
+                    label: `${d.name} — ${formatDiscountValue(d)}`,
+                  })),
+                ]
+            }
+          />
+        </Field>
+        {profitWarning && (
+          <Card className="p-3" style={{ background: C.ivory, border: `1px solid ${C.warning}` }}>
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={16} style={{ color: C.warning, marginTop: 2, flexShrink: 0 }} />
+              <p className="text-[12px]" style={{ color: C.coffee }}>
+                {profitWarning}
+              </p>
+            </div>
+          </Card>
+        )}
+
+        <Field label="Tip %" hint="of discounted subtotal">
           <MoneyInput prefix="" suffix="%" value={tipPct} onChange={setTipPct} />
         </Field>
 
@@ -3084,6 +3169,12 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
           {result.overhead > 0 && <BreakRow label="Overhead" value={fmtMoney(result.overhead, business.currency)} />}
           {result.profitMargin > 0 && <BreakRow label="Profit margin" value={fmtMoney(result.profitMargin, business.currency)} />}
           <div className="my-2.5" style={{ borderTop: `1px dashed ${C.gold}`, opacity: 0.4 }} />
+          {result.discountAmount > 0 && (
+            <BreakRow
+              label={selectedDiscount ? `Discount — ${selectedDiscount.name}` : "Discount"}
+              value={`− ${fmtMoney(result.discountAmount, business.currency)}`}
+            />
+          )}
           <BreakRow label="Subtotal" value={fmtMoney(result.subtotal, business.currency)} bold />
           {result.tipPct > 0 && <BreakRow label={`Tip (${result.tipPct}% of subtotal)`} value={fmtMoney(result.tipAmount, business.currency)} />}
           <div className="mt-4 pt-4" style={{ borderTop: `1px solid rgba(201, 169, 97, 0.4)` }}>
@@ -5667,7 +5758,7 @@ const PolicySheet = ({ policy, isNew, onClose, onSave }) => {
 // ============================================================
 //  SETTINGS (V1 extended with Reminders link)
 // ============================================================
-const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void }) => {
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
@@ -5780,6 +5871,39 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
               : <Sparkles size={16} style={{ color: C.goldDeep }} />}
           </div>
         </Card>
+
+        {openDiscounts && (
+          <>
+            <SectionTitle>Studio offers</SectionTitle>
+            <Card className="p-4 active:scale-[0.99]" onClick={openDiscounts}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div
+                    aria-hidden
+                    style={{
+                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                      background: C.ivory, color: C.gold, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                    }}
+                  >
+                    <Sparkles size={15} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold" style={{ color: C.espresso }}>Discounts</p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      {(() => {
+                        const list: Discount[] = store.discountsApi?.discounts || [];
+                        const active = list.filter(d => d.is_active).length;
+                        if (list.length === 0) return "Loyalty rewards · referrals · slow-day specials";
+                        return `${active} active · ${list.length} total`;
+                      })()}
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight size={18} style={{ color: C.muted }} />
+              </div>
+            </Card>
+          </>
+        )}
 
         {openCommunicationLog && (
           // Real <button> for the same WKWebView reliability reason as
@@ -8320,6 +8444,325 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
 // Payment Link via openCheckout(); if the user isn't signed in yet,
 // we send them to the Account screen first because the unlock binds
 // to their Supabase user id.
+// ============================================================
+//  DISCOUNTS SCREEN
+// ============================================================
+const DiscountsScreen = ({
+  store, onBack,
+}: {
+  store: any;
+  onBack: () => void;
+}) => {
+  const api = store.discountsApi;
+  const discounts: Discount[] = api?.discounts || [];
+  const [editing, setEditing] = useState<Partial<DiscountInput> & { id?: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Discount | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const openNew = () => setEditing({
+    name: "",
+    description: "",
+    discount_type: "percentage",
+    value: 10,
+    applies_to: "all",
+    service_id: null,
+    is_active: true,
+    starts_at: null,
+    ends_at: null,
+    usage_limit: null,
+  });
+
+  const openEdit = (d: Discount) => setEditing({
+    id: d.id,
+    name: d.name,
+    description: d.description,
+    discount_type: d.discount_type,
+    value: d.value,
+    applies_to: d.applies_to,
+    service_id: d.service_id,
+    is_active: d.is_active,
+    starts_at: d.starts_at,
+    ends_at: d.ends_at,
+    usage_limit: d.usage_limit,
+  });
+
+  const handleSave = async () => {
+    if (!editing || busy) return;
+    setBusy(true);
+    const saved = await api.upsert(editing);
+    setBusy(false);
+    if (saved) setEditing(null);
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    setBusy(true);
+    const ok = await api.remove(confirmDelete.id);
+    setBusy(false);
+    if (ok) setConfirmDelete(null);
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Discounts"
+        subtitle="Studio offers, loyalty rewards, slow-day specials"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        rightAction={
+          <button
+            type="button"
+            onClick={openNew}
+            className="p-2 rounded-full"
+            style={{ color: C.coffee }}
+            aria-label="New discount"
+          >
+            <Plus size={20} />
+          </button>
+        }
+      />
+
+      <div className="px-5 pt-2 space-y-3">
+        {api?.error && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{api.error}</p>
+          </Card>
+        )}
+
+        {api?.loading && discounts.length === 0 ? (
+          <Card className="p-4">
+            <p className="text-[12px]" style={{ color: C.muted }}>Loading discounts…</p>
+          </Card>
+        ) : discounts.length === 0 ? (
+          <Card className="p-6 text-center" style={{
+            background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
+          }}>
+            <div
+              aria-hidden
+              style={{
+                width: 48, height: 48, margin: "0 auto 12px",
+                borderRadius: 999, display: "grid", placeItems: "center",
+                background: C.ivory, color: C.gold, border: `1px solid ${C.hairline}`,
+              }}
+            >
+              <Sparkles size={20} />
+            </div>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>
+              No discounts yet.
+            </p>
+            <p className="text-[13px] mt-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+              {DISCOUNTS_EMPTY_COPY}
+            </p>
+            <div className="mt-5">
+              <Button variant="primary" icon={<Plus size={16} />} onClick={openNew} fullWidth>
+                Create your first discount
+              </Button>
+            </div>
+          </Card>
+        ) : (
+          discounts.map(d => (
+            <Card
+              key={d.id}
+              className="p-4 active:scale-[0.99] cursor-pointer"
+              onClick={() => openEdit(d)}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>
+                      {d.name}
+                    </p>
+                    <Pill tone={d.is_active ? "success" : "neutral"}>
+                      {d.is_active ? "Active" : "Paused"}
+                    </Pill>
+                  </div>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    {formatDiscountValue(d)}
+                    {" · "}
+                    {d.applies_to === "all" ? "All services" : "Specific service"}
+                    {d.ends_at ? ` · Ends ${fmtDateLong(d.ends_at.slice(0, 10))}` : ""}
+                  </p>
+                  {d.description && (
+                    <p className="text-[12px] mt-2" style={{ color: C.coffee, lineHeight: 1.4 }}>
+                      {d.description}
+                    </p>
+                  )}
+                </div>
+                <ChevronRight size={18} style={{ color: C.muted, marginTop: 2, flexShrink: 0 }} />
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
+
+      <Sheet
+        open={!!editing}
+        onClose={() => setEditing(null)}
+        title={editing?.id ? "Edit discount" : "New discount"}
+      >
+        {editing && (
+          <div className="space-y-3 pb-2">
+            <div>
+              <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted }}>
+                Quick presets
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {DISCOUNT_PRESETS.map(p => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => setEditing({ ...editing, name: p.label, description: editing.description || p.description })}
+                    className="px-3 py-1.5 rounded-full text-[11px] font-semibold active:scale-[0.97] transition"
+                    style={{
+                      background: C.ivory, color: C.coffee,
+                      border: `1px solid ${C.hairline}`,
+                    }}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <Field label="Name">
+              <Input
+                value={editing.name || ""}
+                onChange={e => setEditing({ ...editing, name: e.target.value })}
+                placeholder="Loyalty Reward"
+              />
+            </Field>
+
+            <Field label="Description" hint="Shown on the discount card. Optional.">
+              <Textarea
+                value={editing.description || ""}
+                onChange={e => setEditing({ ...editing, description: e.target.value })}
+                rows={2}
+              />
+            </Field>
+
+            <Field label="Type">
+              <Select
+                value={editing.discount_type || "percentage"}
+                onChange={e => setEditing({ ...editing, discount_type: e.target.value as DiscountInput["discount_type"] })}
+                options={[
+                  { value: "percentage", label: "Percentage off" },
+                  { value: "fixed", label: "Fixed amount off" },
+                ]}
+              />
+            </Field>
+
+            <Field
+              label={editing.discount_type === "percentage" ? "Percentage" : "Amount"}
+              hint={editing.discount_type === "percentage" ? "0–100" : "Dollars"}
+            >
+              <MoneyInput
+                prefix={editing.discount_type === "fixed" ? "$" : ""}
+                suffix={editing.discount_type === "percentage" ? "%" : ""}
+                value={editing.value ?? ""}
+                onChange={(v) => setEditing({ ...editing, value: parseMoney(v) })}
+              />
+            </Field>
+
+            <Field label="Applies to">
+              <Select
+                value="all"
+                onChange={() => { /* service-specific is reserved for V2 */ }}
+                options={[
+                  { value: "all", label: "All services" },
+                  { value: "service-disabled", label: "Specific service — coming soon" },
+                ]}
+              />
+            </Field>
+
+            <Field label="Active">
+              <Select
+                value={editing.is_active === false ? "paused" : "active"}
+                onChange={e => setEditing({ ...editing, is_active: e.target.value === "active" })}
+                options={[
+                  { value: "active", label: "Active — appears in calculator" },
+                  { value: "paused", label: "Paused — hidden from calculator" },
+                ]}
+              />
+            </Field>
+
+            <Field label="Starts (optional)">
+              <Input
+                type="date"
+                value={editing.starts_at ? editing.starts_at.slice(0, 10) : ""}
+                onChange={e => setEditing({ ...editing, starts_at: e.target.value ? `${e.target.value}T00:00:00Z` : null })}
+              />
+            </Field>
+
+            <Field label="Ends (optional)">
+              <Input
+                type="date"
+                value={editing.ends_at ? editing.ends_at.slice(0, 10) : ""}
+                onChange={e => setEditing({ ...editing, ends_at: e.target.value ? `${e.target.value}T23:59:59Z` : null })}
+              />
+            </Field>
+
+            <Field label="Usage limit (optional)" hint="Total times this discount can be applied.">
+              <Input
+                type="number"
+                inputMode="numeric"
+                value={editing.usage_limit ?? ""}
+                onChange={e => setEditing({ ...editing, usage_limit: e.target.value ? Number(e.target.value) : null })}
+                placeholder="No limit"
+              />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <Button variant="primary" icon={<Save size={16} />} onClick={handleSave}>
+                {busy ? "Saving…" : "Save discount"}
+              </Button>
+              <Button variant="outline" onClick={() => setEditing(null)}>
+                Cancel
+              </Button>
+            </div>
+
+            {editing.id && (
+              <Button
+                variant="danger"
+                icon={<Trash2 size={16} />}
+                onClick={() => {
+                  const target = discounts.find(d => d.id === editing.id);
+                  if (target) { setEditing(null); setConfirmDelete(target); }
+                }}
+                fullWidth
+              >
+                Delete discount
+              </Button>
+            )}
+          </div>
+        )}
+      </Sheet>
+
+      <Sheet
+        open={!!confirmDelete}
+        onClose={() => setConfirmDelete(null)}
+        title="Delete discount?"
+      >
+        {confirmDelete && (
+          <div className="space-y-3 pb-2">
+            <p className="text-[14px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+              Remove <strong>{confirmDelete.name}</strong> from your studio? Saved
+              quotes that already used it keep their snapshot — only future
+              quotes lose access.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <Button variant="danger" onClick={handleDelete}>
+                {busy ? "Deleting…" : "Delete"}
+              </Button>
+              <Button variant="outline" onClick={() => setConfirmDelete(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </Sheet>
+    </div>
+  );
+};
+
 const UpgradeSheet = ({
   feature, userId, mode, onClose, onSignInPrompt,
 }: {
@@ -8444,6 +8887,7 @@ export default function App() {
   const auth = useAuth();
   const rawStore = useStorage();
   const { premium } = usePremiumStatus(auth.userId);
+  const discountsApi = useDiscounts(auth.userId);
   const [upgradeFor, setUpgradeFor] = useState<GatedFeature | null>(null);
   const requestUpgrade = useCallback((feature: GatedFeature) => {
     setUpgradeFor(feature);
@@ -8471,12 +8915,13 @@ export default function App() {
       ...rawStore,
       premium,
       requestUpgrade,
+      discountsApi,
       upsertClient: gateNew("clients", rawStore.clients, rawStore.upsertClient),
       upsertAppointment: gateNew("appointments", rawStore.appointments, rawStore.upsertAppointment),
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, premium, requestUpgrade]);
+  }, [rawStore, premium, requestUpgrade, discountsApi]);
 
   const sync = useCloudSync(auth.userId, store);
 
@@ -8747,7 +9192,8 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} />}
+      {secondary === "discounts" && <DiscountsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "account" && (
         <AccountScreen
           email={auth.email}
