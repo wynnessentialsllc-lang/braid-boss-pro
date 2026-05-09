@@ -98,16 +98,25 @@ export const createCheckoutSession = async (): Promise<{ url: string; alreadyPro
   const supabase = getSupabase();
   const { data, error } = await supabase.functions.invoke("create-checkout-session", { body: {} });
   if (error) {
-    // Surface the function's own JSON error body if it provided one
+    // Surface the function's own JSON error body. supabase-js puts
+    // the underlying Response on `error.context` for FunctionsHttpError;
+    // we want the function's `error`/`detail` field, not the generic
+    // "Edge Function returned a non-2xx status code" wrapper.
+    let msg = error.message || "checkout session failed";
     const ctx = (error as { context?: unknown }).context;
     if (ctx instanceof Response) {
       try {
-        const j = await ctx.clone().json();
-        const msg = (j as any)?.error || (j as any)?.detail || error.message;
-        throw new Error(msg);
-      } catch { /* fall through */ }
+        const body: any = await ctx.clone().json();
+        if (body) {
+          const parts: string[] = [];
+          if (body.error) parts.push(body.error);
+          if (body.detail) parts.push(body.detail);
+          if (body.code) parts.push(`(${body.code})`);
+          if (parts.length > 0) msg = parts.join(" — ");
+        }
+      } catch { /* leave msg as-is */ }
     }
-    throw new Error(error.message || "checkout session failed");
+    throw new Error(msg);
   }
   if ((data as any)?.already_pro) {
     return { url: "", alreadyPro: true };
