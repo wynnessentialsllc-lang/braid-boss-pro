@@ -79,6 +79,19 @@ import {
   type PushCapability,
 } from "./lib/push";
 import {
+  isGuestUser,
+  hasLifetimeAccess,
+  hasReachedGuestLimit,
+  isGuestBlocked,
+  guestRemainingLabel,
+  grantLifetimeAccess,
+  GUEST_LIMIT_COPY,
+  GUEST_LIMITS,
+  LIFETIME_PRICE_LABEL,
+  LIFETIME_TAGLINE,
+  type GuestFeature,
+} from "./lib/guest-limits";
+import {
   Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon,
   Plus, X, ChevronRight, ChevronLeft, Search, Copy, Check, Trash2, Edit3,
   FileText, DollarSign, Clock, Phone, Mail, AlertCircle, Sparkles,
@@ -2919,8 +2932,8 @@ const QuickTile = ({ icon, label, onClick }) => (
 // ============================================================
 //  CALCULATOR
 // ============================================================
-const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, openConvertToAppt, openPresets, prefillFromPreset, onClearPresetPrefill }) => {
-  const { business, upsertQuote } = store;
+const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, openConvertToAppt, openPresets, prefillFromPreset, onClearPresetPrefill, onGuestLimitHit, authMode }: any) => {
+  const { business, upsertQuote, quotes = [] } = store;
   const [styleName, setStyleName] = useState("");
   const [hairCost, setHairCost] = useState("");
   const [hourlyRate, setHourlyRate] = useState<string | number>(business.hourlyRate);
@@ -2978,6 +2991,13 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
   const removeAddOn = (id) => setAddOns(addOns.filter(a => a.id !== id));
 
   const handleSave = async () => {
+    // Guest gating: count saved quotes; show paywall after the
+    // 5th save attempt. Authed + lifetime-unlocked users always
+    // proceed.
+    if (hasReachedGuestLimit("calculator", quotes.length, authMode)) {
+      onGuestLimitHit?.("calculator");
+      return;
+    }
     if (!styleName && !labelInput) { setShowSaveSheet(true); return; }
     await actuallySave(labelInput || styleName);
   };
@@ -5648,7 +5668,7 @@ const PolicySheet = ({ policy, isNew, onClose, onSave }) => {
 // ============================================================
 //  SETTINGS (V1 extended with Reminders link)
 // ============================================================
-const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, authMode, onGuestLimitHit }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; authMode?: string; onGuestLimitHit?: (f: GuestFeature) => void }) => {
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
@@ -5736,13 +5756,24 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
         )}
 
         <SectionTitle>Reminders</SectionTitle>
-        <Card className="p-4 active:scale-[0.99]" onClick={openReminderSettings}>
+        <Card
+          className="p-4 active:scale-[0.99]"
+          onClick={() => {
+            if (isGuestBlocked("reminders", authMode)) { onGuestLimitHit?.("reminders"); return; }
+            openReminderSettings();
+          }}>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold" style={{ color: C.espresso }}>Reminder settings</p>
-              <p className="text-[11px]" style={{ color: C.muted }}>{store.reminderSettings?.enabled ? "Enabled" : "Disabled"} · {(store.reminderSettings?.defaultChannel || "sms").toString().toUpperCase()}</p>
+              <p className="text-[11px]" style={{ color: C.muted }}>
+                {isGuestBlocked("reminders", authMode)
+                  ? <span style={{ color: C.goldDeep, fontWeight: 600 }}>Lifetime · $9.99</span>
+                  : <>{store.reminderSettings?.enabled ? "Enabled" : "Disabled"} · {(store.reminderSettings?.defaultChannel || "sms").toString().toUpperCase()}</>}
+              </p>
             </div>
-            <ChevronRight size={18} style={{ color: C.muted }} />
+            {isGuestBlocked("reminders", authMode)
+              ? <Sparkles size={16} style={{ color: C.goldDeep }} />
+              : <ChevronRight size={18} style={{ color: C.muted }} />}
           </div>
         </Card>
 
@@ -5753,7 +5784,10 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
           // the dead space between them all bubble up to the button.
           <button
            type="button"
-            onClick={() => { console.log("Communication log tapped"); openCommunicationLog(); }}
+            onClick={() => {
+              if (isGuestBlocked("communicationLog", authMode)) { onGuestLimitHit?.("communicationLog"); return; }
+              openCommunicationLog();
+            }}
             className="w-full text-left rounded-2xl p-4 mt-2 active:scale-[0.99] cursor-pointer select-none transition"
             style={{
               background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
@@ -5767,20 +5801,62 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
             <div className="flex items-center justify-between" style={{ pointerEvents: "none" }}>
               <div>
                 <p className="text-sm font-semibold" style={{ color: C.espresso }}>Communication log</p>
-                <p className="text-[11px]" style={{ color: C.muted }}>{(store.commLog || []).length} message{(store.commLog || []).length === 1 ? "" : "s"} · copies, shares, sends</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>
+                  {isGuestBlocked("communicationLog", authMode)
+                    ? <span style={{ color: C.goldDeep, fontWeight: 600 }}>Lifetime · $9.99</span>
+                    : <>{(store.commLog || []).length} message{(store.commLog || []).length === 1 ? "" : "s"} · copies, shares, sends</>}
+                </p>
               </div>
-              <ChevronRight size={18} style={{ color: C.muted }} />
+              {isGuestBlocked("communicationLog", authMode)
+                ? <Sparkles size={16} style={{ color: C.goldDeep }} />
+                : <ChevronRight size={18} style={{ color: C.muted }} />}
             </div>
           </button>
         )}
 
         <SectionTitle>Data</SectionTitle>
         <Card className="p-4 space-y-2">
-          <Button variant="outline" icon={<Download size={15} />} onClick={exportData} fullWidth>Export all data (JSON)</Button>
+          <Button
+            variant="outline"
+            icon={isGuestBlocked("export", authMode) ? <Sparkles size={15} /> : <Download size={15} />}
+            onClick={() => {
+              if (isGuestBlocked("export", authMode)) { onGuestLimitHit?.("export"); return; }
+              exportData();
+            }}
+            fullWidth>
+            {isGuestBlocked("export", authMode) ? "Export · Lifetime $9.99" : "Export all data (JSON)"}
+          </Button>
           <p className="text-[11px] text-center" style={{ color: C.muted }}>
             Photo data is redacted from exports for size. Stored locally in this device only.
           </p>
         </Card>
+
+        {isGuestUser(authMode) && !hasLifetimeAccess() && (
+          <Card className="p-4" style={{
+            background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
+            border: `1px solid ${C.hairline}`,
+          }}>
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl p-2 shrink-0" style={{ background: "rgba(201,169,97,0.18)" }}>
+                <Sparkles size={18} style={{ color: C.goldDeep }} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.goldDeep, letterSpacing: "0.14em" }}>
+                  {LIFETIME_PRICE_LABEL}
+                </p>
+                <p className="text-sm font-semibold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY, fontSize: 18, lineHeight: 1.2 }}>
+                  Unlock the full studio
+                </p>
+                <p className="text-[11px] mt-1 leading-relaxed" style={{ color: C.muted }}>
+                  Cloud sync, unlimited everything, reminders, communication log, future upgrades. {LIFETIME_TAGLINE}
+                </p>
+              </div>
+            </div>
+            <Button variant="primary" fullWidth className="mt-3" icon={<Sparkles size={15} />} onClick={() => onGuestLimitHit?.("sync")}>
+              See what&apos;s included
+            </Button>
+          </Card>
+        )}
 
         <Button variant="primary" onClick={save} fullWidth icon={saved ? <Check size={16} /> : <Save size={16} />}>
           {saved ? "Saved" : "Save settings"}
@@ -8199,6 +8275,90 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
 };
 
 // ============================================================
+//  UPGRADE / PAYWALL
+// ============================================================
+// Single Sheet component reused everywhere a guest hits a limit. The
+// `feature` prop selects the calm headline + body copy from
+// GUEST_LIMIT_COPY. No aggressive lock language — the surface is
+// presented as graduating to a fuller studio, not bouncing off a
+// barrier.
+const UpgradeSheet = ({ open, feature, onClose, onUnlock, onSignUp }: {
+  open: boolean;
+  feature: GuestFeature | null;
+  onClose: () => void;
+  onUnlock: () => void;          // grants lifetime locally for now
+  onSignUp: () => void;          // route to the auth sheet (sign up)
+}) => {
+  const copy = feature ? GUEST_LIMIT_COPY[feature] : null;
+  return (
+    <Sheet
+      open={open && !!copy}
+      onClose={onClose}
+      title="Unlock the full studio">
+      {copy && (
+        <div className="space-y-4 pb-3">
+          <div className="rounded-2xl p-4" style={{
+            background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
+            border: `1px solid ${C.hairline}`,
+          }}>
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles size={16} style={{ color: C.goldDeep }} />
+              <span className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.goldDeep, letterSpacing: "0.14em" }}>
+                {LIFETIME_PRICE_LABEL}
+              </span>
+            </div>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso, lineHeight: 1.2 }}>
+              {copy.headline}
+            </p>
+            <p className="text-[12px] mt-2 leading-relaxed" style={{ color: C.coffee }}>
+              {copy.body}
+            </p>
+          </div>
+
+          <div className="rounded-2xl p-4 space-y-2.5" style={{ background: C.cream, border: `1px solid ${C.hairline}` }}>
+            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+              Lifetime studio includes
+            </p>
+            {[
+              "Unlimited clients, appointments, quotes, receipts",
+              "Cloud sync + secure backup across every device",
+              "Reminders, communication log, retention insights",
+              "PDF receipts and invoices, exports, calendar feed",
+              "All future upgrades at no extra cost",
+            ].map((line, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <CheckCircle2 size={15} style={{ color: C.goldDeep, marginTop: 2, flexShrink: 0 }} />
+                <p className="text-[13px] leading-snug" style={{ color: C.coffee }}>{line}</p>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-[11px] text-center" style={{ color: C.muted, letterSpacing: "0.04em" }}>
+            {LIFETIME_TAGLINE}
+          </p>
+
+          <div className="space-y-2">
+            <Button variant="primary" fullWidth onClick={onUnlock} icon={<Sparkles size={15} />}>
+              Unlock for $9.99
+            </Button>
+            <Button variant="outline" fullWidth onClick={onSignUp}>
+              Create a free account first
+            </Button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full py-2 text-[12px] font-semibold tracking-wide"
+              style={{ color: C.muted }}>
+              Maybe later
+            </button>
+          </div>
+        </div>
+      )}
+    </Sheet>
+  );
+};
+
+// ============================================================
 //  APP ROOT
 // ============================================================
 export default function App() {
@@ -8317,18 +8477,43 @@ export default function App() {
   }, [store.appointments]);
   const notifications = useNotifications(store);
 
+  // ===== Guest-mode paywall plumbing =====
+  // Single piece of state drives the UpgradeSheet. The action that
+  // hit the limit decides which copy variant to show.
+  const [paywallFeature, setPaywallFeature] = useState<GuestFeature | null>(null);
+  // `gateGuestAction(feature, count, callback)` runs the callback when
+  // the guest is within their quota; otherwise opens the upgrade
+  // sheet with the right copy and never invokes the callback. Wraps
+  // every "create" action across the app.
+  const gateGuestAction = useCallback(
+    (feature: GuestFeature, count: number, run: () => void) => {
+      if (hasReachedGuestLimit(feature, count, auth.mode)) {
+        setPaywallFeature(feature);
+        return;
+      }
+      run();
+    },
+    [auth.mode],
+  );
+
   // Dashboard quick actions
   const openQuickAppt = (prefill: any = {}) => {
-    setApptPrefill(prefill || {});
-    setActive("schedule");
+    gateGuestAction("appointments", store.appointments.length, () => {
+      setApptPrefill(prefill || {});
+      setActive("schedule");
+    });
   };
   const openQuickClient = () => {
-    setQuickClient({ id: `cli_${uid()}`, name: "", phone: "", email: "", preferredStyles: [], scalpSensitivity: "None", allergies: "", notes: "" });
-    setOpenClientForm(true);
+    gateGuestAction("clients", store.clients.length, () => {
+      setQuickClient({ id: `cli_${uid()}`, name: "", phone: "", email: "", preferredStyles: [], scalpSensitivity: "None", allergies: "", notes: "" });
+      setOpenClientForm(true);
+    });
   };
   const openQuickTx = () => {
-    setEditingTx(null);
-    setOpenTx(true);
+    gateGuestAction("money", store.transactions.length, () => {
+      setEditingTx(null);
+      setOpenTx(true);
+    });
   };
   const openTimerForAppt = (appt) => {
     setTimerApptPrefill(appt);
@@ -8426,12 +8611,17 @@ export default function App() {
               notifBadgeCount={notifications.unreadCount}
               openCommunication={openCommunication}
               syncState={auth.mode === "authed" ? sync.state : undefined}
-              openAnalytics={() => setSecondary("analytics")}
+              openAnalytics={() => {
+                if (isGuestBlocked("analytics", auth.mode)) { setPaywallFeature("analytics"); return; }
+                setSecondary("analytics");
+              }}
               openPresets={() => setSecondary("presets")}
               openTimer={() => setSecondary("timer")} />
           )}
           {active === "calculator" && (
             <Calculator store={store}
+              authMode={auth.mode}
+              onGuestLimitHit={(f: GuestFeature) => setPaywallFeature(f)}
               prefillFromQuote={calcPrefill}
               onClearPrefill={() => setCalcPrefill(null)}
               prefillFromPreset={calcPresetPrefill}
@@ -8470,7 +8660,7 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} authMode={auth.mode} onGuestLimitHit={(f: GuestFeature) => setPaywallFeature(f)} />}
       {secondary === "account" && (
         <AccountScreen
           email={auth.email}
@@ -8612,6 +8802,26 @@ export default function App() {
           </div>
         </Sheet>
       )}
+
+      <UpgradeSheet
+        open={paywallFeature !== null}
+        feature={paywallFeature}
+        onClose={() => setPaywallFeature(null)}
+        onUnlock={() => {
+          // Local lifetime grant. When real payments are wired, the
+          // post-purchase callback should call grantLifetimeAccess()
+          // instead of having the user tap this button.
+          grantLifetimeAccess();
+          setPaywallFeature(null);
+        }}
+        onSignUp={() => {
+          // Guests see the sign-up CTA on the Account screen. Route
+          // them there; the AuthSheet inside AccountScreen handles
+          // the actual sign-up flow.
+          setPaywallFeature(null);
+          setSecondary("account");
+        }}
+      />
 
     </Frame>
   );
