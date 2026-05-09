@@ -5,9 +5,12 @@
 -- the Supabase service role after retrieving and validating the Stripe
 -- Checkout Session. Authenticated users are explicitly REVOKEd from
 -- updating this column so they cannot self-grant access.
+--
+-- The profiles table keys on `id` (matching auth.users.id), not
+-- `user_id`. Every reference here uses `id`.
 
 create table if not exists public.profiles (
-  user_id uuid primary key references auth.users(id) on delete cascade,
+  id uuid primary key references auth.users(id) on delete cascade,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -24,13 +27,13 @@ alter table public.profiles enable row level security;
 
 drop policy if exists "profiles_self_select" on public.profiles;
 create policy "profiles_self_select" on public.profiles
-  for select using (auth.uid() = user_id);
+  for select using (auth.uid() = id);
 
 -- Allow the user to insert their own empty profile row (idempotent).
 -- The lifetime_access default is false, so this is safe.
 drop policy if exists "profiles_self_insert" on public.profiles;
 create policy "profiles_self_insert" on public.profiles
-  for insert with check (auth.uid() = user_id);
+  for insert with check (auth.uid() = id);
 
 -- Column-level lockdown: revoke UPDATE on the paid columns from
 -- authenticated. Service role still has full access (it bypasses RLS

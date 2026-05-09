@@ -112,16 +112,17 @@ export async function POST(req: Request) {
   }
 
   // Write the unlock. Upsert in case the profile row doesn't exist yet.
+  // profiles keys on `id` (= auth.users.id), not `user_id`.
   const { error: writeError } = await adminClient
     .from("profiles")
     .upsert(
       {
-        user_id: userId,
+        id: userId,
         lifetime_access: true,
         stripe_checkout_session_id: session.id ?? sessionId,
         upgraded_at: new Date().toISOString(),
       },
-      { onConflict: "user_id" },
+      { onConflict: "id" },
     );
   if (writeError) {
     return fail(500, `Could not save the unlock: ${writeError.message}`);

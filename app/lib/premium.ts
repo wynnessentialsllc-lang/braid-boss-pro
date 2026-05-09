@@ -80,7 +80,7 @@ export const useLifetimeAccess = (userId: string | null): boolean | null => {
       const { data } = await supabase
         .from("profiles")
         .select("lifetime_access")
-        .eq("user_id", userId)
+        .eq("id", userId)
         .maybeSingle();
       if (cancelled) return;
       setUnlocked(!!data?.lifetime_access);
