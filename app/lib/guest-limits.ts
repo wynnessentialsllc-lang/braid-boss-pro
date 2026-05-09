@@ -1,24 +1,18 @@
 // Guest mode limits + premium unlock plumbing for Braid Boss Pro.
 //
-// Guest workspace is intentionally constrained so the salon owner
-// graduates to a real account (and the $9.99 lifetime unlock) before
-// their data outgrows the local-only sandbox. Limits are enforced at
-// the action layer (creating a client, saving a quote, etc.) — read
-// access stays unrestricted so a guest can still browse what they've
-// already created.
+// The source of truth for "is this user Pro?" is now Supabase
+// (`profiles.is_pro_user`). All gate functions in this module accept
+// an `isPro` boolean that the calling component reads via
+// useProStatus() in app/lib/pro-status.ts. Frontend-only flags are
+// no longer authoritative — they cannot be: column-level GRANTs on
+// `profiles` make is_pro_user writable only by the Stripe webhook
+// running as service_role.
+//
+// Limits apply to anyone who is NOT Pro — guests and authed-free
+// users alike. The product hook is the $9.99 lifetime unlock.
 //
 // Tone: every user-facing string here is calm and premium. No
-// "blocked" / "denied" language. The intent is to feel like a velvet
-// rope, not a paywall.
-
-const isBrowser = (): boolean =>
-  typeof window !== "undefined" && typeof window.localStorage !== "undefined";
-
-// localStorage flag set by the future paywall integration. Until
-// payments are wired, this stays unset for everyone — but the helper
-// already reads through it so the eventual switch is one line of
-// code (in whatever post-purchase callback we wire up).
-const LIFETIME_FLAG_KEY = "bbp-lifetime-unlock";
+// "blocked" / "denied" language. Velvet rope, not a paywall.
 
 export const LIFETIME_PRICE = 9.99;
 export const LIFETIME_PRICE_LABEL = "Lifetime Access · $9.99";
@@ -29,6 +23,7 @@ export type GuestFeature =
   | "clients"        // creating a client record
   | "appointments"   // creating an appointment
   | "money"          // creating an income/expense entry
+  | "savedQuotes"    // viewing the saved-quotes list past the cap
   | "export"         // export-all-data (always premium)
   | "reminders"      // reminder settings (always premium)
   | "communicationLog" // communication log (always premium)
@@ -36,13 +31,14 @@ export type GuestFeature =
   | "sync"           // cloud sync / backup / restore (always premium)
   ;
 
-// Numeric quotas. Features marked `null` are gated outright in
-// guest mode (no quota — the action is unavailable until unlock).
+// Numeric quotas. Features marked `null` are gated outright (no
+// quota — premium-only).
 export const GUEST_LIMITS: Record<GuestFeature, number | null> = {
   calculator: 5,
-  clients: 2,
+  clients: 10,
   appointments: 3,
-  money: 3,
+  money: 5,
+  savedQuotes: 5,        // matches calculator quota; saved quotes is a 1:1 view
   export: null,
   reminders: null,
   communicationLog: null,
@@ -66,6 +62,10 @@ export const GUEST_LIMIT_COPY: Record<GuestFeature, { headline: string; body: st
   money: {
     headline: "Your guest ledger has reached its limit",
     body: "Unlock to track unlimited income and expenses, generate receipts and invoices, and see your full revenue trends.",
+  },
+  savedQuotes: {
+    headline: "Your guest quote vault is full",
+    body: "Unlock to keep an unlimited quote library, version history, and one-tap conversion into appointments.",
   },
   export: {
     headline: "Data export is part of the lifetime studio",
@@ -92,76 +92,49 @@ export const GUEST_LIMIT_COPY: Record<GuestFeature, { headline: string; body: st
 export const isGuestUser = (mode: string | undefined | null): boolean =>
   mode === "guest";
 
-// Lifetime access lookup. Reads localStorage on the client; returns
-// false on the server / during SSR. Designed to be called from React
-// render — it never throws.
-export const hasLifetimeAccess = (): boolean => {
-  if (!isBrowser()) return false;
-  try {
-    return window.localStorage.getItem(LIFETIME_FLAG_KEY) === "1";
-  } catch {
-    return false;
-  }
-};
-
-export const grantLifetimeAccess = (): void => {
-  if (!isBrowser()) return;
-  try { window.localStorage.setItem(LIFETIME_FLAG_KEY, "1"); } catch { /* quota */ }
-};
-
-// Test/QA only — strip any local flag.
-export const revokeLifetimeAccess = (): void => {
-  if (!isBrowser()) return;
-  try { window.localStorage.removeItem(LIFETIME_FLAG_KEY); } catch { /* ignore */ }
-};
-
-// Quota check. `count` is whatever the caller has already created
-// for that feature (e.g. `store.clients.length` for "clients").
-//
-// - Authed users: never limited.
-// - Lifetime-unlocked users: never limited.
-// - Guests with a feature in GUEST_LIMITS that's `null`: always
-//   limited (the feature is fully premium).
-// - Guests with a numeric quota: limited once `count >= quota`.
+/**
+ * Quota check.
+ *
+ * - Pro users: never limited.
+ * - Everyone else (guest + authed-free) with a numeric quota:
+ *   limited once `count >= quota`.
+ * - Everyone else with a `null` quota: always limited (premium-only).
+ */
 export const hasReachedGuestLimit = (
   feature: GuestFeature,
   count: number,
-  mode: string | null | undefined,
+  isPro: boolean,
 ): boolean => {
-  if (mode === "authed") return false;
-  if (hasLifetimeAccess()) return false;
-  if (!isGuestUser(mode)) return false;
+  if (isPro) return false;
   const quota = GUEST_LIMITS[feature];
   if (quota === null) return true;
   return count >= quota;
 };
 
-// Premium-only features — always gated for guests, regardless of
-// count. Equivalent to `hasReachedGuestLimit(feature, 0, mode)` but
-// reads more clearly at the call site.
-export const isGuestBlocked = (
+/**
+ * Premium-only features — gated regardless of count when not Pro.
+ * Equivalent to `hasReachedGuestLimit(feature, 0, isPro)` but reads
+ * more clearly at the call site.
+ */
+export const isFeatureLocked = (
   feature: GuestFeature,
-  mode: string | null | undefined,
+  isPro: boolean,
 ): boolean => {
-  if (mode === "authed") return false;
-  if (hasLifetimeAccess()) return false;
-  if (!isGuestUser(mode)) return false;
+  if (isPro) return false;
   return GUEST_LIMITS[feature] === null;
 };
 
-// Soft progress label — "3 of 5 used" when there's a quota, else
-// returns null. Used to render an unobtrusive hint above the
-// upgrade card on the dashboard / settings.
-export const guestRemainingLabel = (
+/**
+ * "3 of 10 used" hint for the dashboard / settings. Returns null
+ * for pro users and for premium-only features.
+ */
+export const remainingQuotaLabel = (
   feature: GuestFeature,
   count: number,
-  mode: string | null | undefined,
+  isPro: boolean,
 ): string | null => {
-  if (mode !== "guest") return null;
-  if (hasLifetimeAccess()) return null;
+  if (isPro) return null;
   const quota = GUEST_LIMITS[feature];
   if (quota === null) return null;
-  const remaining = Math.max(0, quota - count);
-  if (remaining === 0) return `${quota} of ${quota} guest entries used`;
-  return `${count} of ${quota} guest entries used`;
+  return `${Math.min(count, quota)} of ${quota} used`;
 };
