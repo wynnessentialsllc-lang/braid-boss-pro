@@ -80,19 +80,17 @@ import {
 } from "./lib/push";
 import {
   isGuestUser,
+  hasLifetimeAccess,
   hasReachedGuestLimit,
-  isFeatureLocked,
-  remainingQuotaLabel,
+  isGuestBlocked,
+  guestRemainingLabel,
+  grantLifetimeAccess,
   GUEST_LIMIT_COPY,
   GUEST_LIMITS,
   LIFETIME_PRICE_LABEL,
   LIFETIME_TAGLINE,
   type GuestFeature,
 } from "./lib/guest-limits";
-import {
-  useProStatus,
-  createCheckoutSession,
-} from "./lib/pro-status";
 import {
   Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon,
   Plus, X, ChevronRight, ChevronLeft, Search, Copy, Check, Trash2, Edit3,
@@ -2934,7 +2932,7 @@ const QuickTile = ({ icon, label, onClick }) => (
 // ============================================================
 //  CALCULATOR
 // ============================================================
-const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, openConvertToAppt, openPresets, prefillFromPreset, onClearPresetPrefill, onGuestLimitHit, isPro = false }: any) => {
+const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, openConvertToAppt, openPresets, prefillFromPreset, onClearPresetPrefill, onGuestLimitHit, authMode }: any) => {
   const { business, upsertQuote, quotes = [] } = store;
   const [styleName, setStyleName] = useState("");
   const [hairCost, setHairCost] = useState("");
@@ -2996,7 +2994,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
     // Guest gating: count saved quotes; show paywall after the
     // 5th save attempt. Authed + lifetime-unlocked users always
     // proceed.
-    if (hasReachedGuestLimit("calculator", quotes.length, isPro)) {
+    if (hasReachedGuestLimit("calculator", quotes.length, authMode)) {
       onGuestLimitHit?.("calculator");
       return;
     }
@@ -5670,7 +5668,7 @@ const PolicySheet = ({ policy, isNew, onClose, onSave }) => {
 // ============================================================
 //  SETTINGS (V1 extended with Reminders link)
 // ============================================================
-const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, isPro = false, onGuestLimitHit, onRestoreAccess, restoreState }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; isPro?: boolean; onGuestLimitHit?: (f: GuestFeature) => void; onRestoreAccess?: () => void; restoreState?: "idle" | "checking" | "ok" | "fail" }) => {
+const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, authMode, onGuestLimitHit }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; authMode?: string; onGuestLimitHit?: (f: GuestFeature) => void }) => {
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
@@ -5761,19 +5759,19 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
         <Card
           className="p-4 active:scale-[0.99]"
           onClick={() => {
-            if (isFeatureLocked("reminders", isPro)) { onGuestLimitHit?.("reminders"); return; }
+            if (isGuestBlocked("reminders", authMode)) { onGuestLimitHit?.("reminders"); return; }
             openReminderSettings();
           }}>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold" style={{ color: C.espresso }}>Reminder settings</p>
               <p className="text-[11px]" style={{ color: C.muted }}>
-                {isFeatureLocked("reminders", isPro)
+                {isGuestBlocked("reminders", authMode)
                   ? <span style={{ color: C.goldDeep, fontWeight: 600 }}>Lifetime · $9.99</span>
                   : <>{store.reminderSettings?.enabled ? "Enabled" : "Disabled"} · {(store.reminderSettings?.defaultChannel || "sms").toString().toUpperCase()}</>}
               </p>
             </div>
-            {isFeatureLocked("reminders", isPro)
+            {isGuestBlocked("reminders", authMode)
               ? <Sparkles size={16} style={{ color: C.goldDeep }} />
               : <ChevronRight size={18} style={{ color: C.muted }} />}
           </div>
@@ -5787,7 +5785,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
           <button
            type="button"
             onClick={() => {
-              if (isFeatureLocked("communicationLog", isPro)) { onGuestLimitHit?.("communicationLog"); return; }
+              if (isGuestBlocked("communicationLog", authMode)) { onGuestLimitHit?.("communicationLog"); return; }
               openCommunicationLog();
             }}
             className="w-full text-left rounded-2xl p-4 mt-2 active:scale-[0.99] cursor-pointer select-none transition"
@@ -5804,12 +5802,12 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
               <div>
                 <p className="text-sm font-semibold" style={{ color: C.espresso }}>Communication log</p>
                 <p className="text-[11px]" style={{ color: C.muted }}>
-                  {isFeatureLocked("communicationLog", isPro)
+                  {isGuestBlocked("communicationLog", authMode)
                     ? <span style={{ color: C.goldDeep, fontWeight: 600 }}>Lifetime · $9.99</span>
                     : <>{(store.commLog || []).length} message{(store.commLog || []).length === 1 ? "" : "s"} · copies, shares, sends</>}
                 </p>
               </div>
-              {isFeatureLocked("communicationLog", isPro)
+              {isGuestBlocked("communicationLog", authMode)
                 ? <Sparkles size={16} style={{ color: C.goldDeep }} />
                 : <ChevronRight size={18} style={{ color: C.muted }} />}
             </div>
@@ -5820,20 +5818,20 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
         <Card className="p-4 space-y-2">
           <Button
             variant="outline"
-            icon={isFeatureLocked("export", isPro) ? <Sparkles size={15} /> : <Download size={15} />}
+            icon={isGuestBlocked("export", authMode) ? <Sparkles size={15} /> : <Download size={15} />}
             onClick={() => {
-              if (isFeatureLocked("export", isPro)) { onGuestLimitHit?.("export"); return; }
+              if (isGuestBlocked("export", authMode)) { onGuestLimitHit?.("export"); return; }
               exportData();
             }}
             fullWidth>
-            {isFeatureLocked("export", isPro) ? "Export · Lifetime $9.99" : "Export all data (JSON)"}
+            {isGuestBlocked("export", authMode) ? "Export · Lifetime $9.99" : "Export all data (JSON)"}
           </Button>
           <p className="text-[11px] text-center" style={{ color: C.muted }}>
             Photo data is redacted from exports for size. Stored locally in this device only.
           </p>
         </Card>
 
-        {!isPro && (
+        {isGuestUser(authMode) && !hasLifetimeAccess() && (
           <Card className="p-4" style={{
             background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
             border: `1px solid ${C.hairline}`,
@@ -5857,52 +5855,6 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
             <Button variant="primary" fullWidth className="mt-3" icon={<Sparkles size={15} />} onClick={() => onGuestLimitHit?.("sync")}>
               See what&apos;s included
             </Button>
-            {/* Restore access — re-fetches profiles.is_pro_user from
-                Supabase. Useful if the user paid on the web and is
-                checking the iOS app, or if a webhook delivery was
-                slow to land. */}
-            {onRestoreAccess && (
-              <button
-                type="button"
-                onClick={onRestoreAccess}
-                disabled={restoreState === "checking"}
-                className="w-full mt-2 py-2 text-[12px] font-semibold tracking-wide active:scale-[0.99] transition"
-                style={{ color: C.coffee }}>
-                {restoreState === "checking" ? "Checking your account…"
-                  : restoreState === "ok" ? "✓ Lifetime access is active"
-                  : restoreState === "fail" ? "Still syncing — tap to retry"
-                  : "Already paid? Restore access"}
-              </button>
-            )}
-            {restoreState === "fail" && (
-              <p className="text-[11px] text-center mt-1" style={{ color: C.muted }}>
-                Payment received, but access is still syncing. Try again in a moment, or contact <a href="mailto:hello@hairwellnessslab.com" style={{ color: C.goldDeep }}>support</a>.
-              </p>
-            )}
-          </Card>
-        )}
-
-        {isPro && (
-          <Card className="p-4" style={{
-            background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
-            border: `1px solid ${C.hairline}`,
-          }}>
-            <div className="flex items-center gap-3">
-              <div className="rounded-xl p-2 shrink-0" style={{ background: "rgba(92,124,74,0.16)" }}>
-                <CheckCircle2 size={18} style={{ color: C.success }} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.success, letterSpacing: "0.14em" }}>
-                  Lifetime · Active
-                </p>
-                <p className="text-sm font-semibold" style={{ color: C.espresso }}>
-                  You&apos;re unlocked
-                </p>
-                <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
-                  All features available. Future upgrades included.
-                </p>
-              </div>
-            </div>
           </Card>
         )}
 
@@ -8330,24 +8282,12 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
 // GUEST_LIMIT_COPY. No aggressive lock language — the surface is
 // presented as graduating to a fuller studio, not bouncing off a
 // barrier.
-const UpgradeSheet = ({
-  open,
-  feature,
-  onClose,
-  onUnlock,
-  onSignUp,
-  isGuest,
-  busy,
-  errorMessage,
-}: {
+const UpgradeSheet = ({ open, feature, onClose, onUnlock, onSignUp }: {
   open: boolean;
   feature: GuestFeature | null;
   onClose: () => void;
-  onUnlock: () => void;          // initiate Stripe checkout
+  onUnlock: () => void;          // grants lifetime locally for now
   onSignUp: () => void;          // route to the auth sheet (sign up)
-  isGuest: boolean;              // true for anonymous guest mode
-  busy: boolean;                 // disables the button while Stripe loads
-  errorMessage: string | null;   // surfaced beneath the button
 }) => {
   const copy = feature ? GUEST_LIMIT_COPY[feature] : null;
   return (
@@ -8398,32 +8338,12 @@ const UpgradeSheet = ({
           </p>
 
           <div className="space-y-2">
-            {isGuest ? (
-              <>
-                <Button variant="primary" fullWidth onClick={onSignUp} icon={<Sparkles size={15} />}>
-                  Create a free account to unlock
-                </Button>
-                <p className="text-[11px] text-center" style={{ color: C.muted }}>
-                  Lifetime access is tied to a signed-in account so it follows you across devices.
-                </p>
-              </>
-            ) : (
-              <>
-                <Button
-                  variant="primary"
-                  fullWidth
-                  onClick={onUnlock}
-                  disabled={busy}
-                  icon={busy ? <Clock size={15} /> : <Sparkles size={15} />}>
-                  {busy ? "Opening secure checkout…" : "Unlock for $9.99"}
-                </Button>
-                {errorMessage && (
-                  <p className="text-[11px] text-center" style={{ color: C.danger }}>
-                    {errorMessage}
-                  </p>
-                )}
-              </>
-            )}
+            <Button variant="primary" fullWidth onClick={onUnlock} icon={<Sparkles size={15} />}>
+              Unlock for $9.99
+            </Button>
+            <Button variant="outline" fullWidth onClick={onSignUp}>
+              Create a free account first
+            </Button>
             <button
               type="button"
               onClick={onClose}
@@ -8557,39 +8477,23 @@ export default function App() {
   }, [store.appointments]);
   const notifications = useNotifications(store);
 
-  // ===== Pro / lifetime status =====
-  // Server-truth: profiles.is_pro_user. Refreshes on focus and via
-  // the Restore access button in Settings. Frontend gates ALL read
-  // through this boolean; we never trust localStorage.
-  const proStatus = useProStatus(auth.userId);
-  const isPro = proStatus.isPro;
-
   // ===== Guest-mode paywall plumbing =====
   // Single piece of state drives the UpgradeSheet. The action that
   // hit the limit decides which copy variant to show.
   const [paywallFeature, setPaywallFeature] = useState<GuestFeature | null>(null);
-  const [checkoutBusy, setCheckoutBusy] = useState(false);
-  const [checkoutError, setCheckoutError] = useState<string | null>(null);
-  // Restore-access feedback states. The button in Settings flips
-  // restoreState through "checking" → "ok" (when isPro becomes true)
-  // or "fail" (after a 4s timeout without isPro).
-  const [restoreState, setRestoreState] = useState<"idle" | "checking" | "ok" | "fail">("idle");
-  useEffect(() => {
-    if (restoreState === "checking" && isPro) setRestoreState("ok");
-  }, [restoreState, isPro]);
-
-  // gateGuestAction(feature, count, callback) runs the callback when
-  // the user is within quota or pro; otherwise opens the upgrade
-  // sheet with the right copy and never invokes the callback.
+  // `gateGuestAction(feature, count, callback)` runs the callback when
+  // the guest is within their quota; otherwise opens the upgrade
+  // sheet with the right copy and never invokes the callback. Wraps
+  // every "create" action across the app.
   const gateGuestAction = useCallback(
     (feature: GuestFeature, count: number, run: () => void) => {
-      if (hasReachedGuestLimit(feature, count, isPro)) {
+      if (hasReachedGuestLimit(feature, count, auth.mode)) {
         setPaywallFeature(feature);
         return;
       }
       run();
     },
-    [isPro],
+    [auth.mode],
   );
 
   // Dashboard quick actions
@@ -8708,7 +8612,7 @@ export default function App() {
               openCommunication={openCommunication}
               syncState={auth.mode === "authed" ? sync.state : undefined}
               openAnalytics={() => {
-                if (isFeatureLocked("analytics", isPro)) { setPaywallFeature("analytics"); return; }
+                if (isGuestBlocked("analytics", auth.mode)) { setPaywallFeature("analytics"); return; }
                 setSecondary("analytics");
               }}
               openPresets={() => setSecondary("presets")}
@@ -8716,7 +8620,7 @@ export default function App() {
           )}
           {active === "calculator" && (
             <Calculator store={store}
-              isPro={isPro}
+              authMode={auth.mode}
               onGuestLimitHit={(f: GuestFeature) => setPaywallFeature(f)}
               prefillFromQuote={calcPrefill}
               onClearPrefill={() => setCalcPrefill(null)}
@@ -8756,27 +8660,7 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && (
-        <SettingsScreen
-          store={store}
-          onBack={() => setSecondary(null)}
-          openReminderSettings={() => setSecondary("reminderSettings")}
-          openCommunicationLog={() => setSecondary("communicationLog")}
-          openAccount={() => setSecondary("account")}
-          isPro={isPro}
-          onGuestLimitHit={(f: GuestFeature) => setPaywallFeature(f)}
-          onRestoreAccess={async () => {
-            setRestoreState("checking");
-            await proStatus.refresh();
-            // proStatus.isPro reflects the new value on next render.
-            // Use a one-tick delay to read the freshly-fetched value.
-            setTimeout(() => {
-              setRestoreState((s) => s === "checking" ? "fail" : s);
-            }, 4000);
-          }}
-          restoreState={restoreState}
-        />
-      )}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} authMode={auth.mode} onGuestLimitHit={(f: GuestFeature) => setPaywallFeature(f)} />}
       {secondary === "account" && (
         <AccountScreen
           email={auth.email}
@@ -8922,30 +8806,13 @@ export default function App() {
       <UpgradeSheet
         open={paywallFeature !== null}
         feature={paywallFeature}
-        isGuest={auth.mode !== "authed"}
-        busy={checkoutBusy}
-        errorMessage={checkoutError}
-        onClose={() => { setPaywallFeature(null); setCheckoutError(null); }}
-        onUnlock={async () => {
-          // Stripe Checkout: server mints a session bound to the
-          // signed-in user.id; we redirect to the returned URL.
-          setCheckoutBusy(true);
-          setCheckoutError(null);
-          try {
-            const { url, alreadyPro } = await createCheckoutSession();
-            if (alreadyPro) {
-              await proStatus.refresh();
-              setPaywallFeature(null);
-              return;
-            }
-            // openExternal handles iOS Capacitor (SFSafariViewController)
-            // and web (regular navigation) transparently.
-            await openExternal(url);
-          } catch (err: any) {
-            setCheckoutError(err?.message || "Couldn't open checkout. Please try again.");
-          } finally {
-            setCheckoutBusy(false);
-          }
+        onClose={() => setPaywallFeature(null)}
+        onUnlock={() => {
+          // Local lifetime grant. When real payments are wired, the
+          // post-purchase callback should call grantLifetimeAccess()
+          // instead of having the user tap this button.
+          grantLifetimeAccess();
+          setPaywallFeature(null);
         }}
         onSignUp={() => {
           // Guests see the sign-up CTA on the Account screen. Route
