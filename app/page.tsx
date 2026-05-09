@@ -59,6 +59,16 @@ import {
   useLifetimeAccess,
 } from "./lib/premium";
 import {
+  GUEST_LIMITS,
+  FEATURE_LABEL,
+  UPGRADE_HEADLINE,
+  UPGRADE_BODY,
+  UPGRADE_BADGE,
+  hasReachedGuestLimit,
+  usePremiumStatus,
+  type GatedFeature,
+} from "./lib/guest-limits";
+import {
   downloadJson,
   downloadPdfBlob,
 } from "./lib/native-download";
@@ -3285,6 +3295,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     let clientName = form.clientName;
     if (showNewClient && newClientName.trim()) {
       const newC = await upsertClient({ name: newClientName.trim(), phone: form.clientPhone, email: form.clientEmail });
+      if (!newC) return; // Gated by upgrade sheet — bail without saving the appointment.
       clientId = newC.id; clientName = newC.name;
     } else if (clientId) {
       const c = clients.find(x => x.id === clientId);
@@ -3326,6 +3337,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     };
 
     const saved = await upsertAppointment(baseAppt);
+    if (!saved) return; // Gated by upgrade sheet.
     await scheduleRemindersForAppointment({
       ...saved,
       remindersEnabled,
@@ -3353,6 +3365,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           isRecurringInstance: true,
           recurrenceIndex: i,
         });
+        if (!future) break; // Gated mid-series — stop generating.
         await scheduleRemindersForAppointment({
           ...future, remindersEnabled,
           clientPhone: form.clientPhone, clientEmail: form.clientEmail,
@@ -5667,6 +5680,10 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
   };
 
   const exportData = async () => {
+    if (!store.premium) {
+      store.requestUpgrade?.("export");
+      return;
+    }
     const dump = {
       exported: new Date().toISOString(), version: "v2",
       business: store.business, settings: store.reminderSettings,
@@ -5742,13 +5759,25 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
         )}
 
         <SectionTitle>Reminders</SectionTitle>
-        <Card className="p-4 active:scale-[0.99]" onClick={openReminderSettings}>
+        <Card
+          className="p-4 active:scale-[0.99]"
+          onClick={() => {
+            if (!store.premium) { store.requestUpgrade?.("reminders"); return; }
+            openReminderSettings();
+          }}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold" style={{ color: C.espresso }}>Reminder settings</p>
-              <p className="text-[11px]" style={{ color: C.muted }}>{store.reminderSettings?.enabled ? "Enabled" : "Disabled"} · {(store.reminderSettings?.defaultChannel || "sms").toString().toUpperCase()}</p>
+              <p className="text-[11px]" style={{ color: C.muted }}>
+                {store.premium
+                  ? `${store.reminderSettings?.enabled ? "Enabled" : "Disabled"} · ${(store.reminderSettings?.defaultChannel || "sms").toString().toUpperCase()}`
+                  : `Lifetime Access · ${LIFETIME_PRICE_LABEL}`}
+              </p>
             </div>
-            <ChevronRight size={18} style={{ color: C.muted }} />
+            {store.premium
+              ? <ChevronRight size={18} style={{ color: C.muted }} />
+              : <Sparkles size={16} style={{ color: C.goldDeep }} />}
           </div>
         </Card>
 
@@ -5759,7 +5788,10 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
           // the dead space between them all bubble up to the button.
           <button
            type="button"
-            onClick={() => { console.log("Communication log tapped"); openCommunicationLog(); }}
+            onClick={() => {
+              if (!store.premium) { store.requestUpgrade?.("communicationLog"); return; }
+              openCommunicationLog();
+            }}
             className="w-full text-left rounded-2xl p-4 mt-2 active:scale-[0.99] cursor-pointer select-none transition"
             style={{
               background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
@@ -6920,8 +6952,10 @@ const useCloudSync = (userId: string | null, store: any) => {
   };
 
   // Initial pull + one-time migration push on first authed render.
+  // Skipped entirely for non-premium accounts — cloud sync is gated
+  // behind lifetime access, so guest/free accounts work fully offline.
   useEffect(() => {
-    if (!userId) { initialPullDone.current = false; return; }
+    if (!userId || !store?.premium) { initialPullDone.current = false; return; }
     if (initialPullDone.current) return;
     initialPullDone.current = true;
     (async () => {
@@ -6999,7 +7033,7 @@ const useCloudSync = (userId: string | null, store: any) => {
   // only records whose JSON differs from the last successful sync;
   // deletes anything we'd previously synced that's no longer in state.
   useEffect(() => {
-    if (!userId || !initialPullDone.current) return;
+    if (!userId || !initialPullDone.current || !store?.premium) return;
     const tables: Array<{ table: import("./lib/supabase").SyncTable; arr: any[]; api: any }> = [
       { table: "clients", arr: store.clients || [], api: syncClients },
       { table: "appointments", arr: store.appointments || [], api: syncAppointments },
@@ -7046,7 +7080,7 @@ const useCloudSync = (userId: string | null, store: any) => {
 
   // Drain the offline write queue whenever connectivity resumes.
   useEffect(() => {
-    if (!userId || typeof window === "undefined") return;
+    if (!userId || typeof window === "undefined" || !store?.premium) return;
     const onOnline = async () => {
       const result = await drainQueue(userId);
       setPendingCount(queueLength());
@@ -8281,9 +8315,169 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
 // ============================================================
 //  APP ROOT
 // ============================================================
+// Calm, premium-looking upgrade sheet. Shown when a guest hits a limit
+// or taps a premium-only entry point. The CTA opens the live Stripe
+// Payment Link via openCheckout(); if the user isn't signed in yet,
+// we send them to the Account screen first because the unlock binds
+// to their Supabase user id.
+const UpgradeSheet = ({
+  feature, userId, mode, onClose, onSignInPrompt,
+}: {
+  feature: GatedFeature | null;
+  userId: string | null;
+  mode: AuthMode;
+  onClose: () => void;
+  onSignInPrompt: () => void;
+}) => {
+  const open = !!feature;
+  const limit = feature && feature in GUEST_LIMITS
+    ? (GUEST_LIMITS as any)[feature] as number
+    : null;
+  const featureName = feature ? FEATURE_LABEL[feature] : "";
+  const linkReady = isPaymentLinkConfigured();
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Lifetime Access">
+      <div className="px-1 pb-2 pt-1">
+        <div className="flex items-center gap-2 mb-3">
+          <span
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "4px 10px", borderRadius: 999,
+              background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+              color: C.paper, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em",
+              textTransform: "uppercase",
+            }}
+          >
+            <Sparkles size={12} /> {UPGRADE_BADGE}
+          </span>
+        </div>
+
+        <p
+          style={{
+            fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600,
+            lineHeight: 1.15, color: C.espresso,
+          }}
+        >
+          ✨ {UPGRADE_HEADLINE}
+        </p>
+        {limit !== null && (
+          <p className="mt-2" style={{ color: C.muted, fontSize: 13 }}>
+            {featureName} are capped at {limit} on the free workspace.
+          </p>
+        )}
+        <p className="mt-3" style={{ color: C.coffee, fontSize: 14, lineHeight: 1.5 }}>
+          {UPGRADE_BODY}
+        </p>
+
+        <ul className="mt-4 space-y-2" style={{ color: C.coffee, fontSize: 13 }}>
+          {[
+            "Unlimited clients, appointments, money entries, and quotes",
+            "Reminders, communication log, and analytics",
+            "Cloud sync across every device you sign in on",
+            "Includes future upgrades — no subscriptions",
+          ].map(line => (
+            <li key={line} className="flex items-start gap-2">
+              <CheckCircle2 size={16} style={{ color: C.goldDeep, marginTop: 2, flexShrink: 0 }} />
+              <span>{line}</span>
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-6 space-y-2">
+          {mode !== "authed" || !userId ? (
+            <>
+              <button
+                type="button"
+                onClick={onSignInPrompt}
+                className="w-full rounded-2xl py-3.5 text-[15px] font-semibold active:scale-[0.99] transition"
+                style={{
+                  background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+                  color: C.paper, border: `1px solid ${C.goldDeep}`,
+                  boxShadow: "0 8px 20px -10px rgba(168, 137, 63, 0.6)",
+                }}
+              >
+                Sign in to unlock
+              </button>
+              <p className="text-[11px] text-center" style={{ color: C.muted }}>
+                Your unlock binds to your account so it follows you everywhere.
+              </p>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                disabled={!linkReady}
+                onClick={() => { void openCheckout(userId); onClose(); }}
+                className="w-full rounded-2xl py-3.5 text-[15px] font-semibold active:scale-[0.99] transition disabled:opacity-60"
+                style={{
+                  background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+                  color: C.paper, border: `1px solid ${C.goldDeep}`,
+                  boxShadow: "0 8px 20px -10px rgba(168, 137, 63, 0.6)",
+                }}
+              >
+                {linkReady ? `Unlock for ${LIFETIME_PRICE_LABEL}` : "Coming soon"}
+              </button>
+              <p className="text-[11px] text-center" style={{ color: C.muted }}>
+                Secure checkout by Stripe · No subscriptions
+              </p>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full rounded-2xl py-3 text-[13px] font-semibold active:scale-[0.99] transition"
+            style={{
+              background: C.ivory, color: C.coffee,
+              border: `1px solid ${C.hairline}`,
+            }}
+          >
+            Maybe later
+          </button>
+        </div>
+      </div>
+    </Sheet>
+  );
+};
+
 export default function App() {
   const auth = useAuth();
-  const store = useStorage();
+  const rawStore = useStorage();
+  const { premium } = usePremiumStatus(auth.userId);
+  const [upgradeFor, setUpgradeFor] = useState<GatedFeature | null>(null);
+  const requestUpgrade = useCallback((feature: GatedFeature) => {
+    setUpgradeFor(feature);
+  }, []);
+  const closeUpgrade = useCallback(() => setUpgradeFor(null), []);
+
+  // Wrap entity creators so a guest at the limit sees the elegant
+  // upgrade sheet instead of silently saving record N+1. Only NEW
+  // records (no id) are gated — edits always pass through so existing
+  // data stays editable.
+  const store = useMemo(() => {
+    const gateNew = <Args extends any[], R>(
+      feature: GatedFeature,
+      list: any[],
+      fn: (rec: any, ...rest: Args) => R,
+    ) => async (rec: any, ...rest: Args): Promise<R | null> => {
+      const isNew = !rec || typeof rec !== "object" || !rec.id;
+      if (isNew && hasReachedGuestLimit(feature, list?.length ?? 0, premium)) {
+        requestUpgrade(feature);
+        return null;
+      }
+      return fn(rec, ...rest);
+    };
+    return {
+      ...rawStore,
+      premium,
+      requestUpgrade,
+      upsertClient: gateNew("clients", rawStore.clients, rawStore.upsertClient),
+      upsertAppointment: gateNew("appointments", rawStore.appointments, rawStore.upsertAppointment),
+      upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
+      upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
+    };
+  }, [rawStore, premium, requestUpgrade]);
+
   const sync = useCloudSync(auth.userId, store);
 
   // Run the notification scheduler once per app open + every 10 min
@@ -8506,7 +8700,10 @@ export default function App() {
               notifBadgeCount={notifications.unreadCount}
               openCommunication={openCommunication}
               syncState={auth.mode === "authed" ? sync.state : undefined}
-              openAnalytics={() => setSecondary("analytics")}
+              openAnalytics={() => {
+                if (!store.premium) { requestUpgrade("analytics"); return; }
+                setSecondary("analytics");
+              }}
               openPresets={() => setSecondary("presets")}
               openTimer={() => setSecondary("timer")} />
           )}
@@ -8561,6 +8758,7 @@ export default function App() {
           onBack={() => setSecondary("settings")}
           onSignOut={async () => { await auth.signOut(); setSecondary(null); }}
           onExport={() => {
+            if (!store.premium) { store.requestUpgrade?.("export"); return; }
             const data = JSON.stringify({
               business: store.business,
               clients: store.clients,
@@ -8692,6 +8890,14 @@ export default function App() {
           </div>
         </Sheet>
       )}
+
+      <UpgradeSheet
+        feature={upgradeFor}
+        userId={auth.userId}
+        mode={auth.mode}
+        onClose={closeUpgrade}
+        onSignInPrompt={() => { closeUpgrade(); setSecondary("account"); }}
+      />
 
     </Frame>
   );
