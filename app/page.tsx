@@ -3069,7 +3069,19 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
   };
 
   const handleConvertToAppointment = () => {
-    openConvertToAppt({ style: styleName, totalPrice: result.finalPrice });
+    // Pass the pre-discount price plus tip as the appointment's
+    // totalPrice; the discount is carried as a separate snapshot so
+    // the appointment row records both the agreed gross price and
+    // the credit applied. balanceDue logic on the appointment side
+    // reduces by discountAmount, so the net behaviour matches the
+    // calculator's finalPrice.
+    openConvertToAppt({
+      style: styleName,
+      totalPrice: Number(((result.subtotalBeforeDiscount || result.subtotal) + (result.tipAmount || 0)).toFixed(2)),
+      discountId: selectedDiscount?.id ?? null,
+      discountName: selectedDiscount?.name ?? null,
+      discountAmount: result.discountAmount || 0,
+    });
   };
 
   return (
@@ -3349,6 +3361,11 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         paymentDate: appt?.paymentDate || "",
         paymentMethod: appt?.paymentMethod || "",
         paymentNotes: appt?.paymentNotes || "",
+        // Discount snapshot — accept either camelCase (local) or
+        // snake_case (cloud row) so both prefill cleanly.
+        discountId: appt?.discountId ?? appt?.discount_id ?? null,
+        discountName: appt?.discountName ?? appt?.discount_name ?? null,
+        discountAmount: sanitizeMoneyInput(appt?.discountAmount ?? appt?.discount_amount ?? 0),
         id: appt?.id,
         seriesId: appt?.seriesId,
       });
@@ -3363,7 +3380,50 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     }
   }, [open, appt]);
 
-  const balanceDue = (Number(form.totalPrice) || 0) - (Number(form.depositPaid) || 0);
+  // Discount picker (V1: only "applies to all" discounts surface).
+  const allDiscounts: Discount[] = store.discountsApi?.discounts || [];
+  const availableDiscounts = useMemo(
+    () => selectableDiscounts(allDiscounts),
+    [allDiscounts],
+  );
+  // If the saved discount is no longer selectable (paused / expired)
+  // but is the one already on this appointment, keep it visible so
+  // the snapshot stays editable. Past records aren't re-priced.
+  const previewDiscount = useMemo(() => {
+    if (!form.discountId) return null;
+    return availableDiscounts.find(d => d.id === form.discountId)
+      || allDiscounts.find(d => d.id === form.discountId)
+      || null;
+  }, [form.discountId, availableDiscounts, allDiscounts]);
+
+  const handleDiscountChange = (id: string) => {
+    if (!id) {
+      setForm({ ...form, discountId: null, discountName: null, discountAmount: 0 });
+      return;
+    }
+    const d = availableDiscounts.find(x => x.id === id);
+    if (!d) return;
+    const amt = computeDiscountAmount(Number(form.totalPrice) || 0, d);
+    setForm({ ...form, discountId: d.id, discountName: d.name, discountAmount: amt });
+  };
+
+  // Re-quote the discount whenever the entered total changes — a 10%
+  // discount on a $200 quote should jump to a 10% discount on a $250
+  // edit without the user having to reselect it.
+  useEffect(() => {
+    if (!form.discountId) return;
+    const d = availableDiscounts.find(x => x.id === form.discountId);
+    if (!d) return;
+    const amt = computeDiscountAmount(Number(form.totalPrice) || 0, d);
+    if (amt !== Number(form.discountAmount)) {
+      setForm(prev => ({ ...prev, discountAmount: amt }));
+    }
+  }, [form.totalPrice, form.discountId, availableDiscounts]);
+
+  const discountAmt = Number(form.discountAmount) || 0;
+  const grossTotal = Number(form.totalPrice) || 0;
+  const netTotal = Math.max(0, grossTotal - discountAmt);
+  const balanceDue = netTotal - (Number(form.depositPaid) || 0);
 
   // When picking an existing client, auto-fill phone/email
   useEffect(() => {
@@ -3539,6 +3599,56 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           <Field label="Total price"><MoneyInput value={form.totalPrice} onChange={(v) => setForm({ ...form, totalPrice: v })} /></Field>
           <Field label="Deposit paid"><MoneyInput value={form.depositPaid} onChange={(v) => setForm({ ...form, depositPaid: v })} /></Field>
         </div>
+
+        <Field
+          label="Discount"
+          hint={availableDiscounts.length === 0
+            ? "Create a Studio Offer in Settings → Discounts."
+            : "Optional. Subtracts from the total price."}
+        >
+          <Select
+            value={form.discountId || ""}
+            onChange={e => handleDiscountChange(e.target.value)}
+            options={(() => {
+              const opts = [{ value: "", label: "No discount" }];
+              for (const d of availableDiscounts) {
+                opts.push({ value: d.id, label: `${d.name} — ${formatDiscountValue(d)}` });
+              }
+              // If the saved discount is paused/expired, still show it
+              // so the user can unbind or keep the snapshot intact.
+              if (previewDiscount && !availableDiscounts.find(d => d.id === previewDiscount.id)) {
+                opts.push({
+                  value: previewDiscount.id,
+                  label: `${previewDiscount.name} — ${formatDiscountValue(previewDiscount)} (paused)`,
+                });
+              }
+              return opts;
+            })()}
+          />
+        </Field>
+        {discountAmt > 0 && (
+          <Card className="p-3" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+            <div className="flex items-center justify-between text-[13px]" style={{ color: C.coffee }}>
+              <span>Subtotal</span>
+              <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
+                {fmtMoney(grossTotal, business.currency)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-[13px] mt-1" style={{ color: C.goldDeep }}>
+              <span>Discount{form.discountName ? ` — ${form.discountName}` : ""}</span>
+              <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
+                − {fmtMoney(discountAmt, business.currency)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-[14px] font-semibold mt-2 pt-2"
+              style={{ color: C.espresso, borderTop: `1px solid ${C.hairline}` }}>
+              <span>Net total</span>
+              <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
+                {fmtMoney(netTotal, business.currency)}
+              </span>
+            </div>
+          </Card>
+        )}
 
         <Card className="p-3.5 flex justify-between items-center" style={{ background: C.ivory }}>
           <span className="text-sm font-semibold" style={{ color: C.coffee }}>Balance due</span>
