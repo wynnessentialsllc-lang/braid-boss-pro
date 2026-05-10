@@ -5603,7 +5603,7 @@ const DEFAULT_CUSTOMER_FILTERS: CustomerFilters = {
 const filtersAreActive = (f: CustomerFilters) =>
   f.lastVisited !== "any" || f.frequency !== "any";
 
-const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, savePhoto, deletePhoto: deletePhotoProp }: { store: any; openClientPhotos?: any; openCommunication?: (ctx: CommContext) => void; openQuickAppt?: (prefill?: any) => void; savePhoto?: (p: any) => Promise<any>; deletePhoto?: (id: string) => Promise<void> }) => {
+const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, savePhoto, deletePhoto: deletePhotoProp, openClientId, clearOpenClientId }: { store: any; openClientPhotos?: any; openCommunication?: (ctx: CommContext) => void; openQuickAppt?: (prefill?: any) => void; savePhoto?: (p: any) => Promise<any>; deletePhoto?: (id: string) => Promise<void>; openClientId?: string | null; clearOpenClientId?: () => void }) => {
   void openClientPhotos;
   const { clients, appointments, photos, business } = store;
   const [search, setSearch] = useState("");
@@ -5612,6 +5612,17 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<CustomerFilters>(DEFAULT_CUSTOMER_FILTERS);
   const [comingSoon, setComingSoon] = useState<string | null>(null);
+
+  // Notification deep-link consumer: when App stamps openClientId, find
+  // the matching client record and pop the existing ClientSheet. Clear
+  // the prop after so re-renders don't re-open it.
+  useEffect(() => {
+    if (!openClientId) return;
+    const found = clients.find((c: any) => c?.id === openClientId);
+    if (found) setEditing(found);
+    clearOpenClientId?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional one-shot consumer
+  }, [openClientId, clients]);
 
   const today = todayISO();
   const enriched = useMemo(() => clients.map(c => {
@@ -8750,6 +8761,16 @@ const TimerSessionsScreen = ({ store, onBack }) => {
 // ============================================================
 type NotifCategory = "system" | "finance" | "retention" | "appointment" | "communication_status";
 
+// Centralised target type so a notification's deep-link is a tagged
+// union the action router can switch on. Adding a new notification
+// kind is now: stamp a target → register the handler in the router.
+// No inline "if id starts with bal_" string parsing anywhere.
+export type NotificationTarget =
+  | { kind: "appointment"; appointmentId: string; date?: string }
+  | { kind: "client"; clientId: string }
+  | { kind: "reminders" }
+  | { kind: "schedule" };
+
 type NotifItem = {
   id: string;
   category: NotifCategory;
@@ -8759,6 +8780,7 @@ type NotifItem = {
   title: string;
   body: string;
   meta?: string;
+  target?: NotificationTarget;
 };
 
 // Categories that contribute to the bell badge. communication_status
@@ -8816,6 +8838,7 @@ const buildNotifications = (store: any): NotifItem[] => {
       title: `Balance overdue · ${a.clientName || "Client"}`,
       body: `${fmtMoney(parseMoney(a.balanceDue), currency)} unpaid for ${a.style || "appointment"}.`,
       meta: `Was ${fmtDate(a.date)}`,
+      target: { kind: "appointment", appointmentId: a.id, date: a.date },
     });
   }
 
@@ -8838,6 +8861,7 @@ const buildNotifications = (store: any): NotifItem[] => {
       title: `${a.clientName || "Client"} · ${a.style || "Appointment"}`,
       body: `${fmtDate(a.date)}${a.time ? ` at ${fmtTime(a.time)}` : ""}`,
       meta: apptMs ? fmtRelative(new Date(apptMs).toISOString()) : undefined,
+      target: { kind: "appointment", appointmentId: a.id, date: a.date },
     });
   }
 
@@ -8856,6 +8880,7 @@ const buildNotifications = (store: any): NotifItem[] => {
       icon: <AlertTriangle size={16} style={{ color: C.warning }} />,
       title: `No-show · ${a.clientName || "Client"}`,
       body: `${a.style || "Appointment"} on ${fmtDate(a.date)}. Decide on policy fee or follow-up.`,
+      target: { kind: "appointment", appointmentId: a.id, date: a.date },
     });
   }
 
@@ -8870,6 +8895,7 @@ const buildNotifications = (store: any): NotifItem[] => {
       icon: <Sparkles size={16} style={{ color: C.goldDeep }} />,
       title: `${c.reason} · ${c.client.name || "Client"}`,
       body: `${c.metrics.daysSinceLast ?? 0}d since last visit${c.metrics.mostBookedStyle ? ` · prefers ${c.metrics.mostBookedStyle}` : ""}.`,
+      target: { kind: "client", clientId: c.client.id },
     });
   }
 
@@ -8886,6 +8912,7 @@ const buildNotifications = (store: any): NotifItem[] => {
       icon: <XCircle size={16} style={{ color: C.danger }} />,
       title: `Reminder failed to send · ${r.clientName || "Client"}`,
       body: `${PURPOSE_LABEL_LOCAL[r.purpose as keyof typeof PURPOSE_LABEL_LOCAL] || "Reminder"} couldn't be delivered. Re-send manually if needed.`,
+      target: { kind: "reminders" },
     });
   }
 
@@ -8908,6 +8935,7 @@ const buildNotifications = (store: any): NotifItem[] => {
       title: `${queuedTodayOrTomorrow.length} reminder${queuedTodayOrTomorrow.length === 1 ? "" : "s"} queued`,
       body: "Outgoing client messages scheduled for the next 48h.",
       meta: "View in Reminder inbox",
+      target: { kind: "reminders" },
     });
   }
 
@@ -8996,7 +9024,58 @@ const useNotifications = (store: any) => {
     persist(READ_NOTIF_KEY, Array.from(new Set([...read, ...ids])), setRead);
   }, [items, read]);
 
-  return { hydrated, items, unreadCount, dismiss, clearAll, markAllRead };
+  // Single-id read marker. Used when a notification is tapped so the
+  // bell badge drops one count immediately.
+  const markRead = useCallback((id: string) => {
+    if (read.includes(id)) return;
+    persist(READ_NOTIF_KEY, Array.from(new Set([...read, id])), setRead);
+  }, [read]);
+
+  const readIds = useMemo(() => new Set(read), [read]);
+
+  return { hydrated, items, unreadCount, dismiss, clearAll, markAllRead, markRead, readIds };
+};
+
+// ---- Notification action router ----------------------------------------
+// Centralised "where does this notification go when tapped" logic. New
+// kinds plug in by stamping a NotificationTarget on the NotifItem in
+// buildNotifications — no per-screen branching needed.
+type NotificationRouterCtx = {
+  appointments: any[];
+  setActive: (tab: string) => void;
+  setSecondary: (key: string | null) => void;
+  setApptPrefill: (a: any) => void;
+  setClientToOpenId: (id: string | null) => void;
+};
+
+const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
+  if (!n.target) {
+    // Fallback for legacy items without a target — surface on Schedule.
+    ctx.setActive("schedule");
+    return;
+  }
+  const target = n.target;
+  switch (target.kind) {
+    case "appointment": {
+      const appt = (ctx.appointments || []).find(a => a?.id === target.appointmentId);
+      ctx.setActive("schedule");
+      // Schedule consumes apptPrefill via useEffect — passing the
+      // record with id reopens AppointmentSheet in edit mode.
+      if (appt) ctx.setApptPrefill(appt);
+      break;
+    }
+    case "client": {
+      ctx.setActive("clients");
+      ctx.setClientToOpenId(target.clientId);
+      break;
+    }
+    case "reminders":
+      ctx.setSecondary("reminders");
+      break;
+    case "schedule":
+      ctx.setActive("schedule");
+      break;
+  }
 };
 
 // Derive a payment status from an appointment record. Honors an explicit
@@ -9321,13 +9400,15 @@ const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: 
   );
 };
 
-const NotificationsSheet = ({ open, onClose, items, dismiss, clearAll, markAllRead }: {
+const NotificationsSheet = ({ open, onClose, items, dismiss, clearAll, markAllRead, onTap, readIds }: {
   open: boolean;
   onClose: () => void;
   items: NotifItem[];
   dismiss: (id: string) => void;
   clearAll: () => void;
   markAllRead: () => void;
+  onTap: (n: NotifItem) => void;
+  readIds: Set<string>;
 }) => {
   return (
     <Sheet open={open} onClose={onClose} title="Notifications"
@@ -9367,25 +9448,65 @@ const NotificationsSheet = ({ open, onClose, items, dismiss, clearAll, markAllRe
             </button>
           </div>
           <div className="space-y-2 pb-6">
-            {items.map(n => (
-              <Card key={n.id} className="p-3.5 flex items-start gap-3">
-                <div className="rounded-xl p-2 shrink-0" style={{
-                  background: n.tone === "danger" ? "rgba(156,61,46,0.10)" :
-                    n.tone === "warning" ? "rgba(201,118,43,0.12)" :
-                      n.tone === "gold" ? "rgba(201,169,97,0.18)" : C.ivory,
-                }}>{n.icon}</div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{n.title}</p>
-                  <p className="text-xs mt-0.5 leading-relaxed line-clamp-2" style={{ color: C.coffee }}>{n.body}</p>
-                  {n.meta && <p className="text-[11px] mt-1" style={{ color: C.muted }}>{n.meta}</p>}
-                </div>
-                <button type="button" onClick={() => dismiss(n.id)} aria-label="Dismiss notification"
-                  className="p-2 -mr-1 rounded-full shrink-0 active:scale-[0.92] transition"
-                  style={{ color: C.danger }}>
-                  <Trash2 size={16} />
-                </button>
-              </Card>
-            ))}
+            {items.map(n => {
+              const isUnread = !readIds.has(n.id);
+              const tappable = !!n.target;
+              return (
+                <Card key={n.id} className="p-0 flex items-stretch overflow-hidden">
+                  {/* Main tappable surface — real <button> for iOS
+                      WKWebView reliability. Delete button sits as a
+                      sibling outside this so taps on the trash icon
+                      never trigger the row open. */}
+                  <button
+                    type="button"
+                    onClick={() => { if (tappable) onTap(n); }}
+                    disabled={!tappable}
+                    aria-label={tappable ? `Open ${n.title}` : n.title}
+                    className="flex items-start gap-3 p-3.5 flex-1 text-left active:scale-[0.99] transition"
+                    style={{
+                      background: "transparent",
+                      border: 0,
+                      cursor: tappable ? "pointer" : "default",
+                      color: "inherit",
+                      font: "inherit",
+                      appearance: "none",
+                      WebkitAppearance: "none",
+                    }}
+                  >
+                    <div className="rounded-xl p-2 shrink-0" style={{
+                      background: n.tone === "danger" ? "rgba(156,61,46,0.10)" :
+                        n.tone === "warning" ? "rgba(201,118,43,0.12)" :
+                          n.tone === "gold" ? "rgba(201,169,97,0.18)" : C.ivory,
+                    }}>{n.icon}</div>
+                    <div className="min-w-0 flex-1" style={{ pointerEvents: "none" }}>
+                      <div className="flex items-center gap-2">
+                        {isUnread && (
+                          <span aria-hidden style={{
+                            width: 6, height: 6, borderRadius: 999,
+                            background: C.gold, flexShrink: 0,
+                          }} />
+                        )}
+                        <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{n.title}</p>
+                      </div>
+                      <p className="text-xs mt-0.5 leading-relaxed line-clamp-2" style={{ color: C.coffee }}>{n.body}</p>
+                      {n.meta && <p className="text-[11px] mt-1" style={{ color: C.muted }}>{n.meta}</p>}
+                    </div>
+                    {tappable && (
+                      <ChevronRight size={16} style={{ color: C.muted, marginTop: 6, flexShrink: 0 }} />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); dismiss(n.id); }}
+                    aria-label="Dismiss notification"
+                    className="p-3 shrink-0 rounded-full active:scale-[0.92] transition"
+                    style={{ color: C.danger, background: "transparent", border: 0, alignSelf: "flex-start", margin: 4 }}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </Card>
+              );
+            })}
           </div>
         </>
       )}
@@ -12378,6 +12499,9 @@ export default function App() {
   const [openClientForm, setOpenClientForm] = useState(false);
   const [quickClient, setQuickClient] = useState<EntityRecord | null>(null);
   const [notifOpen, setNotifOpen] = useState(false);
+  // Notification deep-link plumbing: when a notification routes to a
+  // client, App stamps the id and Clients pops the matching profile.
+  const [clientToOpenId, setClientToOpenId] = useState<string | null>(null);
   const [commPickerCtx, setCommPickerCtx] = useState<CommContext | null>(null);
   const [activeComm, setActiveComm] = useState<(CommContext & { templateKey: CommTemplateKey }) | null>(null);
   const [activeReceipt, setActiveReceipt] = useState<ReceiptRecord | null>(null);
@@ -12433,6 +12557,21 @@ export default function App() {
     else setCommPickerCtx(finalCtx);
   }, [store.appointments]);
   const notifications = useNotifications(store);
+
+  // Centralised notification tap handler. Marks the item read +
+  // closes the sheet + routes via the action router. New kinds plug
+  // in by stamping a NotificationTarget in buildNotifications.
+  const handleNotificationTap = useCallback((n: NotifItem) => {
+    notifications.markRead(n.id);
+    setNotifOpen(false);
+    routeNotification(n, {
+      appointments: store.appointments,
+      setActive,
+      setSecondary,
+      setApptPrefill,
+      setClientToOpenId,
+    });
+  }, [notifications, store.appointments]);
 
   // Dashboard quick actions
   const openQuickAppt = (prefill: any = {}) => {
@@ -12571,7 +12710,7 @@ export default function App() {
               openAvailability={() => setSecondary("availability")} />
           )}
           {active === "clients" && (
-            <Clients store={store} openCommunication={openCommunication} openQuickAppt={openQuickAppt} savePhoto={handleSavePhoto} deletePhoto={handleDeletePhoto} />
+            <Clients store={store} openCommunication={openCommunication} openQuickAppt={openQuickAppt} savePhoto={handleSavePhoto} deletePhoto={handleDeletePhoto} openClientId={clientToOpenId} clearOpenClientId={() => setClientToOpenId(null)} />
           )}
           {active === "money" && (
             <Money store={store}
@@ -12717,6 +12856,8 @@ export default function App() {
         dismiss={notifications.dismiss}
         clearAll={notifications.clearAll}
         markAllRead={notifications.markAllRead}
+        onTap={handleNotificationTap}
+        readIds={notifications.readIds}
       />
 
       {/* Transaction sheet */}
