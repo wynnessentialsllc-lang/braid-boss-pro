@@ -1,22 +1,25 @@
 // Create a Stripe Checkout Session for a booking-request deposit.
 //
-// Public booking page POSTs here with { request_id } after the anon
-// `public_submit_booking_request` RPC has landed an `awaiting_deposit`
-// row. We:
-//   1. Read the row via the Supabase service role (bypasses RLS).
-//   2. Validate it actually requires a deposit.
-//   3. Create a Stripe Checkout Session via the REST API.
-//   4. Persist the session id back onto the booking_request.
-//   5. Return { url } so the browser can redirect to Stripe.
+// Phase B11 — Stripe Connect Express direct charges. The session is
+// created on the stylist's connected account via the `Stripe-Account`
+// header; their statement descriptor shows on the client's card, the
+// money lands in their Stripe balance directly, and (optionally) the
+// platform takes an application fee of PLATFORM_FEE_BPS basis points.
 //
-// Platform-Stripe model for V1 (no Connect). The deposit lands in the
-// platform account and the salon owner reconciles manually. Connect
-// onboarding is a follow-up phase — this route is structured so that
-// adding `stripe_account` to the session call is a one-line change.
+// Flow:
+//   1. Read the row via the Supabase service role.
+//   2. Require approval_status = 'awaiting_deposit'.
+//   3. Resolve the stylist's connected acct_XXX from profiles; refuse
+//      if Connect onboarding hasn't completed (charges_enabled = false).
+//   4. Create the Checkout Session AS the connected account.
+//   5. Persist the session id and acct id onto the booking_request.
+//   6. Return { url } so the browser can redirect.
 //
 // Webhook (/api/booking-deposit/webhook) flips the row to
 // deposit_paid_pending_approval once Stripe fires
-// checkout.session.completed.
+// checkout.session.completed on the connected account (the platform
+// endpoint must have "Listen to events on Connected accounts"
+// enabled in the Stripe dashboard).
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -77,7 +80,7 @@ export async function POST(req: Request) {
   const { data: row, error: readErr } = await admin
     .from("booking_requests")
     .select(
-      "id, user_id, link_slug, client_name, client_email, service_id, service_name_snapshot, service_name, deposit_amount, deposit_required, approval_status, preferred_date, preferred_time",
+      "id, user_id, link_slug, client_name, client_email, service_id, service_name_snapshot, service_name, deposit_amount, deposit_required, approval_status, preferred_date, preferred_time, stripe_connect_account_id",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -92,13 +95,40 @@ export async function POST(req: Request) {
     return fail(400, "This request doesn't require a deposit.");
   }
 
+  // Phase B11 — resolve the connected account. The submit RPC stamps
+  // `stripe_connect_account_id` only when the stylist had a
+  // charges_enabled account at submit time, so most rows arrive here
+  // pre-flight checked. Re-read profiles defensively in case the
+  // stylist's status flipped between submit and checkout.
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("stripe_connect_account_id, stripe_connect_charges_enabled")
+    .eq("id", row.user_id)
+    .maybeSingle();
+
+  const acctId =
+    row.stripe_connect_account_id ||
+    profile?.stripe_connect_account_id ||
+    null;
+  if (!acctId) {
+    return fail(409, "Stylist hasn't connected Stripe yet.");
+  }
+  if (!profile?.stripe_connect_charges_enabled) {
+    return fail(409, "Stylist's Stripe account isn't ready to take charges.");
+  }
+
   const baseUrl = baseUrlOf(req);
   const cents = Math.round(Number(row.deposit_amount) * 100);
   const productName = `Deposit · ${row.service_name_snapshot || row.service_name || "Booking"}`;
 
-  // Stripe REST expects application/x-www-form-urlencoded with bracket
-  // notation for nested fields. Build the params manually so we don't
-  // need to depend on the Stripe SDK.
+  // Optional platform fee in basis points. Defaults to 0 — no fee.
+  const feeBps = (() => {
+    const raw = Number(process.env.PLATFORM_FEE_BPS || 0);
+    if (!Number.isFinite(raw) || raw < 0 || raw > 10_000) return 0;
+    return Math.floor(raw);
+  })();
+  const applicationFeeCents = feeBps > 0 ? Math.floor((cents * feeBps) / 10_000) : 0;
+
   const form = new URLSearchParams();
   form.set("mode", "payment");
   form.set("payment_method_types[]", "card");
@@ -117,20 +147,23 @@ export async function POST(req: Request) {
   if (row.client_email) form.set("customer_email", row.client_email);
   form.set("metadata[booking_request_id]", row.id);
   form.set("metadata[stylist_user_id]", row.user_id);
+  form.set("metadata[stylist_account_id]", acctId);
   if (row.service_id) form.set("metadata[service_id]", row.service_id);
   if (row.client_name) form.set("metadata[client_name]", row.client_name);
   if (row.client_email) form.set("metadata[client_email]", row.client_email);
   if (row.preferred_date) form.set("metadata[appointment_date]", row.preferred_date);
   if (row.preferred_time) form.set("metadata[appointment_time]", row.preferred_time);
-  // Mirror the booking_request id into payment_intent metadata too so
-  // the webhook can recover even if the session metadata is missing.
   form.set("payment_intent_data[metadata][booking_request_id]", row.id);
+  if (applicationFeeCents > 0) {
+    form.set("payment_intent_data[application_fee_amount]", String(applicationFeeCents));
+  }
 
   const stripeRes = await fetch(`${STRIPE_API}/checkout/sessions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${stripeSecret}`,
       "Stripe-Version": "2024-06-20",
+      "Stripe-Account": acctId,
       "content-type": "application/x-www-form-urlencoded",
     },
     body: form.toString(),
@@ -151,13 +184,14 @@ export async function POST(req: Request) {
     return fail(502, "Stripe returned an unusable session.");
   }
 
-  // Persist the session id so the queue UI can show "Pending" and the
-  // webhook can dedupe against retries.
+  // Persist the session id and lock the acct id on the row so refunds
+  // (when we wire them) route through the same connected account.
   await admin
     .from("booking_requests")
     .update({
       stripe_checkout_session_id: session.id,
       stripe_session_id: session.id,
+      stripe_connect_account_id: acctId,
     })
     .eq("id", row.id);
 
