@@ -319,6 +319,49 @@ export type PublicSlot = {
   startMinute: number;
 };
 
+// ---- Public month availability (Phase B3 / B7) -----------------------
+//
+// One round-trip per month. Returns one row per calendar day with a
+// status label the booking heatmap renders directly. Backed by the
+// security-definer `public_get_month_availability` RPC, which loops
+// `public_list_availability` server-side so the slot algorithm stays
+// single-source.
+export type MonthDayStatus = "off" | "booked" | "limited" | "available";
+
+export type MonthDay = {
+  day: string;          // "YYYY-MM-DD"
+  slotCount: number;
+  status: MonthDayStatus;
+};
+
+export const fetchPublicMonthAvailability = async (params: {
+  slug: string;
+  year: number;          // 4-digit year
+  month: number;         // 1-12
+  serviceId?: string | null;
+  durationMinutes?: number | null;
+}): Promise<{ ok: true; days: MonthDay[] } | { ok: false; error: string }> => {
+  if (!params.slug) return { ok: false, error: "Missing booking slug." };
+  if (!Number.isFinite(params.year) || !Number.isFinite(params.month)) {
+    return { ok: false, error: "Invalid month." };
+  }
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("public_get_month_availability", {
+    slug_in: params.slug,
+    year_in: Math.trunc(params.year),
+    month_in: Math.trunc(params.month),
+    service_id_in: params.serviceId ?? null,
+    duration_minutes_in: params.durationMinutes ?? null,
+  });
+  if (error) return { ok: false, error: error.message };
+  const days = ((data || []) as any[]).map(d => ({
+    day: String(d.day_iso),
+    slotCount: Number(d.slot_count) || 0,
+    status: (d.status as MonthDayStatus) || "off",
+  }));
+  return { ok: true, days };
+};
+
 export const fetchPublicAvailability = async (params: {
   slug: string;
   dateIso: string;          // "YYYY-MM-DD"

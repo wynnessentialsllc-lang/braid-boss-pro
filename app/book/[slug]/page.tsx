@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
 import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LABEL } from "../../lib/waitlist";
@@ -8,10 +8,27 @@ import { emitAnalyticsEvent } from "../../lib/analytics-events";
 import {
   fetchPublicServices,
   fetchPublicAvailability,
+  fetchPublicMonthAvailability,
   type PublicService,
   type PublicSlot,
+  type MonthDay,
+  type MonthDayStatus,
 } from "../../lib/services";
 import { collectPublicContext } from "../../lib/waitlist";
+
+// Local-date "YYYY-MM-DD" — never UTC-shifts so the calendar lines up
+// with what the visitor sees on their phone.
+const localDateISO = (d: Date): string => {
+  const yr = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${yr}-${mo}-${da}`;
+};
+const todayISO = (): string => localDateISO(new Date());
+
+// Default slot duration in minutes when no service is selected. The
+// calendar still works — slots come back with one-hour spacing.
+const DEFAULT_DURATION_MIN = 60;
 
 // Minimal palette — kept inline so this page never imports the main
 // app shell (it's served to anonymous visitors).
@@ -63,6 +80,18 @@ export default function PublicBookingPage() {
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [hasFetchedSlots, setHasFetchedSlots] = useState(false);
+
+  // Phase B7 — interactive month heatmap. Cursor is the visible
+  // year-month. monthCache is keyed by `${y}-${m}-${svcId|none}-${dur}`
+  // so navigating back and forth doesn't refetch.
+  const [monthCursor, setMonthCursor] = useState<{ year: number; month: number }>(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() + 1 };
+  });
+  const [monthDays, setMonthDays] = useState<MonthDay[]>([]);
+  const [monthLoading, setMonthLoading] = useState(false);
+  const [monthError, setMonthError] = useState<string | null>(null);
+  const monthCache = useRef<Map<string, MonthDay[]>>(new Map());
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -182,13 +211,24 @@ export default function PublicBookingPage() {
     ? catalog.find(s => s.id === serviceId) || null
     : null;
 
-  // Re-fetch slots whenever the user picks a different service or
-  // date. Only runs when both a service AND a date are chosen on a
-  // catalog-aware salon — legacy free-text links keep the manual
-  // preferred-time input.
+  // Phase B7 — derived duration. When a catalog service is picked we
+  // use its real duration; otherwise default to 60 minutes so the
+  // calendar still surfaces meaningful slot counts.
+  const activeServiceId = selectedCatalogService?.id ?? null;
+  const activeServiceDurationHours = selectedCatalogService?.duration_hours ?? 0;
+  const activeDurationMinutes = activeServiceId
+    ? Math.max(15, Math.round((activeServiceDurationHours || 0) * 60))
+    : DEFAULT_DURATION_MIN;
+
+  // Re-fetch slots whenever the user picks a different date / service.
+  // Now also runs without a catalog service (uses the default duration)
+  // so a stylist who hasn't built services yet still gets a working
+  // slot picker after the calendar selection.
   useEffect(() => {
-    if (!hasCatalog || !selectedCatalogService || !preferredDate) {
+    if (!preferredDate) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional reset on dep clear
       setSlots([]);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional reset on dep clear
       setHasFetchedSlots(false);
       return;
     }
@@ -200,8 +240,8 @@ export default function PublicBookingPage() {
       const result = await fetchPublicAvailability({
         slug,
         dateIso: preferredDate,
-        serviceId: selectedCatalogService.id,
-        durationMinutes: Math.round((selectedCatalogService.duration_hours || 0) * 60),
+        serviceId: activeServiceId,
+        durationMinutes: activeDurationMinutes,
         slotIntervalMinutes: 30,
       });
       if (cancelled) return;
@@ -209,8 +249,6 @@ export default function PublicBookingPage() {
       if (!result.ok) { setSlotsError(result.error); return; }
       setSlots(result.slots);
       setHasFetchedSlots(true);
-      // If the previously-chosen slot is no longer in the list,
-      // clear it so the user picks a fresh one.
       if (preferredTime && !result.slots.find(s => s.time === preferredTime)) {
         setPreferredTime("");
       }
@@ -221,7 +259,7 @@ export default function PublicBookingPage() {
           source: "public",
           payload: {
             slug,
-            serviceId: selectedCatalogService.id,
+            serviceId: activeServiceId,
             date: preferredDate,
             slotCount: result.slots.length,
           },
@@ -230,7 +268,46 @@ export default function PublicBookingPage() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasCatalog, selectedCatalogService?.id, preferredDate, slug]);
+  }, [preferredDate, activeServiceId, activeDurationMinutes, slug]);
+
+  // Phase B7 — month heatmap. Refetches when the visible month, the
+  // selected service, or the duration changes. Cached per key so
+  // navigating back to a previously-viewed month is instant.
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch + cache hit pattern
+  useEffect(() => {
+    if (!slug) return;
+    const key = `${monthCursor.year}-${monthCursor.month}-${activeServiceId || "none"}-${activeDurationMinutes}`;
+    const cached = monthCache.current.get(key);
+    if (cached) {
+      setMonthDays(cached);
+      setMonthLoading(false);
+      setMonthError(null);
+      return;
+    }
+    let cancelled = false;
+    setMonthLoading(true);
+    setMonthError(null);
+    (async () => {
+      const result = await fetchPublicMonthAvailability({
+        slug,
+        year: monthCursor.year,
+        month: monthCursor.month,
+        serviceId: activeServiceId,
+        durationMinutes: activeDurationMinutes,
+      });
+      if (cancelled) return;
+      setMonthLoading(false);
+      if (!result.ok) { setMonthError(result.error); setMonthDays([]); return; }
+      monthCache.current.set(key, result.days);
+      setMonthDays(result.days);
+    })();
+    return () => { cancelled = true; };
+  }, [slug, monthCursor.year, monthCursor.month, activeServiceId, activeDurationMinutes]);
+
+  const monthHasAnyAvailability = useMemo(
+    () => monthDays.some(d => d.status === "available" || d.status === "limited"),
+    [monthDays],
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -471,136 +548,131 @@ export default function PublicBookingPage() {
                 <Input value={serviceName} onChange={e => setServiceName(e.target.value)} placeholder="e.g. Knotless mid-back" />
               </Field>
             )}
-            {hasCatalog ? (
-              <>
-                <Field label="Date">
-                  <Input
-                    type="date"
-                    value={preferredDate}
-                    onChange={e => setPreferredDate(e.target.value)}
-                    min={new Date().toISOString().slice(0, 10)}
-                  />
-                </Field>
-                {selectedCatalogService && preferredDate && (
-                  <div>
-                    <span
-                      style={{
-                        display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase",
-                        letterSpacing: "0.08em", color: C.coffee, marginBottom: 6,
-                      }}
-                    >
-                      Available times
-                    </span>
-                    {slotsLoading && (
-                      <p style={{ fontSize: 12, color: C.muted, padding: "12px 0" }}>
-                        Checking availability…
-                      </p>
-                    )}
-                    {!slotsLoading && slotsError && (
-                      <p style={{ fontSize: 12, color: C.danger }}>{slotsError}</p>
-                    )}
-                    {!slotsLoading && !slotsError && hasFetchedSlots && slots.length === 0 && (
-                      <div
-                        style={{
-                          padding: 14,
-                          borderRadius: 12,
-                          background: C.paper,
-                          border: `1px solid ${C.hairline}`,
-                          textAlign: "center",
-                        }}
+            <BookingCalendar
+              monthCursor={monthCursor}
+              setMonthCursor={setMonthCursor}
+              monthDays={monthDays}
+              monthLoading={monthLoading}
+              monthError={monthError}
+              monthHasAnyAvailability={monthHasAnyAvailability}
+              hasCatalog={hasCatalog}
+              hasService={!!selectedCatalogService}
+              selectedDate={preferredDate}
+              onSelectDate={(iso) => { setPreferredDate(iso); setPreferredTime(""); }}
+              onJoinWaitlist={() => setWaitlistOpen(true)}
+            />
+            {preferredDate && (
+              <div>
+                <span
+                  style={{
+                    display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase",
+                    letterSpacing: "0.08em", color: C.coffee, marginBottom: 8,
+                  }}
+                >
+                  Available times · {formatPrettyDate(preferredDate)}
+                </span>
+                {slotsLoading && <SlotSkeleton />}
+                {!slotsLoading && slotsError && (
+                  <p style={{ fontSize: 12, color: C.danger }}>{slotsError}</p>
+                )}
+                {!slotsLoading && !slotsError && hasFetchedSlots && slots.length === 0 && (
+                  <div
+                    style={{
+                      padding: 16,
+                      borderRadius: 14,
+                      background: C.paper,
+                      border: `1px solid ${C.hairline}`,
+                      textAlign: "center",
+                    }}
+                  >
+                    <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>
+                      No openings on this date.
+                    </p>
+                    <p style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
+                      Pick another day — or join the waitlist and we&apos;ll text you when something opens.
+                    </p>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+                      <button
+                        type="button"
+                        onClick={() => { setPreferredDate(""); setPreferredTime(""); }}
+                        style={ghostButtonStyle}
                       >
-                        <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>
-                          No openings available for this date.
-                        </p>
-                        <p style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
-                          Pick another date — or join the waitlist below and we&apos;ll text you when something opens.
-                        </p>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
-                          <button
-                            type="button"
-                            onClick={() => { setPreferredDate(""); setPreferredTime(""); }}
-                            style={{
-                              padding: "10px", borderRadius: 10,
-                              background: "transparent", color: C.coffee,
-                              border: `1px solid ${C.hairline}`,
-                              fontSize: 12, fontWeight: 600, cursor: "pointer",
-                            }}
-                          >
-                            Choose another date
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setWaitlistOpen(true)}
-                            style={{
-                              padding: "10px", borderRadius: 10,
-                              background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
-                              color: C.paper,
-                              border: `1px solid ${C.goldDeep}`,
-                              fontSize: 12, fontWeight: 700, cursor: "pointer",
-                            }}
-                          >
-                            Join the waitlist
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {!slotsLoading && !slotsError && slots.length > 0 && (
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))",
-                          gap: 8,
-                        }}
+                        Choose another date
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWaitlistOpen(true)}
+                        style={primaryButtonStyle}
                       >
-                        {slots.map(s => {
-                          const on = preferredTime === s.time;
-                          return (
-                            <button
-                              type="button"
-                              key={s.time}
-                              onClick={() => setPreferredTime(s.time)}
-                              style={{
-                                padding: "12px 8px",
-                                borderRadius: 12,
-                                background: on
-                                  ? `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`
-                                  : C.paper,
-                                color: on ? C.paper : C.coffee,
-                                border: `1px solid ${on ? C.goldDeep : C.hairline}`,
-                                fontSize: 13,
-                                fontWeight: 600,
-                                cursor: "pointer",
-                                minHeight: 44,
-                              }}
-                            >
-                              {s.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+                        Join the waitlist
+                      </button>
+                    </div>
                   </div>
                 )}
-                {selectedCatalogService && !preferredDate && (
-                  <p style={{ fontSize: 12, color: C.muted }}>
-                    Pick a date to see available times.
-                  </p>
+                {!slotsLoading && !slotsError && slots.length > 0 && (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))",
+                      gap: 8,
+                    }}
+                  >
+                    {slots.map(s => {
+                      const on = preferredTime === s.time;
+                      return (
+                        <button
+                          type="button"
+                          key={s.time}
+                          onClick={() => setPreferredTime(s.time)}
+                          style={{
+                            padding: "12px 8px",
+                            borderRadius: 12,
+                            background: on
+                              ? `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`
+                              : C.paper,
+                            color: on ? C.paper : C.coffee,
+                            border: `1px solid ${on ? C.goldDeep : C.hairline}`,
+                            fontSize: 13,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            minHeight: 44,
+                            transition: "background 120ms ease, transform 120ms ease",
+                            transform: on ? "scale(1.02)" : "scale(1)",
+                          }}
+                        >
+                          {s.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
-                {!selectedCatalogService && (
-                  <p style={{ fontSize: 12, color: C.muted }}>
-                    Pick a service first to see open times.
-                  </p>
-                )}
-              </>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <Field label="Preferred date">
-                  <Input type="date" value={preferredDate} onChange={e => setPreferredDate(e.target.value)} />
-                </Field>
-                <Field label="Preferred time">
-                  <Input type="time" value={preferredTime} onChange={e => setPreferredTime(e.target.value)} />
-                </Field>
               </div>
+            )}
+            {!hasCatalog && services.length === 0 && (
+              <details
+                style={{
+                  padding: 12,
+                  borderRadius: 12,
+                  background: C.paper,
+                  border: `1px solid ${C.hairline}`,
+                  fontSize: 12,
+                  color: C.muted,
+                }}
+              >
+                <summary style={{ cursor: "pointer", fontWeight: 600, color: C.coffee }}>
+                  Don&apos;t see a service that fits? Tell us what you want
+                </summary>
+                <div style={{ marginTop: 10 }}>
+                  <Input
+                    value={serviceName}
+                    onChange={e => setServiceName(e.target.value)}
+                    placeholder="e.g. Knotless mid-back"
+                  />
+                  <p style={{ marginTop: 6, fontSize: 11 }}>
+                    The stylist will reach out to confirm details.
+                  </p>
+                </div>
+              </details>
             )}
             <Field label="Notes">
               <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
@@ -737,3 +809,335 @@ const Field = ({ label, children }: { label: string; children: React.ReactNode }
 const Input = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
   <input {...props} style={inputStyle} />
 );
+
+// ---- Phase B7 — booking calendar -------------------------------------
+
+const ghostButtonStyle: React.CSSProperties = {
+  padding: 10,
+  borderRadius: 10,
+  background: "transparent",
+  color: C.coffee,
+  border: `1px solid ${C.hairline}`,
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: "pointer",
+  minHeight: 40,
+};
+const primaryButtonStyle: React.CSSProperties = {
+  padding: 10,
+  borderRadius: 10,
+  background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+  color: C.paper,
+  border: `1px solid ${C.goldDeep}`,
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: "pointer",
+  minHeight: 40,
+};
+
+const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"] as const;
+const MONTH_LABELS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+] as const;
+
+const formatPrettyDate = (iso: string): string => {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+};
+
+const SlotSkeleton = () => (
+  <div
+    style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))",
+      gap: 8,
+    }}
+  >
+    {Array.from({ length: 6 }).map((_, i) => (
+      <div
+        key={i}
+        style={{
+          height: 44,
+          borderRadius: 12,
+          background: `linear-gradient(90deg, ${C.paper}, ${C.ivory}, ${C.paper})`,
+          backgroundSize: "200% 100%",
+          animation: "bbpShimmer 1.4s ease-in-out infinite",
+          border: `1px solid ${C.hairline}`,
+        }}
+      />
+    ))}
+  </div>
+);
+
+type CalendarProps = {
+  monthCursor: { year: number; month: number };
+  setMonthCursor: (next: { year: number; month: number }) => void;
+  monthDays: MonthDay[];
+  monthLoading: boolean;
+  monthError: string | null;
+  monthHasAnyAvailability: boolean;
+  hasCatalog: boolean;
+  hasService: boolean;
+  selectedDate: string;
+  onSelectDate: (iso: string) => void;
+  onJoinWaitlist: () => void;
+};
+
+const BookingCalendar = ({
+  monthCursor, setMonthCursor, monthDays, monthLoading, monthError,
+  monthHasAnyAvailability, hasCatalog, hasService, selectedDate,
+  onSelectDate, onJoinWaitlist,
+}: CalendarProps) => {
+  const dayMap = useMemo(() => {
+    const m = new Map<string, MonthDay>();
+    for (const d of monthDays) m.set(d.day, d);
+    return m;
+  }, [monthDays]);
+
+  // Build the visible grid: leading blanks for the weekday offset of
+  // day 1, then every day of the month, padded so the grid is a
+  // multiple of 7. SSR-safe — no Date.now() at render time outside
+  // the cursor (which was set in lazy state init).
+  const cells = useMemo(() => {
+    const first = new Date(monthCursor.year, monthCursor.month - 1, 1);
+    const lead = first.getDay(); // 0 = Sunday
+    const daysInMonth = new Date(monthCursor.year, monthCursor.month, 0).getDate();
+    const out: ({ iso: string; day: number } | null)[] = [];
+    for (let i = 0; i < lead; i++) out.push(null);
+    for (let d = 1; d <= daysInMonth; d++) {
+      const iso = `${monthCursor.year}-${String(monthCursor.month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      out.push({ iso, day: d });
+    }
+    while (out.length % 7 !== 0) out.push(null);
+    return out;
+  }, [monthCursor]);
+
+  const today = todayISO();
+
+  const goPrev = () => {
+    const m = monthCursor.month - 1;
+    if (m < 1) setMonthCursor({ year: monthCursor.year - 1, month: 12 });
+    else setMonthCursor({ year: monthCursor.year, month: m });
+  };
+  const goNext = () => {
+    const m = monthCursor.month + 1;
+    if (m > 12) setMonthCursor({ year: monthCursor.year + 1, month: 1 });
+    else setMonthCursor({ year: monthCursor.year, month: m });
+  };
+
+  // Don't allow navigating to a month entirely in the past (the prev
+  // arrow disables when the visible month is the current month).
+  const now = new Date();
+  const atCurrentMonth =
+    monthCursor.year === now.getFullYear() && monthCursor.month === now.getMonth() + 1;
+
+  const headerLabel = `${MONTH_LABELS[monthCursor.month - 1]} ${monthCursor.year}`;
+
+  return (
+    <div
+      style={{
+        padding: 14,
+        borderRadius: 16,
+        background: C.paper,
+        border: `1px solid ${C.hairline}`,
+      }}
+    >
+      <style>{`
+        @keyframes bbpShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        @keyframes bbpFadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+      `}</style>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <button
+          type="button"
+          onClick={goPrev}
+          disabled={atCurrentMonth}
+          aria-label="Previous month"
+          style={{
+            ...ghostButtonStyle,
+            minHeight: 36, padding: "6px 10px",
+            opacity: atCurrentMonth ? 0.4 : 1,
+            cursor: atCurrentMonth ? "default" : "pointer",
+          }}
+        >
+          ←
+        </button>
+        <div style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 18, color: C.espresso }}>
+          {headerLabel}
+        </div>
+        <button
+          type="button"
+          onClick={goNext}
+          aria-label="Next month"
+          style={{ ...ghostButtonStyle, minHeight: 36, padding: "6px 10px" }}
+        >
+          →
+        </button>
+      </div>
+
+      {!hasCatalog && (
+        <p style={{ fontSize: 11, color: C.muted, marginBottom: 8, lineHeight: 1.5 }}>
+          The stylist hasn&apos;t finished setting up their catalog. Pick any open day and we&apos;ll text you to confirm.
+        </p>
+      )}
+      {hasCatalog && !hasService && (
+        <p style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+          Pick a service above for the most accurate openings — the calendar uses an hour by default until then.
+        </p>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
+        {WEEKDAY_LETTERS.map((w, i) => (
+          <div
+            key={`wk-${i}`}
+            style={{
+              fontSize: 10, fontWeight: 700, color: C.muted,
+              textAlign: "center", textTransform: "uppercase", letterSpacing: "0.08em",
+              padding: "4px 0",
+            }}
+          >
+            {w}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+        {cells.map((cell, idx) => {
+          if (!cell) return <div key={`pad-${idx}`} style={{ minHeight: 44 }} />;
+          const info = dayMap.get(cell.iso);
+          const status: MonthDayStatus = info?.status ?? "off";
+          const isPast = cell.iso < today;
+          const isSelected = selectedDate === cell.iso;
+          const disabled = isPast || status === "off" || status === "booked";
+          return (
+            <CalendarCell
+              key={cell.iso}
+              day={cell.day}
+              status={status}
+              loading={monthLoading && !info}
+              disabled={disabled}
+              selected={isSelected}
+              onClick={() => { if (!disabled) onSelectDate(cell.iso); }}
+            />
+          );
+        })}
+      </div>
+
+      <div style={{
+        display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12,
+        fontSize: 10, color: C.muted, alignItems: "center",
+      }}>
+        <Legend swatch={C.gold} label="Open" />
+        <Legend swatch="#E5D4A0" label="Limited" />
+        <Legend swatch={C.hairline} label="Booked" />
+        <Legend swatch="transparent" border label="Closed" />
+      </div>
+
+      {monthError && (
+        <p style={{ fontSize: 11, color: C.danger, marginTop: 10 }}>
+          Couldn&apos;t load this month&apos;s availability. {monthError}
+        </p>
+      )}
+      {!monthLoading && !monthError && monthDays.length > 0 && !monthHasAnyAvailability && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: 12,
+            borderRadius: 12,
+            background: C.cream,
+            border: `1px solid ${C.hairline}`,
+            textAlign: "center",
+          }}
+        >
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 16, fontWeight: 600, color: C.espresso }}>
+            Stylist is updating availability
+          </p>
+          <p style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+            No openings this month yet. Try the next month, or join the waitlist and we&apos;ll text you.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
+            <button type="button" onClick={goNext} style={ghostButtonStyle}>
+              See next month
+            </button>
+            <button type="button" onClick={onJoinWaitlist} style={primaryButtonStyle}>
+              Join waitlist
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Legend = ({ swatch, label, border }: { swatch: string; label: string; border?: boolean }) => (
+  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+    <span style={{
+      display: "inline-block", width: 10, height: 10, borderRadius: 3,
+      background: swatch, border: border ? `1px solid ${C.hairline}` : "none",
+    }} />
+    {label}
+  </span>
+);
+
+type CellProps = {
+  day: number;
+  status: MonthDayStatus;
+  loading: boolean;
+  disabled: boolean;
+  selected: boolean;
+  onClick: () => void;
+};
+
+const CalendarCell = ({ day, status, loading, disabled, selected, onClick }: CellProps) => {
+  // Visual treatment per status. Selected wins over status colors.
+  let bg = C.paper;
+  let fg = C.espresso;
+  let border = `1px solid ${C.hairline}`;
+  if (loading) {
+    bg = `linear-gradient(90deg, ${C.paper}, ${C.ivory}, ${C.paper})`;
+  } else if (selected) {
+    bg = `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`;
+    fg = C.paper;
+    border = `1px solid ${C.goldDeep}`;
+  } else if (status === "available") {
+    bg = "rgba(201, 169, 97, 0.18)";
+    border = `1px solid rgba(201, 169, 97, 0.35)`;
+  } else if (status === "limited") {
+    bg = "rgba(229, 212, 160, 0.35)";
+    border = `1px solid rgba(229, 212, 160, 0.55)`;
+  } else if (status === "booked") {
+    bg = C.cream;
+    fg = C.muted;
+  } else if (status === "off") {
+    bg = "transparent";
+    fg = "rgba(74, 44, 26, 0.35)";
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || loading}
+      aria-label={`Day ${day}, ${status}`}
+      style={{
+        minHeight: 44, padding: 0,
+        borderRadius: 10,
+        background: bg as string,
+        color: fg,
+        border,
+        fontSize: 13,
+        fontWeight: selected ? 700 : 500,
+        cursor: disabled ? "default" : "pointer",
+        animation: loading ? "bbpShimmer 1.4s ease-in-out infinite" : "bbpFadeIn 180ms ease",
+        backgroundSize: loading ? "200% 100%" : undefined,
+        transition: "transform 120ms ease, background 120ms ease",
+        transform: selected ? "scale(1.04)" : "scale(1)",
+      }}
+    >
+      {day}
+    </button>
+  );
+};
