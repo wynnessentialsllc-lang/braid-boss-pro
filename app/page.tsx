@@ -146,6 +146,17 @@ import {
   useAvailability,
 } from "./lib/availability";
 import {
+  type WaitlistRequest,
+  type WaitlistStatus,
+  WAITLIST_STATUS_LABEL,
+  WAITLIST_FLEX_LABEL,
+  useWaitlist,
+} from "./lib/waitlist";
+import {
+  type ClientLike,
+  matchClientByContact,
+} from "./lib/clients-match";
+import {
   downloadJson,
   downloadPdfBlob,
 } from "./lib/native-download";
@@ -8968,7 +8979,7 @@ const PolicySheet = ({ policy, isNew, onClose, onSave }) => {
 // ============================================================
 //  SETTINGS (V1 extended with Reminders link)
 // ============================================================
-const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void }) => {
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
@@ -9176,6 +9187,35 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Availability</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Weekly hours · time off · one-time changes</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openWaitlist && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openWaitlist}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <UserPlus size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Waitlist</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        {(() => {
+                          const list = store.waitlistApi?.requests || [];
+                          const waiting = list.filter((r: any) => r.status === "waiting").length;
+                          if (list.length === 0) return "Clients waiting for an opening";
+                          return `${waiting} waiting · ${list.length} total`;
+                        })()}
+                      </p>
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
@@ -12496,6 +12536,186 @@ const BookingPoliciesScreen = ({ store, onBack }: { store: any; onBack: () => vo
 // ============================================================
 //  AVAILABILITY (Phase 2)
 // ============================================================
+// ============================================================
+//  WAITLIST — owner management screen
+// ============================================================
+const WAITLIST_STATUS_TONE: Record<WaitlistStatus, "warning" | "gold" | "success" | "danger" | "neutral"> = {
+  waiting:   "warning",
+  contacted: "gold",
+  booked:    "success",
+  declined:  "danger",
+  archived:  "neutral",
+};
+
+const WaitlistScreen = ({
+  store, onBack, onConvertToAppointment,
+}: {
+  store: any;
+  onBack: () => void;
+  onConvertToAppointment: (req: WaitlistRequest, matchedClient: ClientLike | null) => void;
+}) => {
+  const api = store.waitlistApi;
+  const requests: WaitlistRequest[] = api?.requests || [];
+  const clients: ClientLike[] = (store.clients as ClientLike[]) || [];
+  const [filter, setFilter] = useState<"waiting" | "all" | "archived">("waiting");
+  const [picker, setPicker] = useState<{ req: WaitlistRequest; candidates: ClientLike[] } | null>(null);
+
+  const filtered = useMemo(() => {
+    if (filter === "all") return requests;
+    if (filter === "archived") return requests.filter(r => r.status === "archived" || r.status === "declined");
+    return requests.filter(r => r.status === "waiting" || r.status === "contacted");
+  }, [requests, filter]);
+
+  const tryConvert = (req: WaitlistRequest) => {
+    const match = matchClientByContact(
+      { email: req.client_email, phone: req.client_phone },
+      clients,
+    );
+    if (match.kind === "ambiguous") {
+      setPicker({ req, candidates: match.candidates });
+      return;
+    }
+    if (match.kind === "single") {
+      onConvertToAppointment(req, match.client);
+      return;
+    }
+    onConvertToAppointment(req, null);
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Waitlist"
+        subtitle="Clients waiting for an opening"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-3">
+        {api?.error && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{api.error}</p>
+          </Card>
+        )}
+
+        <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          {[
+            { id: "waiting", label: `Active · ${requests.filter(r => r.status === "waiting" || r.status === "contacted").length}` },
+            { id: "all", label: `All · ${requests.length}` },
+            { id: "archived", label: `Archive · ${requests.filter(r => r.status === "archived" || r.status === "declined").length}` },
+          ].map(t => (
+            <button
+              type="button"
+              key={t.id}
+              onClick={() => setFilter(t.id as any)}
+              className="flex-1 py-2 rounded-lg text-[12px] font-semibold transition"
+              style={{
+                background: filter === t.id ? C.espresso : "transparent",
+                color: filter === t.id ? C.cream : C.coffee,
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {filtered.length === 0 ? (
+          <EmptyState
+            icon={<UserPlus size={28} style={{ color: C.gold }} />}
+            title="No one waiting"
+            body="When a client submits a waitlist request from your booking link, they'll show here."
+          />
+        ) : (
+          filtered.map(r => (
+            <Card key={r.id} className="p-4">
+              <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <Pill tone={WAITLIST_STATUS_TONE[r.status]}>{WAITLIST_STATUS_LABEL[r.status]}</Pill>
+                    {r.preferred_date && (
+                      <span className="text-[11px] font-semibold" style={{ color: C.coffee }}>
+                        {fmtDate(r.preferred_date)}{r.preferred_time ? ` · ${fmtTime(r.preferred_time)}` : ""}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>{r.client_name}</p>
+                  <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
+                    {r.service_name || "No service specified"}
+                    {r.flexibility ? ` · ${WAITLIST_FLEX_LABEL[r.flexibility]}` : ""}
+                  </p>
+                  {(r.client_phone || r.client_email) && (
+                    <p className="text-[11px] mt-1" style={{ color: C.coffee }}>
+                      {[r.client_phone, r.client_email].filter(Boolean).join(" · ")}
+                    </p>
+                  )}
+                  {r.notes && (
+                    <p className="text-[12px] mt-2" style={{ color: C.coffee, lineHeight: 1.4 }}>{r.notes}</p>
+                  )}
+                  <p className="text-[10px] mt-2" style={{ color: C.muted }}>
+                    Submitted {fmtRelative(r.created_at)}
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                <Button variant="primary" icon={<Check size={14} />} onClick={() => tryConvert(r)}>
+                  Convert to appt
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => api.setStatus(r.id, r.status === "contacted" ? "waiting" : "contacted")}
+                >
+                  {r.status === "contacted" ? "Mark waiting" : "Mark contacted"}
+                </Button>
+                <Button variant="outline" onClick={() => api.setStatus(r.id, "archived")}>
+                  Archive
+                </Button>
+                <Button variant="danger" icon={<Trash2 size={14} />} onClick={() => api.remove(r.id)}>
+                  Delete
+                </Button>
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
+
+      <Sheet
+        open={!!picker}
+        onClose={() => setPicker(null)}
+        title="Pick the right client"
+      >
+        {picker && (
+          <div className="space-y-2 pb-2">
+            <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+              Multiple clients match this contact info. Pick the existing one to link, or create a new client.
+            </p>
+            {picker.candidates.map(c => (
+              <button
+                type="button"
+                key={c.id}
+                onClick={() => { const req = picker.req; setPicker(null); onConvertToAppointment(req, c); }}
+                className="w-full text-left rounded-xl px-4 py-3 active:scale-[0.99] transition"
+                style={{ background: C.paper, border: `1px solid ${C.hairline}`, color: "inherit", font: "inherit" }}
+              >
+                <p className="text-sm font-semibold" style={{ color: C.espresso }}>{c.name}</p>
+                <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
+                  {[c.phone, c.email].filter(Boolean).join(" · ") || "No contact info"}
+                </p>
+              </button>
+            ))}
+            <Button
+              variant="primary"
+              fullWidth
+              icon={<UserPlus size={14} />}
+              onClick={() => { const req = picker.req; setPicker(null); onConvertToAppointment(req, null); }}
+            >
+              Create new client
+            </Button>
+            <Button variant="outline" fullWidth onClick={() => setPicker(null)}>Cancel</Button>
+          </div>
+        )}
+      </Sheet>
+    </div>
+  );
+};
+
 const AvailabilityScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const api = store.availabilityApi;
   const rules: AvailabilityRule[] = api?.rules || [];
@@ -13268,6 +13488,7 @@ export default function App() {
   const servicesApi = useServices(auth.userId);
   const policiesApi = useBookingPolicy(auth.userId);
   const availabilityApi = useAvailability(auth.userId);
+  const waitlistApi = useWaitlist(auth.userId);
   const [upgradeFor, setUpgradeFor] = useState<GatedFeature | null>(null);
   const requestUpgrade = useCallback((feature: GatedFeature) => {
     setUpgradeFor(feature);
@@ -13299,6 +13520,7 @@ export default function App() {
       servicesApi,
       policiesApi,
       availabilityApi,
+      waitlistApi,
       upsertClient: gateNew("clients", rawStore.clients, rawStore.upsertClient),
       // Personal events and blocked time live in the same table but
       // aren't bookings, so they (a) don't count toward the appointment
@@ -13320,7 +13542,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, premium, requestUpgrade, discountsApi, servicesApi, policiesApi, availabilityApi]);
+  }, [rawStore, premium, requestUpgrade, discountsApi, servicesApi, policiesApi, availabilityApi, waitlistApi]);
 
   const sync = useCloudSync(auth.userId, store);
 
@@ -13628,9 +13850,53 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "waitlist" && (
+        <WaitlistScreen
+          store={store}
+          onBack={() => setSecondary("settings")}
+          onConvertToAppointment={async (req, matchedClient) => {
+            // Resolve the client. Match wins; otherwise create a new
+            // client record so the appointment is linked from day one
+            // (no "Walk-in" placeholder, no duplicate next time).
+            let client = matchedClient;
+            if (!client) {
+              const created = await store.upsertClient({
+                name: req.client_name,
+                phone: req.client_phone || "",
+                email: req.client_email || "",
+              });
+              client = created || null;
+            }
+            const apptId = `appt_${uid()}`;
+            const newAppt: any = {
+              id: apptId,
+              clientId: client?.id || "",
+              clientName: client?.name || req.client_name,
+              clientPhone: client?.phone || req.client_phone || "",
+              clientEmail: client?.email || req.client_email || "",
+              style: req.service_name || "",
+              serviceId: req.service_id || null,
+              date: req.preferred_date || todayISO(),
+              time: req.preferred_time || "10:00",
+              durationHours: "",
+              totalPrice: 0,
+              depositPaid: 0,
+              status: "scheduled",
+              source: "waitlist",
+              notes: req.notes || "",
+              createdAt: new Date().toISOString(),
+            };
+            await store.upsertAppointment(newAppt);
+            await store.waitlistApi.setStatus(req.id, "booked");
+            setSecondary(null);
+            setActive("schedule");
+            setApptPrefill(newAppt);
+          }}
+        />
+      )}
       {secondary === "services" && <ServicesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "reports" && <ReportsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "discounts" && <DiscountsScreen store={store} onBack={() => setSecondary("settings")} />}
@@ -13686,21 +13952,46 @@ export default function App() {
           userId={auth.userId}
           onBack={() => setSecondary(null)}
           onApprove={async (req) => {
-            // Approve = create an appointment from the request payload,
-            // then mark the request as converted with the new appt id.
+            // Client matching: email first, phone fallback. If a
+            // single existing client matches, link the appointment
+            // to them. If multiple match, the V1 fallback is to
+            // pick the first (the dedicated picker lives in the
+            // Waitlist convert flow; booking-request approval
+            // doesn't have an interactive picker yet — Phase B).
+            // If none match, create a new client so the appointment
+            // is linked from day one.
+            const match = matchClientByContact(
+              { email: req.client_email, phone: req.client_phone },
+              (store.clients as ClientLike[]) || [],
+            );
+            let client: ClientLike | null = null;
+            if (match.kind === "single") client = match.client;
+            else if (match.kind === "ambiguous") client = match.candidates[0] || null;
+            if (!client) {
+              const created = await store.upsertClient({
+                name: req.client_name,
+                phone: req.client_phone || "",
+                email: req.client_email || "",
+              });
+              client = (created as ClientLike) || null;
+            }
+
             const apptId = `appt_${uid()}`;
             const newAppt: any = {
               id: apptId,
-              clientName: req.client_name,
-              clientPhone: req.client_phone || "",
-              clientEmail: req.client_email || "",
+              clientId: client?.id || "",
+              clientName: client?.name || req.client_name,
+              clientPhone: client?.phone || req.client_phone || "",
+              clientEmail: client?.email || req.client_email || "",
               style: req.service_name || "",
+              serviceId: (req as any).service_id || null,
               date: req.preferred_date || todayISO(),
               time: req.preferred_time || "10:00",
               durationHours: req.service_duration ?? "",
               totalPrice: req.service_price ?? 0,
               depositPaid: 0,
               status: "scheduled",
+              source: "public_booking",
               notes: req.notes || "",
               createdAt: new Date().toISOString(),
             };

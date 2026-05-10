@@ -316,3 +316,94 @@ export const WEEKDAY_LABELS = [
   "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
 ] as const;
 export const WEEKDAY_SHORT = ["S", "M", "T", "W", "T", "F", "S"] as const;
+
+// ---- Public-booking slot engine (Phase A — pure helper) ---------------
+//
+// Pure function: given the day's availability snapshot and the list
+// of existing appointments for that date, return the start times that
+// fit a service of `serviceDurationMinutes`. Phase B will surface this
+// to the public booking page via a security-definer RPC; Phase A
+// ships the engine so internal screens can use it today.
+
+export type SlotEngineInput = {
+  date: string;                       // "YYYY-MM-DD"
+  serviceDurationMinutes: number;     // service length to fit
+  appointments: Array<{ time?: string; durationHours?: number | string; status?: string; kind?: string; date?: string }>;
+  availabilityRules: AvailabilityRule[];
+  availabilityExceptions: AvailabilityException[];
+  slotIntervalMinutes?: number;       // default 30
+};
+
+export type Slot = {
+  time: string;        // "HH:mm" 24h, sortable
+  label: string;       // "9:00 AM" — UI-ready
+  startMinute: number; // minutes from midnight
+};
+
+const toMin = (hhmm: string): number => {
+  const [h, m] = hhmm.split(":").map(Number);
+  return (h || 0) * 60 + (m || 0);
+};
+const toHhmm = (mins: number): string => {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+};
+const toLabel = (mins: number): string => {
+  const h24 = Math.floor(mins / 60);
+  const m = mins % 60;
+  const period = h24 >= 12 ? "PM" : "AM";
+  const h = ((h24 + 11) % 12) + 1;
+  return `${h}:${String(m).padStart(2, "0")} ${period}`;
+};
+
+// Two ranges overlap if start < other-end AND end > other-start.
+const overlaps = (aStart: number, aEnd: number, bStart: number, bEnd: number): boolean =>
+  aStart < bEnd && aEnd > bStart;
+
+export const getAvailableSlots = (input: SlotEngineInput): Slot[] => {
+  const duration = Math.max(15, Math.round(Number(input.serviceDurationMinutes) || 0));
+  if (duration <= 0) return [];
+  const interval = Math.max(5, Math.round(Number(input.slotIntervalMinutes) || 30));
+
+  const day = computeDayAvailability(input.date, input.availabilityRules, input.availabilityExceptions);
+  if (!day.open) return [];
+
+  // Existing bookings for the day. Cancelled entries don't reserve
+  // time. Personal events + blocked-kind entries DO (they hold the
+  // slot so the public booking can't double-book over them).
+  const reserved: Array<[number, number]> = [];
+  for (const a of input.appointments) {
+    if (!a || a.date !== input.date) continue;
+    if (a.status === "cancelled") continue;
+    if (!a.time) continue;
+    const start = toMin(a.time);
+    const dur = Math.max(15, Math.round((Number(a.durationHours) || 1) * 60));
+    reserved.push([start, start + dur]);
+  }
+  // The day's explicit `blocked` exceptions (in the windows + blocks
+  // model from computeDayAvailability) are already exposed:
+  for (const b of day.blocks) {
+    reserved.push([toMin(b.start), toMin(b.end)]);
+  }
+
+  const out: Slot[] = [];
+  for (const window of day.windows) {
+    const wStart = toMin(window.start);
+    const wEnd = toMin(window.end);
+    // Walk the window in `interval` steps; emit a slot whenever a
+    // service of `duration` minutes fits AND doesn't overlap any
+    // reserved range.
+    for (let s = wStart; s + duration <= wEnd; s += interval) {
+      const e = s + duration;
+      let conflict = false;
+      for (const [rs, re] of reserved) {
+        if (overlaps(s, e, rs, re)) { conflict = true; break; }
+      }
+      if (!conflict) {
+        out.push({ time: toHhmm(s), label: toLabel(s), startMinute: s });
+      }
+    }
+  }
+  return out;
+};
