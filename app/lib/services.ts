@@ -302,3 +302,45 @@ export const fetchPublicServices = async (
   }));
   return { ok: true, services };
 };
+
+// ---- Public availability ----------------------------------------------
+//
+// Phase B2: anonymous slot lookup. Calls the security-definer RPC
+// `public_list_availability` so anon visitors can see real slots
+// without reading owner availability data directly.
+//
+// All required filtering — weekly hours, breaks, off / custom /
+// blocked exceptions, existing appointments, buffers, and
+// max_concurrent — happens inside the RPC. The client just
+// renders chips.
+export type PublicSlot = {
+  time: string;        // "HH:mm"
+  label: string;       // "9:00 AM"
+  startMinute: number;
+};
+
+export const fetchPublicAvailability = async (params: {
+  slug: string;
+  dateIso: string;          // "YYYY-MM-DD"
+  serviceId?: string | null;
+  durationMinutes?: number | null;
+  slotIntervalMinutes?: number;
+}): Promise<{ ok: true; slots: PublicSlot[] } | { ok: false; error: string }> => {
+  if (!params.slug) return { ok: false, error: "Missing booking slug." };
+  if (!params.dateIso) return { ok: false, error: "Pick a date first." };
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("public_list_availability", {
+    slug_in: params.slug,
+    date_in: params.dateIso,
+    duration_minutes_in: params.durationMinutes ?? null,
+    service_id_in: params.serviceId ?? null,
+    slot_interval_minutes_in: params.slotIntervalMinutes ?? 30,
+  });
+  if (error) return { ok: false, error: error.message };
+  const slots = ((data || []) as any[]).map(s => ({
+    time: String(s.slot_time),
+    label: String(s.slot_label),
+    startMinute: Number(s.start_minute) || 0,
+  }));
+  return { ok: true, slots };
+};

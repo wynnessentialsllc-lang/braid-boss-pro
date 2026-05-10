@@ -5,7 +5,12 @@ import { useParams } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
 import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LABEL } from "../../lib/waitlist";
 import { emitAnalyticsEvent } from "../../lib/analytics-events";
-import { fetchPublicServices, type PublicService } from "../../lib/services";
+import {
+  fetchPublicServices,
+  fetchPublicAvailability,
+  type PublicService,
+  type PublicSlot,
+} from "../../lib/services";
 import { collectPublicContext } from "../../lib/waitlist";
 
 // Minimal palette — kept inline so this page never imports the main
@@ -53,6 +58,11 @@ export default function PublicBookingPage() {
   // so existing booking links keep working during the rollout.
   const [catalog, setCatalog] = useState<PublicService[]>([]);
   const [serviceId, setServiceId] = useState<string>("");
+  // Phase B2 — live slot picker driven by public_list_availability.
+  const [slots, setSlots] = useState<PublicSlot[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [slotsError, setSlotsError] = useState<string | null>(null);
+  const [hasFetchedSlots, setHasFetchedSlots] = useState(false);
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -171,6 +181,56 @@ export default function PublicBookingPage() {
   const selectedCatalogService = hasCatalog
     ? catalog.find(s => s.id === serviceId) || null
     : null;
+
+  // Re-fetch slots whenever the user picks a different service or
+  // date. Only runs when both a service AND a date are chosen on a
+  // catalog-aware salon — legacy free-text links keep the manual
+  // preferred-time input.
+  useEffect(() => {
+    if (!hasCatalog || !selectedCatalogService || !preferredDate) {
+      setSlots([]);
+      setHasFetchedSlots(false);
+      return;
+    }
+    let cancelled = false;
+    setSlotsLoading(true);
+    setSlotsError(null);
+    setHasFetchedSlots(false);
+    (async () => {
+      const result = await fetchPublicAvailability({
+        slug,
+        dateIso: preferredDate,
+        serviceId: selectedCatalogService.id,
+        durationMinutes: Math.round((selectedCatalogService.duration_hours || 0) * 60),
+        slotIntervalMinutes: 30,
+      });
+      if (cancelled) return;
+      setSlotsLoading(false);
+      if (!result.ok) { setSlotsError(result.error); return; }
+      setSlots(result.slots);
+      setHasFetchedSlots(true);
+      // If the previously-chosen slot is no longer in the list,
+      // clear it so the user picks a fresh one.
+      if (preferredTime && !result.slots.find(s => s.time === preferredTime)) {
+        setPreferredTime("");
+      }
+      if (link?.user_id) {
+        void emitAnalyticsEvent({
+          ownerUserId: link.user_id,
+          type: "public_slot_viewed" as any,
+          source: "public",
+          payload: {
+            slug,
+            serviceId: selectedCatalogService.id,
+            date: preferredDate,
+            slotCount: result.slots.length,
+          },
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasCatalog, selectedCatalogService?.id, preferredDate, slug]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -411,14 +471,137 @@ export default function PublicBookingPage() {
                 <Input value={serviceName} onChange={e => setServiceName(e.target.value)} placeholder="e.g. Knotless mid-back" />
               </Field>
             )}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Preferred date">
-                <Input type="date" value={preferredDate} onChange={e => setPreferredDate(e.target.value)} />
-              </Field>
-              <Field label="Preferred time">
-                <Input type="time" value={preferredTime} onChange={e => setPreferredTime(e.target.value)} />
-              </Field>
-            </div>
+            {hasCatalog ? (
+              <>
+                <Field label="Date">
+                  <Input
+                    type="date"
+                    value={preferredDate}
+                    onChange={e => setPreferredDate(e.target.value)}
+                    min={new Date().toISOString().slice(0, 10)}
+                  />
+                </Field>
+                {selectedCatalogService && preferredDate && (
+                  <div>
+                    <span
+                      style={{
+                        display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase",
+                        letterSpacing: "0.08em", color: C.coffee, marginBottom: 6,
+                      }}
+                    >
+                      Available times
+                    </span>
+                    {slotsLoading && (
+                      <p style={{ fontSize: 12, color: C.muted, padding: "12px 0" }}>
+                        Checking availability…
+                      </p>
+                    )}
+                    {!slotsLoading && slotsError && (
+                      <p style={{ fontSize: 12, color: C.danger }}>{slotsError}</p>
+                    )}
+                    {!slotsLoading && !slotsError && hasFetchedSlots && slots.length === 0 && (
+                      <div
+                        style={{
+                          padding: 14,
+                          borderRadius: 12,
+                          background: C.paper,
+                          border: `1px solid ${C.hairline}`,
+                          textAlign: "center",
+                        }}
+                      >
+                        <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>
+                          No openings available for this date.
+                        </p>
+                        <p style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
+                          Pick another date — or join the waitlist below and we&apos;ll text you when something opens.
+                        </p>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+                          <button
+                            type="button"
+                            onClick={() => { setPreferredDate(""); setPreferredTime(""); }}
+                            style={{
+                              padding: "10px", borderRadius: 10,
+                              background: "transparent", color: C.coffee,
+                              border: `1px solid ${C.hairline}`,
+                              fontSize: 12, fontWeight: 600, cursor: "pointer",
+                            }}
+                          >
+                            Choose another date
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setWaitlistOpen(true)}
+                            style={{
+                              padding: "10px", borderRadius: 10,
+                              background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+                              color: C.paper,
+                              border: `1px solid ${C.goldDeep}`,
+                              fontSize: 12, fontWeight: 700, cursor: "pointer",
+                            }}
+                          >
+                            Join the waitlist
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {!slotsLoading && !slotsError && slots.length > 0 && (
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))",
+                          gap: 8,
+                        }}
+                      >
+                        {slots.map(s => {
+                          const on = preferredTime === s.time;
+                          return (
+                            <button
+                              type="button"
+                              key={s.time}
+                              onClick={() => setPreferredTime(s.time)}
+                              style={{
+                                padding: "12px 8px",
+                                borderRadius: 12,
+                                background: on
+                                  ? `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`
+                                  : C.paper,
+                                color: on ? C.paper : C.coffee,
+                                border: `1px solid ${on ? C.goldDeep : C.hairline}`,
+                                fontSize: 13,
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                minHeight: 44,
+                              }}
+                            >
+                              {s.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {selectedCatalogService && !preferredDate && (
+                  <p style={{ fontSize: 12, color: C.muted }}>
+                    Pick a date to see available times.
+                  </p>
+                )}
+                {!selectedCatalogService && (
+                  <p style={{ fontSize: 12, color: C.muted }}>
+                    Pick a service first to see open times.
+                  </p>
+                )}
+              </>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Preferred date">
+                  <Input type="date" value={preferredDate} onChange={e => setPreferredDate(e.target.value)} />
+                </Field>
+                <Field label="Preferred time">
+                  <Input type="time" value={preferredTime} onChange={e => setPreferredTime(e.target.value)} />
+                </Field>
+              </div>
+            )}
             <Field label="Notes">
               <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
                 placeholder="Hair length, anything you want me to know…"
