@@ -145,7 +145,23 @@ export async function POST(req: Request) {
     const link = await stripePost("/account_links", linkForm, stripeSecret);
     if (!link?.url) return fail(502, "Stripe didn't return an onboarding URL.");
 
-    return NextResponse.json({ url: link.url, account_id: accountId });
+    // Sanity log so prod can confirm the URL Stripe returned is the
+    // Express setup link (connect.stripe.com/setup/...) and not the
+    // platform-owner dashboard (dashboard.stripe.com/...).
+    const linkUrl: string = String(link.url);
+    let host = "";
+    try { host = new URL(linkUrl).host; } catch { host = "<unparseable>"; }
+    const looksRight = host.endsWith("connect.stripe.com");
+    console.info(
+      `[stripe-connect/onboard] account_link → host=${host} ${looksRight ? "(express ok)" : "(UNEXPECTED HOST)"} account=${accountId}`,
+    );
+    if (!looksRight) {
+      console.warn(
+        `[stripe-connect/onboard] Stripe returned a non-Express URL: ${linkUrl}`,
+      );
+    }
+
+    return NextResponse.json({ url: linkUrl, account_id: accountId });
   } catch (e: any) {
     return fail(502, e?.message || "Stripe onboarding failed.");
   }
