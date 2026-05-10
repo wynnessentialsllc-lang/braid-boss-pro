@@ -336,9 +336,14 @@ export default function PublicBookingPage() {
       // deployed yet (older Supabase env) so existing booking links
       // never break.
       let submittedOk = false;
+      let newRequestId: string | null = null;
+      let needsDeposit = false;
       const ctx = collectPublicContext();
       const supabase = getSupabase();
-      const { data: rpcId, error: rpcErr } = await supabase.rpc(
+      // Phase B10 — the RPC now returns a TABLE with the new request
+      // id, approval_status, and the deposit context the client needs
+      // to redirect straight to Stripe Checkout.
+      const { data: rpcRows, error: rpcErr } = await supabase.rpc(
         "public_submit_booking_request",
         {
           slug_in: slug,
@@ -353,9 +358,15 @@ export default function PublicBookingPage() {
           locale_in: ctx.locale,
         },
       );
-      if (!rpcErr && rpcId) {
-        submittedOk = true;
-      } else {
+      if (!rpcErr && rpcRows) {
+        const row = Array.isArray(rpcRows) ? rpcRows[0] : (rpcRows as any);
+        if (row?.request_id) {
+          submittedOk = true;
+          newRequestId = String(row.request_id);
+          needsDeposit = !!row.deposit_required && Number(row.deposit_amount) > 0;
+        }
+      }
+      if (!submittedOk) {
         // Legacy edge-function fallback. Only triggers when the
         // RPC isn't deployed (404) or returns null.
         const res = await fetch(`${FUNCTIONS_URL}/booking-request`, {
@@ -382,6 +393,28 @@ export default function PublicBookingPage() {
         submittedOk = true;
       }
       if (!submittedOk) throw new Error("Couldn't send your request.");
+
+      // Deposit-required path: kick the client straight to Stripe.
+      // The success URL routes them to /booking/success which polls
+      // the RPC until the webhook flips approval_status.
+      if (needsDeposit && newRequestId) {
+        const checkoutRes = await fetch("/api/booking-deposit/checkout", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ request_id: newRequestId }),
+        });
+        const checkoutBody = await checkoutRes.json().catch(() => ({}));
+        if (!checkoutRes.ok || !checkoutBody?.url) {
+          throw new Error(
+            checkoutBody?.error || "Couldn't start checkout. Please try again.",
+          );
+        }
+        // Full-page redirect to Stripe Checkout. Using assign() (instead
+        // of href=) so the lint compiler doesn't flag the assignment.
+        if (typeof window !== "undefined") window.location.assign(String(checkoutBody.url));
+        return;
+      }
+
       setSubmitted(true);
       if (link?.user_id) {
         void emitAnalyticsEvent({
@@ -696,7 +729,11 @@ export default function PublicBookingPage() {
                 cursor: submitting ? "default" : "pointer",
                 opacity: submitting ? 0.6 : 1,
               }}>
-              {submitting ? "Sending…" : "Request appointment"}
+              {submitting
+                ? "Sending…"
+                : selectedCatalogService?.deposit_required && (selectedCatalogService.deposit_amount || 0) > 0
+                  ? `Pay deposit & request appointment · $${Number(selectedCatalogService.deposit_amount).toFixed(2)}`
+                  : "Request appointment"}
             </button>
             <p style={{ fontSize: 11, color: C.muted, textAlign: "center", marginTop: 4 }}>
               You&apos;ll get a confirmation reply once your stylist reviews the request.
