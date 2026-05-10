@@ -4109,7 +4109,34 @@ const DayCalendarView = ({
                   overflow: "hidden",
                 }}
               >
-                <p className="text-[13px] font-semibold leading-tight truncate">
+                {/* Double-book hint — surfaces on the FIRST column of
+                    every overlap cluster so the cluster size is
+                    visible at a glance without repeating the badge
+                    on every column. Position: top-right corner. */}
+                {isSplit && p.col === 0 && (
+                  <span
+                    aria-label={`${cols} bookings overlap`}
+                    style={{
+                      position: "absolute",
+                      top: 6,
+                      right: 6,
+                      padding: "2px 6px",
+                      borderRadius: 999,
+                      background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+                      color: C.paper,
+                      fontSize: 9,
+                      fontWeight: 700,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      lineHeight: 1.2,
+                      boxShadow: "0 1px 2px rgba(168, 137, 63, 0.4)",
+                      zIndex: 1,
+                    }}
+                  >
+                    {cols === 2 ? "Double" : `${cols} bookings`}
+                  </span>
+                )}
+                <p className="text-[13px] font-semibold leading-tight truncate" style={isSplit ? { paddingRight: p.col === 0 ? 56 : 0 } : undefined}>
                   {titleLine}
                 </p>
                 <p className="text-[11px] mt-0.5 truncate" style={{ opacity: 0.85 }}>
