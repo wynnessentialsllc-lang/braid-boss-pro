@@ -12,9 +12,16 @@ import { getSupabase } from "./supabase";
 export type ApprovalStatus =
   | "pending_review"
   | "approved_pending_deposit"
+  | "awaiting_deposit"
+  | "deposit_paid_pending_approval"
+  | "approved"
   | "confirmed"
-  | "expired"
-  | "declined";
+  | "denied"
+  | "declined"
+  | "cancelled"
+  | "expired";
+
+export type PaymentStatus = "unpaid" | "paid" | "refunded" | "failed";
 
 export type BookingRequestRecord = {
   id: string;
@@ -36,33 +43,50 @@ export type BookingRequestRecord = {
   status: "pending" | "approved" | "declined" | "converted" | string;
   approval_status: ApprovalStatus;
   deposit_amount: number | null;
+  deposit_paid: boolean;
   deposit_paid_at: string | null;
+  deposit_required: boolean;
+  payment_status: PaymentStatus;
   stripe_session_id: string | null;
+  stripe_checkout_session_id: string | null;
+  stripe_payment_intent_id: string | null;
   approval_expires_at: string | null;
   approved_at: string | null;
   declined_at: string | null;
+  denied_at: string | null;
   expired_at: string | null;
   confirmed_at: string | null;
   decline_reason: string | null;
+  denied_reason: string | null;
   appointment_id: string | null;
   created_at: string;
   updated_at: string;
 };
 
 export const APPROVAL_STATUS_LABEL: Record<ApprovalStatus, string> = {
-  pending_review:           "Awaiting review",
-  approved_pending_deposit: "Approved · awaiting deposit",
-  confirmed:                "Confirmed",
-  expired:                  "Hold expired",
-  declined:                 "Declined",
+  pending_review:                "Awaiting review",
+  approved_pending_deposit:      "Approved · awaiting deposit",
+  awaiting_deposit:              "Awaiting deposit",
+  deposit_paid_pending_approval: "Deposit paid · needs approval",
+  approved:                      "Approved",
+  confirmed:                     "Confirmed",
+  denied:                        "Denied",
+  declined:                      "Declined",
+  cancelled:                     "Cancelled",
+  expired:                       "Hold expired",
 };
 
 export const APPROVAL_STATUS_TONE: Record<ApprovalStatus, "neutral" | "gold" | "success" | "warning" | "danger"> = {
-  pending_review:           "neutral",
-  approved_pending_deposit: "gold",
-  confirmed:                "success",
-  expired:                  "warning",
-  declined:                 "danger",
+  pending_review:                "neutral",
+  approved_pending_deposit:      "gold",
+  awaiting_deposit:              "warning",
+  deposit_paid_pending_approval: "gold",
+  approved:                      "success",
+  confirmed:                     "success",
+  denied:                        "danger",
+  declined:                      "danger",
+  cancelled:                     "neutral",
+  expired:                       "warning",
 };
 
 // Time-left for an approval hold, in seconds. Negative when past due.
@@ -91,7 +115,9 @@ export const useBookingApprovalQueue = (userId: string | null): {
   refresh: () => Promise<void>;
   approve: (id: string, depositAmount: number | null, expiresMinutes?: number) => Promise<BookingRequestRecord | null>;
   decline: (id: string, reason?: string) => Promise<BookingRequestRecord | null>;
+  deny: (id: string, reason?: string) => Promise<BookingRequestRecord | null>;
   markPaid: (id: string, sessionId?: string) => Promise<BookingRequestRecord | null>;
+  confirmApproval: (id: string, appointmentId: string) => Promise<BookingRequestRecord | null>;
 } => {
   const [requests, setRequests] = useState<BookingRequestRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(!!userId);
@@ -163,5 +189,29 @@ export const useBookingApprovalQueue = (userId: string | null): {
     return (data as BookingRequestRecord) || null;
   };
 
-  return { requests, loading, error, refresh, approve, decline, markPaid };
+  const deny: ReturnType<typeof useBookingApprovalQueue>["deny"] = async (id, reason) => {
+    if (!userId) return null;
+    const supabase = getSupabase();
+    const { data, error: err } = await supabase.rpc("deny_booking_request", {
+      request_id_in: id,
+      reason_in: reason || null,
+    });
+    if (err) { setError(err.message); return null; }
+    await refresh();
+    return (data as BookingRequestRecord) || null;
+  };
+
+  const confirmApproval: ReturnType<typeof useBookingApprovalQueue>["confirmApproval"] = async (id, appointmentId) => {
+    if (!userId) return null;
+    const supabase = getSupabase();
+    const { data, error: err } = await supabase.rpc("confirm_booking_request_approval", {
+      request_id_in: id,
+      appointment_id_in: appointmentId,
+    });
+    if (err) { setError(err.message); return null; }
+    await refresh();
+    return (data as BookingRequestRecord) || null;
+  };
+
+  return { requests, loading, error, refresh, approve, decline, deny, markPaid, confirmApproval };
 };

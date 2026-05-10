@@ -9311,12 +9311,14 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                       <p className="text-[11px]" style={{ color: C.muted }}>
                         {(() => {
                           const list: BookingRequestRecord[] = store.approvalsApi?.requests || [];
+                          const paidPendingApproval = list.filter(r => r.approval_status === "deposit_paid_pending_approval").length;
                           const review = list.filter(r => r.approval_status === "pending_review").length;
-                          const deposit = list.filter(r => r.approval_status === "approved_pending_deposit").length;
-                          if (review === 0 && deposit === 0) return "Review requests, set deposits";
+                          const awaitingDeposit = list.filter(r => r.approval_status === "awaiting_deposit" || r.approval_status === "approved_pending_deposit").length;
+                          if (paidPendingApproval === 0 && review === 0 && awaitingDeposit === 0) return "Review requests, set deposits";
                           const parts: string[] = [];
+                          if (paidPendingApproval > 0) parts.push(`${paidPendingApproval} deposit paid · needs you`);
                           if (review > 0) parts.push(`${review} to review`);
-                          if (deposit > 0) parts.push(`${deposit} awaiting deposit`);
+                          if (awaitingDeposit > 0) parts.push(`${awaitingDeposit} awaiting deposit`);
                           return parts.join(" · ");
                         })()}
                       </p>
@@ -12976,22 +12978,30 @@ const ApprovalQueueScreen = ({ store, onBack }: { store: any; onBack: () => void
   const [holdDraft, setHoldDraft] = useState<Record<string, string>>({});
   const [declineDraft, setDeclineDraft] = useState<Record<string, string>>({});
 
+  // Phase B10 buckets:
+  //   active  → anything that wants the stylist's attention
+  //   history → terminal states (approved/confirmed/denied/declined/cancelled/expired)
+  const ACTIVE_STATES: ApprovalStatus[] = [
+    "pending_review",
+    "approved_pending_deposit",
+    "awaiting_deposit",
+    "deposit_paid_pending_approval",
+  ];
+  const HISTORY_STATES: ApprovalStatus[] = [
+    "approved", "confirmed", "denied", "declined", "cancelled", "expired",
+  ];
   const counts = useMemo(() => {
-    const active = requests.filter(r =>
-      r.approval_status === "pending_review" || r.approval_status === "approved_pending_deposit",
-    ).length;
-    const history = requests.filter(r =>
-      r.approval_status === "confirmed" || r.approval_status === "expired" || r.approval_status === "declined",
-    ).length;
+    const active = requests.filter(r => ACTIVE_STATES.includes(r.approval_status)).length;
+    const history = requests.filter(r => HISTORY_STATES.includes(r.approval_status)).length;
     return { active, all: requests.length, history };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requests]);
 
   const filtered = useMemo(() => {
     if (filter === "all") return requests;
-    if (filter === "history") {
-      return requests.filter(r => r.approval_status === "confirmed" || r.approval_status === "expired" || r.approval_status === "declined");
-    }
-    return requests.filter(r => r.approval_status === "pending_review" || r.approval_status === "approved_pending_deposit");
+    if (filter === "history") return requests.filter(r => HISTORY_STATES.includes(r.approval_status));
+    return requests.filter(r => ACTIVE_STATES.includes(r.approval_status));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requests, filter]);
 
   const handleApprove = async (req: BookingRequestRecord) => {
@@ -13011,7 +13021,8 @@ const ApprovalQueueScreen = ({ store, onBack }: { store: any; onBack: () => void
   const handleDecline = async (req: BookingRequestRecord) => {
     if (busyId) return;
     setBusyId(req.id);
-    await api.decline(req.id, declineDraft[req.id] || "");
+    // Phase B10 — route through deny so the canonical fields land too.
+    await api.deny(req.id, declineDraft[req.id] || "");
     setBusyId(null);
     setExpanded(null);
   };
@@ -13021,6 +13032,69 @@ const ApprovalQueueScreen = ({ store, onBack }: { store: any; onBack: () => void
     setBusyId(req.id);
     await api.markPaid(req.id);
     setBusyId(null);
+  };
+
+  // Phase B10 — deposit-paid → approve & create appointment.
+  // Resolves the client (match by contact, otherwise create), creates
+  // the appointment row, then calls confirm_booking_request_approval
+  // which is itself idempotent so a double-tap won't double-create.
+  const handleApproveAndCreate = async (req: BookingRequestRecord) => {
+    if (busyId) return;
+    setBusyId(req.id);
+    try {
+      const clients: any[] = (store.clients as any[]) || [];
+      const match = matchClientByContact(
+        { email: req.client_email, phone: req.client_phone },
+        clients,
+      );
+      let client: any = match.kind === "single" ? match.client : null;
+      if (match.kind === "ambiguous") client = match.candidates[0];
+      if (!client) {
+        client = await store.upsertClient({
+          name: req.client_name,
+          phone: req.client_phone || "",
+          email: req.client_email || "",
+        });
+      }
+      if (!client?.id) throw new Error("Couldn't resolve client");
+
+      const apptId = req.appointment_id || `appt_${uid()}`;
+      const newAppt: any = {
+        id: apptId,
+        clientId: client.id,
+        clientName: client.name || req.client_name,
+        clientPhone: client.phone || req.client_phone || "",
+        clientEmail: client.email || req.client_email || "",
+        style: req.service_name || "",
+        date: req.preferred_date || "",
+        time: req.preferred_time || "",
+        durationHours: Number(req.service_duration_hours || req.service_duration || 0) || null,
+        totalPrice: Number(req.service_price || 0) || 0,
+        depositPaid: Number(req.deposit_amount || 0) || 0,
+        balanceDue: Math.max(0, (Number(req.service_price || 0) || 0) - (Number(req.deposit_amount || 0) || 0)),
+        status: "scheduled",
+        kind: "appointment",
+        serviceId: req.service_id || null,
+        source: "public_booking",
+        notes: req.notes || "",
+        isAllDay: false,
+        blocksAvailability: true,
+      };
+      const saved = await store.upsertAppointment(newAppt);
+      if (!saved) throw new Error("Couldn't create appointment");
+      await api.confirmApproval(req.id, apptId);
+    } finally {
+      setBusyId(null);
+      setExpanded(null);
+    }
+  };
+
+  const handleDeny = async (req: BookingRequestRecord) => {
+    if (busyId) return;
+    setBusyId(req.id);
+    await api.deny(req.id, declineDraft[req.id] || "");
+    setBusyId(null);
+    setExpanded(null);
   };
 
   return (
@@ -13229,10 +13303,75 @@ const ApprovalQueueScreen = ({ store, onBack }: { store: any; onBack: () => void
                 </div>
               )}
 
+              {/* Deposit-first (Phase B10) — client paid; stylist approves. */}
+              {status === "deposit_paid_pending_approval" && (
+                <div className="space-y-2 pt-1">
+                  <div
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-lg"
+                    style={{ background: "rgba(92, 124, 74, 0.10)", border: `1px solid rgba(92, 124, 74, 0.35)` }}
+                  >
+                    <Check size={14} style={{ color: C.success }} />
+                    <span className="text-[11px] font-semibold" style={{ color: C.success }}>
+                      Deposit paid · {fmtMoney(Number(req.deposit_amount || 0), currency)}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={busyId === req.id}
+                      onClick={() => handleApproveAndCreate(req)}
+                      className="flex-1 py-2 rounded-lg text-[12px] font-semibold"
+                      style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+                    >
+                      {busyId === req.id ? "Approving…" : "Approve & schedule"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === req.id}
+                      onClick={() => setExpanded(`decline:${req.id}`)}
+                      className="px-3 py-2 rounded-lg text-[12px] font-semibold"
+                      style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}
+                    >
+                      Deny
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Awaiting deposit — client received the link but hasn't paid. */}
+              {status === "awaiting_deposit" && (
+                <div className="space-y-1.5 pt-1">
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    Waiting on the client to complete deposit checkout. They&apos;ve been redirected to Stripe.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={busyId === req.id}
+                      onClick={() => handleMarkPaid(req)}
+                      className="flex-1 py-2 rounded-lg text-[12px] font-semibold"
+                      style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}` }}
+                    >
+                      {busyId === req.id ? "Saving…" : "Mark deposit paid manually"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === req.id}
+                      onClick={() => setExpanded(`decline:${req.id}`)}
+                      className="px-3 py-2 rounded-lg text-[12px] font-semibold"
+                      style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Legacy approve-first hold (kept for backwards compat). */}
               {status === "approved_pending_deposit" && (
                 <div className="space-y-1.5 pt-1">
                   <p className="text-[11px]" style={{ color: C.muted }}>
-                    Stripe Checkout lands in the next phase. Until then, mark deposits paid manually after they clear.
+                    Slot is held while the client pays the deposit. Mark paid manually if the deposit landed off-platform.
                   </p>
                   <div className="flex gap-2">
                     <button
@@ -13255,6 +13394,13 @@ const ApprovalQueueScreen = ({ store, onBack }: { store: any; onBack: () => void
                     </button>
                   </div>
                 </div>
+              )}
+
+              {/* Denial outcome — show refund-in-Stripe nudge if a deposit was paid. */}
+              {status === "denied" && req.deposit_paid && (
+                <p className="text-[11px] pt-1" style={{ color: C.muted }}>
+                  Refund the {fmtMoney(Number(req.deposit_amount || 0), currency)} deposit in Stripe if needed — automatic refunds aren&apos;t enabled yet.
+                </p>
               )}
             </Card>
           );
