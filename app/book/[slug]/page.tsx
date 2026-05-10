@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
+import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LABEL } from "../../lib/waitlist";
+import { emitAnalyticsEvent } from "../../lib/analytics-events";
 
 // Minimal palette — kept inline so this page never imports the main
 // app shell (it's served to anonymous visitors).
@@ -18,6 +20,7 @@ const FONT_BODY = `"DM Sans", "Inter", system-ui, sans-serif`;
 
 type LinkConfig = {
   slug: string;
+  user_id?: string | null;
   business_name?: string | null;
   intro?: string | null;
   services?: any[] | null;
@@ -55,6 +58,53 @@ export default function PublicBookingPage() {
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Waitlist mode — when the client doesn't see a workable slot, they
+  // can join the waitlist directly via the anon insert policy on
+  // waitlist_requests. Phase B will surface this automatically when
+  // the slot picker comes up empty.
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
+  const [waitlistFlex, setWaitlistFlex] = useState<WaitlistFlexibility>("anytime");
+  const [waitlistSubmitting, setWaitlistSubmitting] = useState(false);
+  const [waitlistDone, setWaitlistDone] = useState(false);
+  const [waitlistError, setWaitlistError] = useState<string | null>(null);
+
+  const submitWaitlist = async () => {
+    if (waitlistSubmitting) return;
+    setWaitlistError(null);
+    if (!name.trim()) { setWaitlistError("Please enter your name."); return; }
+    if (!link?.user_id) { setWaitlistError("This booking link is misconfigured."); return; }
+    setWaitlistSubmitting(true);
+    const selected = services.find((s: any) => s?.name === serviceName);
+    const result = await submitPublicWaitlistRequest({
+      ownerUserId: link.user_id,
+      client_name: name.trim(),
+      client_phone: phone.trim() || null,
+      client_email: email.trim() || null,
+      service_id: selected?.id || null,
+      service_name: serviceName || null,
+      preferred_date: preferredDate || null,
+      preferred_time: preferredTime || null,
+      flexibility: waitlistFlex,
+      notes: notes.trim() || null,
+    });
+    setWaitlistSubmitting(false);
+    if (!result.ok) { setWaitlistError(result.error); return; }
+    setWaitlistDone(true);
+    if (link?.user_id) {
+      void emitAnalyticsEvent({
+        ownerUserId: link.user_id,
+        type: "waitlist_joined",
+        source: "public",
+        payload: {
+          slug,
+          serviceName: serviceName || null,
+          flexibility: waitlistFlex,
+          preferredDate: preferredDate || null,
+        },
+      });
+    }
+  };
+
   useEffect(() => {
     if (!slug) return;
     let cancelled = false;
@@ -63,7 +113,7 @@ export default function PublicBookingPage() {
         const supabase = getSupabase();
         const { data, error } = await supabase
           .from("booking_links")
-          .select("slug, business_name, intro, services, active")
+          .select("slug, user_id, business_name, intro, services, active")
           .eq("slug", slug)
           .maybeSingle();
         if (cancelled) return;
@@ -113,6 +163,19 @@ export default function PublicBookingPage() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error || "Couldn't send request");
       setSubmitted(true);
+      if (link?.user_id) {
+        void emitAnalyticsEvent({
+          ownerUserId: link.user_id,
+          type: "booking_requested",
+          source: "public",
+          payload: {
+            slug,
+            serviceName: serviceName || null,
+            preferredDate: preferredDate || null,
+            preferredTime: preferredTime || null,
+          },
+        });
+      }
     } catch (err: any) {
       setSubmitError(
         err?.message
@@ -132,7 +195,16 @@ export default function PublicBookingPage() {
         body { margin: 0; }
         input, textarea, select, button { font-family: inherit; }
       `}</style>
-      <div className="mx-auto" style={{ maxWidth: 480, padding: "32px 20px 64px" }}>
+      <div
+        className="mx-auto"
+        style={{
+          maxWidth: 480,
+          padding: "32px 20px",
+          // Generous bottom padding so the last button clears the
+          // sticky CTA bar and the iPhone Safari home indicator.
+          paddingBottom: "calc(120px + env(safe-area-inset-bottom, 0px))",
+        }}
+      >
         <p style={{ textAlign: "center", letterSpacing: "0.22em", textTransform: "uppercase", fontSize: 10, fontWeight: 700, color: C.gold }}>
           Book your appointment
         </p>
@@ -233,6 +305,85 @@ export default function PublicBookingPage() {
               You&apos;ll get a confirmation reply once your stylist reviews the request.
             </p>
           </form>
+        )}
+
+        {/* Waitlist alternate flow */}
+        {!linkLoading && !linkError && !submitted && (
+          <div style={{ marginTop: 24, padding: 16, borderRadius: 16, background: C.paper, border: `1px solid ${C.hairline}` }}>
+            {!waitlistOpen && !waitlistDone && (
+              <button
+                type="button"
+                onClick={() => setWaitlistOpen(true)}
+                style={{
+                  width: "100%", padding: "12px 14px", borderRadius: 12,
+                  background: "transparent", color: C.coffee,
+                  border: `1px solid ${C.hairline}`,
+                  fontSize: 14, fontWeight: 600, cursor: "pointer",
+                }}
+              >
+                Don&apos;t see a time that works? · Join the waitlist
+              </button>
+            )}
+            {waitlistOpen && !waitlistDone && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>
+                  Join the waitlist
+                </p>
+                <p style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
+                  We&apos;ll reach out the moment a matching opening appears. Fill in the appointment fields above first — we&apos;ll use those.
+                </p>
+                <Field label="When are you flexible?">
+                  <select
+                    value={waitlistFlex}
+                    onChange={e => setWaitlistFlex(e.target.value as WaitlistFlexibility)}
+                    style={selectStyle}
+                  >
+                    {(Object.keys(WAITLIST_FLEX_LABEL) as WaitlistFlexibility[]).map(k => (
+                      <option key={k} value={k}>{WAITLIST_FLEX_LABEL[k]}</option>
+                    ))}
+                  </select>
+                </Field>
+                {waitlistError && (
+                  <p style={{ fontSize: 12, color: C.danger }}>{waitlistError}</p>
+                )}
+                <button
+                  type="button"
+                  onClick={submitWaitlist}
+                  disabled={waitlistSubmitting}
+                  style={{
+                    padding: "13px 14px", borderRadius: 14,
+                    background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+                    color: C.paper, border: `1px solid ${C.goldDeep}`,
+                    fontSize: 14, fontWeight: 700, cursor: "pointer",
+                    opacity: waitlistSubmitting ? 0.7 : 1,
+                  }}
+                >
+                  {waitlistSubmitting ? "Adding…" : "Join the waitlist"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWaitlistOpen(false)}
+                  style={{
+                    padding: "10px 14px", borderRadius: 12,
+                    background: "transparent", color: C.muted, border: 0,
+                    fontSize: 12, fontWeight: 600, cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            {waitlistDone && (
+              <div style={{ textAlign: "center" }}>
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>
+                  You&apos;re on the waitlist
+                </p>
+                <p style={{ fontSize: 13, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
+                  The stylist will contact you if an opening becomes available.
+                </p>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
