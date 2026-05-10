@@ -102,6 +102,8 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     timezone: r => cleanString(r.timezone),
     locale: r => cleanString(r.locale),
     created_from_public: r => cleanBool(r.createdFromPublic),
+    is_all_day: r => cleanBool(r.isAllDay),
+    blocks_availability: r => r.blocksAvailability === false ? false : true,
   },
   quotes: {
     label: r => cleanString(r.label),
@@ -222,6 +224,8 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.timezone = base.timezone ?? row.timezone ?? null;
       base.locale = base.locale ?? row.locale ?? null;
       base.createdFromPublic = base.createdFromPublic ?? row.created_from_public ?? false;
+      base.isAllDay = base.isAllDay ?? row.is_all_day ?? false;
+      base.blocksAvailability = base.blocksAvailability ?? (row.blocks_availability ?? true);
       break;
     case "quotes":
       base.label = base.label ?? row.label;

@@ -4455,11 +4455,15 @@ const DayCalendarView = ({
               : isPersonalBlock
                 ? (a.eventTitle || "Personal event")
                 : (a.clientName || "Open slot");
-            const subLine = isBlockedBlock
-              ? `${fmtTime(a.time)} · Off`
-              : isPersonalBlock
-                ? `${fmtTime(a.time)} · Personal`
-                : `${fmtTime(a.time)} · ${a.style || "Service"}`;
+            const isAllDay = !!a?.isAllDay;
+            const blocksAvail = a?.blocksAvailability !== false;
+            const subLine = isAllDay
+              ? `All day${blocksAvail ? " · Availability blocked" : ""}`
+              : isBlockedBlock
+                ? `${fmtTime(a.time)} · Off`
+                : isPersonalBlock
+                  ? `${fmtTime(a.time)} · Personal`
+                  : `${fmtTime(a.time)} · ${a.style || "Service"}`;
 
             return (
               <button
@@ -4565,11 +4569,15 @@ const WeekCalendarView = ({
                     : isPersonalBlock
                       ? (a.eventTitle || "Personal event")
                       : (a.clientName || "Open slot");
-                  const subLine = isBlockedBlock
-                    ? `${fmtTime(a.time)} · Off`
-                    : isPersonalBlock
-                      ? `${fmtTime(a.time)} · Personal`
-                      : `${fmtTime(a.time)} · ${a.style || "Service"}`;
+                  const isAllDay = !!a?.isAllDay;
+                  const blocksAvail = a?.blocksAvailability !== false;
+                  const subLine = isAllDay
+                    ? `All day${blocksAvail ? " · Availability blocked" : ""}`
+                    : isBlockedBlock
+                      ? `${fmtTime(a.time)} · Off`
+                      : isPersonalBlock
+                        ? `${fmtTime(a.time)} · Personal`
+                        : `${fmtTime(a.time)} · ${a.style || "Service"}`;
                   return (
                     <button
                       type="button"
@@ -5571,6 +5579,48 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           </Field>
         )}
 
+        {!isAppointment && (
+          <Card className="p-3 space-y-3" style={{ background: C.cream }}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex-1">
+                <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>All day</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>
+                  {form.isAllDay
+                    ? "This blocks your full booking day."
+                    : "Toggle on to block the whole day from public booking."}
+                </p>
+              </div>
+              <Toggle
+                checked={!!form.isAllDay}
+                onChange={(checked) => {
+                  setForm({
+                    ...form,
+                    isAllDay: checked,
+                    // Clear time + duration when switching to all-day so
+                    // the row sorts to the top of the day cleanly and
+                    // doesn't carry stale numbers if the user toggles back.
+                    time: checked ? "" : form.time,
+                    durationHours: checked ? "" : form.durationHours,
+                    blocksAvailability: checked ? true : (form.blocksAvailability ?? true),
+                  });
+                }}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex-1">
+                <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>Block public availability</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>
+                  When on, public clients can&apos;t book during this time.
+                </p>
+              </div>
+              <Toggle
+                checked={form.blocksAvailability !== false}
+                onChange={(checked) => setForm({ ...form, blocksAvailability: checked })}
+              />
+            </div>
+          </Card>
+        )}
+
         {isAppointment && (
           <Field label="Client">
             {showNewClient ? (
@@ -5611,8 +5661,12 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Date"><Input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></Field>
-          <Field label="Time"><Input type="time" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} /></Field>
-          <Field label="Duration"><MoneyInput prefix="" suffix="hrs" placeholder="6.5" value={form.durationHours} onChange={(v) => setForm({ ...form, durationHours: v })} /></Field>
+          {!form.isAllDay && (
+            <Field label="Time"><Input type="time" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} /></Field>
+          )}
+          {!form.isAllDay && (
+            <Field label="Duration"><MoneyInput prefix="" suffix="hrs" placeholder="6.5" value={form.durationHours} onChange={(v) => setForm({ ...form, durationHours: v })} /></Field>
+          )}
           {isAppointment && (
             <Field label="Status">
               <Select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}
