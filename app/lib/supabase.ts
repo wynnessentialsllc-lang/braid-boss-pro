@@ -92,6 +92,9 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     payment_notes: r => cleanString(r.paymentNotes),
     notes: r => cleanString(r.notes),
     series_id: r => cleanString(r.seriesId),
+    discount_id: r => cleanString(r.discountId),
+    discount_name: r => cleanString(r.discountName),
+    discount_amount: r => (r.discountAmount == null ? null : cleanNumber(r.discountAmount)),
   },
   quotes: {
     label: r => cleanString(r.label),
@@ -102,6 +105,9 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     inputs: r => r.inputs ?? {},
     breakdown: r => r.breakdown ?? {},
     saved_at: r => cleanString(r.savedAt),
+    discount_id: r => cleanString(r.discountId),
+    discount_name: r => cleanString(r.discountName),
+    discount_amount: r => (r.discountAmount == null ? null : cleanNumber(r.discountAmount)),
   },
   receipts: {
     receipt_number: r => cleanString(r.receiptNumber),
@@ -199,6 +205,9 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.paymentNotes = base.paymentNotes ?? row.payment_notes;
       base.notes = base.notes ?? row.notes;
       base.seriesId = base.seriesId ?? row.series_id;
+      base.discountId = base.discountId ?? row.discount_id;
+      base.discountName = base.discountName ?? row.discount_name;
+      base.discountAmount = base.discountAmount ?? row.discount_amount;
       break;
     case "quotes":
       base.label = base.label ?? row.label;
@@ -209,6 +218,9 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.inputs = base.inputs ?? row.inputs;
       base.breakdown = base.breakdown ?? row.breakdown;
       base.savedAt = base.savedAt ?? row.saved_at;
+      base.discountId = base.discountId ?? row.discount_id;
+      base.discountName = base.discountName ?? row.discount_name;
+      base.discountAmount = base.discountAmount ?? row.discount_amount;
       break;
     case "receipts":
       base.receiptNumber = base.receiptNumber ?? row.receipt_number;
