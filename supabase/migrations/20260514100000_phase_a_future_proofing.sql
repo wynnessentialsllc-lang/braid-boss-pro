@@ -20,6 +20,28 @@ alter table public.waitlist_requests
   add column if not exists locale text,
   add column if not exists created_from_public boolean not null default false;
 
+-- Self-heal block. On any environment where converted_appointment_id
+-- was previously created as `uuid` (an early draft of this migration
+-- declared it that way), normalise it to `text` so the column matches
+-- the app's text-typed appointment ids. No-op when the column is
+-- already text.
+do $$
+declare
+  current_type text;
+begin
+  select data_type
+    into current_type
+  from information_schema.columns
+  where table_schema = 'public'
+    and table_name = 'waitlist_requests'
+    and column_name = 'converted_appointment_id';
+  if current_type is not null and current_type <> 'text' then
+    execute 'alter table public.waitlist_requests '
+         || 'alter column converted_appointment_id type text '
+         || 'using converted_appointment_id::text';
+  end if;
+end $$;
+
 create index if not exists waitlist_requests_converted_idx
   on public.waitlist_requests (user_id, converted_appointment_id)
   where converted_appointment_id is not null;
