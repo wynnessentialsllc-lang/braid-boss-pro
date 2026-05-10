@@ -7,6 +7,8 @@
 import { useEffect, useState } from "react";
 import { getSupabase } from "./supabase";
 
+export type AvailabilitySensitivity = "conservative" | "balanced" | "aggressive";
+
 export type BookingPolicy = {
   user_id: string;
   deposit_policy: string | null;
@@ -18,6 +20,10 @@ export type BookingPolicy = {
   guests_policy: string | null;
   reschedule_policy: string | null;
   custom_notes: string | null;
+  // Phase B3 — biases the public slot engine. Conservative spreads
+  // bookings out (60-min slot interval); aggressive packs them
+  // tighter (15-min); balanced is the 30-min default.
+  availability_sensitivity: AvailabilitySensitivity;
   created_at?: string;
   updated_at?: string;
 };
@@ -34,6 +40,7 @@ export const EMPTY_POLICY: BookingPolicyInput = {
   guests_policy: null,
   reschedule_policy: null,
   custom_notes: null,
+  availability_sensitivity: "balanced",
 };
 
 // Calm presets the UI surfaces as quick-fill chips. The user can
@@ -128,6 +135,11 @@ export const useBookingPolicy = (userId: string | null): {
       guests_policy: text(draft.guests_policy),
       reschedule_policy: text(draft.reschedule_policy),
       custom_notes: text(draft.custom_notes),
+      availability_sensitivity: (["conservative", "balanced", "aggressive"] as const).includes(
+        (draft.availability_sensitivity || "balanced") as any,
+      )
+        ? draft.availability_sensitivity || "balanced"
+        : "balanced",
     };
     const supabase = getSupabase();
     const { data, error: err } = await supabase

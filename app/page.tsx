@@ -12481,6 +12481,7 @@ const BookingPoliciesScreen = ({ store, onBack }: { store: any; onBack: () => vo
         guests_policy: policy.guests_policy,
         reschedule_policy: policy.reschedule_policy,
         custom_notes: policy.custom_notes,
+        availability_sensitivity: policy.availability_sensitivity || "balanced",
       });
     }
   }, [policy?.updated_at, policy?.user_id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -12514,6 +12515,35 @@ const BookingPoliciesScreen = ({ store, onBack }: { store: any; onBack: () => vo
             <p className="text-[12px]" style={{ color: C.muted }}>Loading policies…</p>
           </Card>
         )}
+
+        <Card className="p-4 space-y-2">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: C.espresso }}>Availability sensitivity</p>
+            <p className="text-[11px]" style={{ color: C.muted }}>
+              How tightly the public booking page packs the schedule. Conservative spreads bookings out · Balanced is the default · Aggressive packs tighter.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 pt-1">
+            {(["conservative", "balanced", "aggressive"] as const).map(opt => {
+              const on = (draft.availability_sensitivity || "balanced") === opt;
+              return (
+                <button
+                  type="button"
+                  key={opt}
+                  onClick={() => setDraft({ ...draft, availability_sensitivity: opt })}
+                  className="px-3 py-1.5 rounded-full text-[12px] font-semibold active:scale-[0.97] transition"
+                  style={{
+                    background: on ? C.espresso : C.paper,
+                    color: on ? C.cream : C.coffee,
+                    border: `1px solid ${on ? C.espresso : C.hairline}`,
+                  }}
+                >
+                  {opt[0].toUpperCase() + opt.slice(1)}
+                </button>
+              );
+            })}
+          </div>
+        </Card>
 
         {POLICY_FIELDS.map(f => (
           <Card key={f.key} className="p-4 space-y-2">

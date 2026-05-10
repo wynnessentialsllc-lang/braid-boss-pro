@@ -334,7 +334,10 @@ export const fetchPublicAvailability = async (params: {
     date_in: params.dateIso,
     duration_minutes_in: params.durationMinutes ?? null,
     service_id_in: params.serviceId ?? null,
-    slot_interval_minutes_in: params.slotIntervalMinutes ?? 30,
+    // Phase B3 — passing null lets the RPC fall back to the owner's
+    // availability_sensitivity. Callers can still pin a fixed
+    // interval by passing slotIntervalMinutes explicitly.
+    slot_interval_minutes_in: params.slotIntervalMinutes ?? null,
   });
   if (error) return { ok: false, error: error.message };
   const slots = ((data || []) as any[]).map(s => ({
@@ -343,4 +346,47 @@ export const fetchPublicAvailability = async (params: {
     startMinute: Number(s.start_minute) || 0,
   }));
   return { ok: true, slots };
+};
+
+// ---- Month availability heatmap (Phase B3) ----------------------------
+//
+// Fetches the per-day slot count + status for an entire month so the
+// public booking calendar can render a heatmap in one round-trip.
+// Backed by `public_get_month_availability`, which calls the Phase B2
+// slot engine internally. Status:
+//   off       past date / closed / off exception
+//   booked    working day but zero slots fit
+//   limited   1..4 slots
+//   available 5+ slots
+export type MonthDayStatus = "off" | "booked" | "limited" | "available";
+
+export type MonthDay = {
+  dayIso: string;        // "YYYY-MM-DD"
+  slotCount: number;
+  status: MonthDayStatus;
+};
+
+export const fetchPublicMonthAvailability = async (params: {
+  slug: string;
+  year: number;
+  month: number;            // 1-12
+  serviceId?: string | null;
+  durationMinutes?: number | null;
+}): Promise<{ ok: true; days: MonthDay[] } | { ok: false; error: string }> => {
+  if (!params.slug) return { ok: false, error: "Missing booking slug." };
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("public_get_month_availability", {
+    slug_in: params.slug,
+    year_in: params.year,
+    month_in: params.month,
+    service_id_in: params.serviceId ?? null,
+    duration_minutes_in: params.durationMinutes ?? null,
+  });
+  if (error) return { ok: false, error: error.message };
+  const days = ((data || []) as any[]).map(r => ({
+    dayIso: String(r.day_iso),
+    slotCount: Number(r.slot_count) || 0,
+    status: (r.status as MonthDayStatus) || "off",
+  }));
+  return { ok: true, days };
 };

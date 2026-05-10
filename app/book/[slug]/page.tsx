@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
 import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LABEL } from "../../lib/waitlist";
@@ -8,8 +8,11 @@ import { emitAnalyticsEvent } from "../../lib/analytics-events";
 import {
   fetchPublicServices,
   fetchPublicAvailability,
+  fetchPublicMonthAvailability,
   type PublicService,
   type PublicSlot,
+  type MonthDay,
+  type MonthDayStatus,
 } from "../../lib/services";
 import { collectPublicContext } from "../../lib/waitlist";
 
@@ -63,6 +66,16 @@ export default function PublicBookingPage() {
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [hasFetchedSlots, setHasFetchedSlots] = useState(false);
+  // Phase B3 — month heatmap. visibleMonth tracks the month the
+  // calendar is showing; monthCache memoises results per
+  // (year, month, serviceId) so paging back to a recently-viewed
+  // month doesn't re-hit the RPC.
+  const today = new Date();
+  const [visibleYear, setVisibleYear] = useState<number>(today.getFullYear());
+  const [visibleMonth, setVisibleMonth] = useState<number>(today.getMonth() + 1);
+  const [monthDays, setMonthDays] = useState<MonthDay[]>([]);
+  const [monthLoading, setMonthLoading] = useState(false);
+  const monthCacheRef = useRef<Map<string, MonthDay[]>>(new Map());
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -182,6 +195,61 @@ export default function PublicBookingPage() {
     ? catalog.find(s => s.id === serviceId) || null
     : null;
 
+  // Phase B3 — pull the per-day status for the visible month
+  // whenever service, slug, or visible-month changes. Cached per
+  // (year, month, serviceId) so paging back doesn't re-hit the RPC.
+  useEffect(() => {
+    if (!hasCatalog || !selectedCatalogService || !slug) return;
+    const cacheKey = `${visibleYear}-${visibleMonth}-${selectedCatalogService.id}`;
+    const cached = monthCacheRef.current.get(cacheKey);
+    if (cached) { setMonthDays(cached); return; }
+    let cancelled = false;
+    setMonthLoading(true);
+    (async () => {
+      const result = await fetchPublicMonthAvailability({
+        slug,
+        year: visibleYear,
+        month: visibleMonth,
+        serviceId: selectedCatalogService.id,
+        durationMinutes: Math.round((selectedCatalogService.duration_hours || 0) * 60),
+      });
+      if (cancelled) return;
+      setMonthLoading(false);
+      if (!result.ok) return;
+      monthCacheRef.current.set(cacheKey, result.days);
+      setMonthDays(result.days);
+      if (link?.user_id) {
+        void emitAnalyticsEvent({
+          ownerUserId: link.user_id,
+          type: "availability_loaded" as any,
+          source: "public",
+          payload: {
+            slug,
+            serviceId: selectedCatalogService.id,
+            year: visibleYear,
+            month: visibleMonth,
+            availableDays: result.days.filter(d => d.status === "available" || d.status === "limited").length,
+          },
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug, hasCatalog, selectedCatalogService?.id, visibleYear, visibleMonth]);
+
+  // Build a quick lookup: dayIso → MonthDay so the calendar grid
+  // renders without scanning the array per cell.
+  const monthByDate = useMemo(() => {
+    const m = new Map<string, MonthDay>();
+    for (const d of monthDays) m.set(d.dayIso, d);
+    return m;
+  }, [monthDays]);
+
+  // Next available date for friction-reduction copy + auto-suggest.
+  const nextAvailableDay = useMemo(() => {
+    return monthDays.find(d => d.status === "available" || d.status === "limited") || null;
+  }, [monthDays]);
+
   // Re-fetch slots whenever the user picks a different service or
   // date. Only runs when both a service AND a date are chosen on a
   // catalog-aware salon — legacy free-text links keep the manual
@@ -202,7 +270,8 @@ export default function PublicBookingPage() {
         dateIso: preferredDate,
         serviceId: selectedCatalogService.id,
         durationMinutes: Math.round((selectedCatalogService.duration_hours || 0) * 60),
-        slotIntervalMinutes: 30,
+        // Phase B3 — leave slotIntervalMinutes undefined so the RPC
+        // falls back to the owner's availability_sensitivity setting.
       });
       if (cancelled) return;
       setSlotsLoading(false);
@@ -473,14 +542,98 @@ export default function PublicBookingPage() {
             )}
             {hasCatalog ? (
               <>
-                <Field label="Date">
-                  <Input
-                    type="date"
-                    value={preferredDate}
-                    onChange={e => setPreferredDate(e.target.value)}
-                    min={new Date().toISOString().slice(0, 10)}
+                {/* Availability summary — surfaces the next opening
+                    so a hesitant client always has a one-tap path. */}
+                {selectedCatalogService && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      padding: 12,
+                      borderRadius: 14,
+                      background: `linear-gradient(135deg, ${C.espresso}, ${C.coffee})`,
+                      color: C.cream,
+                      border: `1px solid ${C.goldDeep}`,
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: C.gold }}>
+                        Next opening
+                      </p>
+                      <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, lineHeight: 1.1, marginTop: 4 }}>
+                        {nextAvailableDay
+                          ? new Date(nextAvailableDay.dayIso + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })
+                          : monthLoading ? "Checking…" : "No openings this month"}
+                      </p>
+                    </div>
+                    {nextAvailableDay && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreferredDate(nextAvailableDay.dayIso);
+                          setPreferredTime("");
+                          if (link?.user_id) {
+                            void emitAnalyticsEvent({
+                              ownerUserId: link.user_id,
+                              type: "next_available_clicked" as any,
+                              source: "public",
+                              payload: { slug, date: nextAvailableDay.dayIso },
+                            });
+                          }
+                        }}
+                        style={{
+                          padding: "10px 14px",
+                          borderRadius: 10,
+                          background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+                          color: C.paper,
+                          border: `1px solid ${C.goldDeep}`,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          flexShrink: 0,
+                        }}
+                      >
+                        Pick this day
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Heatmap calendar */}
+                {selectedCatalogService && (
+                  <BookingHeatmap
+                    year={visibleYear}
+                    month={visibleMonth}
+                    monthByDate={monthByDate}
+                    selected={preferredDate}
+                    loading={monthLoading}
+                    onPrevMonth={() => {
+                      const m = visibleMonth - 1;
+                      if (m < 1) { setVisibleMonth(12); setVisibleYear(visibleYear - 1); }
+                      else setVisibleMonth(m);
+                    }}
+                    onNextMonth={() => {
+                      const m = visibleMonth + 1;
+                      if (m > 12) { setVisibleMonth(1); setVisibleYear(visibleYear + 1); }
+                      else setVisibleMonth(m);
+                    }}
+                    onPickDay={(iso, status) => {
+                      if (status === "off") return;
+                      setPreferredDate(iso);
+                      setPreferredTime("");
+                      if (link?.user_id) {
+                        void emitAnalyticsEvent({
+                          ownerUserId: link.user_id,
+                          type: "calendar_day_selected" as any,
+                          source: "public",
+                          payload: { slug, date: iso, status },
+                        });
+                      }
+                    }}
                   />
-                </Field>
+                )}
                 {selectedCatalogService && preferredDate && (
                   <div>
                     <span
@@ -545,11 +698,29 @@ export default function PublicBookingPage() {
                       </div>
                     )}
                     {!slotsLoading && !slotsError && slots.length > 0 && (
+                      <SlotRecommendations
+                        slots={slots}
+                        selected={preferredTime}
+                        onPick={t => {
+                          setPreferredTime(t);
+                          if (link?.user_id) {
+                            void emitAnalyticsEvent({
+                              ownerUserId: link.user_id,
+                              type: "slot_selected" as any,
+                              source: "public",
+                              payload: { slug, serviceId: selectedCatalogService?.id || null, date: preferredDate, time: t },
+                            });
+                          }
+                        }}
+                      />
+                    )}
+                    {!slotsLoading && !slotsError && slots.length > 0 && (
                       <div
                         style={{
                           display: "grid",
                           gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))",
                           gap: 8,
+                          marginTop: 12,
                         }}
                       >
                         {slots.map(s => {
@@ -558,7 +729,17 @@ export default function PublicBookingPage() {
                             <button
                               type="button"
                               key={s.time}
-                              onClick={() => setPreferredTime(s.time)}
+                              onClick={() => {
+                                setPreferredTime(s.time);
+                                if (link?.user_id) {
+                                  void emitAnalyticsEvent({
+                                    ownerUserId: link.user_id,
+                                    type: "slot_selected" as any,
+                                    source: "public",
+                                    payload: { slug, serviceId: selectedCatalogService?.id || null, date: preferredDate, time: s.time },
+                                  });
+                                }
+                              }}
                               style={{
                                 padding: "12px 8px",
                                 borderRadius: 12,
@@ -737,3 +918,242 @@ const Field = ({ label, children }: { label: string; children: React.ReactNode }
 const Input = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
   <input {...props} style={inputStyle} />
 );
+
+// ---- Smart slot recommendations (Phase B3) ----------------------------
+//
+// Surfaces five chips above the slot grid so the client can land on
+// a sensible slot without reading the whole list:
+//   Best       earliest available (lowest fragmentation by design)
+//   Morning    first slot ≤ 12:00
+//   Afternoon  first slot 12:00..17:00
+//   Evening    first slot ≥ 17:00
+//
+// Pure derivation from the slots[] already loaded — no new fetch.
+const SlotRecommendations = ({
+  slots, selected, onPick,
+}: {
+  slots: PublicSlot[];
+  selected: string;
+  onPick: (time: string) => void;
+}) => {
+  if (slots.length === 0) return null;
+  const morning   = slots.find(s => s.startMinute <  12 * 60);
+  const afternoon = slots.find(s => s.startMinute >= 12 * 60 && s.startMinute < 17 * 60);
+  const evening   = slots.find(s => s.startMinute >= 17 * 60);
+  const best      = slots[0];
+  const recs: Array<{ key: string; label: string; slot: PublicSlot | undefined }> = [
+    { key: "best",      label: "Best",      slot: best },
+    { key: "morning",   label: "Morning",   slot: morning },
+    { key: "afternoon", label: "Afternoon", slot: afternoon },
+    { key: "evening",   label: "Evening",   slot: evening },
+  ];
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 4 }}>
+      {recs.map(r => {
+        if (!r.slot) return null;
+        const on = selected === r.slot.time;
+        return (
+          <button
+            type="button"
+            key={r.key}
+            onClick={() => onPick(r.slot!.time)}
+            style={{
+              padding: "6px 10px",
+              borderRadius: 999,
+              background: on ? C.espresso : C.ivory,
+              color: on ? C.cream : C.coffee,
+              border: `1px solid ${on ? C.espresso : C.hairline}`,
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              cursor: "pointer",
+            }}
+          >
+            {r.label} · {r.slot.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
+
+// ---- Booking heatmap (Phase B3) --------------------------------------
+//
+// 6×7 grid coloured by per-day status. monthByDate is a lookup
+// produced by the parent so each cell renders in O(1). Days outside
+// the visible month render with low opacity. Off / past-date cells
+// are non-tappable.
+const HEATMAP_TONES: Record<MonthDayStatus, { bg: string; fg: string; border: string; label: string }> = {
+  available: { bg: "rgba(201, 169, 97, 0.42)", fg: "#2A1810", border: "#A8893F", label: "Open" },
+  limited:   { bg: "rgba(201, 118, 43, 0.32)", fg: "#4A2C1A", border: "#C9762B", label: "Limited" },
+  booked:    { bg: "rgba(139, 115, 85, 0.20)", fg: "#8B7355", border: "rgba(139, 115, 85, 0.45)", label: "Booked" },
+  off:       { bg: "rgba(74, 44, 26, 0.06)",   fg: "#B8A586", border: "rgba(74, 44, 26, 0.10)", label: "Off" },
+};
+
+const BookingHeatmap = ({
+  year, month, monthByDate, selected, loading,
+  onPrevMonth, onNextMonth, onPickDay,
+}: {
+  year: number;
+  month: number;
+  monthByDate: Map<string, MonthDay>;
+  selected: string;
+  loading: boolean;
+  onPrevMonth: () => void;
+  onNextMonth: () => void;
+  onPickDay: (iso: string, status: MonthDayStatus) => void;
+}) => {
+  const monthLabel = new Date(year, month - 1, 1).toLocaleDateString("en-US", {
+    month: "long", year: "numeric",
+  });
+  const firstOfMonth = new Date(year, month - 1, 1);
+  const startWeekday = firstOfMonth.getDay(); // 0=Sun
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  // Touch swipe — small horizontal threshold so vertical scroll wins
+  // unambiguously. Same UX as the internal Schedule strip.
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+
+  // 42 cells = 6 weeks; covers any month layout. Cells outside the
+  // visible month are filled but non-tappable.
+  const cells = Array.from({ length: 42 }, (_, i) => {
+    const d = new Date(year, month - 1, 1 - startWeekday + i);
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return { date: d, iso, day: d.getDate(), inMonth: d.getMonth() === month - 1 };
+  });
+
+  return (
+    <div
+      onTouchStart={e => { const t = e.touches[0]; swipeStart.current = { x: t.clientX, y: t.clientY }; }}
+      onTouchEnd={e => {
+        const start = swipeStart.current;
+        swipeStart.current = null;
+        if (!start) return;
+        const t = e.changedTouches[0];
+        const dx = t.clientX - start.x;
+        const dy = t.clientY - start.y;
+        if (Math.abs(dx) < 40 || Math.abs(dy) > Math.abs(dx)) return;
+        if (dx < 0) onNextMonth(); else onPrevMonth();
+      }}
+      style={{
+        background: C.paper,
+        border: `1px solid ${C.hairline}`,
+        borderRadius: 16,
+        padding: 14,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <button
+          type="button"
+          onClick={onPrevMonth}
+          style={{
+            width: 32, height: 32, borderRadius: 999,
+            background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}`,
+            fontSize: 18, lineHeight: 1, cursor: "pointer",
+          }}
+        >
+          ‹
+        </button>
+        <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>
+          {monthLabel}
+        </p>
+        <button
+          type="button"
+          onClick={onNextMonth}
+          style={{
+            width: 32, height: 32, borderRadius: 999,
+            background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}`,
+            fontSize: 18, lineHeight: 1, cursor: "pointer",
+          }}
+        >
+          ›
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
+        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+          <span
+            key={`${d}-${i}`}
+            style={{
+              fontSize: 9, fontWeight: 700, textAlign: "center",
+              letterSpacing: "0.14em", color: C.muted, padding: "4px 0",
+            }}
+          >
+            {d}
+          </span>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+        {cells.map(c => {
+          const md = monthByDate.get(c.iso);
+          const status: MonthDayStatus = md ? md.status : "off";
+          const tone = HEATMAP_TONES[status];
+          const isPast = c.iso < todayIso;
+          const isOff = status === "off" || isPast;
+          const isSelected = c.iso === selected;
+          const inMonthOpacity = c.inMonth ? 1 : 0.32;
+          return (
+            <button
+              type="button"
+              key={c.iso}
+              onClick={() => { if (!isOff) onPickDay(c.iso, status); }}
+              disabled={isOff}
+              aria-label={`${c.iso} ${tone.label}`}
+              style={{
+                position: "relative",
+                minHeight: 44,
+                padding: 4,
+                borderRadius: 10,
+                background: isSelected
+                  ? `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`
+                  : tone.bg,
+                color: isSelected ? C.paper : tone.fg,
+                border: `1px solid ${isSelected ? C.goldDeep : tone.border}`,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: isOff ? "default" : "pointer",
+                opacity: inMonthOpacity,
+                transition: "transform 0.12s ease, opacity 0.12s ease",
+              }}
+            >
+              <span style={{ fontFamily: FONT_DISPLAY }}>{c.day}</span>
+              {md && md.slotCount > 0 && c.inMonth && (
+                <span
+                  aria-hidden
+                  style={{
+                    position: "absolute",
+                    bottom: 4, left: "50%", transform: "translateX(-50%)",
+                    width: 4, height: 4, borderRadius: 999,
+                    background: isSelected ? C.cream : C.goldDeep,
+                  }}
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Legend + loading shimmer */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10, fontSize: 10, color: C.muted }}>
+        {(["available", "limited", "booked", "off"] as MonthDayStatus[]).map(k => (
+          <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <span
+              aria-hidden
+              style={{
+                width: 10, height: 10, borderRadius: 3,
+                background: HEATMAP_TONES[k].bg,
+                border: `1px solid ${HEATMAP_TONES[k].border}`,
+              }}
+            />
+            {HEATMAP_TONES[k].label}
+          </span>
+        ))}
+        {loading && (
+          <span style={{ marginLeft: "auto", fontStyle: "italic" }}>Updating…</span>
+        )}
+      </div>
+    </div>
+  );
+};
