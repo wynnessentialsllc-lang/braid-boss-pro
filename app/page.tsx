@@ -181,6 +181,18 @@ const C = {
   muted: "#8B7355", mutedSoft: "#B8A586",
   success: "#5C7C4A", warning: "#C9762B", danger: "#9C3D2E",
   hairline: "rgba(74, 44, 26, 0.12)",
+
+  // 2026 facelift accents — bright but professional, calibrated to
+  // sit on the cream surface without fighting the gold lead. Add
+  // usage gradually; the existing brand tokens above stay primary.
+  coral: "#E08A6A",      // soft coral / rose accent
+  coralDeep: "#C56947",
+  lavender: "#9B7CC4",   // electric-lavender / plum accent
+  lavenderDeep: "#7556A0",
+  mint: "#7CB69E",       // fresh mint success accent
+  mintDeep: "#56947A",
+  teal: "#4A8A8A",       // teal info accent
+  tealDeep: "#356B6B",
 };
 const FONT_DISPLAY = `"Cormorant Garamond", Georgia, serif`;
 const FONT_BODY = `"DM Sans", "Inter", system-ui, sans-serif`;
@@ -1613,11 +1625,41 @@ const EmptyState = ({ icon, title, body, cta }: {
   cta?: React.ReactNode;
 }) => (
   <div className="flex flex-col items-center justify-center py-12 px-6 text-center bbp-fade">
-    <div className="mb-4 rounded-full p-4" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>{icon}</div>
+    {/* Soft halo behind the icon — gold core fading through coral
+        and lavender so empty states stop feeling like an "error" and
+        start feeling like an invitation. Pure CSS, no extra DOM. */}
+    <div
+      className="relative mb-4 rounded-full"
+      style={{
+        background: C.ivory,
+        border: `1px solid ${C.hairline}`,
+        padding: 16,
+        boxShadow: "0 1px 2px rgba(42, 24, 16, 0.04), 0 14px 36px -12px rgba(201, 169, 97, 0.45)",
+      }}
+    >
+      <span
+        aria-hidden
+        className="absolute inset-0 rounded-full bbp-empty-halo"
+        style={{
+          margin: -10,
+          background:
+            "conic-gradient(from 180deg, rgba(201, 169, 97, 0.32), rgba(224, 138, 106, 0.28), rgba(155, 124, 196, 0.28), rgba(124, 182, 158, 0.30), rgba(201, 169, 97, 0.32))",
+          filter: "blur(14px)",
+          opacity: 0.55,
+          zIndex: 0,
+        }}
+      />
+      <span className="relative" style={{ zIndex: 1 }}>{icon}</span>
+    </div>
     <p className="italic mb-1.5" style={{ fontFamily: FONT_DISPLAY, color: C.gold, fontSize: 18 }}>a fresh page awaits</p>
     <h4 style={{ fontFamily: FONT_DISPLAY, color: C.espresso, fontSize: 24, fontWeight: 600, lineHeight: 1.2 }}>{title}</h4>
     <p className="mt-2 text-sm max-w-xs" style={{ color: C.muted, lineHeight: 1.5 }}>{body}</p>
     {cta && <div className="mt-5">{cta}</div>}
+    <style>{`
+      @keyframes bbpEmptyHalo { 0%, 100% { transform: rotate(0deg) scale(1); opacity: 0.45; } 50% { transform: rotate(180deg) scale(1.06); opacity: 0.65; } }
+      .bbp-empty-halo { animation: bbpEmptyHalo 14s ease-in-out infinite; }
+      @media (prefers-reduced-motion: reduce) { .bbp-empty-halo { animation: none; } }
+    `}</style>
   </div>
 );
 
@@ -2342,6 +2384,116 @@ const RebookingScreen = ({
   );
 };
 
+// Dashboard hero — animated gradient card with greeting, owner
+// first name, and a small KPI ribbon. CSS-only (a slow-moving
+// conic gradient under a glass-blur layer); no animation library.
+// Honours prefers-reduced-motion.
+const DashboardHero = ({
+  greeting, ownerName, today, todayRevenue, weekAppts, currency,
+}: {
+  greeting: string;
+  ownerName: string | null;
+  today: string;
+  todayRevenue: number;
+  weekAppts: number;
+  currency: string;
+}) => {
+  return (
+    <div
+      className="relative overflow-hidden bbp-hero"
+      style={{
+        borderRadius: 28,
+        padding: "22px 22px 18px",
+        background: `linear-gradient(135deg, ${C.espresso} 0%, ${C.coffee} 100%)`,
+        color: C.cream,
+        boxShadow:
+          "0 1px 2px rgba(42, 24, 16, 0.06), 0 28px 60px -22px rgba(42, 24, 16, 0.45)",
+      }}
+    >
+      {/* Slow shimmer of the new accent palette behind a glass blur.
+          Stays subtle so the copy stays the hero. */}
+      <span
+        aria-hidden
+        className="bbp-hero-shimmer absolute"
+        style={{
+          inset: -40,
+          background:
+            "conic-gradient(from 200deg, rgba(201, 169, 97, 0.40), rgba(224, 138, 106, 0.34), rgba(155, 124, 196, 0.32), rgba(124, 182, 158, 0.32), rgba(201, 169, 97, 0.40))",
+          filter: "blur(40px)",
+          opacity: 0.55,
+          zIndex: 0,
+          pointerEvents: "none",
+        }}
+      />
+      <div className="relative" style={{ zIndex: 1 }}>
+        <p
+          className="text-[10px] font-bold uppercase tracking-widest"
+          style={{ color: C.gold, letterSpacing: "0.18em" }}
+        >
+          {greeting}
+        </p>
+        <h1
+          style={{
+            fontFamily: FONT_DISPLAY,
+            fontSize: 32,
+            fontWeight: 600,
+            lineHeight: 1.05,
+            color: C.cream,
+            marginTop: 4,
+          }}
+        >
+          {ownerName ? <>Welcome back, <em style={{ color: C.gold, fontStyle: "normal" }}>{ownerName}</em>.</> : "Welcome back."}
+        </h1>
+        <p className="mt-1 text-[12px]" style={{ color: "rgba(245, 235, 217, 0.78)" }}>
+          {fmtDateLong(today)}
+        </p>
+
+        {/* Tiny ribbon of two live numbers to anchor the card with
+            real signal — today's revenue and the week's appointment
+            count. Both are read-only; tapping the parent KPI cards
+            below already routes the user to the deep view. */}
+        <div className="mt-4 flex items-stretch gap-2">
+          <div
+            className="flex-1 rounded-2xl px-3 py-2.5"
+            style={{
+              background: "rgba(245, 235, 217, 0.10)",
+              border: "1px solid rgba(201, 169, 97, 0.30)",
+              backdropFilter: "blur(4px)",
+            }}
+          >
+            <p className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.gold, letterSpacing: "0.16em" }}>
+              Today
+            </p>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.cream, lineHeight: 1 }}>
+              {fmtMoney(todayRevenue, currency)}
+            </p>
+          </div>
+          <div
+            className="flex-1 rounded-2xl px-3 py-2.5"
+            style={{
+              background: "rgba(245, 235, 217, 0.10)",
+              border: "1px solid rgba(201, 169, 97, 0.30)",
+              backdropFilter: "blur(4px)",
+            }}
+          >
+            <p className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.gold, letterSpacing: "0.16em" }}>
+              Week
+            </p>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.cream, lineHeight: 1 }}>
+              {weekAppts} {weekAppts === 1 ? "booking" : "bookings"}
+            </p>
+          </div>
+        </div>
+      </div>
+      <style>{`
+        @keyframes bbpHeroShimmer { 0%, 100% { transform: rotate(0deg) scale(1); } 50% { transform: rotate(120deg) scale(1.05); } }
+        .bbp-hero-shimmer { animation: bbpHeroShimmer 18s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) { .bbp-hero-shimmer { animation: none; } }
+      `}</style>
+    </div>
+  );
+};
+
 const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState }: { store: any; setActive: any; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
@@ -2489,11 +2641,15 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
       />
 
       <div className="px-5 pt-4 pb-28 space-y-5">
-        {business.ownerName && (
-          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 28, color: C.espresso, fontWeight: 500, lineHeight: 1.15 }}>
-            Welcome back, <em style={{ color: C.gold }}>{business.ownerName.split(" ")[0]}</em>.
-          </p>
-        )}
+        <DashboardHero
+          greeting={greeting}
+          ownerName={business.ownerName?.split(" ")[0] || null}
+          today={today}
+          todayRevenue={revenueStats.todayRevenue}
+          weekAppts={stats.weekAppts}
+          currency={business.currency}
+        />
+
 
         <div className="grid grid-cols-2 gap-3">
           <KpiCard label="Today revenue" value={fmtMoney(revenueStats.todayRevenue, business.currency)} icon={<DollarSign size={16} />} tone={revenueStats.todayRevenue > 0 ? "gold" : "neutral"} onClick={() => setActive("schedule")} />
