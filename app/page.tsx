@@ -1643,8 +1643,11 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
 }) => {
   // iOS Safari's URL bar overlays the page and `100vh` / `100dvh` /
   // `position: fixed` all behave inconsistently across iOS versions.
-  // The visualViewport API is the only source of truth for the area
-  // the user can actually see, so size the overlay against it directly.
+  // The visualViewport API is the source of truth for the area the
+  // user can actually see, so size the overlay against it directly.
+  // We still fall back to 100dvh (NEVER 100vh — vh ignores the URL
+  // bar collapse and over-tall sheets clip past the top of the
+  // viewport on mobile Safari).
   const [vv, setVv] = useState<{ height: number; offsetTop: number } | null>(null);
   useEffect(() => {
     if (!open) return;
@@ -1665,7 +1668,13 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
   if (!open) return null;
   const overlayHeight = vv?.height ?? undefined;
   const overlayTop = vv?.offsetTop ?? 0;
-  const sheetMaxHeight = maxHeight || (overlayHeight ? `${overlayHeight - 24}px` : "calc(100dvh - 24px)");
+  // Cap sheet height so its top edge always clears the iOS notch /
+  // dynamic island / Safari URL-bar overlay when the layout sits at
+  // viewport-fit: cover. env(safe-area-inset-top) is 0 on Android +
+  // desktop, so this is a no-op there.
+  const sheetMaxHeight = maxHeight || (overlayHeight
+    ? `calc(${overlayHeight}px - env(safe-area-inset-top, 0px))`
+    : "calc(100dvh - env(safe-area-inset-top, 0px))");
   return (
     <div className="fixed left-0 right-0 z-50 flex items-end justify-center"
       style={{
@@ -1675,7 +1684,15 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
       }}
       onClick={onClose}>
       <div className="bbp-sheet w-full max-w-[480px] rounded-t-3xl flex flex-col"
-        style={{ background: C.cream, maxHeight: sheetMaxHeight, boxShadow: "0 -20px 60px -20px rgba(0,0,0,0.3)" }}
+        style={{
+          background: C.cream,
+          maxHeight: sheetMaxHeight,
+          boxShadow: "0 -20px 60px -20px rgba(0,0,0,0.3)",
+          // Reserve room for the notch + dynamic island so the
+          // grabber and the "Edit Appointment" header are never
+          // hidden behind the browser chrome.
+          paddingTop: "env(safe-area-inset-top, 0px)",
+        }}
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center pt-3 pb-1">
           <div className="w-10 h-1.5 rounded-full" style={{ background: C.mutedSoft }} />
@@ -1687,13 +1704,17 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {rightAction}
-            <button type="button" onClick={onClose} className="p-2 -mr-2 rounded-full" style={{ color: C.coffee }}><X size={22} /></button>
+            <button type="button" onClick={onClose} aria-label="Close" className="p-2 -mr-2 rounded-full" style={{ color: C.coffee }}><X size={22} /></button>
           </div>
         </div>
         <div className="flex-1 bbp-scroll px-5 pt-4"
           style={{
             overflowY: "auto",
             WebkitOverflowScrolling: "touch",
+            // Bottom padding reserves room for the tab bar (~72px),
+            // the home indicator (env(safe-area-inset-bottom)), and a
+            // bit of breathing space — plus enough buffer that the
+            // last form button isn't pinned to the chrome.
             paddingBottom: "calc(140px + env(safe-area-inset-bottom, 0px))",
             overscrollBehavior: "contain",
           }}>
