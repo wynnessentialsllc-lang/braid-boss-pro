@@ -95,6 +95,7 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     discount_id: r => cleanString(r.discountId),
     discount_name: r => cleanString(r.discountName),
     discount_amount: r => (r.discountAmount == null ? null : cleanNumber(r.discountAmount)),
+    kind: r => cleanString(r.kind) || "appointment",
   },
   quotes: {
     label: r => cleanString(r.label),
@@ -208,6 +209,7 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.discountId = base.discountId ?? row.discount_id;
       base.discountName = base.discountName ?? row.discount_name;
       base.discountAmount = base.discountAmount ?? row.discount_amount;
+      base.kind = base.kind ?? row.kind ?? "appointment";
       break;
     case "quotes":
       base.label = base.label ?? row.label;

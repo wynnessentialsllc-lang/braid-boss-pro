@@ -190,11 +190,24 @@ export const computeDayStatus = (
   apptsForDay: any[],
   opts: { workingDayHours?: number } = {},
 ): { status: DayStatus; label: string } => {
-  const list = apptsForDay.filter(a => a?.status !== "cancelled");
-  if (list.length === 0) return { status: "empty", label: "No bookings" };
-  const totalHours = list.reduce((s, a) => s + (Number(a?.durationHours) || 0), 0);
   const cap = opts.workingDayHours ?? 8;
-  const anyDepositDue = list.some(a => (Number(a?.depositPaid) || 0) <= 0);
+  // A "blocked" entry covering the full working day means the
+  // stylist explicitly marked the day off. Surface "Off" when that
+  // happens — even if there's a stray booking, the block tells the
+  // truth about availability.
+  const blockedHours = apptsForDay
+    .filter(a => a?.kind === "blocked" && a?.status !== "cancelled")
+    .reduce((s, a) => s + (Number(a?.durationHours) || 0), 0);
+  if (blockedHours >= cap) return { status: "off", label: "Off" };
+
+  // Billable bookings only — personal events and blocked time aren't
+  // bookings and shouldn't drive the booked / openings logic.
+  const billable = apptsForDay.filter(a =>
+    a?.status !== "cancelled" && (!a?.kind || a.kind === "appointment"),
+  );
+  if (billable.length === 0) return { status: "empty", label: "No bookings" };
+  const totalHours = billable.reduce((s, a) => s + (Number(a?.durationHours) || 0), 0);
+  const anyDepositDue = billable.some(a => (Number(a?.depositPaid) || 0) <= 0);
   if (totalHours >= cap) return { status: "fully_booked", label: "Fully booked" };
   if (anyDepositDue) return { status: "deposit_due", label: "Deposit due" };
   return { status: "openings_available", label: "Openings available" };

@@ -121,7 +121,7 @@ import {
   Plus, X, ChevronRight, ChevronLeft, ChevronDown, Search, Copy, Check, Trash2, Edit3,
   FileText, DollarSign, Clock, Phone, Mail, AlertCircle, Sparkles,
   ArrowUpRight, ArrowDownRight, Save, RefreshCw, Download, Bell, BellOff,
-  CalendarPlus, UserPlus, Receipt, ScrollText, Image as ImageIcon, Camera,
+  CalendarPlus, UserPlus, Coffee, Lock, Receipt, ScrollText, Image as ImageIcon, Camera,
   Star, Heart, Repeat, Play, Pause, Square, Timer as TimerIcon, Zap, Award,
   BarChart3, Layers, MessageSquare, Send, AlertTriangle, CheckCircle2,
   XCircle, Filter, LogOut
@@ -3240,12 +3240,13 @@ const TIMELINE_START_HOUR = 6;
 const TIMELINE_END_HOUR = 21;
 const HOUR_PX = 60;
 
-const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, openCommunication, openReceipt }: { store: any; prefillNewAppt: any; clearApptPrefill: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void; openReceipt?: (rcp: ReceiptRecord) => void }) => {
+const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, openCommunication, openReceipt, openQuickClient }: { store: any; prefillNewAppt: any; clearApptPrefill: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void; openReceipt?: (rcp: ReceiptRecord) => void; openQuickClient?: () => void }) => {
   const { appointments, business, recurringSeries } = store;
   const [editing, setEditing] = useState<EntityRecord | null>(null);
   const [prefs, setPrefs] = useCalendarPrefs();
   const [showSettings, setShowSettings] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
   const today = todayISO();
   const [selectedDate, setSelectedDate] = useState<string>(today);
 
@@ -3291,13 +3292,18 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
     [apptsForSelectedDay],
   );
 
-  // Income view aggregations are scoped to the selected day.
+  // Income view aggregations are scoped to the selected day. Personal
+  // events and blocked time live in the same table but never carry
+  // revenue — filter them out so they can't poison the totals.
   const dayMoney = useMemo(() => {
     let expected = 0;
     let deposits = 0;
     let pending = 0;
     let completed = 0;
-    for (const a of apptsForSelectedDay) {
+    const billable = apptsForSelectedDay.filter(
+      a => !a?.kind || a.kind === "appointment",
+    );
+    for (const a of billable) {
       const total = Number(a?.totalPrice) || 0;
       const discount = Number(a?.discountAmount) || 0;
       const net = Math.max(0, total - discount);
@@ -3310,7 +3316,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
     }
     return {
       expected, deposits, pending, completed,
-      count: apptsForSelectedDay.length,
+      count: billable.length,
     };
   }, [apptsForSelectedDay]);
 
@@ -3374,19 +3380,43 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
           </span>
           <ChevronDown size={16} style={{ color: C.coffee }} />
         </button>
-        <button
-          type="button"
-          onClick={() => setEditing({})}
-          aria-label="New appointment"
-          className="p-2 rounded-full active:scale-[0.97] transition"
-          style={{
-            color: C.paper,
-            background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
-            boxShadow: "0 6px 14px -6px rgba(168, 137, 63, 0.55)",
-          }}
-        >
-          <Plus size={18} />
-        </button>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setShowCreateMenu(v => !v)}
+            aria-label="New calendar item"
+            aria-expanded={showCreateMenu}
+            className="p-2 rounded-full active:scale-[0.97] transition"
+            style={{
+              color: C.paper,
+              background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+              boxShadow: "0 6px 14px -6px rgba(168, 137, 63, 0.55)",
+            }}
+          >
+            <Plus size={18} />
+          </button>
+          {showCreateMenu && (
+            <CreateMenu
+              onClose={() => setShowCreateMenu(false)}
+              onCreateAppointment={() => {
+                setShowCreateMenu(false);
+                setEditing({ date: selectedDate, kind: "appointment" });
+              }}
+              onCreateClient={() => {
+                setShowCreateMenu(false);
+                openQuickClient?.();
+              }}
+              onCreatePersonalEvent={() => {
+                setShowCreateMenu(false);
+                setEditing({ date: selectedDate, kind: "personal" });
+              }}
+              onBlockOffTime={() => {
+                setShowCreateMenu(false);
+                setEditing({ date: selectedDate, kind: "blocked" });
+              }}
+            />
+          )}
+        </div>
       </div>
 
       {/* WEEK STRIP — swipeable + chevron fallback */}
@@ -3666,7 +3696,22 @@ const DayCalendarView = ({
             const rawHeight = (durationMin / 60) * HOUR_PX;
             const maxHeight = HOURS.length * HOUR_PX - top;
             const height = Math.max(44, Math.min(rawHeight, maxHeight));
-            const color = colorForAppointment(a, colorMode, today);
+
+            // Personal events and blocked time skip the standard
+            // color coding — both render as neutral / unavailable
+            // blocks to keep the timeline readable.
+            const kind = a?.kind || "appointment";
+            const isPersonalBlock = kind === "personal";
+            const isBlockedBlock = kind === "blocked";
+            const color = (isPersonalBlock || isBlockedBlock)
+              ? {
+                  background: isBlockedBlock ? "rgba(74, 44, 26, 0.08)" : "rgba(139, 115, 85, 0.10)",
+                  border: isBlockedBlock ? "rgba(74, 44, 26, 0.30)" : "rgba(139, 115, 85, 0.35)",
+                  foreground: isBlockedBlock ? C.muted : C.coffee,
+                  accent: isBlockedBlock ? C.muted : C.caramel,
+                  label: isBlockedBlock ? "Unavailable" : "Personal",
+                }
+              : colorForAppointment(a, colorMode, today);
 
             const total = Number(a?.totalPrice) || 0;
             const discount = Number(a?.discountAmount) || 0;
@@ -3678,6 +3723,17 @@ const DayCalendarView = ({
               : deposit < net ? `Deposit ${fmtMoney(deposit, business?.currency)}`
               : "Deposit paid";
             const balanceLine = balance > 0 ? `Balance ${fmtMoney(balance, business?.currency)}` : null;
+
+            const titleLine = isBlockedBlock
+              ? (a.eventTitle || "Unavailable")
+              : isPersonalBlock
+                ? (a.eventTitle || "Personal event")
+                : (a.clientName || "Open slot");
+            const subLine = isBlockedBlock
+              ? `${fmtTime(a.time)} · Off`
+              : isPersonalBlock
+                ? `${fmtTime(a.time)} · Personal`
+                : `${fmtTime(a.time)} · ${a.style || "Service"}`;
 
             return (
               <button
@@ -3695,17 +3751,18 @@ const DayCalendarView = ({
                   background: color.background,
                   border: `1px solid ${color.border}`,
                   borderLeft: `4px solid ${color.accent}`,
+                  borderStyle: isBlockedBlock ? "dashed" : "solid",
                   color: color.foreground,
                   overflow: "hidden",
                 }}
               >
                 <p className="text-[13px] font-semibold leading-tight truncate">
-                  {a.clientName || "Open slot"}
+                  {titleLine}
                 </p>
                 <p className="text-[11px] mt-0.5 truncate" style={{ opacity: 0.85 }}>
-                  {fmtTime(a.time)} · {a.style || "Service"}
+                  {subLine}
                 </p>
-                {height >= 60 && (
+                {height >= 60 && !isPersonalBlock && !isBlockedBlock && (
                   <p className="text-[11px] mt-0.5 truncate" style={{ opacity: 0.85 }}>
                     {depositLine}{balanceLine ? ` · ${balanceLine}` : ""}
                   </p>
@@ -3765,7 +3822,27 @@ const WeekCalendarView = ({
             ) : (
               <div className="space-y-2">
                 {list.map(a => {
-                  const color = colorForAppointment(a, colorMode, today);
+                  const kind = a?.kind || "appointment";
+                  const isPersonalBlock = kind === "personal";
+                  const isBlockedBlock = kind === "blocked";
+                  const color = (isPersonalBlock || isBlockedBlock)
+                    ? {
+                        background: isBlockedBlock ? "rgba(74, 44, 26, 0.08)" : "rgba(139, 115, 85, 0.10)",
+                        border: isBlockedBlock ? "rgba(74, 44, 26, 0.30)" : "rgba(139, 115, 85, 0.35)",
+                        foreground: isBlockedBlock ? C.muted : C.coffee,
+                        accent: isBlockedBlock ? C.muted : C.caramel,
+                      }
+                    : colorForAppointment(a, colorMode, today);
+                  const titleLine = isBlockedBlock
+                    ? (a.eventTitle || "Unavailable")
+                    : isPersonalBlock
+                      ? (a.eventTitle || "Personal event")
+                      : (a.clientName || "Open slot");
+                  const subLine = isBlockedBlock
+                    ? `${fmtTime(a.time)} · Off`
+                    : isPersonalBlock
+                      ? `${fmtTime(a.time)} · Personal`
+                      : `${fmtTime(a.time)} · ${a.style || "Service"}`;
                   return (
                     <button
                       type="button"
@@ -3776,19 +3853,22 @@ const WeekCalendarView = ({
                         background: color.background,
                         border: `1px solid ${color.border}`,
                         borderLeft: `4px solid ${color.accent}`,
+                        borderStyle: isBlockedBlock ? "dashed" : "solid",
                         color: color.foreground,
                       }}
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-semibold truncate">{a.clientName || "Open slot"}</p>
+                          <p className="text-[13px] font-semibold truncate">{titleLine}</p>
                           <p className="text-[11px] truncate" style={{ opacity: 0.85 }}>
-                            {fmtTime(a.time)} · {a.style || "Service"}
+                            {subLine}
                           </p>
                         </div>
-                        <span className="text-[12px] font-semibold tabular-nums" style={{ opacity: 0.9 }}>
-                          {fmtMoney(Number(a.totalPrice) || 0, business?.currency)}
-                        </span>
+                        {!isPersonalBlock && !isBlockedBlock && (
+                          <span className="text-[12px] font-semibold tabular-nums" style={{ opacity: 0.9 }}>
+                            {fmtMoney(Number(a.totalPrice) || 0, business?.currency)}
+                          </span>
+                        )}
                       </div>
                     </button>
                   );
@@ -3926,6 +4006,94 @@ const IncomeCalendarView = ({
 };
 
 // ---- Calendar Settings Sheet -------------------------------------------
+
+// ---- Floating "Create" menu (Schedule + button) ------------------------
+// Tiny popover anchored to the + button. Cream card with hairline
+// dividers between actions. Closes on outside-click and Escape so
+// mobile Safari and Capacitor both behave.
+const CreateMenu = ({
+  onClose, onCreateAppointment, onCreateClient, onCreatePersonalEvent, onBlockOffTime,
+}: {
+  onClose: () => void;
+  onCreateAppointment: () => void;
+  onCreateClient: () => void;
+  onCreatePersonalEvent: () => void;
+  onBlockOffTime: () => void;
+}) => {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const onPointer = (e: PointerEvent) => {
+      const node = ref.current;
+      if (!node) return;
+      if (e.target instanceof Node && !node.contains(e.target)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    // pointerdown is the most reliable cross-platform "tap outside"
+    // signal — touchstart fires before scroll on iOS but pointer
+    // unifies mouse + touch + pen.
+    document.addEventListener("pointerdown", onPointer, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const items = [
+    { icon: <CalendarPlus size={18} />, label: "Create appointment", description: "Booking with a client", onClick: onCreateAppointment },
+    { icon: <UserPlus size={18} />,     label: "Create client",      description: "Add someone to your book",  onClick: onCreateClient },
+    { icon: <Coffee size={18} />,       label: "Create personal event", description: "Errand, lunch, school, etc.", onClick: onCreatePersonalEvent },
+    { icon: <Lock size={18} />,         label: "Block off time",     description: "Mark yourself unavailable", onClick: onBlockOffTime },
+  ];
+
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      className="absolute z-50 mt-2 right-0 w-64 rounded-2xl overflow-hidden"
+      style={{
+        background: C.paper,
+        border: `1px solid ${C.hairline}`,
+        boxShadow:
+          "0 1px 2px rgba(42, 24, 16, 0.06), 0 18px 36px -12px rgba(42, 24, 16, 0.22)",
+      }}
+    >
+      {items.map((it, i) => (
+        <button
+          key={it.label}
+          type="button"
+          role="menuitem"
+          onClick={it.onClick}
+          className="w-full flex items-center gap-3 px-4 py-3 active:scale-[0.99] transition text-left"
+          style={{
+            color: C.espresso,
+            borderTop: i === 0 ? "none" : `1px solid ${C.hairline}`,
+            background: "transparent",
+          }}
+        >
+          <span
+            aria-hidden
+            className="flex items-center justify-center shrink-0"
+            style={{
+              width: 32, height: 32, borderRadius: 999,
+              background: C.ivory, color: C.gold, border: `1px solid ${C.hairline}`,
+            }}
+          >
+            {it.icon}
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-[13px] font-semibold leading-tight" style={{ color: C.espresso }}>
+              {it.label}
+            </span>
+            <span className="block text-[11px] mt-0.5" style={{ color: C.muted }}>
+              {it.description}
+            </span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+};
 
 // ---- Full-month Date Picker -------------------------------------------
 // Tapping the month/year header opens this. Initial month follows the
@@ -4263,6 +4431,14 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         discountId: appt?.discountId ?? appt?.discount_id ?? null,
         discountName: appt?.discountName ?? appt?.discount_name ?? null,
         discountAmount: sanitizeMoneyInput(appt?.discountAmount ?? appt?.discount_amount ?? 0),
+        // Calendar item kind. Default 'appointment' so existing rows
+        // keep their pre-migration semantics. Personal events / blocked
+        // time hide the client + payment sections in the form.
+        kind: (appt?.kind as ("appointment" | "personal" | "blocked") | undefined) || "appointment",
+        // Free-text title used by personal events and blocked time
+        // (e.g. "Doctor's appointment" / "Lunch with Mom"). Stored on
+        // the same record; falls back to clientName for existing rows.
+        eventTitle: appt?.eventTitle || appt?.event_title || "",
         id: appt?.id,
         seriesId: appt?.seriesId,
       });
@@ -4339,6 +4515,28 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   }, [form.clientId, clients]);
 
   const handleSave = async () => {
+    // Personal events and blocked time skip the entire client/payment/
+    // recurring/reminders pipeline — they're just titled time-blocks.
+    if (form.kind === "personal" || form.kind === "blocked") {
+      const baseEvent = {
+        ...form,
+        // Wipe fields that don't apply so a kind-changed record stays clean.
+        clientId: "", clientName: "",
+        clientPhone: "", clientEmail: "",
+        style: "",
+        depositPaid: 0, totalPrice: 0,
+        discountId: null, discountName: null, discountAmount: 0,
+        paymentStatus: "", paymentDate: "", paymentMethod: "", paymentNotes: "",
+        seriesId: undefined,
+        remindersEnabled: false,
+        reminderChannel: null,
+      };
+      const saved = await upsertAppointment(baseEvent);
+      if (!saved) return;
+      onClose();
+      return;
+    }
+
     let clientId = form.clientId;
     let clientName = form.clientName;
     if (showNewClient && newClientName.trim()) {
@@ -4432,7 +4630,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
   const handleDelete = async () => {
     if (!form.id) return;
-    if (!window.confirm("Delete this appointment?")) return;
+    const confirmCopy = form.kind === "personal" ? "Delete this personal event?"
+      : form.kind === "blocked" ? "Remove this blocked time?"
+      : "Delete this appointment?";
+    if (!window.confirm(confirmCopy)) return;
     await deleteAppointment(form.id);
     onClose();
   };
@@ -4452,51 +4653,85 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     onClose();
   };
 
+  // Sheet title + placeholder copy depend on the calendar item kind.
+  const isAppointment = form.kind === "appointment" || !form.kind;
+  const isPersonal = form.kind === "personal";
+  const isBlocked = form.kind === "blocked";
+  const sheetTitle = (() => {
+    if (form.id) {
+      if (isPersonal) return "Edit personal event";
+      if (isBlocked) return "Edit blocked time";
+      return "Edit Appointment";
+    }
+    if (isPersonal) return "New personal event";
+    if (isBlocked) return "Block off time";
+    return "New Appointment";
+  })();
+
   return (
-    <Sheet open={open} onClose={onClose} title={form.id ? "Edit Appointment" : "New Appointment"}>
+    <Sheet open={open} onClose={onClose} title={sheetTitle}>
       <div className="space-y-4 pb-6">
-        <Field label="Client">
-          {showNewClient ? (
-            <div className="flex gap-2">
-              <div className="flex-1"><Input value={newClientName} onChange={e => setNewClientName(e.target.value)} placeholder="Client name" /></div>
-              <Button variant="outline" onClick={() => setShowNewClient(false)}>Cancel</Button>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <Select value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}
-                  options={[{ value: "", label: "— Select client —" }, ...clients.map(c => ({ value: c.id, label: c.name }))]} />
+        {!isAppointment && (
+          <Field label="Title">
+            <Input
+              value={form.eventTitle || ""}
+              onChange={e => setForm({ ...form, eventTitle: e.target.value })}
+              placeholder={isPersonal ? "Lunch with Mom" : "Unavailable"}
+            />
+          </Field>
+        )}
+
+        {isAppointment && (
+          <Field label="Client">
+            {showNewClient ? (
+              <div className="flex gap-2">
+                <div className="flex-1"><Input value={newClientName} onChange={e => setNewClientName(e.target.value)} placeholder="Client name" /></div>
+                <Button variant="outline" onClick={() => setShowNewClient(false)}>Cancel</Button>
               </div>
-              <Button variant="outline" icon={<UserPlus size={16} />} onClick={() => setShowNewClient(true)}>New</Button>
-            </div>
-          )}
-        </Field>
+            ) : (
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <Select value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}
+                    options={[{ value: "", label: "— Select client —" }, ...clients.map(c => ({ value: c.id, label: c.name }))]} />
+                </div>
+                <Button variant="outline" icon={<UserPlus size={16} />} onClick={() => setShowNewClient(true)}>New</Button>
+              </div>
+            )}
+          </Field>
+        )}
 
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Phone" hint="for SMS"><Input type="tel" value={form.clientPhone} onChange={e => setForm({ ...form, clientPhone: e.target.value })} placeholder="555-0123" /></Field>
-          <Field label="Email" hint="for email"><Input type="email" value={form.clientEmail} onChange={e => setForm({ ...form, clientEmail: e.target.value })} placeholder="name@email.com" /></Field>
-        </div>
+        {isAppointment && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Phone" hint="for SMS"><Input type="tel" value={form.clientPhone} onChange={e => setForm({ ...form, clientPhone: e.target.value })} placeholder="555-0123" /></Field>
+            <Field label="Email" hint="for email"><Input type="email" value={form.clientEmail} onChange={e => setForm({ ...form, clientEmail: e.target.value })} placeholder="name@email.com" /></Field>
+          </div>
+        )}
 
-        <Field label="Style / Service"><Input value={form.style} onChange={e => setForm({ ...form, style: e.target.value })} placeholder="e.g. Knotless mid-back" /></Field>
+        {isAppointment && (
+          <Field label="Style / Service"><Input value={form.style} onChange={e => setForm({ ...form, style: e.target.value })} placeholder="e.g. Knotless mid-back" /></Field>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Date"><Input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></Field>
           <Field label="Time"><Input type="time" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} /></Field>
           <Field label="Duration"><MoneyInput prefix="" suffix="hrs" placeholder="6.5" value={form.durationHours} onChange={(v) => setForm({ ...form, durationHours: v })} /></Field>
-          <Field label="Status">
-            <Select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}
-              options={[
-                { value: "scheduled", label: "Scheduled" },
-                { value: "confirmed", label: "Confirmed" },
-                { value: "completed", label: "Completed" },
-                { value: "cancelled", label: "Cancelled" },
-                { value: "no_show", label: "No-show" },
-              ]} />
-          </Field>
-          <Field label="Total price"><MoneyInput value={form.totalPrice} onChange={(v) => setForm({ ...form, totalPrice: v })} /></Field>
-          <Field label="Deposit paid"><MoneyInput value={form.depositPaid} onChange={(v) => setForm({ ...form, depositPaid: v })} /></Field>
+          {isAppointment && (
+            <Field label="Status">
+              <Select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}
+                options={[
+                  { value: "scheduled", label: "Scheduled" },
+                  { value: "confirmed", label: "Confirmed" },
+                  { value: "completed", label: "Completed" },
+                  { value: "cancelled", label: "Cancelled" },
+                  { value: "no_show", label: "No-show" },
+                ]} />
+            </Field>
+          )}
+          {isAppointment && <Field label="Total price"><MoneyInput value={form.totalPrice} onChange={(v) => setForm({ ...form, totalPrice: v })} /></Field>}
+          {isAppointment && <Field label="Deposit paid"><MoneyInput value={form.depositPaid} onChange={(v) => setForm({ ...form, depositPaid: v })} /></Field>}
         </div>
 
+        {isAppointment && (
         <Field
           label="Discount"
           hint={availableDiscounts.length === 0
@@ -4523,7 +4758,8 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             })()}
           />
         </Field>
-        {discountAmt > 0 && (
+        )}
+        {isAppointment && discountAmt > 0 && (
           <Card className="p-3" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
             <div className="flex items-center justify-between text-[13px]" style={{ color: C.coffee }}>
               <span>Subtotal</span>
@@ -4547,14 +4783,17 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           </Card>
         )}
 
+        {isAppointment && (
         <Card className="p-3.5 flex justify-between items-center" style={{ background: C.ivory }}>
           <span className="text-sm font-semibold" style={{ color: C.coffee }}>Balance due</span>
           <span style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: balanceDue > 0 ? C.warning : C.success }}>
             {fmtMoney(balanceDue, business.currency)}
           </span>
         </Card>
+        )}
 
         {/* PAYMENT */}
+        {isAppointment && (
         <Card className="p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -4631,8 +4870,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             );
           })()}
         </Card>
+        )}
 
-        {/* RECURRING */}
+        {/* RECURRING — appointments only */}
+        {isAppointment && (
         <Card className="p-4">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
@@ -4658,8 +4899,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             </div>
           )}
         </Card>
+        )}
 
-        {/* REMINDERS */}
+        {/* REMINDERS — appointments only */}
+        {isAppointment && (
         <Card className="p-4">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
@@ -4682,18 +4925,19 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             </div>
           )}
         </Card>
+        )}
 
         <Field label="Notes">
           <Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Hair texture, prep notes, anything to remember…" rows={3} />
         </Field>
 
-        {form.id && (
+        {isAppointment && form.id && (
           <Button variant="dark" icon={<TimerIcon size={18} />} onClick={handleStartTimer} fullWidth>Start chair timer</Button>
         )}
-        {form.id && (
+        {isAppointment && form.id && (
           <AppointmentCommHistory appointmentId={form.id} commLog={store.commLog || []} />
         )}
-        {form.id && openCommunication && (
+        {isAppointment && form.id && openCommunication && (
           <Button variant="outline" icon={<MessageSquare size={16} />} fullWidth
             onClick={() => openCommunication({
               appointment: form,
@@ -4705,8 +4949,8 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         {form.id && form.date && (
           <Button variant="outline" icon={<CalendarPlus size={16} />} fullWidth
             onClick={() => {
-              const ics = buildVCalendar([form as IcsAppointment], { businessName: business?.businessName, currency: business?.currency });
-              const fname = sanitizeFilename(`appt-${form.clientName || "client"}-${form.date}`) + ".ics";
+              const ics = buildVCalendar([form as IcsAppointment], { businessName: form.eventTitle || business?.businessName, currency: business?.currency });
+              const fname = sanitizeFilename(`appt-${form.eventTitle || form.clientName || "event"}-${form.date}`) + ".ics";
               downloadIcs(fname, ics);
             }}>
             Add to calendar
@@ -4715,10 +4959,21 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
         <div className="grid grid-cols-2 gap-3 pt-2">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={handleSave} disabled={!form.style && !form.clientId && !showNewClient}>Save</Button>
+          <Button
+            variant="primary"
+            onClick={handleSave}
+            disabled={isAppointment
+              ? (!form.style && !form.clientId && !showNewClient)
+              : !((form.eventTitle || "").trim())
+            }
+          >
+            Save
+          </Button>
         </div>
         {form.id && (
-          <Button variant="danger" icon={<Trash2 size={16} />} onClick={handleDelete} fullWidth>Delete this appointment</Button>
+          <Button variant="danger" icon={<Trash2 size={16} />} onClick={handleDelete} fullWidth>
+            {isPersonal ? "Delete this event" : isBlocked ? "Remove blocked time" : "Delete this appointment"}
+          </Button>
         )}
         {form.seriesId && (
           <Button variant="danger" onClick={handleDeleteSeries} fullWidth>Delete entire series</Button>
@@ -9924,7 +10179,23 @@ export default function App() {
       requestUpgrade,
       discountsApi,
       upsertClient: gateNew("clients", rawStore.clients, rawStore.upsertClient),
-      upsertAppointment: gateNew("appointments", rawStore.appointments, rawStore.upsertAppointment),
+      // Personal events and blocked time live in the same table but
+      // aren't bookings, so they (a) don't count toward the appointment
+      // limit and (b) bypass the gate entirely when being created.
+      upsertAppointment: async (rec: any) => {
+        const recKind = rec?.kind || "appointment";
+        if (recKind !== "appointment") {
+          return rawStore.upsertAppointment(rec);
+        }
+        const billable = (rawStore.appointments as any[])
+          .filter(a => !a?.kind || a.kind === "appointment");
+        const isNew = !rec || typeof rec !== "object" || !rec.id;
+        if (isNew && hasReachedGuestLimit("appointments", billable.length, premium)) {
+          requestUpgrade("appointments");
+          return null;
+        }
+        return rawStore.upsertAppointment(rec);
+      },
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
@@ -10175,7 +10446,8 @@ export default function App() {
               clearApptPrefill={() => setApptPrefill(null)}
               openTimerForAppt={openTimerForAppt}
               openCommunication={openCommunication}
-              openReceipt={openReceipt} />
+              openReceipt={openReceipt}
+              openQuickClient={openQuickClient} />
           )}
           {active === "clients" && (
             <Clients store={store} openCommunication={openCommunication} openQuickAppt={openQuickAppt} savePhoto={handleSavePhoto} deletePhoto={handleDeletePhoto} />
