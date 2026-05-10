@@ -136,17 +136,25 @@ export const useWaitlist = (
   // Stamp the linked appointment id when a request is converted.
   // Separated from setStatus because the caller needs the new
   // appointment id from upsertAppointment first.
-  const linkConvertedAppointment = async (id: string, appointmentId: string) => {
+  //
+  // NOTE: converted_appointment_id is `uuid` in the schema while
+  // the app stamps appointment ids as text (`appt_<uid>`). Writing
+  // the text id into a uuid column would fail at the DB layer, so
+  // we deliberately skip that write today and rely on
+  // status='booked' as the conversion signal. When appointments.id
+  // is migrated to uuid (or this column is loosened to text), wire
+  // the field through and dashboards can link the two records.
+  const linkConvertedAppointment = async (id: string, _appointmentId: string) => {
     if (!userId) return false;
     const supabase = getSupabase();
     const { error: err } = await supabase
       .from("waitlist_requests")
-      .update({ status: "booked", converted_appointment_id: appointmentId })
+      .update({ status: "booked" })
       .eq("id", id)
       .eq("user_id", userId);
     if (err) { setError(err.message); return false; }
     setRequests(prev => prev.map(r => r.id === id
-      ? { ...r, status: "booked" as WaitlistStatus, converted_appointment_id: appointmentId }
+      ? { ...r, status: "booked" as WaitlistStatus }
       : r));
     return true;
   };
