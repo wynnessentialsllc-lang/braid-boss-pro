@@ -3245,6 +3245,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
   const [editing, setEditing] = useState<EntityRecord | null>(null);
   const [prefs, setPrefs] = useCalendarPrefs();
   const [showSettings, setShowSettings] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const today = todayISO();
   const [selectedDate, setSelectedDate] = useState<string>(today);
 
@@ -3315,6 +3316,37 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
 
   const goToToday = () => setSelectedDate(today);
 
+  // Move the visible week. Anchored to the current selectedDate's
+  // week start so successive shifts compose cleanly. We move the
+  // *selectedDate itself* by ±7 days so the gold-circle highlight
+  // travels with the strip — the user can keep tapping the same
+  // weekday to scrub through weeks. monthLabel + weekDates re-derive
+  // automatically from selectedDate.
+  const shiftWeek = (direction: 1 | -1) => {
+    setSelectedDate(prev => addDaysISO(prev, direction * 7));
+  };
+
+  // Touch-driven horizontal swipe. We capture startX on touchstart
+  // and decide on touchend; threshold of 40px filters out vertical
+  // scroll noise. Direction maps to "swipe content left = next week"
+  // which matches iOS conventions and the spec.
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const onWeekTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    swipeStart.current = { x: t.clientX, y: t.clientY };
+  };
+  const onWeekTouchEnd = (e: React.TouchEvent) => {
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) < 40) return;
+    if (Math.abs(dy) > Math.abs(dx)) return; // vertical scroll won
+    shiftWeek(dx < 0 ? 1 : -1);
+  };
+
   return (
     <div className="bbp-fade pb-32">
       {/* HEADER — overflow / month / plus */}
@@ -3333,9 +3365,9 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
         </button>
         <button
           type="button"
-          onClick={goToToday}
+          onClick={() => setShowDatePicker(true)}
           className="flex items-center gap-1.5 px-2 py-1 rounded-lg active:scale-[0.98] transition"
-          aria-label="Jump to today"
+          aria-label="Open date picker"
         >
           <span style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>
             {monthLabel}
@@ -3357,8 +3389,22 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
         </button>
       </div>
 
-      {/* WEEK STRIP */}
-      <div className="grid grid-cols-7 gap-1 px-3 mb-3">
+      {/* WEEK STRIP — swipeable + chevron fallback */}
+      <div
+        className="flex items-center gap-1 px-2 mb-3"
+        onTouchStart={onWeekTouchStart}
+        onTouchEnd={onWeekTouchEnd}
+      >
+        <button
+          type="button"
+          onClick={() => shiftWeek(-1)}
+          aria-label="Previous week"
+          className="p-1.5 rounded-full active:scale-[0.95] transition shrink-0"
+          style={{ color: C.muted }}
+        >
+          <ChevronLeft size={18} />
+        </button>
+        <div className="grid grid-cols-7 gap-1 flex-1">
         {weekDates.map(iso => {
           const d = new Date(iso + "T00:00:00");
           const isSelected = iso === selectedDate;
@@ -3405,6 +3451,16 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
             </button>
           );
         })}
+        </div>
+        <button
+          type="button"
+          onClick={() => shiftWeek(1)}
+          aria-label="Next week"
+          className="p-1.5 rounded-full active:scale-[0.95] transition shrink-0"
+          style={{ color: C.muted }}
+        >
+          <ChevronRight size={18} />
+        </button>
       </div>
 
       {/* VIEW PILLS */}
@@ -3497,6 +3553,16 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
         prefs={prefs}
         setPrefs={setPrefs}
         onClose={() => setShowSettings(false)}
+      />
+
+      <DatePickerSheet
+        open={showDatePicker}
+        selectedDate={selectedDate}
+        today={today}
+        dateHasAppts={dateHasAppts}
+        onSelect={(iso) => { setSelectedDate(iso); setShowDatePicker(false); }}
+        onJumpToToday={() => { setSelectedDate(today); setShowDatePicker(false); }}
+        onClose={() => setShowDatePicker(false)}
       />
     </div>
   );
@@ -3860,6 +3926,158 @@ const IncomeCalendarView = ({
 };
 
 // ---- Calendar Settings Sheet -------------------------------------------
+
+// ---- Full-month Date Picker -------------------------------------------
+// Tapping the month/year header opens this. Initial month follows the
+// currently selected date, not today (per spec). Has prev/next month
+// chevrons, weekday legend, full grid (with leading/trailing days from
+// neighbouring months greyed out), and a Today button at the bottom
+// that jumps to today and closes.
+const DatePickerSheet = ({
+  open, selectedDate, today, dateHasAppts, onSelect, onJumpToToday, onClose,
+}: {
+  open: boolean;
+  selectedDate: string;
+  today: string;
+  dateHasAppts: Set<string>;
+  onSelect: (iso: string) => void;
+  onJumpToToday: () => void;
+  onClose: () => void;
+}) => {
+  // Anchor the visible month at the selected date when the sheet
+  // opens, then let the user navigate from there.
+  const initialAnchor = useMemo(() => {
+    const d = new Date(selectedDate + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  }, [selectedDate]);
+
+  const [viewYear, setViewYear] = useState<number>(initialAnchor.getFullYear());
+  const [viewMonth, setViewMonth] = useState<number>(initialAnchor.getMonth());
+
+  // Re-anchor each time the sheet opens so reopening lands on the
+  // current selected month rather than wherever the user wandered last.
+  useEffect(() => {
+    if (open) {
+      setViewYear(initialAnchor.getFullYear());
+      setViewMonth(initialAnchor.getMonth());
+    }
+  }, [open, initialAnchor]);
+
+  const monthLabel = useMemo(() => {
+    const d = new Date(viewYear, viewMonth, 1);
+    return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  }, [viewYear, viewMonth]);
+
+  // Build the 6×7 grid: leading days from previous month, the current
+  // month's days, trailing days from next month. Sunday-anchored to
+  // match the week strip on the schedule screen.
+  const cells = useMemo(() => {
+    const firstOfMonth = new Date(viewYear, viewMonth, 1);
+    const startWeekday = firstOfMonth.getDay(); // 0=Sun
+    const gridStart = new Date(viewYear, viewMonth, 1 - startWeekday);
+    const out: { iso: string; inMonth: boolean; day: number }[] = [];
+    for (let i = 0; i < 42; i += 1) {
+      const d = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + i);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      out.push({
+        iso: `${y}-${m}-${day}`,
+        inMonth: d.getMonth() === viewMonth,
+        day: d.getDate(),
+      });
+    }
+    return out;
+  }, [viewYear, viewMonth]);
+
+  const shiftMonth = (dir: 1 | -1) => {
+    const next = new Date(viewYear, viewMonth + dir, 1);
+    setViewYear(next.getFullYear());
+    setViewMonth(next.getMonth());
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Pick a date">
+      <div className="pb-2">
+        <div className="flex items-center justify-between mb-3">
+          <button
+            type="button"
+            onClick={() => shiftMonth(-1)}
+            aria-label="Previous month"
+            className="p-2 rounded-full active:scale-[0.95] transition"
+            style={{ color: C.coffee }}
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>
+            {monthLabel}
+          </p>
+          <button
+            type="button"
+            onClick={() => shiftMonth(1)}
+            aria-label="Next month"
+            className="p-2 rounded-full active:scale-[0.95] transition"
+            style={{ color: C.coffee }}
+          >
+            <ChevronRight size={20} />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1 mb-2">
+          {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+            <span
+              key={`${d}-${i}`}
+              className="text-[10px] font-bold tracking-widest text-center"
+              style={{ color: C.muted, letterSpacing: "0.14em" }}
+            >
+              {d}
+            </span>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-7 gap-1">
+          {cells.map(cell => {
+            const isSelected = cell.iso === selectedDate;
+            const isToday = cell.iso === today;
+            const has = dateHasAppts.has(cell.iso);
+            return (
+              <button
+                type="button"
+                key={cell.iso}
+                onClick={() => onSelect(cell.iso)}
+                aria-current={isSelected ? "date" : undefined}
+                className="flex flex-col items-center justify-center gap-0.5 py-2 rounded-xl active:scale-[0.97] transition"
+                style={{
+                  background: isSelected
+                    ? `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`
+                    : "transparent",
+                  border: isToday && !isSelected ? `1px solid ${C.gold}` : "none",
+                  color: isSelected ? C.paper : (cell.inMonth ? C.espresso : C.mutedSoft),
+                  boxShadow: isSelected ? "0 6px 14px -6px rgba(168, 137, 63, 0.55)" : "none",
+                }}
+              >
+                <span className="text-[14px] font-semibold">{cell.day}</span>
+                <span
+                  aria-hidden
+                  style={{
+                    width: 4, height: 4, borderRadius: 999,
+                    background: has && cell.inMonth ? (isSelected ? C.cream : C.gold) : "transparent",
+                  }}
+                />
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mt-5">
+          <Button variant="primary" onClick={onJumpToToday}>Today</Button>
+          <Button variant="outline" onClick={onClose}>Done</Button>
+        </div>
+      </div>
+    </Sheet>
+  );
+};
 
 const CalendarSettingsSheet = ({
   open, prefs, setPrefs, onClose,
