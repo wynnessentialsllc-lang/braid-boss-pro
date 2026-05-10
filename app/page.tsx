@@ -5603,23 +5603,25 @@ const DEFAULT_CUSTOMER_FILTERS: CustomerFilters = {
 const filtersAreActive = (f: CustomerFilters) =>
   f.lastVisited !== "any" || f.frequency !== "any";
 
-const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, savePhoto, deletePhoto: deletePhotoProp, openClientId, clearOpenClientId }: { store: any; openClientPhotos?: any; openCommunication?: (ctx: CommContext) => void; openQuickAppt?: (prefill?: any) => void; savePhoto?: (p: any) => Promise<any>; deletePhoto?: (id: string) => Promise<void>; openClientId?: string | null; clearOpenClientId?: () => void }) => {
+const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, savePhoto, deletePhoto: deletePhotoProp, openClientId, clearOpenClientId, openAppointmentRecord }: { store: any; openClientPhotos?: any; openCommunication?: (ctx: CommContext) => void; openQuickAppt?: (prefill?: any) => void; savePhoto?: (p: any) => Promise<any>; deletePhoto?: (id: string) => Promise<void>; openClientId?: string | null; clearOpenClientId?: () => void; openAppointmentRecord?: (a: any) => void }) => {
   void openClientPhotos;
   const { clients, appointments, photos, business } = store;
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<EntityRecord | null>(null);
+  const [profileFor, setProfileFor] = useState<EntityRecord | null>(null);
   const [showOverflow, setShowOverflow] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<CustomerFilters>(DEFAULT_CUSTOMER_FILTERS);
   const [comingSoon, setComingSoon] = useState<string | null>(null);
 
-  // Notification deep-link consumer: when App stamps openClientId, find
-  // the matching client record and pop the existing ClientSheet. Clear
-  // the prop after so re-renders don't re-open it.
+  // Notification deep-link consumer: when App stamps openClientId,
+  // find the matching client record and open the rich profile sheet
+  // (not the bare edit sheet). Clear the prop after so re-renders
+  // don't re-open it.
   useEffect(() => {
     if (!openClientId) return;
     const found = clients.find((c: any) => c?.id === openClientId);
-    if (found) setEditing(found);
+    if (found) setProfileFor(found);
     clearOpenClientId?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional one-shot consumer
   }, [openClientId, clients]);
@@ -5809,7 +5811,7 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
             <button
               type="button"
               key={c.id}
-              onClick={() => setEditing(c)}
+              onClick={() => setProfileFor(c)}
               className="w-full text-left active:scale-[0.99] transition"
               style={{
                 background: C.paper,
@@ -5872,6 +5874,17 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
       </div>
 
       <FAB onClick={() => setEditing({})} />
+
+      <ClientProfileSheet
+        open={!!profileFor}
+        client={profileFor}
+        store={store}
+        onClose={() => setProfileFor(null)}
+        onEdit={() => { const c = profileFor; setProfileFor(null); setEditing(c); }}
+        onOpenAppointment={(a) => { setProfileFor(null); openAppointmentRecord?.(a); }}
+        onMessage={openCommunication}
+        onBookAppointment={(prefill) => { setProfileFor(null); openQuickAppt?.(prefill); }}
+      />
 
       <ClientSheet
         open={!!editing}
@@ -6187,6 +6200,545 @@ const ClientRebookingInsightCard = ({
         </div>
       </div>
     </Card>
+  );
+};
+
+// ============================================================
+//  CLIENT PROFILE — read-mostly detail sheet (Phase 3 surface)
+// ============================================================
+//
+// Tapping a customer row opens this rich profile. Edit lives behind
+// the explicit Edit button (which opens the existing ClientSheet),
+// so save logic is unchanged. Tap any appointment row to open it
+// in the AppointmentSheet. Read-only sections derive every number
+// from existing appointments / clients / photos data — no fake
+// transactions, no fake activity.
+
+const TAG_PRESETS = [
+  "VIP",
+  "New Client",
+  "Repeat Client",
+  "Needs Follow-Up",
+  "Deposit Required",
+  "Sensitive Scalp",
+  "Marketing: Top Client",
+] as const;
+
+const COMM_PREF_OPTIONS = [
+  { value: "email", label: "Email reminders" },
+  { value: "text",  label: "Text reminders" },
+  { value: "none",  label: "No reminders" },
+] as const;
+
+const ClientProfileSheet = ({
+  open, client, store, onClose, onEdit, onOpenAppointment, onMessage, onBookAppointment,
+}: {
+  open: boolean;
+  client: any;
+  store: any;
+  onClose: () => void;
+  onEdit: () => void;
+  onOpenAppointment: (a: any) => void;
+  onMessage?: (ctx: CommContext) => void;
+  onBookAppointment?: (prefill?: any) => void;
+}) => {
+  const today = todayISO();
+  const business = store.business;
+  const currency = business?.currency || "USD";
+  const allAppts: any[] = (store.appointments as any[]) || [];
+  const photos: any[] = (store.photos as any[]) || [];
+  const cAppts = useMemo(
+    () => allAppts.filter(a => a?.clientId === client?.id && a?.status !== "cancelled"),
+    [allAppts, client?.id],
+  );
+  const cPhotos = useMemo(
+    () => photos.filter(p => p?.clientId === client?.id),
+    [photos, client?.id],
+  );
+
+  // Past / today / future buckets, used for the visit-date logic.
+  // Mirrors the Customers-row fix from PR #75: treat each appointment
+  // by date relative to today, not by sort position alone.
+  const past = useMemo(
+    () => cAppts.filter(a => a?.date && a.date < today).sort((a, b) => (a.date || "").localeCompare(b.date || "")),
+    [cAppts, today],
+  );
+  const todays = useMemo(() => cAppts.filter(a => a?.date === today), [cAppts, today]);
+  const future = useMemo(
+    () => cAppts.filter(a => a?.date && a.date > today).sort((a, b) => (a.date || "").localeCompare(b.date || "")),
+    [cAppts, today],
+  );
+
+  const completed = useMemo(
+    () => cAppts.filter(a => a?.status === "completed" || a?.paymentStatus === "paid"),
+    [cAppts],
+  );
+  const lifetimeSpend = useMemo(
+    () => completed.reduce((s, a) => s + calculateCollectedAmount(a), 0),
+    [completed],
+  );
+
+  const firstVisit = past[0]?.date || todays[0]?.date || null;
+  const lastVisit = past.length > 0 ? past[past.length - 1].date : null;
+  const upcomingCount = future.length + todays.length;
+
+  // Tags persist on the client record's `tags` array. The clients
+  // table promotes some columns and round-trips the rest through the
+  // data jsonb, so this works without a schema change.
+  const tags: string[] = Array.isArray(client?.tags) ? client.tags : [];
+  const commPref: string = client?.commPreference || "email";
+
+  const toggleTag = async (label: string) => {
+    if (!client?.id) return;
+    const next = tags.includes(label)
+      ? tags.filter(t => t !== label)
+      : [...tags, label];
+    await store.upsertClient({ ...client, tags: next });
+  };
+
+  const setCommPref = async (value: string) => {
+    if (!client?.id) return;
+    await store.upsertClient({ ...client, commPreference: value });
+  };
+
+  // Activity timeline — derived events. Each event is a real artifact
+  // (an appointment, a payment, a discount snapshot, a note edit).
+  type Activity = { id: string; ts: string; label: string; detail?: string };
+  const activity: Activity[] = useMemo(() => {
+    const evts: Activity[] = [];
+    for (const a of cAppts) {
+      if (a?.createdAt) {
+        evts.push({
+          id: `created_${a.id}`,
+          ts: a.createdAt,
+          label: "Appointment created",
+          detail: `${a.style || "Service"} · ${a.date ? fmtDate(a.date) : "—"}`,
+        });
+      }
+      if (a?.status === "completed" && a?.date) {
+        // Approximate completion timestamp with end of the appointment day.
+        evts.push({
+          id: `completed_${a.id}`,
+          ts: `${a.date}T23:59:00`,
+          label: "Appointment completed",
+          detail: `${a.style || "Service"} · ${fmtMoney(calculateCollectedAmount(a), currency)}`,
+        });
+      }
+      if (Number(a?.depositPaid) > 0 && a?.paymentDate) {
+        evts.push({
+          id: `payment_${a.id}`,
+          ts: `${a.paymentDate}T00:00:00`,
+          label: a?.paymentStatus === "paid" ? "Payment recorded" : "Deposit recorded",
+          detail: `${fmtMoney(Number(a.depositPaid), currency)} · ${a.style || "Service"}`,
+        });
+      }
+      if (a?.discountName && Number(a?.discountAmount) > 0) {
+        evts.push({
+          id: `discount_${a.id}`,
+          ts: a?.createdAt || `${a.date || today}T00:00:00`,
+          label: `Discount used · ${a.discountName}`,
+          detail: `− ${fmtMoney(Number(a.discountAmount), currency)} on ${a.style || "Service"}`,
+        });
+      }
+    }
+    return evts.sort((x, y) => (y.ts || "").localeCompare(x.ts || ""));
+  }, [cAppts, currency, today]);
+
+  if (!client) return null;
+
+  const ApptRow = ({ a }: { a: any }) => {
+    const status = a?.status || "scheduled";
+    const ps = paymentStatusOf(a, today);
+    const total = Number(a?.totalPrice) || 0;
+    const dep = Number(a?.depositPaid) || 0;
+    const balance = Math.max(0, total - dep - (Number(a?.discountAmount) || 0));
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenAppointment(a)}
+        className="w-full text-left rounded-2xl px-3.5 py-3 active:scale-[0.99] transition mb-2"
+        style={{
+          background: C.paper,
+          border: `1px solid ${C.hairline}`,
+          color: "inherit",
+          font: "inherit",
+          appearance: "none",
+          WebkitAppearance: "none",
+        }}
+      >
+        <div className="flex items-start justify-between gap-3" style={{ pointerEvents: "none" }}>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <Pill tone={STATUS_TONE[status] || "neutral"}>{STATUS_LABEL[status] || status}</Pill>
+              {ps !== "pending" && status !== "cancelled" && (
+                <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>
+              )}
+            </div>
+            <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>
+              {a?.style || "Service"}
+            </p>
+            <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
+              {a?.date ? fmtDate(a.date) : "—"}{a?.time ? ` · ${fmtTime(a.time)}` : ""}
+            </p>
+          </div>
+          <div className="text-right shrink-0">
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 16, fontWeight: 600, color: C.goldDeep }}>
+              {fmtMoney(total, currency)}
+            </p>
+            {balance > 0 && (
+              <p className="text-[11px]" style={{ color: C.warning }}>
+                Balance {fmtMoney(balance, currency)}
+              </p>
+            )}
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  const StatTile = ({ label, value, hint }: { label: string; value: string; hint?: string }) => (
+    <Card className="p-3.5">
+      <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+        {label}
+      </p>
+      <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso, lineHeight: 1.05 }}>
+        {value}
+      </p>
+      {hint && <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>{hint}</p>}
+    </Card>
+  );
+
+  const Section = ({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) => (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+          {title}
+        </p>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+
+  const [tab, setTab] = useState<"upcoming" | "previous">("upcoming");
+
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={client?.name || "Client"}
+      rightAction={
+        <button
+          type="button"
+          onClick={onEdit}
+          className="text-[12px] font-semibold px-3 py-1.5 rounded-lg active:scale-[0.97] transition"
+          style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}
+          aria-label="Edit client"
+        >
+          <span className="inline-flex items-center gap-1.5">
+            <Edit3 size={12} /> Edit
+          </span>
+        </button>
+      }
+    >
+      <div className="space-y-5 pb-2">
+        {/* SUMMARY STATS */}
+        <div className="grid grid-cols-2 gap-3">
+          <StatTile label="Total visits" value={String(completed.length)} hint={`${cAppts.length} on the books`} />
+          <StatTile label="Upcoming" value={String(upcomingCount)} hint={upcomingCount === 0 ? "Nothing scheduled" : "future bookings"} />
+          <StatTile label="Last visit" value={lastVisit ? fmtDate(lastVisit) : "—"} />
+          <StatTile label="First visit" value={firstVisit ? fmtDate(firstVisit) : "—"} />
+          <Card className="p-3.5 col-span-2" style={{ background: `linear-gradient(180deg, ${C.espresso}, ${C.coffee})`, border: `1px solid ${C.goldDeep}` }}>
+            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.gold, letterSpacing: "0.14em" }}>Lifetime spend</p>
+            <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600, color: C.cream, lineHeight: 1 }}>
+              {fmtMoney(lifetimeSpend, currency)}
+            </p>
+          </Card>
+        </div>
+
+        {/* CONTACT */}
+        <Section
+          title="Contact"
+          action={
+            onMessage ? (
+              <button
+                type="button"
+                onClick={() => onMessage({ client, appointment: future[0] || past[past.length - 1] || null })}
+                className="text-[11px] font-semibold px-2 py-1"
+                style={{ color: C.goldDeep, background: "transparent", border: 0 }}
+              >
+                Message
+              </button>
+            ) : undefined
+          }
+        >
+          <Card className="p-3.5 space-y-2">
+            <div className="flex items-center gap-3">
+              <Phone size={14} style={{ color: C.muted }} />
+              <p className="text-[13px]" style={{ color: client?.phone ? C.espresso : C.muted }}>
+                {client?.phone || "No phone on file"}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Mail size={14} style={{ color: C.muted }} />
+              <p className="text-[13px] truncate" style={{ color: client?.email ? C.espresso : C.muted }}>
+                {client?.email || "No email on file"}
+              </p>
+            </div>
+            {client?.timezone && (
+              <div className="flex items-center gap-3">
+                <Clock size={14} style={{ color: C.muted }} />
+                <p className="text-[13px]" style={{ color: C.espresso }}>{client.timezone}</p>
+              </div>
+            )}
+            <div className="flex items-center gap-3">
+              <Bell size={14} style={{ color: C.muted }} />
+              <p className="text-[13px]" style={{ color: C.espresso }}>
+                Prefers {COMM_PREF_OPTIONS.find(o => o.value === commPref)?.label.toLowerCase() || "email reminders"}
+              </p>
+            </div>
+          </Card>
+        </Section>
+
+        {/* TAGS / GROUPS */}
+        <Section title="Tags">
+          <div className="flex flex-wrap gap-2">
+            {TAG_PRESETS.map(t => {
+              const on = tags.includes(t);
+              return (
+                <button
+                  type="button"
+                  key={t}
+                  onClick={() => toggleTag(t)}
+                  className="px-3 py-1.5 rounded-full text-[11px] font-semibold active:scale-[0.97] transition"
+                  style={{
+                    background: on ? C.espresso : C.paper,
+                    color: on ? C.cream : C.coffee,
+                    border: `1px solid ${on ? C.espresso : C.hairline}`,
+                  }}
+                >
+                  {t}
+                </button>
+              );
+            })}
+          </div>
+        </Section>
+
+        {/* APPOINTMENT NOTIFICATIONS */}
+        <Section title="Appointment notifications">
+          <Card className="p-3.5">
+            <div className="flex flex-wrap gap-2">
+              {COMM_PREF_OPTIONS.map(o => {
+                const on = commPref === o.value;
+                return (
+                  <button
+                    type="button"
+                    key={o.value}
+                    onClick={() => setCommPref(o.value)}
+                    className="px-3 py-1.5 rounded-full text-[11px] font-semibold active:scale-[0.97] transition"
+                    style={{
+                      background: on ? C.espresso : C.paper,
+                      color: on ? C.cream : C.coffee,
+                      border: `1px solid ${on ? C.espresso : C.hairline}`,
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] mt-2" style={{ color: C.muted }}>
+              Stored on the client. SMS sending isn&rsquo;t wired yet.
+            </p>
+          </Card>
+        </Section>
+
+        {/* NOTES & FILES */}
+        <Section title="Notes & files">
+          <Card className="p-3.5 space-y-3">
+            {client?.notes ? (
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Notes</p>
+                <p className="text-[13px] mt-1" style={{ color: C.coffee, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{client.notes}</p>
+              </div>
+            ) : (
+              <p className="text-[12px]" style={{ color: C.muted }}>No notes yet — open Edit to add one.</p>
+            )}
+            {client?.allergies && (
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Allergies</p>
+                <p className="text-[13px] mt-1" style={{ color: C.coffee, lineHeight: 1.5 }}>{client.allergies}</p>
+              </div>
+            )}
+            {client?.scalpSensitivity && client?.scalpSensitivity !== "None" && (
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Scalp sensitivity</p>
+                <p className="text-[13px] mt-1" style={{ color: C.coffee }}>{client.scalpSensitivity}</p>
+              </div>
+            )}
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Photos</p>
+              {cPhotos.length === 0 ? (
+                <p className="text-[12px] mt-1" style={{ color: C.muted }}>
+                  No photos yet. Inspiration shots, before/after, and scalp references show here.
+                </p>
+              ) : (
+                <p className="text-[12px] mt-1" style={{ color: C.coffee }}>
+                  {cPhotos.length} photo{cPhotos.length === 1 ? "" : "s"} on file. Open Edit to view the gallery.
+                </p>
+              )}
+            </div>
+          </Card>
+        </Section>
+
+        {/* PAYMENT ON FILE */}
+        <Section title="Payment on file">
+          <Card className="p-3.5 flex items-center justify-between" style={{ background: C.paper }}>
+            <div>
+              <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>No payment method on file</p>
+              <p className="text-[11px]" style={{ color: C.muted }}>Card-on-file is on the roadmap.</p>
+            </div>
+            <button
+              type="button"
+              disabled
+              className="text-[11px] font-semibold px-3 py-1.5 rounded-lg"
+              style={{ background: C.ivory, color: C.muted, border: `1px solid ${C.hairline}`, opacity: 0.7 }}
+            >
+              Coming soon
+            </button>
+          </Card>
+        </Section>
+
+        {/* TRANSACTIONS */}
+        <Section title="Transactions">
+          {completed.length === 0 ? (
+            <Card className="p-4 text-center">
+              <p className="text-[12px]" style={{ color: C.muted }}>No transactions yet.</p>
+            </Card>
+          ) : (
+            <Card className="p-2">
+              {completed
+                .slice()
+                .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+                .slice(0, 8)
+                .map((a, i) => {
+                  const ps = paymentStatusOf(a, today);
+                  return (
+                    <div
+                      key={a.id}
+                      className="flex items-center justify-between px-2 py-2.5"
+                      style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{a.style || "Service"}</p>
+                        <p className="text-[11px]" style={{ color: C.muted }}>
+                          {a.date ? fmtDate(a.date) : "—"} · {PAYMENT_STATUS_LABEL[ps] || ps}
+                        </p>
+                      </div>
+                      <span className="text-[13px] font-semibold tabular-nums ml-3" style={{ color: C.coffee }}>
+                        {fmtMoney(calculateCollectedAmount(a), currency)}
+                      </span>
+                    </div>
+                  );
+                })}
+            </Card>
+          )}
+        </Section>
+
+        {/* APPOINTMENTS — Upcoming / Previous tabs */}
+        <Section
+          title="Appointments"
+          action={
+            onBookAppointment ? (
+              <button
+                type="button"
+                onClick={() => onBookAppointment({ clientId: client?.id, clientName: client?.name, clientPhone: client?.phone, clientEmail: client?.email })}
+                className="text-[11px] font-semibold px-2 py-1"
+                style={{ color: C.goldDeep, background: "transparent", border: 0 }}
+              >
+                + Book
+              </button>
+            ) : undefined
+          }
+        >
+          <div className="flex p-1 rounded-xl mb-2" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+            {([
+              { id: "upcoming", label: `Upcoming · ${future.length + todays.length}` },
+              { id: "previous", label: `Previous · ${past.length}` },
+            ] as { id: "upcoming" | "previous"; label: string }[]).map(t => (
+              <button
+                type="button"
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className="flex-1 py-2 rounded-lg text-[12px] font-semibold transition"
+                style={{
+                  background: tab === t.id ? C.espresso : "transparent",
+                  color: tab === t.id ? C.cream : C.coffee,
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {tab === "upcoming" ? (
+            (todays.length + future.length) === 0 ? (
+              <Card className="p-4 text-center">
+                <p className="text-[12px]" style={{ color: C.muted }}>No upcoming appointments.</p>
+              </Card>
+            ) : (
+              <>{[...todays, ...future].map(a => <ApptRow key={a.id} a={a} />)}</>
+            )
+          ) : (
+            past.length === 0 ? (
+              <Card className="p-4 text-center">
+                <p className="text-[12px]" style={{ color: C.muted }}>No past appointments yet.</p>
+              </Card>
+            ) : (
+              <>{[...past].reverse().map(a => <ApptRow key={a.id} a={a} />)}</>
+            )
+          )}
+        </Section>
+
+        {/* ACTIVITY TIMELINE */}
+        <Section title="Activity">
+          {activity.length === 0 ? (
+            <Card className="p-4 text-center">
+              <p className="text-[12px]" style={{ color: C.muted }}>No activity yet — appointments and payments will land here as they happen.</p>
+            </Card>
+          ) : (
+            <Card className="p-2">
+              {activity.slice(0, 12).map((e, i) => (
+                <div
+                  key={e.id}
+                  className="flex items-start gap-3 px-2 py-2.5"
+                  style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 8, height: 8, borderRadius: 999,
+                      background: C.gold, marginTop: 6, flexShrink: 0,
+                    }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[12px] font-semibold" style={{ color: C.espresso }}>{e.label}</p>
+                    {e.detail && <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>{e.detail}</p>}
+                  </div>
+                  <span className="text-[10px]" style={{ color: C.muted }}>
+                    {(e.ts || "").slice(0, 10) ? fmtDate((e.ts || "").slice(0, 10)) : ""}
+                  </span>
+                </div>
+              ))}
+            </Card>
+          )}
+        </Section>
+
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          <Button variant="outline" onClick={onClose}>Close</Button>
+          <Button variant="primary" icon={<Edit3 size={16} />} onClick={onEdit}>Edit profile</Button>
+        </div>
+      </div>
+    </Sheet>
   );
 };
 
@@ -12710,7 +13262,7 @@ export default function App() {
               openAvailability={() => setSecondary("availability")} />
           )}
           {active === "clients" && (
-            <Clients store={store} openCommunication={openCommunication} openQuickAppt={openQuickAppt} savePhoto={handleSavePhoto} deletePhoto={handleDeletePhoto} openClientId={clientToOpenId} clearOpenClientId={() => setClientToOpenId(null)} />
+            <Clients store={store} openCommunication={openCommunication} openQuickAppt={openQuickAppt} savePhoto={handleSavePhoto} deletePhoto={handleDeletePhoto} openClientId={clientToOpenId} clearOpenClientId={() => setClientToOpenId(null)} openAppointmentRecord={(a) => { setActive("schedule"); setApptPrefill(a); }} />
           )}
           {active === "money" && (
             <Money store={store}
