@@ -81,8 +81,24 @@ function PaymentsInner() {
   }, [userId, connectFlag]);
 
   const [launching, setLaunching] = useState(false);
+
+  // Detect the most common platform-side blocker: Stripe refuses to
+  // create connected accounts until the platform owner accepts the
+  // "Connect responsibilities" in the Stripe dashboard. The error
+  // message Stripe returns includes the platform-profile URL, but
+  // it currently renders as plain text inside connect.error — turn
+  // that into a real CTA below.
+  const platformProfileUrl = "https://dashboard.stripe.com/settings/connect/platform-profile";
+  const platformSetupIncomplete = useMemo(() => {
+    const msg = (connect.error || "").toLowerCase();
+    if (!msg) return false;
+    return msg.includes("platform-profile")
+      || msg.includes("responsibilities")
+      || msg.includes("review the responsibilities");
+  }, [connect.error]);
+
   const handleStartOnboarding = useCallback(async () => {
-    if (launching) return;
+    if (launching || platformSetupIncomplete) return;
     setLaunching(true);
     const url = await connect.startOnboarding();
     if (url && typeof window !== "undefined") {
@@ -90,7 +106,7 @@ function PaymentsInner() {
       return;
     }
     setLaunching(false);
-  }, [connect, launching]);
+  }, [connect, launching, platformSetupIncomplete]);
 
   const buttonLabel = useMemo(() => {
     if (launching) return "Opening Stripe…";
@@ -161,17 +177,36 @@ function PaymentsInner() {
         )}
       </div>
 
+      {/* Primary CTA — disabled while the platform side is incomplete
+          so the stylist can't bash their head against an opaque
+          Stripe error. The warning block below tells them what to do. */}
       <button
         type="button"
         onClick={handleStartOnboarding}
-        disabled={launching || status === "active"}
+        disabled={launching || status === "active" || platformSetupIncomplete}
         style={{
           ...primaryButtonStyle,
-          opacity: status === "active" || launching ? 0.55 : 1,
+          opacity: status === "active" || launching || platformSetupIncomplete ? 0.55 : 1,
+          cursor: status === "active" || launching || platformSetupIncomplete ? "default" : "pointer",
         }}
       >
         {buttonLabel}
       </button>
+
+      {platformSetupIncomplete && (
+        <p
+          style={{
+            margin: "-4px 0 0",
+            textAlign: "center",
+            fontSize: 11,
+            fontWeight: 600,
+            color: C.warning,
+            letterSpacing: "0.04em",
+          }}
+        >
+          Platform setup incomplete
+        </p>
+      )}
 
       <button
         type="button"
@@ -181,9 +216,43 @@ function PaymentsInner() {
         Refresh status
       </button>
 
-      {connect.error && (
+      {platformSetupIncomplete ? (
+        <div
+          style={{
+            padding: 14,
+            borderRadius: 14,
+            background: "rgba(184, 134, 11, 0.08)",
+            border: `1px solid rgba(184, 134, 11, 0.35)`,
+            display: "grid",
+            gap: 10,
+          }}
+        >
+          <p style={{ fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>
+            Stripe requires the platform owner to review Connect responsibilities before accounts can be linked.
+          </p>
+          <p style={{ fontSize: 11, color: C.muted, lineHeight: 1.5, wordBreak: "break-all" }}>
+            Open this URL in the platform Stripe dashboard:{" "}
+            <a
+              href={platformProfileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={anchorLinkStyle}
+            >
+              {platformProfileUrl}
+            </a>
+          </p>
+          <a
+            href={platformProfileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={secondaryButtonStyle}
+          >
+            Review Stripe Responsibilities
+          </a>
+        </div>
+      ) : connect.error ? (
         <p style={{ fontSize: 12, color: C.danger }}>{connect.error}</p>
-      )}
+      ) : null}
 
       <p style={{ fontSize: 11, color: C.muted, textAlign: "center", lineHeight: 1.5 }}>
         Stripe collects deposits as direct charges on your account.
@@ -259,6 +328,38 @@ const subtleButtonStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
   cursor: "pointer",
+};
+
+// Inline anchor — used when a Stripe error message contains the
+// platform-profile URL. Styled to match the gold/coffee palette so
+// it reads as an actionable link rather than free text.
+const anchorLinkStyle: React.CSSProperties = {
+  color: C.goldDeep,
+  textDecoration: "underline",
+  textDecorationThickness: 1,
+  textUnderlineOffset: 2,
+  fontWeight: 600,
+};
+
+// Secondary CTA — used for "Review Stripe Responsibilities" and any
+// future outbound link the page surfaces. Mirrors primaryButtonStyle's
+// shape so the buttons line up visually but reads as the lower-weight
+// option (cream ground, espresso ink).
+const secondaryButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "12px 16px",
+  borderRadius: 12,
+  background: C.cream,
+  color: C.espresso,
+  border: `1px solid ${C.goldDeep}`,
+  fontSize: 13,
+  fontWeight: 700,
+  cursor: "pointer",
+  minHeight: 44,
+  textDecoration: "none",
+  textAlign: "center",
 };
 
 function CheckRow({ ok, children }: { ok: boolean; children: React.ReactNode }) {
