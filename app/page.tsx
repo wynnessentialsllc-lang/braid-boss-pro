@@ -145,7 +145,7 @@ import {
   CalendarPlus, UserPlus, Coffee, Lock, Receipt, ScrollText, Image as ImageIcon, Camera,
   Star, Heart, Repeat, Play, Pause, Square, Timer as TimerIcon, Zap, Award,
   BarChart3, Layers, MessageSquare, Send, AlertTriangle, CheckCircle2,
-  XCircle, Filter, LogOut
+  XCircle, Filter, MoreHorizontal, SlidersHorizontal, LogOut
 } from "lucide-react";
 
 /* ============================================================
@@ -5174,11 +5174,46 @@ const QuickRescheduleSheet = ({
 const PREF_STYLES = ["Knotless", "Box braids", "Boho", "Goddess", "Stitch braids", "Cornrows", "Twists", "Locs", "Sew-in", "Wig install"];
 const SENSITIVITY = ["None", "Mild", "Moderate", "High"];
 
+// ============================================================
+//  CUSTOMERS — mobile-first refresh
+// ============================================================
+//
+// Top-level layout:
+//   - Large display title + circular overflow button
+//   - Search input + slim filter button on the same row
+// Layered interactions:
+//   - Overflow popover (Create / Manage groups / Merge)
+//   - Filters bottom sheet (uses the shared <Sheet> so safe-area
+//     spacing carries over for free)
+//
+// Existing CRUD stays as-is via ClientSheet; this is a UX-only
+// upgrade to the list screen.
+
+type CustomerLastVisited = "any" | "30d" | "90d" | "year" | "never";
+type CustomerFrequency = "any" | "1plus" | "3plus" | "5plus";
+
+type CustomerFilters = {
+  lastVisited: CustomerLastVisited;
+  frequency: CustomerFrequency;
+};
+
+const DEFAULT_CUSTOMER_FILTERS: CustomerFilters = {
+  lastVisited: "any",
+  frequency: "any",
+};
+
+const filtersAreActive = (f: CustomerFilters) =>
+  f.lastVisited !== "any" || f.frequency !== "any";
+
 const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, savePhoto, deletePhoto: deletePhotoProp }: { store: any; openClientPhotos?: any; openCommunication?: (ctx: CommContext) => void; openQuickAppt?: (prefill?: any) => void; savePhoto?: (p: any) => Promise<any>; deletePhoto?: (id: string) => Promise<void> }) => {
   void openClientPhotos;
   const { clients, appointments, photos, business } = store;
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<EntityRecord | null>(null);
+  const [showOverflow, setShowOverflow] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState<CustomerFilters>(DEFAULT_CUSTOMER_FILTERS);
+  const [comingSoon, setComingSoon] = useState<string | null>(null);
 
   const enriched = useMemo(() => clients.map(c => {
     const cAppts = appointments.filter(a => a.clientId === c.id);
@@ -5193,63 +5228,448 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
       ...c,
       apptCount: cAppts.length,
       totalSpent,
-      lastApptDate: cAppts.map(a => a.date).sort().reverse()[0],
+      lastApptDate: cAppts.map(a => a.date).sort().reverse()[0] as string | undefined,
       photoCount: photos.filter(p => p.clientId === c.id).length,
     };
   }).sort((a, b) => a.name.localeCompare(b.name)), [clients, appointments, photos]);
 
-  const filtered = enriched.filter(c => !search || c.name.toLowerCase().includes(search.toLowerCase()));
+  const today = todayISO();
+  const filtered = useMemo(() => {
+    return enriched.filter(c => {
+      if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
+      // Last visited
+      if (filters.lastVisited !== "any") {
+        if (!c.lastApptDate) {
+          if (filters.lastVisited !== "never") return false;
+        } else {
+          if (filters.lastVisited === "never") return false;
+          const days = filters.lastVisited === "30d" ? 30 : filters.lastVisited === "90d" ? 90 : 365;
+          const cutoff = addDaysISO(today, -days);
+          if (c.lastApptDate < cutoff) return false;
+        }
+      }
+      // Frequency
+      if (filters.frequency !== "any") {
+        const min = filters.frequency === "1plus" ? 1 : filters.frequency === "3plus" ? 3 : 5;
+        if (c.apptCount < min) return false;
+      }
+      return true;
+    });
+  }, [enriched, search, filters, today]);
+
+  const filtersOn = filtersAreActive(filters);
 
   return (
-    <div className="bbp-fade">
-      <Header title="Clients" subtitle={`${clients.length} ${clients.length === 1 ? "client" : "clients"}`} />
-      <div className="px-5 pt-4 pb-32 space-y-3">
-        <div className="relative">
-          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: C.muted }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clients"
-            className="w-full rounded-xl py-3 pl-10 pr-4 text-[15px] outline-none"
-            style={{ background: C.paper, border: `1px solid ${C.hairline}`, color: C.ink }} />
+    <div className="bbp-fade pb-32">
+      {/* HEADER */}
+      <div className="px-5 pt-6 pb-3 flex items-start justify-between">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+            Your book
+          </p>
+          <h1 style={{ fontFamily: FONT_DISPLAY, fontSize: 34, fontWeight: 600, color: C.espresso, lineHeight: 1 }}>
+            Customers
+          </h1>
+          <p className="text-[12px] mt-1" style={{ color: C.muted }}>
+            {clients.length} {clients.length === 1 ? "person" : "people"}
+            {filtered.length !== clients.length ? ` · ${filtered.length} shown` : ""}
+          </p>
         </div>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setShowOverflow(v => !v)}
+            aria-label="Customers menu"
+            aria-expanded={showOverflow}
+            className="rounded-full active:scale-[0.96] transition flex items-center justify-center"
+            style={{
+              width: 40, height: 40,
+              background: C.paper,
+              border: `1px solid ${C.hairline}`,
+              boxShadow: "0 1px 2px rgba(42, 24, 16, 0.04), 0 6px 18px -10px rgba(42, 24, 16, 0.18)",
+              color: C.coffee,
+            }}
+          >
+            <MoreHorizontal size={18} />
+          </button>
+          {showOverflow && (
+            <CustomersOverflowMenu
+              onClose={() => setShowOverflow(false)}
+              onCreate={() => { setShowOverflow(false); setEditing({}); }}
+              onManageGroups={() => { setShowOverflow(false); setComingSoon("Customer groups"); }}
+              onMerge={() => { setShowOverflow(false); setComingSoon("Merge customers"); }}
+            />
+          )}
+        </div>
+      </div>
 
+      {/* SEARCH + FILTER */}
+      <div className="px-5 pb-3 flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: C.muted }} />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search customers"
+            inputMode="search"
+            autoComplete="off"
+            className="w-full rounded-xl py-3 pl-10 pr-4 text-[15px] outline-none"
+            style={{ background: C.paper, border: `1px solid ${C.hairline}`, color: C.ink }}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowFilters(true)}
+          aria-label="Filter customers"
+          className="rounded-xl active:scale-[0.97] transition flex items-center gap-1.5 px-3"
+          style={{
+            height: 46,
+            background: filtersOn ? C.espresso : C.paper,
+            border: `1px solid ${filtersOn ? C.espresso : C.hairline}`,
+            color: filtersOn ? C.cream : C.coffee,
+          }}
+        >
+          <SlidersHorizontal size={16} />
+          <span className="text-[12px] font-semibold">Filter</span>
+          {filtersOn && (
+            <span
+              aria-hidden
+              style={{
+                width: 6, height: 6, borderRadius: 999,
+                background: C.gold, marginLeft: 2,
+              }}
+            />
+          )}
+        </button>
+      </div>
+
+      {/* LIST */}
+      <div className="px-5 space-y-2">
         {filtered.length === 0 ? (
           clients.length === 0 ? (
             <EmptyState
               icon={<Users size={28} style={{ color: C.gold }} />}
               title="Every booked braid starts with one client"
-              body="Build your book of business. Every client becomes a profile with style preferences, photos, allergies, and lifetime value."
-              cta={<Button variant="primary" icon={<Plus size={18} />} onClick={() => setEditing({})}>Add first client</Button>}
+              body="Build your book of business. Every customer becomes a profile with style preferences, photos, allergies, and lifetime value."
+              cta={<Button variant="primary" icon={<Plus size={18} />} onClick={() => setEditing({})}>Add first customer</Button>}
             />
           ) : (
-            <div className="text-center py-8 text-sm" style={{ color: C.muted }}>No matches for &quot;{search}&quot;</div>
+            <div className="text-center py-10">
+              <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>No matches</p>
+              <p className="text-[13px] mt-2" style={{ color: C.muted }}>
+                {search ? `Nothing matches "${search}"` : "Try clearing filters."}
+              </p>
+              {filtersOn && (
+                <div className="mt-4 inline-block">
+                  <Button variant="outline" onClick={() => setFilters(DEFAULT_CUSTOMER_FILTERS)}>Clear filters</Button>
+                </div>
+              )}
+            </div>
           )
         ) : (
-          <div className="space-y-2.5">
-            {filtered.map(c => (
-              <Card key={c.id} className="p-4 flex items-center gap-3 cursor-pointer active:scale-[0.99] transition" onClick={() => setEditing(c)}>
-                <div className="rounded-full flex items-center justify-center shrink-0" style={{
-                  width: 46, height: 46, background: `linear-gradient(135deg, ${C.caramel}, ${C.coffee})`,
-                  color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600,
-                }}>{initials(c.name)}</div>
+          filtered.map(c => (
+            <button
+              type="button"
+              key={c.id}
+              onClick={() => setEditing(c)}
+              className="w-full text-left active:scale-[0.99] transition"
+              style={{
+                background: C.paper,
+                border: `1px solid ${C.hairline}`,
+                borderRadius: 18,
+                padding: "14px 16px",
+                boxShadow: "0 1px 2px rgba(42, 24, 16, 0.04)",
+                fontFamily: "inherit",
+                color: "inherit",
+                appearance: "none",
+                WebkitAppearance: "none",
+              }}
+            >
+              <div className="flex items-center gap-3.5" style={{ pointerEvents: "none" }}>
+                <div
+                  className="rounded-full flex items-center justify-center shrink-0"
+                  style={{
+                    width: 52, height: 52,
+                    background: `linear-gradient(135deg, ${C.caramel}, ${C.coffee})`,
+                    color: C.cream,
+                    fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 600,
+                  }}
+                >
+                  {initials(c.name)}
+                </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-[15px] truncate" style={{ color: C.espresso }}>{c.name}</p>
-                  <p className="text-xs mt-0.5 flex items-center gap-2" style={{ color: C.muted }}>
-                    <span>{c.apptCount > 0 ? `${c.apptCount} appt${c.apptCount > 1 ? "s" : ""}` : "No appointments"}</span>
-                    {c.photoCount > 0 && <span className="flex items-center gap-1"><ImageIcon size={10} />{c.photoCount}</span>}
-                    {c.lastApptDate && <span>· {fmtDate(c.lastApptDate)}</span>}
+                  <p
+                    className="truncate"
+                    style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso, lineHeight: 1.15 }}
+                  >
+                    {c.name}
+                  </p>
+                  <p className="text-[12px] mt-0.5 truncate" style={{ color: C.muted }}>
+                    {c.apptCount > 0
+                      ? `${c.apptCount} ${c.apptCount === 1 ? "visit" : "visits"}`
+                      : "No visits yet"}
+                    {c.lastApptDate ? ` · last ${fmtDate(c.lastApptDate)}` : ""}
+                    {c.photoCount > 0 ? ` · ${c.photoCount} photo${c.photoCount === 1 ? "" : "s"}` : ""}
                   </p>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>Lifetime</p>
-                  <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.goldDeep }}>{fmtMoney(c.totalSpent, business.currency)}</p>
+                  <p className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Lifetime</p>
+                  <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.goldDeep, lineHeight: 1 }}>
+                    {fmtMoney(c.totalSpent, business.currency)}
+                  </p>
                 </div>
-              </Card>
-            ))}
-          </div>
+              </div>
+            </button>
+          ))
         )}
       </div>
+
       <FAB onClick={() => setEditing({})} />
-      <ClientSheet open={!!editing} client={editing} store={store} onClose={() => setEditing(null)} openCommunication={openCommunication} openQuickAppt={openQuickAppt} savePhoto={savePhoto} deletePhotoExternal={deletePhotoProp} />
+
+      <ClientSheet
+        open={!!editing}
+        client={editing}
+        store={store}
+        onClose={() => setEditing(null)}
+        openCommunication={openCommunication}
+        openQuickAppt={openQuickAppt}
+        savePhoto={savePhoto}
+        deletePhotoExternal={deletePhotoProp}
+      />
+
+      <CustomersFilterSheet
+        open={showFilters}
+        filters={filters}
+        onChange={setFilters}
+        onClear={() => setFilters(DEFAULT_CUSTOMER_FILTERS)}
+        onApply={() => setShowFilters(false)}
+        onClose={() => setShowFilters(false)}
+        onComingSoon={(label) => setComingSoon(label)}
+      />
+
+      <Sheet
+        open={!!comingSoon}
+        onClose={() => setComingSoon(null)}
+        title={comingSoon || ""}
+      >
+        <div className="space-y-3 pb-2">
+          <p className="text-[14px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+            <strong>{comingSoon}</strong> is on the roadmap. Tap the heart in the
+            Account screen to vote it up the queue, or use Search and the existing
+            filters in the meantime.
+          </p>
+          <Button variant="primary" fullWidth onClick={() => setComingSoon(null)}>
+            Got it
+          </Button>
+        </div>
+      </Sheet>
     </div>
+  );
+};
+
+// ---- Customers overflow popover ---------------------------------------
+const CustomersOverflowMenu = ({
+  onClose, onCreate, onManageGroups, onMerge,
+}: {
+  onClose: () => void;
+  onCreate: () => void;
+  onManageGroups: () => void;
+  onMerge: () => void;
+}) => {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const onPointer = (e: PointerEvent) => {
+      const node = ref.current;
+      if (!node) return;
+      if (e.target instanceof Node && !node.contains(e.target)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("pointerdown", onPointer, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const items = [
+    { icon: <UserPlus size={18} />, label: "Create customer",  description: "Add a profile manually",      enabled: true,  onClick: onCreate },
+    { icon: <Users size={18} />,    label: "Manage groups",     description: "Coming soon",                 enabled: false, onClick: onManageGroups },
+    { icon: <Repeat size={18} />,   label: "Merge customers",   description: "Coming soon",                 enabled: false, onClick: onMerge },
+  ];
+
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      className="absolute z-50 mt-2 right-0 w-64 rounded-2xl overflow-hidden bbp-pop"
+      style={{
+        background: C.paper,
+        border: `1px solid ${C.hairline}`,
+        boxShadow:
+          "0 1px 2px rgba(42, 24, 16, 0.06), 0 18px 36px -12px rgba(42, 24, 16, 0.22)",
+        transformOrigin: "top right",
+      }}
+    >
+      <style>{`@keyframes bbpPop { from { opacity:0; transform: scale(0.96) translateY(-4px);} to { opacity:1; transform: scale(1) translateY(0);} } .bbp-pop { animation: bbpPop 0.18s ease-out both; }`}</style>
+      {items.map((it, i) => (
+        <button
+          key={it.label}
+          type="button"
+          role="menuitem"
+          onClick={it.onClick}
+          className="w-full flex items-center gap-3 px-4 py-3 active:scale-[0.99] transition text-left"
+          style={{
+            color: C.espresso,
+            borderTop: i === 0 ? "none" : `1px solid ${C.hairline}`,
+            background: "transparent",
+            opacity: it.enabled ? 1 : 0.55,
+          }}
+        >
+          <span
+            aria-hidden
+            className="flex items-center justify-center shrink-0"
+            style={{
+              width: 32, height: 32, borderRadius: 999,
+              background: C.ivory, color: C.gold, border: `1px solid ${C.hairline}`,
+            }}
+          >
+            {it.icon}
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-[13px] font-semibold leading-tight" style={{ color: C.espresso }}>
+              {it.label}
+            </span>
+            <span className="block text-[11px] mt-0.5" style={{ color: C.muted }}>
+              {it.description}
+            </span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+};
+
+// ---- Customers filter bottom sheet ------------------------------------
+const CustomersFilterSheet = ({
+  open, filters, onChange, onClear, onApply, onClose, onComingSoon,
+}: {
+  open: boolean;
+  filters: CustomerFilters;
+  onChange: (f: CustomerFilters) => void;
+  onClear: () => void;
+  onApply: () => void;
+  onClose: () => void;
+  onComingSoon: (label: string) => void;
+}) => {
+  const radio = <T extends string>(
+    label: string,
+    value: T,
+    current: T,
+    onPick: (v: T) => void,
+  ) => (
+    <button
+      type="button"
+      key={value}
+      onClick={() => onPick(value)}
+      className="px-3 py-1.5 rounded-full text-[12px] font-semibold active:scale-[0.97] transition"
+      style={{
+        background: current === value ? C.espresso : C.paper,
+        color: current === value ? C.cream : C.coffee,
+        border: `1px solid ${current === value ? C.espresso : C.hairline}`,
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  const SoonRow = ({ label }: { label: string }) => (
+    <button
+      type="button"
+      onClick={() => onComingSoon(label)}
+      className="w-full text-left rounded-xl px-4 py-3 flex items-center justify-between active:scale-[0.99] transition"
+      style={{ background: C.paper, border: `1px solid ${C.hairline}`, opacity: 0.7 }}
+    >
+      <div>
+        <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>{label}</p>
+        <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>Coming soon</p>
+      </div>
+      <ChevronRight size={16} style={{ color: C.muted }} />
+    </button>
+  );
+
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title="Filters"
+      rightAction={
+        <button
+          type="button"
+          onClick={onClear}
+          className="text-[12px] font-semibold px-2 py-1 rounded-lg"
+          style={{ color: C.coffee }}
+        >
+          Clear all
+        </button>
+      }
+    >
+      <div className="space-y-5 pb-2">
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+            Last visited
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {radio("Any time", "any" as CustomerLastVisited, filters.lastVisited, v => onChange({ ...filters, lastVisited: v }))}
+            {radio("Past 30 days", "30d" as CustomerLastVisited, filters.lastVisited, v => onChange({ ...filters, lastVisited: v }))}
+            {radio("Past 90 days", "90d" as CustomerLastVisited, filters.lastVisited, v => onChange({ ...filters, lastVisited: v }))}
+            {radio("Past year", "year" as CustomerLastVisited, filters.lastVisited, v => onChange({ ...filters, lastVisited: v }))}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+            Hasn&rsquo;t visited
+          </p>
+          <p className="text-[12px] mb-2" style={{ color: C.muted }}>
+            Show customers who&rsquo;ve never booked.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {radio("Off", "any" as CustomerLastVisited, filters.lastVisited, v => onChange({ ...filters, lastVisited: v }))}
+            {radio("Never visited", "never" as CustomerLastVisited, filters.lastVisited, v => onChange({ ...filters, lastVisited: v }))}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+            Visit frequency
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {radio("Any", "any" as CustomerFrequency, filters.frequency, v => onChange({ ...filters, frequency: v }))}
+            {radio("1+ visits", "1plus" as CustomerFrequency, filters.frequency, v => onChange({ ...filters, frequency: v }))}
+            {radio("3+ visits", "3plus" as CustomerFrequency, filters.frequency, v => onChange({ ...filters, frequency: v }))}
+            {radio("5+ visits", "5plus" as CustomerFrequency, filters.frequency, v => onChange({ ...filters, frequency: v }))}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+            More filters
+          </p>
+          <div className="space-y-2">
+            <SoonRow label="Card on file" />
+            <SoonRow label="Feedback" />
+            <SoonRow label="Creation source" />
+            <SoonRow label="Instant profile" />
+            <SoonRow label="Visited location" />
+          </div>
+        </div>
+
+        <Button variant="primary" fullWidth onClick={onApply}>
+          Apply
+        </Button>
+      </div>
+    </Sheet>
   );
 };
 
