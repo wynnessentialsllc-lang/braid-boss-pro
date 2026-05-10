@@ -158,6 +158,13 @@ import {
 } from "./lib/clients-match";
 import { emitAnalyticsEvent } from "./lib/analytics-events";
 import {
+  type BookingIntelligence,
+  type SmartInsight,
+  generateSmartInsights,
+  humaniseSource,
+  useBookingIntelligence,
+} from "./lib/intelligence";
+import {
   downloadJson,
   downloadPdfBlob,
 } from "./lib/native-download";
@@ -8980,7 +8987,7 @@ const PolicySheet = ({ policy, isNew, onClose, onSave }) => {
 // ============================================================
 //  SETTINGS (V1 extended with Reminders link)
 // ============================================================
-const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void }) => {
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
@@ -9149,7 +9156,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
               </Card>
             )}
 
-            {(openPolicies || openAvailability) && <SectionTitle>Booking</SectionTitle>}
+            {(openPolicies || openAvailability || openIntelligence) && <SectionTitle>Booking</SectionTitle>}
             {openPolicies && (
               <Card className="p-4 active:scale-[0.99]" onClick={openPolicies}>
                 <div className="flex items-center justify-between">
@@ -9216,6 +9223,30 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                           if (list.length === 0) return "Clients waiting for an opening";
                           return `${waiting} waiting · ${list.length} total`;
                         })()}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openIntelligence && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openIntelligence}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <BarChart3 size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Booking intelligence</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        Funnel, top services, demand & smart insights
                       </p>
                     </div>
                   </div>
@@ -12755,6 +12786,366 @@ const WaitlistScreen = ({
   );
 };
 
+// ============================================================
+//  BOOKING INTELLIGENCE — Phase B4
+// ============================================================
+const INTEL_WEEKDAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const intelToneStyle = (tone: SmartInsight["tone"]) => {
+  switch (tone) {
+    case "gold":
+      return { bg: "#F5E9C8", fg: C.goldDeep, border: "#E5D4A0" };
+    case "success":
+      return { bg: "#E4EDD8", fg: C.success, border: "#C9D9B0" };
+    case "warning":
+      return { bg: "#F5DDC0", fg: C.warning, border: "#E8C99A" };
+    default:
+      return { bg: C.ivory, fg: C.coffee, border: C.hairline };
+  }
+};
+
+const WeekdayBars = ({ data }: { data: { dow: number; count: number }[] }) => {
+  const map = new Map(data.map(d => [d.dow, d.count]));
+  const max = Math.max(1, ...data.map(d => d.count));
+  const width = 280;
+  const height = 110;
+  const padTop = 8;
+  const padBottom = 22;
+  const barAreaH = height - padTop - padBottom;
+  const barW = (width - 14) / 7;
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} preserveAspectRatio="none">
+      {[0, 1, 2, 3, 4, 5, 6].map(i => {
+        const v = map.get(i) || 0;
+        const h = max > 0 ? (v / max) * barAreaH : 0;
+        const x = 7 + i * barW + 2;
+        const y = padTop + (barAreaH - h);
+        return (
+          <g key={i}>
+            <rect x={x} y={y} width={barW - 4} height={h} rx={4} fill={v > 0 ? C.gold : C.hairline} />
+            <text x={x + (barW - 4) / 2} y={padTop + barAreaH + 14} fontSize={10} textAnchor="middle" fill={C.muted}>
+              {INTEL_WEEKDAYS_SHORT[i]}
+            </text>
+            {v > 0 && (
+              <text x={x + (barW - 4) / 2} y={y - 3} fontSize={10} textAnchor="middle" fill={C.coffee}>
+                {v}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
+const ServiceBar = ({ pct, color }: { pct: number; color: string }) => (
+  <div className="w-full h-1.5 rounded-full" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+    <div
+      className="h-full rounded-full"
+      style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: color }}
+    />
+  </div>
+);
+
+const BookingIntelligenceScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId = store.userId || null;
+  const [windowDays, setWindowDays] = useState<7 | 30 | 90>(30);
+  const { data, loading, error, refresh } = useBookingIntelligence(userId, windowDays);
+  const currency = store.business?.currency || "USD";
+  const insights = useMemo(() => generateSmartInsights(data), [data]);
+
+  const subtitle = windowDays === 7 ? "Last 7 days" : windowDays === 90 ? "Last 90 days" : "Last 30 days";
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Booking intelligence"
+        subtitle={subtitle}
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-4">
+        <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          {[
+            { id: 7 as const, label: "7d" },
+            { id: 30 as const, label: "30d" },
+            { id: 90 as const, label: "90d" },
+          ].map(opt => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setWindowDays(opt.id)}
+              className="flex-1 py-2 rounded-lg text-[12px] font-semibold"
+              style={{
+                background: windowDays === opt.id ? C.cream : "transparent",
+                color: windowDays === opt.id ? C.espresso : C.muted,
+                border: windowDays === opt.id ? `1px solid ${C.hairline}` : "1px solid transparent",
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {error && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{error}</p>
+            <button
+              type="button"
+              onClick={() => refresh()}
+              className="mt-2 px-3 py-1.5 rounded-full text-[11px] font-semibold"
+              style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
+            >
+              Try again
+            </button>
+          </Card>
+        )}
+
+        {loading && !data && (
+          <Card className="p-4">
+            <p className="text-[12px]" style={{ color: C.muted }}>Crunching the numbers…</p>
+          </Card>
+        )}
+
+        {data && (
+          <>
+            {/* Smart insights */}
+            {insights.length > 0 && (
+              <div className="space-y-2">
+                <SectionTitle>Smart insights</SectionTitle>
+                {insights.map(ins => {
+                  const t = intelToneStyle(ins.tone);
+                  return (
+                    <Card key={ins.id} className="p-3" style={{ border: `1px solid ${t.border}`, background: t.bg }}>
+                      <p className="text-[13px] font-semibold" style={{ color: t.fg }}>{ins.title}</p>
+                      {ins.body && (
+                        <p className="text-[11px] mt-0.5" style={{ color: C.coffee }}>{ins.body}</p>
+                      )}
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Funnel */}
+            <SectionTitle>Booking funnel</SectionTitle>
+            <Card className="p-4 space-y-2.5">
+              {[
+                { label: "Page views",        value: data.funnel.page_views },
+                { label: "Service views",     value: data.funnel.service_views },
+                { label: "Slot views",        value: data.funnel.slot_views },
+                { label: "Booking requests",  value: data.funnel.booking_requests },
+                { label: "Approved bookings", value: data.funnel.approved_bookings },
+              ].map((row, i, all) => {
+                const top = all[0].value || 1;
+                const pct = (row.value / top) * 100;
+                return (
+                  <div key={row.label} className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[12px]" style={{ color: C.coffee }}>{row.label}</p>
+                      <p className="text-[12px] font-semibold" style={{ color: C.espresso }}>{row.value}</p>
+                    </div>
+                    <ServiceBar pct={pct} color={i === all.length - 1 ? C.success : C.gold} />
+                  </div>
+                );
+              })}
+              <div className="pt-2 border-t flex items-center justify-between" style={{ borderColor: C.hairline }}>
+                <p className="text-[11px]" style={{ color: C.muted }}>Waitlist joined</p>
+                <p className="text-[12px] font-semibold" style={{ color: C.espresso }}>
+                  {data.funnel.waitlist_joined} · {data.funnel.waitlist_converted} converted
+                </p>
+              </div>
+            </Card>
+
+            {/* Top services */}
+            {data.top_services.length > 0 && (
+              <>
+                <SectionTitle>Top services</SectionTitle>
+                <Card className="p-4 space-y-3">
+                  {data.top_services.slice(0, 6).map(s => {
+                    const maxRev = Math.max(...data.top_services.map(x => x.revenue || 0), 1);
+                    const pct = ((s.revenue || 0) / maxRev) * 100;
+                    return (
+                      <div key={s.service_id} className="space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[13px] font-semibold flex-1 min-w-0 truncate" style={{ color: C.espresso }}>
+                            {s.service_name}
+                          </p>
+                          <p className="text-[12px] font-semibold whitespace-nowrap" style={{ color: C.goldDeep }}>
+                            {fmtMoney(s.revenue || 0, currency)}
+                          </p>
+                        </div>
+                        <ServiceBar pct={pct} color={C.gold} />
+                        <div className="flex items-center justify-between">
+                          <p className="text-[11px]" style={{ color: C.muted }}>
+                            {s.views} views · {s.requests} requests · {s.approvals} booked
+                          </p>
+                          {s.conversion_pct !== null && (
+                            <p className="text-[11px] font-semibold" style={{ color: C.coffee }}>
+                              {s.conversion_pct.toFixed(0)}% conv
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </Card>
+              </>
+            )}
+
+            {/* Availability pressure */}
+            <SectionTitle>Availability pressure</SectionTitle>
+            <Card className="p-4 space-y-3">
+              <WeekdayBars data={data.availability_pressure.by_weekday} />
+              <div className="flex items-center justify-between text-[11px]" style={{ color: C.muted }}>
+                <span>
+                  {data.availability_pressure.busiest_weekday !== null
+                    ? `Busiest: ${INTEL_WEEKDAYS_SHORT[data.availability_pressure.busiest_weekday]} (${data.availability_pressure.busiest_weekday_count})`
+                    : "No bookings yet in window"}
+                </span>
+                {data.availability_pressure.busiest_hour !== null && (
+                  <span>
+                    Peak hour: {((data.availability_pressure.busiest_hour + 11) % 12) + 1}
+                    {data.availability_pressure.busiest_hour >= 12 ? " PM" : " AM"}
+                  </span>
+                )}
+              </div>
+            </Card>
+
+            {/* Waitlist intelligence */}
+            <SectionTitle>Waitlist intelligence</SectionTitle>
+            <Card className="p-4 space-y-3">
+              <div className="grid grid-cols-3 gap-2">
+                <div className="text-center p-2 rounded-lg" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                  <p className="text-[18px] font-bold" style={{ color: C.espresso }}>{data.waitlist.active}</p>
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: C.muted }}>Active</p>
+                </div>
+                <div className="text-center p-2 rounded-lg" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                  <p className="text-[18px] font-bold" style={{ color: C.espresso }}>{data.waitlist.total_in_window}</p>
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: C.muted }}>Joined</p>
+                </div>
+                <div className="text-center p-2 rounded-lg" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                  <p className="text-[18px] font-bold" style={{ color: C.success }}>
+                    {data.waitlist.conversion_pct !== null ? `${data.waitlist.conversion_pct.toFixed(0)}%` : "—"}
+                  </p>
+                  <p className="text-[10px] uppercase tracking-wider" style={{ color: C.muted }}>Conv</p>
+                </div>
+              </div>
+              {data.waitlist.top_services.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-semibold mb-1" style={{ color: C.coffee }}>Top requested services</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {data.waitlist.top_services.slice(0, 5).map(s => (
+                      <Pill key={s.service_name} tone="neutral">{s.service_name} · {s.n}</Pill>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {data.waitlist.top_dates.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-semibold mb-1" style={{ color: C.coffee }}>Top requested dates</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {data.waitlist.top_dates.slice(0, 5).map(d => (
+                      <Pill key={d.preferred_date} tone="neutral">{d.preferred_date} · {d.n}</Pill>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Card>
+
+            {/* Client sources */}
+            {data.client_sources.length > 0 && (
+              <>
+                <SectionTitle>Client sources</SectionTitle>
+                <Card className="p-4 space-y-2">
+                  {data.client_sources.slice(0, 8).map(src => {
+                    const maxBookings = Math.max(...data.client_sources.map(x => x.bookings), 1);
+                    const pct = (src.bookings / maxBookings) * 100;
+                    return (
+                      <div key={src.source} className="space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[12px] font-semibold flex-1 min-w-0 truncate" style={{ color: C.espresso }}>
+                            {humaniseSource(src.source)}
+                          </p>
+                          <p className="text-[11px] whitespace-nowrap" style={{ color: C.muted }}>
+                            {src.bookings} · {fmtMoney(src.revenue || 0, currency)}
+                          </p>
+                        </div>
+                        <ServiceBar pct={pct} color={C.coffee} />
+                      </div>
+                    );
+                  })}
+                </Card>
+              </>
+            )}
+
+            {/* Calendar demand */}
+            {data.calendar_demand.length > 0 && (
+              <>
+                <SectionTitle>Calendar demand</SectionTitle>
+                <Card className="p-4">
+                  {(() => {
+                    const max = Math.max(...data.calendar_demand.map(d => d.bookings), 1);
+                    const w = 320;
+                    const h = 90;
+                    const padX = 4;
+                    const innerW = w - padX * 2;
+                    const step = data.calendar_demand.length > 1 ? innerW / (data.calendar_demand.length - 1) : 0;
+                    const points = data.calendar_demand.map((d, i) => {
+                      const x = padX + i * step;
+                      const y = h - 6 - (d.bookings / max) * (h - 18);
+                      return `${x},${y}`;
+                    }).join(" ");
+                    return (
+                      <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} preserveAspectRatio="none">
+                        <polyline points={points} fill="none" stroke={C.gold} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+                        {data.calendar_demand.map((d, i) => {
+                          const x = padX + i * step;
+                          const y = h - 6 - (d.bookings / max) * (h - 18);
+                          return d.bookings > 0 ? <circle key={d.day} cx={x} cy={y} r={2.5} fill={C.goldDeep} /> : null;
+                        })}
+                      </svg>
+                    );
+                  })()}
+                  <div className="mt-2 flex items-center justify-between text-[11px]" style={{ color: C.muted }}>
+                    <span>{data.calendar_demand[0]?.day}</span>
+                    <span>{data.calendar_demand[data.calendar_demand.length - 1]?.day}</span>
+                  </div>
+                </Card>
+              </>
+            )}
+
+            {/* Revenue opportunity */}
+            <SectionTitle>Revenue opportunity</SectionTitle>
+            <Card className="p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[12px]" style={{ color: C.coffee }}>Unmet demand (waitlist)</p>
+                <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+                  {data.revenue_opportunity.unmet_demand}
+                </p>
+              </div>
+              <div className="flex items-center justify-between">
+                <p className="text-[12px]" style={{ color: C.coffee }}>Average ticket</p>
+                <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+                  {fmtMoney(data.revenue_opportunity.avg_ticket || 0, currency)}
+                </p>
+              </div>
+              <div className="pt-2 border-t flex items-center justify-between" style={{ borderColor: C.hairline }}>
+                <p className="text-[12px] font-semibold" style={{ color: C.coffee }}>Estimated lost revenue</p>
+                <p className="text-[15px] font-bold" style={{ color: C.goldDeep }}>
+                  {fmtMoney(data.revenue_opportunity.estimated_lost_revenue || 0, currency)}
+                </p>
+              </div>
+              <p className="text-[10px] pt-1" style={{ color: C.muted }}>
+                Estimate based on waitlist size × average ticket in window. Reach out to convert these into bookings.
+              </p>
+            </Card>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const AvailabilityScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const api = store.availabilityApi;
   const rules: AvailabilityRule[] = api?.rules || [];
@@ -13553,6 +13944,7 @@ export default function App() {
     };
     return {
       ...rawStore,
+      userId: auth.userId,
       premium,
       requestUpgrade,
       discountsApi,
@@ -13581,7 +13973,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, premium, requestUpgrade, discountsApi, servicesApi, policiesApi, availabilityApi, waitlistApi]);
+  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, policiesApi, availabilityApi, waitlistApi]);
 
   const sync = useCloudSync(auth.userId, store);
 
@@ -13889,9 +14281,10 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "intelligence" && <BookingIntelligenceScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "waitlist" && (
         <WaitlistScreen
           store={store}
