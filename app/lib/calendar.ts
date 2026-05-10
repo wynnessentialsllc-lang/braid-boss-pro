@@ -184,31 +184,63 @@ export const colorForAppointment = (
 // editor that would set off-days isn't built yet, so we only surface
 // states we can compute from data we already have.
 
-export type DayStatus = "off" | "fully_booked" | "openings_available" | "deposit_due" | "empty";
+export type DayStatus = "off" | "fully_booked" | "openings_available" | "deposit_due" | "limited" | "empty";
+
+// Optional availability snapshot from app/lib/availability.ts. Kept as
+// a thin shape so this module doesn't take a hard dependency on it —
+// callers pass `undefined` when the feature isn't loaded.
+type AvailabilitySnapshot = {
+  open: boolean;
+  capacityMinutes: number;
+  label: string;
+  kind: "off" | "open" | "custom" | "limited";
+};
 
 export const computeDayStatus = (
   apptsForDay: any[],
-  opts: { workingDayHours?: number } = {},
+  opts: { workingDayHours?: number; availability?: AvailabilitySnapshot } = {},
 ): { status: DayStatus; label: string } => {
   const cap = opts.workingDayHours ?? 8;
-  // A "blocked" entry covering the full working day means the
-  // stylist explicitly marked the day off. Surface "Off" when that
-  // happens — even if there's a stray booking, the block tells the
-  // truth about availability.
+  const avail = opts.availability;
+
+  // 1. Availability override beats everything: a closed day says Off
+  //    even if a stray booking exists (the user may want to see that
+  //    booking, but the strip should reflect their schedule truth).
+  if (avail && !avail.open) {
+    return { status: "off", label: avail.label || "Off" };
+  }
+
+  // 2. A "blocked" calendar entry covering the full working day also
+  //    counts as Off (legacy behavior — pre-availability users still
+  //    use blocked-time entries to mark a day closed).
   const blockedHours = apptsForDay
     .filter(a => a?.kind === "blocked" && a?.status !== "cancelled")
     .reduce((s, a) => s + (Number(a?.durationHours) || 0), 0);
   if (blockedHours >= cap) return { status: "off", label: "Off" };
 
-  // Billable bookings only — personal events and blocked time aren't
-  // bookings and shouldn't drive the booked / openings logic.
+  // 3. Billable bookings only — personal/blocked don't drive the
+  //    booked / openings logic.
   const billable = apptsForDay.filter(a =>
     a?.status !== "cancelled" && (!a?.kind || a.kind === "appointment"),
   );
-  if (billable.length === 0) return { status: "empty", label: "No bookings" };
   const totalHours = billable.reduce((s, a) => s + (Number(a?.durationHours) || 0), 0);
   const anyDepositDue = billable.some(a => (Number(a?.depositPaid) || 0) <= 0);
-  if (totalHours >= cap) return { status: "fully_booked", label: "Fully booked" };
+
+  // 4. Use availability capacity (in minutes) when present so
+  //    "Fully booked" reflects the user's real schedule, not a
+  //    hard-coded 8-hour day.
+  const effectiveCapHours = avail ? avail.capacityMinutes / 60 : cap;
+  const isLimited = avail?.kind === "limited" || avail?.kind === "custom";
+
+  if (billable.length === 0) {
+    if (isLimited) return { status: "limited", label: avail.label || "Limited availability" };
+    if (avail?.kind === "open") return { status: "empty", label: "Openings available" };
+    return { status: "empty", label: "No bookings" };
+  }
+  if (effectiveCapHours > 0 && totalHours >= effectiveCapHours) {
+    return { status: "fully_booked", label: "Fully booked" };
+  }
+  if (isLimited) return { status: "limited", label: avail.label || "Limited availability" };
   if (anyDepositDue) return { status: "deposit_due", label: "Deposit due" };
   return { status: "openings_available", label: "Openings available" };
 };
