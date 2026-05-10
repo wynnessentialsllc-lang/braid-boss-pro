@@ -91,6 +91,27 @@ import {
   computeDayStatus,
 } from "./lib/calendar";
 import {
+  type Service,
+  type ServiceInput,
+  type ServiceAddOn,
+  SERVICES_EMPTY_COPY,
+  formatServicePrice,
+  useServices,
+} from "./lib/services";
+import {
+  type DashboardRevenue,
+  type RevenueGranularity,
+  type RevenuePoint,
+  type StyleCount,
+  type RepeatClientStats,
+  computeDashboardRevenue,
+  revenueByPeriod,
+  topBookedStyles,
+  repeatClientStats,
+  lastBookingForClient,
+  ticketTotal as reportTicketTotal,
+} from "./lib/reports";
+import {
   downloadJson,
   downloadPdfBlob,
 } from "./lib/native-download";
@@ -1847,6 +1868,17 @@ const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: {
                 <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>
               ) : null;
             })()}
+            {(() => {
+              // Partial-deposit % pill so you can read "60% deposit" at a
+              // glance without opening the appointment. Reuses the same
+              // ticket math as Reports / Income view.
+              if (appt.status === "cancelled") return null;
+              const total = reportTicketTotal(appt);
+              const deposit = Number(appt.depositPaid) || 0;
+              if (total <= 0 || deposit <= 0 || deposit >= total) return null;
+              const pct = Math.round((deposit / total) * 100);
+              return <Pill tone="gold">{pct}% deposit</Pill>;
+            })()}
             {series && <Pill tone="gold"><Repeat size={10} /> {cadenceLabel(series.cadence)}</Pill>}
             {isLate && <Pill tone="danger">Late</Pill>}
           </div>
@@ -2277,6 +2309,13 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
   );
   const topRebookings = rebookingOpportunities.slice(0, 3);
 
+  // Phase 1 — pure aggregations from app/lib/reports.ts so the
+  // Dashboard cards and the Reports screen share one source of truth.
+  const revenueStats = useMemo(
+    () => computeDashboardRevenue(appointments),
+    [appointments],
+  );
+
   const stats = useMemo(() => {
     const now = new Date();
     const wk = new Date(now); wk.setDate(now.getDate() - 7);
@@ -2375,8 +2414,11 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
         )}
 
         <div className="grid grid-cols-2 gap-3">
+          <KpiCard label="Today revenue" value={fmtMoney(revenueStats.todayRevenue, business.currency)} icon={<DollarSign size={16} />} tone={revenueStats.todayRevenue > 0 ? "gold" : "neutral"} onClick={() => setActive("schedule")} />
           <KpiCard label="Week revenue" value={fmtMoney(stats.weekRevenue, business.currency)} icon={<ArrowUpRight size={16} />} tone="gold" onClick={() => setActive("money")} />
           <KpiCard label="Week clients" value={stats.weekAppts} icon={<Users size={16} />} onClick={() => setActive("schedule")} />
+          <KpiCard label="Avg ticket (30d)" value={fmtMoney(revenueStats.averageTicket30d, business.currency)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => setActive("money")} />
+          <KpiCard label="Deposits (week)" value={fmtMoney(revenueStats.weekDeposits, business.currency)} icon={<Check size={16} />} tone={revenueStats.weekDeposits > 0 ? "success" : "neutral"} onClick={() => setActive("schedule")} />
           <KpiCard label="Pending balance" value={fmtMoney(stats.pendingBalance, business.currency)} icon={<Clock size={16} />} tone={stats.pendingBalance > 0 ? "warning" : "neutral"} onClick={() => setActive("schedule")} />
           <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} onClick={() => setActive("money")} />
         </div>
@@ -4498,21 +4540,28 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   const netTotal = Math.max(0, grossTotal - discountAmt);
   const balanceDue = netTotal - (Number(form.depositPaid) || 0);
 
-  // When picking an existing client, auto-fill phone/email
+  // When picking an existing client, auto-fill phone/email + their
+  // most recent style/duration on NEW appointments only. We don't
+  // overwrite anything the user already typed.
   useEffect(() => {
     if (form.clientId) {
       const c = clients.find(x => x.id === form.clientId);
       if (c) {
+        const last = !form.id
+          ? lastBookingForClient(appointments as any[], form.clientId)
+          : null;
         // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
         setForm(prev => ({
           ...prev,
           clientName: c.name,
           clientPhone: prev.clientPhone || c.phone || "",
           clientEmail: prev.clientEmail || c.email || "",
+          style: prev.style || (last?.style ?? ""),
+          durationHours: prev.durationHours || last?.durationHours || "",
         }));
       }
     }
-  }, [form.clientId, clients]);
+  }, [form.clientId, clients, form.id, appointments]);
 
   const handleSave = async () => {
     // Personal events and blocked time skip the entire client/payment/
@@ -4645,6 +4694,64 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     for (const f of futures) await deleteAppointment(f.id);
     await deleteSeries(form.seriesId);
     onClose();
+  };
+
+  // Phase 1 — operational speed:
+  //   • Duplicate creates a new in-memory appointment record prefilled
+  //     from the current one (id wiped so save creates a new row, date
+  //     reset to today). Closes this sheet and reopens with the copy.
+  //   • Quick reschedule opens a tiny date+time mini-sheet that writes
+  //     ONLY those two fields, then closes — for the common case where
+  //     a client moves their slot.
+  const [showQuickReschedule, setShowQuickReschedule] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState<string>("");
+  const [rescheduleTime, setRescheduleTime] = useState<string>("");
+  const [rescheduleBusy, setRescheduleBusy] = useState(false);
+
+  const handleDuplicate = () => {
+    if (!form.id) return;
+    const dup: any = {
+      ...form,
+      id: undefined,
+      seriesId: undefined,
+      date: todayISO(),
+      status: "scheduled",
+      depositPaid: 0,
+      paymentStatus: "",
+      paymentDate: "",
+      paymentMethod: "",
+      paymentNotes: "",
+      // Drop the discount snapshot — duplicates start from the gross
+      // price; the user re-applies a discount on the new appointment.
+      discountId: null,
+      discountName: null,
+      discountAmount: 0,
+    };
+    onClose();
+    // Defer so the parent can react to the close before we re-open.
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("bbp:duplicate-appointment", { detail: dup }));
+    }, 0);
+  };
+
+  const openQuickReschedule = () => {
+    setRescheduleDate(form.date || todayISO());
+    setRescheduleTime(form.time || "10:00");
+    setShowQuickReschedule(true);
+  };
+
+  const handleQuickReschedule = async () => {
+    if (!form.id || rescheduleBusy) return;
+    if (!rescheduleDate || !rescheduleTime) return;
+    setRescheduleBusy(true);
+    const next = { ...form, date: rescheduleDate, time: rescheduleTime };
+    setForm(next);
+    const saved = await upsertAppointment(next);
+    setRescheduleBusy(false);
+    if (saved) {
+      setShowQuickReschedule(false);
+      onClose();
+    }
   };
 
   const handleStartTimer = () => {
@@ -4932,6 +5039,12 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         </Field>
 
         {isAppointment && form.id && (
+          <div className="grid grid-cols-2 gap-3">
+            <Button variant="outline" icon={<RefreshCw size={16} />} onClick={openQuickReschedule}>Reschedule</Button>
+            <Button variant="outline" icon={<Copy size={16} />} onClick={handleDuplicate}>Duplicate</Button>
+          </div>
+        )}
+        {isAppointment && form.id && (
           <Button variant="dark" icon={<TimerIcon size={18} />} onClick={handleStartTimer} fullWidth>Start chair timer</Button>
         )}
         {isAppointment && form.id && (
@@ -4978,6 +5091,57 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         {form.seriesId && (
           <Button variant="danger" onClick={handleDeleteSeries} fullWidth>Delete entire series</Button>
         )}
+      </div>
+      <QuickRescheduleSheet
+        open={showQuickReschedule}
+        date={rescheduleDate}
+        time={rescheduleTime}
+        onChangeDate={setRescheduleDate}
+        onChangeTime={setRescheduleTime}
+        onClose={() => setShowQuickReschedule(false)}
+        onSave={handleQuickReschedule}
+        busy={rescheduleBusy}
+      />
+    </Sheet>
+  );
+};
+
+// ---- Quick Reschedule mini-sheet --------------------------------------
+// Tiny date+time picker for the "client wants to move their slot"
+// flow. Doesn't touch the rest of the appointment record.
+const QuickRescheduleSheet = ({
+  open, date, time, onChangeDate, onChangeTime, onClose, onSave, busy,
+}: {
+  open: boolean;
+  date: string;
+  time: string;
+  onChangeDate: (v: string) => void;
+  onChangeTime: (v: string) => void;
+  onClose: () => void;
+  onSave: () => void;
+  busy: boolean;
+}) => {
+  return (
+    <Sheet open={open} onClose={onClose} title="Reschedule">
+      <div className="space-y-3 pb-2">
+        <p className="text-[12px]" style={{ color: C.muted }}>
+          Move this appointment to a new date and time. Everything else
+          (client, style, deposit) stays put.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="New date">
+            <Input type="date" value={date} onChange={e => onChangeDate(e.target.value)} />
+          </Field>
+          <Field label="New time">
+            <Input type="time" value={time} onChange={e => onChangeTime(e.target.value)} />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={onSave} disabled={busy || !date || !time}>
+            {busy ? "Saving…" : "Reschedule"}
+          </Button>
+        </div>
       </div>
     </Sheet>
   );
@@ -7020,7 +7184,7 @@ const PolicySheet = ({ policy, isNew, onClose, onSave }) => {
 // ============================================================
 //  SETTINGS (V1 extended with Reminders link)
 // ============================================================
-const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void }) => {
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
@@ -7136,6 +7300,59 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
 
         {openDiscounts && (
           <>
+            <SectionTitle>Catalog</SectionTitle>
+            {openServices && (
+              <Card className="p-4 active:scale-[0.99]" onClick={openServices}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.gold, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <Layers size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Services & styles</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        {(() => {
+                          const list: Service[] = store.servicesApi?.services || [];
+                          const active = list.filter(s => s.is_active).length;
+                          if (list.length === 0) return "Define what you offer to book faster";
+                          return `${active} active · ${list.length} total`;
+                        })()}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openReports && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openReports}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <BarChart3 size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Reports</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>Revenue · top styles · repeat clients</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+
             <SectionTitle>Studio offers</SectionTitle>
             <Card className="p-4 active:scale-[0.99]" onClick={openDiscounts}>
               <div className="flex items-center justify-between">
@@ -9709,6 +9926,501 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
 // ============================================================
 //  DISCOUNTS SCREEN
 // ============================================================
+// ============================================================
+//  SERVICES & STYLES (Phase 1 — catalog only; not wired into bookings yet)
+// ============================================================
+const ServicesScreen = ({
+  store, onBack,
+}: {
+  store: any;
+  onBack: () => void;
+}) => {
+  const api = store.servicesApi;
+  const services: Service[] = api?.services || [];
+  const currency = store.business?.currency || "USD";
+  const [editing, setEditing] = useState<(Partial<ServiceInput> & { id?: string }) | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Service | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const openNew = () => setEditing({
+    name: "",
+    description: "",
+    duration_hours: 4,
+    base_price: 0,
+    deposit_required: false,
+    deposit_amount: null,
+    add_ons: [],
+    prep_instructions: "",
+    is_active: true,
+  });
+
+  const openEdit = (s: Service) => setEditing({
+    id: s.id,
+    name: s.name,
+    description: s.description,
+    duration_hours: s.duration_hours,
+    base_price: s.base_price,
+    deposit_required: s.deposit_required,
+    deposit_amount: s.deposit_amount,
+    add_ons: Array.isArray(s.add_ons) ? s.add_ons : [],
+    prep_instructions: s.prep_instructions,
+    is_active: s.is_active,
+  });
+
+  const handleSave = async () => {
+    if (!editing || busy) return;
+    setBusy(true);
+    const saved = await api.upsert(editing);
+    setBusy(false);
+    if (saved) setEditing(null);
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    setBusy(true);
+    const ok = await api.remove(confirmDelete.id);
+    setBusy(false);
+    if (ok) setConfirmDelete(null);
+  };
+
+  const updateAddOn = (id: string, field: keyof ServiceAddOn, value: string) => {
+    setEditing(prev => prev ? {
+      ...prev,
+      add_ons: (prev.add_ons || []).map(a => a.id === id
+        ? { ...a, [field]: field === "amount" ? parseMoney(value) : value }
+        : a),
+    } : prev);
+  };
+  const addAddOn = () => setEditing(prev => prev ? {
+    ...prev,
+    add_ons: [...(prev.add_ons || []), { id: `addon_${uid()}`, name: "", amount: 0 }],
+  } : prev);
+  const removeAddOn = (id: string) => setEditing(prev => prev ? {
+    ...prev,
+    add_ons: (prev.add_ons || []).filter(a => a.id !== id),
+  } : prev);
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Services & styles"
+        subtitle="Your catalog of bookable looks"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        rightAction={
+          <button
+            type="button"
+            onClick={openNew}
+            className="p-2 rounded-full"
+            style={{ color: C.coffee }}
+            aria-label="New service"
+          >
+            <Plus size={20} />
+          </button>
+        }
+      />
+
+      <div className="px-5 pt-2 space-y-3">
+        {api?.error && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{api.error}</p>
+          </Card>
+        )}
+
+        {api?.loading && services.length === 0 ? (
+          <Card className="p-4">
+            <p className="text-[12px]" style={{ color: C.muted }}>Loading services…</p>
+          </Card>
+        ) : services.length === 0 ? (
+          <Card className="p-6 text-center" style={{
+            background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
+          }}>
+            <div
+              aria-hidden
+              style={{
+                width: 48, height: 48, margin: "0 auto 12px",
+                borderRadius: 999, display: "grid", placeItems: "center",
+                background: C.ivory, color: C.gold, border: `1px solid ${C.hairline}`,
+              }}
+            >
+              <Layers size={20} />
+            </div>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>
+              No services yet.
+            </p>
+            <p className="text-[13px] mt-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+              {SERVICES_EMPTY_COPY}
+            </p>
+            <div className="mt-5">
+              <Button variant="primary" icon={<Plus size={16} />} onClick={openNew} fullWidth>
+                Create your first service
+              </Button>
+            </div>
+          </Card>
+        ) : (
+          services.map(s => (
+            <Card
+              key={s.id}
+              className="p-4 active:scale-[0.99] cursor-pointer"
+              onClick={() => openEdit(s)}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>
+                      {s.name}
+                    </p>
+                    <Pill tone={s.is_active ? "success" : "neutral"}>
+                      {s.is_active ? "Active" : "Inactive"}
+                    </Pill>
+                    {s.deposit_required && (
+                      <Pill tone="gold">Deposit required</Pill>
+                    )}
+                  </div>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    {formatServicePrice(s, currency)}
+                    {s.deposit_required && s.deposit_amount
+                      ? ` · Deposit ${fmtMoney(Number(s.deposit_amount), currency)}`
+                      : ""}
+                    {s.add_ons.length > 0 ? ` · ${s.add_ons.length} add-on${s.add_ons.length === 1 ? "" : "s"}` : ""}
+                  </p>
+                  {s.description && (
+                    <p className="text-[12px] mt-2" style={{ color: C.coffee, lineHeight: 1.4 }}>
+                      {s.description}
+                    </p>
+                  )}
+                </div>
+                <ChevronRight size={18} style={{ color: C.muted, marginTop: 2, flexShrink: 0 }} />
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
+
+      <Sheet
+        open={!!editing}
+        onClose={() => setEditing(null)}
+        title={editing?.id ? "Edit service" : "New service"}
+      >
+        {editing && (
+          <div className="space-y-3 pb-2">
+            <Field label="Name">
+              <Input
+                value={editing.name || ""}
+                onChange={e => setEditing({ ...editing, name: e.target.value })}
+                placeholder="Knotless mid-back"
+              />
+            </Field>
+
+            <Field label="Description" hint="Visible on booking surfaces. Optional.">
+              <Textarea
+                value={editing.description || ""}
+                onChange={e => setEditing({ ...editing, description: e.target.value })}
+                rows={2}
+              />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Duration (hrs)">
+                <MoneyInput
+                  prefix=""
+                  suffix="hrs"
+                  value={editing.duration_hours ?? ""}
+                  onChange={(v) => setEditing({ ...editing, duration_hours: parseMoney(v) })}
+                />
+              </Field>
+              <Field label="Base price">
+                <MoneyInput
+                  value={editing.base_price ?? ""}
+                  onChange={(v) => setEditing({ ...editing, base_price: parseMoney(v) })}
+                />
+              </Field>
+            </div>
+
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Deposit required</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Booking won't confirm until paid.</p>
+                </div>
+                <Toggle
+                  checked={!!editing.deposit_required}
+                  onChange={(v) => setEditing({
+                    ...editing,
+                    deposit_required: v,
+                    deposit_amount: v ? (editing.deposit_amount ?? 0) : null,
+                  })}
+                />
+              </div>
+              {editing.deposit_required && (
+                <Field label="Deposit amount">
+                  <MoneyInput
+                    value={editing.deposit_amount ?? ""}
+                    onChange={(v) => setEditing({ ...editing, deposit_amount: parseMoney(v) })}
+                  />
+                </Field>
+              )}
+            </Card>
+
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-semibold" style={{ color: C.espresso }}>Add-ons</p>
+                <Button variant="outline" icon={<Plus size={14} />} onClick={addAddOn}>Add</Button>
+              </div>
+              {(editing.add_ons || []).length === 0 ? (
+                <p className="text-[11px]" style={{ color: C.muted }}>
+                  Optional. Edges, washing, beads — anything that bumps the price.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {(editing.add_ons || []).map(a => (
+                    <div key={a.id} className="flex items-center gap-2">
+                      <div className="flex-1"><Input value={a.name} onChange={e => updateAddOn(a.id, "name", e.target.value)} placeholder="Add-on name" /></div>
+                      <div className="w-24"><MoneyInput value={a.amount} onChange={(v) => updateAddOn(a.id, "amount", v)} /></div>
+                      <button type="button" onClick={() => removeAddOn(a.id)} className="p-2 rounded-lg" style={{ color: C.danger }}><Trash2 size={18} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            <Field label="Prep instructions" hint="Sent to clients before their booking. Optional.">
+              <Textarea
+                value={editing.prep_instructions || ""}
+                onChange={e => setEditing({ ...editing, prep_instructions: e.target.value })}
+                rows={3}
+                placeholder="Wash and blow-dry the day before. Bring bands."
+              />
+            </Field>
+
+            <Field label="Status">
+              <Select
+                value={editing.is_active === false ? "inactive" : "active"}
+                onChange={e => setEditing({ ...editing, is_active: e.target.value === "active" })}
+                options={[
+                  { value: "active", label: "Active — bookable" },
+                  { value: "inactive", label: "Inactive — hidden from booking" },
+                ]}
+              />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <Button variant="primary" icon={<Save size={16} />} onClick={handleSave}>
+                {busy ? "Saving…" : "Save service"}
+              </Button>
+              <Button variant="outline" onClick={() => setEditing(null)}>
+                Cancel
+              </Button>
+            </div>
+
+            {editing.id && (
+              <Button
+                variant="danger"
+                icon={<Trash2 size={16} />}
+                onClick={() => {
+                  const target = services.find(s => s.id === editing.id);
+                  if (target) { setEditing(null); setConfirmDelete(target); }
+                }}
+                fullWidth
+              >
+                Delete service
+              </Button>
+            )}
+          </div>
+        )}
+      </Sheet>
+
+      <Sheet
+        open={!!confirmDelete}
+        onClose={() => setConfirmDelete(null)}
+        title="Delete service?"
+      >
+        {confirmDelete && (
+          <div className="space-y-3 pb-2">
+            <p className="text-[14px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+              Remove <strong>{confirmDelete.name}</strong> from your catalog? This won't change any
+              past appointments.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <Button variant="danger" onClick={handleDelete}>
+                {busy ? "Deleting…" : "Delete"}
+              </Button>
+              <Button variant="outline" onClick={() => setConfirmDelete(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </Sheet>
+    </div>
+  );
+};
+
+// ============================================================
+//  REPORTS V1 — revenue · top styles · repeat clients
+// ============================================================
+const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const appointments = (store.appointments as any[]) || [];
+  const currency = store.business?.currency || "USD";
+  const [granularity, setGranularity] = useState<RevenueGranularity>("week");
+
+  const revenuePoints = useMemo(
+    () => revenueByPeriod(appointments, granularity, undefined, granularity === "week" ? 8 : 6),
+    [appointments, granularity],
+  );
+  const styles = useMemo(() => topBookedStyles(appointments, 8), [appointments]);
+  const repeats = useMemo(() => repeatClientStats(appointments, 5), [appointments]);
+
+  const maxRevenue = Math.max(1, ...revenuePoints.map(p => p.revenue));
+  const totalRevenue = revenuePoints.reduce((s, p) => s + p.revenue, 0);
+  const totalAppts = revenuePoints.reduce((s, p) => s + p.appointmentCount, 0);
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Reports"
+        subtitle="Revenue, top styles, returning clients"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+
+      <div className="px-5 pt-2 space-y-5">
+        {/* REVENUE */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <SectionTitle>Revenue</SectionTitle>
+            <div className="flex p-0.5 rounded-lg" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              {(["week", "month"] as RevenueGranularity[]).map(g => (
+                <button
+                  type="button"
+                  key={g}
+                  onClick={() => setGranularity(g)}
+                  className="px-3 py-1 rounded-md text-[11px] font-semibold transition"
+                  style={{
+                    background: granularity === g ? C.espresso : "transparent",
+                    color: granularity === g ? C.cream : C.coffee,
+                  }}
+                >
+                  {g === "week" ? "Weekly" : "Monthly"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Card className="p-4">
+            <div className="flex items-baseline justify-between mb-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+                  Last {revenuePoints.length} {granularity === "week" ? "weeks" : "months"}
+                </p>
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600, color: C.espresso }}>
+                  {fmtMoney(totalRevenue, currency)}
+                </p>
+              </div>
+              <p className="text-[11px]" style={{ color: C.muted }}>
+                {totalAppts} appt{totalAppts === 1 ? "" : "s"}
+              </p>
+            </div>
+            <div className="flex items-end gap-1.5" style={{ height: 80 }}>
+              {revenuePoints.map(p => {
+                const h = Math.max(2, Math.round((p.revenue / maxRevenue) * 80));
+                return (
+                  <div key={p.iso} className="flex-1 flex flex-col items-center gap-1">
+                    <div
+                      className="w-full rounded-t-md"
+                      style={{
+                        height: h,
+                        background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+                        opacity: p.revenue > 0 ? 1 : 0.25,
+                      }}
+                    />
+                    <span className="text-[9px] font-semibold" style={{ color: C.muted }}>{p.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        </div>
+
+        {/* TOP STYLES */}
+        <div>
+          <SectionTitle>Top booked styles</SectionTitle>
+          {styles.length === 0 ? (
+            <Card className="p-4 text-center">
+              <p className="text-[12px]" style={{ color: C.muted }}>
+                Add a style to your appointments and it'll surface here.
+              </p>
+            </Card>
+          ) : (
+            <Card className="p-2">
+              {styles.map((s, i) => (
+                <div
+                  key={s.style}
+                  className="flex items-center justify-between px-2 py-2.5"
+                  style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{s.style}</p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      {s.count} booking{s.count === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  <span className="text-[12px] font-semibold tabular-nums ml-3" style={{ color: C.coffee }}>
+                    {fmtMoney(s.revenue, currency)}
+                  </span>
+                </div>
+              ))}
+            </Card>
+          )}
+        </div>
+
+        {/* REPEAT CLIENTS */}
+        <div>
+          <SectionTitle>Repeat clients</SectionTitle>
+          <Card className="p-4">
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Returning</p>
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, color: C.espresso }}>
+                  {Math.round(repeats.repeatRate * 100)}%
+                </p>
+                <p className="text-[11px]" style={{ color: C.muted }}>
+                  {repeats.repeatClients} of {repeats.totalClients}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Top spender</p>
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>
+                  {repeats.topClients[0]?.clientName || "—"}
+                </p>
+                <p className="text-[11px]" style={{ color: C.muted }}>
+                  {repeats.topClients[0] ? fmtMoney(repeats.topClients[0].revenue, currency) : ""}
+                </p>
+              </div>
+            </div>
+            {repeats.topClients.length > 0 && (
+              <div className="pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
+                <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+                  Top {repeats.topClients.length}
+                </p>
+                {repeats.topClients.map((c, i) => (
+                  <div
+                    key={c.clientId}
+                    className="flex items-center justify-between py-1.5"
+                    style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                  >
+                    <p className="text-[13px] truncate" style={{ color: C.espresso }}>{c.clientName}</p>
+                    <span className="text-[11px] tabular-nums ml-3" style={{ color: C.muted }}>
+                      {c.count} · {fmtMoney(c.revenue, currency)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const DiscountsScreen = ({
   store, onBack,
 }: {
@@ -10150,6 +10862,7 @@ export default function App() {
   const rawStore = useStorage();
   const { premium } = usePremiumStatus(auth.userId);
   const discountsApi = useDiscounts(auth.userId);
+  const servicesApi = useServices(auth.userId);
   const [upgradeFor, setUpgradeFor] = useState<GatedFeature | null>(null);
   const requestUpgrade = useCallback((feature: GatedFeature) => {
     setUpgradeFor(feature);
@@ -10178,6 +10891,7 @@ export default function App() {
       premium,
       requestUpgrade,
       discountsApi,
+      servicesApi,
       upsertClient: gateNew("clients", rawStore.clients, rawStore.upsertClient),
       // Personal events and blocked time live in the same table but
       // aren't bookings, so they (a) don't count toward the appointment
@@ -10199,7 +10913,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, premium, requestUpgrade, discountsApi]);
+  }, [rawStore, premium, requestUpgrade, discountsApi, servicesApi]);
 
   const sync = useCloudSync(auth.userId, store);
 
@@ -10252,6 +10966,22 @@ export default function App() {
   const [calcPrefill, setCalcPrefill] = useState<EntityRecord | null>(null);
   const [calcPresetPrefill, setCalcPresetPrefill] = useState<EntityRecord | null>(null);
   const [apptPrefill, setApptPrefill] = useState<EntityRecord | null>(null);
+
+  // Duplicate-appointment bridge: AppointmentSheet dispatches a
+  // CustomEvent when the user taps Duplicate; we catch it here, route
+  // to the Schedule tab, and prefill the new appointment form with
+  // the copy. Skipped during SSR.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onDuplicate = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail) return;
+      setActive("schedule");
+      setApptPrefill(detail);
+    };
+    window.addEventListener("bbp:duplicate-appointment", onDuplicate as EventListener);
+    return () => window.removeEventListener("bbp:duplicate-appointment", onDuplicate as EventListener);
+  }, []);
   const [timerApptPrefill, setTimerApptPrefill] = useState<EntityRecord | null>(null);
   const [openTx, setOpenTx] = useState(false);
   const [editingTx, setEditingTx] = useState<EntityRecord | null>(null);
@@ -10471,7 +11201,9 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} />}
+      {secondary === "services" && <ServicesScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "reports" && <ReportsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "discounts" && <DiscountsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "account" && (
         <AccountScreen
