@@ -72,22 +72,89 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
   const out: Insight[] = [];
   const now = new Date().toISOString();
 
-  // ---- BALANCE: pending balance summary (high) ------------------------
-  const pendingTotal = appts
-    .filter(a => a.paymentStatus !== "paid")
-    .reduce((s, a) => s + num(a.balanceDue), 0);
-  if (pendingTotal > 0) {
-    out.push({
-      id: `pending_total:${today}`,
-      category: "balance",
-      priority: pendingTotal > 200 ? "high" : "medium",
-      title: `${fmt(pendingTotal, currency)} in pending balances`,
-      body: "Outstanding money across active appointments. Tap to review and collect.",
-      why: "Pending balances are the fastest cashflow lever — every collection lands in this month's revenue.",
-      actionLabel: "View schedule",
-      actionTarget: "tab:schedule",
-      createdAt: now,
-    });
+  // ---- BALANCE: signal-bearing alerts only ----------------------------
+  //
+  // The Dashboard already shows pending balance as a KPI total *and*
+  // as an actionable Pending Balances list. Repeating "$X in pending
+  // balances" here adds no new information, so the BALANCE insight
+  // only fires when there's genuine signal:
+  //
+  //   1. Overdue — any appointment dated before today still owes
+  //   2. Balance due today
+  //   3. Multiple clients owe (>= 2 distinct)
+  //   4. Low deposit collection — < 50% of upcoming bookings have a
+  //      deposit on file (sample size >= 3)
+  //
+  // We surface ONE balance insight at most (the highest-priority one
+  // that triggers) so the card list stays focused.
+  const owingAppts = appts.filter(a => a.paymentStatus !== "paid" && num(a.balanceDue) > 0);
+  if (owingAppts.length > 0) {
+    const overdue = owingAppts.filter(a => a.date && a.date < today);
+    const dueToday = owingAppts.filter(a => a.date === today);
+    const distinctClients = new Set(owingAppts.map(a => a.clientId).filter(Boolean));
+
+    if (overdue.length > 0) {
+      const overdueTotal = overdue.reduce((s, a) => s + num(a.balanceDue), 0);
+      out.push({
+        id: `pending_overdue:${today}`,
+        category: "balance",
+        priority: "high",
+        title: `${overdue.length} overdue ${overdue.length === 1 ? "balance" : "balances"} · ${fmt(overdueTotal, currency)}`,
+        body: "Past-due balances on appointments that already happened.",
+        why: "Overdue collections compound quietly. A short message today usually closes them.",
+        actionLabel: "View schedule",
+        actionTarget: "tab:schedule",
+        createdAt: now,
+      });
+    } else if (dueToday.length > 0) {
+      const dueTodayTotal = dueToday.reduce((s, a) => s + num(a.balanceDue), 0);
+      const first = dueToday[0];
+      out.push({
+        id: `pending_today:${today}`,
+        category: "balance",
+        priority: "high",
+        title: `Balance due today · ${fmt(dueTodayTotal, currency)}`,
+        body: dueToday.length === 1 && first?.clientName
+          ? `Collect from ${first.clientName} after the chair clears.`
+          : `Across ${dueToday.length} appointment${dueToday.length === 1 ? "" : "s"} on the books for today.`,
+        actionLabel: "View schedule",
+        actionTarget: "tab:schedule",
+        createdAt: now,
+      });
+    } else if (distinctClients.size >= 2) {
+      out.push({
+        id: `pending_multi:${today}`,
+        category: "balance",
+        priority: "medium",
+        title: `${distinctClients.size} clients owe a balance`,
+        body: "Outstanding totals are spread across more than one client.",
+        why: "Sending personal nudges in the same window keeps follow-ups easy and consistent.",
+        actionLabel: "View schedule",
+        actionTarget: "tab:schedule",
+        createdAt: now,
+      });
+    }
+  }
+
+  // ---- BALANCE: low deposit collection rate ---------------------------
+  const upcoming = appts.filter(a => a.date && a.date >= today);
+  if (upcoming.length >= 3) {
+    const withDeposit = upcoming.filter(a => num(a.depositPaid) > 0).length;
+    const rate = withDeposit / upcoming.length;
+    if (rate < 0.5) {
+      const pct = Math.round(rate * 100);
+      out.push({
+        id: `deposit_rate:${today}`,
+        category: "balance",
+        priority: "medium",
+        title: `Only ${pct}% of upcoming bookings have a deposit`,
+        body: `${withDeposit} of ${upcoming.length} upcoming appointments have a deposit on file.`,
+        why: "Locking in deposits up front reduces no-shows and makes the chair more predictable.",
+        actionLabel: "View schedule",
+        actionTarget: "tab:schedule",
+        createdAt: now,
+      });
+    }
   }
 
   // ---- SCHEDULE: today's appointment list (high if any) ---------------
@@ -233,22 +300,10 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
     });
   }
 
-  // ---- CLIENT: average ticket -----------------------------------------
-  const completed = appts.filter(a => a.status === "completed" || a.paymentStatus === "paid");
-  if (completed.length >= 3) {
-    const totalCollected = completed.reduce((s, a) => s + collected(a), 0);
-    const avg = totalCollected / completed.length;
-    out.push({
-      id: `avg_ticket:${monthStart}`,
-      category: "client",
-      priority: "low",
-      title: `Average ticket: ${fmt(avg, currency)}`,
-      body: `Across ${completed.length} completed bookings.`,
-      actionLabel: "View money",
-      actionTarget: "tab:money",
-      createdAt: now,
-    });
-  }
+  // (Average ticket is now surfaced as its own Dashboard KPI card.
+  // We deliberately do NOT emit a generic "Average ticket: $X"
+  // insight here — Boss Insights is for interpretation, not a second
+  // print of the same number.)
 
   // ---- CLIENT: repeat client rate -------------------------------------
   const withHistory = clients
