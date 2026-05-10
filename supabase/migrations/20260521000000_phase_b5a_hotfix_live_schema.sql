@@ -389,11 +389,23 @@ grant execute on function public.approve_booking_request(uuid, numeric, integer)
 
 
 -- =====================================================================
--- 3. public_list_availability — drop reference to service_duration_hours
---    (which doesn't exist on booking_requests in prod). Use the
---    existing `service_duration` numeric hours column. Falls back to
---    1 hour if a request was submitted before service snapshots were
---    populated.
+-- 3. public_list_availability — fix variable/column ambiguity + drop
+--    reference to service_duration_hours.
+--
+--    Two correctness bugs in the production function:
+--      • PL/pgSQL declared `break_start` / `break_end` locals that
+--        collide with the columns of the same name on
+--        availability_rules. With the default #variable_conflict
+--        mode of `error`, the SELECT INTO that reads from
+--        availability_rules raises "column reference break_start
+--        is ambiguous" at runtime — surfaced by the new month
+--        heatmap that calls this function for every day in view.
+--        Fixed by switching the mode to `use_variable` and
+--        qualifying the column references with table aliases so
+--        intent stays explicit either way.
+--      • booking_requests in production doesn't have
+--        service_duration_hours (Phase B1 snapshot migration not
+--        applied). Use service_duration only. (PR #91 supersedes.)
 -- =====================================================================
 create or replace function public.public_list_availability(
   slug_in text,
@@ -411,6 +423,7 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+#variable_conflict use_variable
 declare
   owner_id uuid;
   weekday_in smallint;
@@ -466,10 +479,12 @@ begin
   end if;
 
   weekday_in := extract(dow from date_in)::smallint;
-  select start_time, end_time, break_start, break_end, is_open
+  -- Qualify with the table alias so the SELECT INTO can't be read as
+  -- referencing the local variables of the same name.
+  select ar.start_time, ar.end_time, ar.break_start, ar.break_end, ar.is_open
     into rule
-  from public.availability_rules
-  where user_id = owner_id and weekday = weekday_in
+  from public.availability_rules ar
+  where ar.user_id = owner_id and ar.weekday = weekday_in
   limit 1;
   if rule is null then
     base_start := '09:00';
@@ -485,11 +500,11 @@ begin
     break_end := rule.break_end;
   end if;
 
-  select start_time, end_time
+  select ae.start_time, ae.end_time
     into exc_custom_start, exc_custom_end
-  from public.availability_exceptions
-  where user_id = owner_id and kind = 'custom'
-    and date_in between start_date and end_date
+  from public.availability_exceptions ae
+  where ae.user_id = owner_id and ae.kind = 'custom'
+    and date_in between ae.start_date and ae.end_date
   limit 1;
   if exc_custom_start is not null and exc_custom_end is not null then
     base_start := exc_custom_start;
@@ -529,11 +544,11 @@ begin
       and a.status <> 'cancelled'
       and a.appt_time is not null
     union all
-    select to_min(start_time), to_min(end_time)
-    from public.availability_exceptions
-    where user_id = owner_id and kind = 'blocked'
-      and date_in between start_date and end_date
-      and start_time is not null and end_time is not null
+    select to_min(ae.start_time), to_min(ae.end_time)
+    from public.availability_exceptions ae
+    where ae.user_id = owner_id and ae.kind = 'blocked'
+      and date_in between ae.start_date and ae.end_date
+      and ae.start_time is not null and ae.end_time is not null
     union all
     -- B5a held-slot logic, fixed: booking_requests has only
     -- `service_duration` (numeric hours) — no service_duration_hours.
