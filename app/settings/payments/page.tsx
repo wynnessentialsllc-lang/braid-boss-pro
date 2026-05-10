@@ -82,13 +82,12 @@ function PaymentsInner() {
 
   const [launching, setLaunching] = useState(false);
 
-  // Detect the most common platform-side blocker: Stripe refuses to
-  // create connected accounts until the platform owner accepts the
-  // "Connect responsibilities" in the Stripe dashboard. The error
-  // message Stripe returns includes the platform-profile URL, but
-  // it currently renders as plain text inside connect.error — turn
-  // that into a real CTA below.
-  const platformProfileUrl = "https://dashboard.stripe.com/settings/connect/platform-profile";
+  // Detect the platform-side blocker: Stripe refuses to create
+  // connected accounts until the platform owner accepts the Connect
+  // responsibilities in the Stripe dashboard. We surface a friendly
+  // "we're finalizing setup" message to the stylist — the actual
+  // platform-profile URL belongs to the platform owner and is NOT
+  // shown to stylists.
   const platformSetupIncomplete = useMemo(() => {
     const msg = (connect.error || "").toLowerCase();
     if (!msg) return false;
@@ -224,31 +223,19 @@ function PaymentsInner() {
             background: "rgba(184, 134, 11, 0.08)",
             border: `1px solid rgba(184, 134, 11, 0.35)`,
             display: "grid",
-            gap: 10,
+            gap: 8,
           }}
         >
           <p style={{ fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>
-            Stripe requires the platform owner to review Connect responsibilities before accounts can be linked.
+            Stripe Connect is being finalized for Braid Boss Pro. We&apos;ll
+            notify you the moment onboarding is ready — usually within a
+            business day.
           </p>
-          <p style={{ fontSize: 11, color: C.muted, lineHeight: 1.5, wordBreak: "break-all" }}>
-            Open this URL in the platform Stripe dashboard:{" "}
-            <a
-              href={platformProfileUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={anchorLinkStyle}
-            >
-              {platformProfileUrl}
-            </a>
+          <p style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
+            Already finished onboarding on a different device? Tap
+            <strong> Refresh status </strong>
+            above to pick up the change.
           </p>
-          <a
-            href={platformProfileUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={secondaryButtonStyle}
-          >
-            Review Stripe Responsibilities
-          </a>
         </div>
       ) : connect.error ? (
         <p style={{ fontSize: 12, color: C.danger }}>{connect.error}</p>
@@ -328,38 +315,6 @@ const subtleButtonStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
   cursor: "pointer",
-};
-
-// Inline anchor — used when a Stripe error message contains the
-// platform-profile URL. Styled to match the gold/coffee palette so
-// it reads as an actionable link rather than free text.
-const anchorLinkStyle: React.CSSProperties = {
-  color: C.goldDeep,
-  textDecoration: "underline",
-  textDecorationThickness: 1,
-  textUnderlineOffset: 2,
-  fontWeight: 600,
-};
-
-// Secondary CTA — used for "Review Stripe Responsibilities" and any
-// future outbound link the page surfaces. Mirrors primaryButtonStyle's
-// shape so the buttons line up visually but reads as the lower-weight
-// option (cream ground, espresso ink).
-const secondaryButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: "12px 16px",
-  borderRadius: 12,
-  background: C.cream,
-  color: C.espresso,
-  border: `1px solid ${C.goldDeep}`,
-  fontSize: 13,
-  fontWeight: 700,
-  cursor: "pointer",
-  minHeight: 44,
-  textDecoration: "none",
-  textAlign: "center",
 };
 
 function CheckRow({ ok, children }: { ok: boolean; children: React.ReactNode }) {
