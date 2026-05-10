@@ -1819,23 +1819,63 @@ const TabBar = ({ active, setActive }: {
       style={{
         bottom: 0,
         transform: "translateX(-50%)",
-        background: C.paper,
+        background: `linear-gradient(180deg, ${C.cream} 0%, ${C.paper} 100%)`,
         borderTop: `1px solid ${C.hairline}`,
         paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        boxShadow: "0 -8px 24px -16px rgba(42, 24, 16, 0.18)",
       }}>
+      <style>{`
+        @keyframes bbpTabActivate { 0% { transform: scale(0.85); opacity: 0; } 60% { transform: scale(1.04); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+        .bbp-tab-active-pill { animation: bbpTabActivate 0.22s cubic-bezier(.2,.8,.2,1) both; }
+      `}</style>
       <div className="flex items-center justify-around px-2 py-2">
         {tabs.map(t => {
           const Icon = t.icon;
           const isActive = active === t.id;
           return (
-            <button type="button" key={t.id} onClick={() => setActive(t.id)}
-              className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition"
-              style={{ color: isActive ? C.espresso : C.mutedSoft }}>
-              <div className="relative">
-                <Icon size={22} strokeWidth={isActive ? 2.4 : 1.8} />
-                {isActive && <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full" style={{ background: C.gold }} />}
-              </div>
-              <span className="text-[10px] font-semibold tracking-wide" style={{ letterSpacing: "0.06em" }}>{t.label}</span>
+            <button
+              type="button"
+              key={t.id}
+              onClick={() => setActive(t.id)}
+              aria-current={isActive ? "page" : undefined}
+              className="relative flex flex-col items-center justify-center gap-1 px-3 py-1.5 rounded-2xl transition"
+              style={{
+                color: isActive ? C.paper : C.mutedSoft,
+                minWidth: 60,
+              }}
+            >
+              {/* Gradient pill behind the active icon. Animates in on
+                  the first frame after activation; stays static after. */}
+              {isActive && (
+                <span
+                  aria-hidden
+                  className="bbp-tab-active-pill absolute"
+                  style={{
+                    top: 0,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    width: 44, height: 32,
+                    borderRadius: 999,
+                    background: `linear-gradient(180deg, ${C.gold} 0%, ${C.goldDeep} 100%)`,
+                    boxShadow:
+                      "0 6px 14px -6px rgba(168, 137, 63, 0.55), 0 0 0 4px rgba(201, 169, 97, 0.14)",
+                  }}
+                />
+              )}
+              <span className="relative" style={{ zIndex: 1 }}>
+                <Icon size={20} strokeWidth={isActive ? 2.4 : 1.9} />
+              </span>
+              <span
+                className="text-[10px] tracking-wide relative"
+                style={{
+                  fontWeight: isActive ? 700 : 600,
+                  color: isActive ? C.espresso : C.mutedSoft,
+                  letterSpacing: "0.06em",
+                  zIndex: 1,
+                }}
+              >
+                {t.label}
+              </span>
             </button>
           );
         })}
@@ -11847,12 +11887,46 @@ const UpgradeSheet = ({
           {UPGRADE_BODY}
         </p>
 
+        {/* Four pillar chips — one-time / lifetime / future upgrades /
+            no subscriptions. Calm gold-on-cream so the message lands
+            without the "BUY NOW" energy. */}
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          {[
+            { label: "One-time unlock",   icon: <Check size={13} /> },
+            { label: "Lifetime access",   icon: <Sparkles size={13} /> },
+            { label: "Future upgrades",   icon: <ArrowUpRight size={13} /> },
+            { label: "No subscriptions",  icon: <Heart size={13} /> },
+          ].map(chip => (
+            <div
+              key={chip.label}
+              className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
+              style={{
+                background: C.ivory,
+                border: `1px solid ${C.hairline}`,
+                color: C.espresso,
+              }}
+            >
+              <span
+                aria-hidden
+                className="flex items-center justify-center shrink-0"
+                style={{
+                  width: 22, height: 22, borderRadius: 999,
+                  background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+                  color: C.paper,
+                }}
+              >
+                {chip.icon}
+              </span>
+              <span className="text-[11px] font-semibold leading-tight">{chip.label}</span>
+            </div>
+          ))}
+        </div>
+
         <ul className="mt-4 space-y-2" style={{ color: C.coffee, fontSize: 13 }}>
           {[
             "Unlimited clients, appointments, money entries, and quotes",
             "Reminders, communication log, and analytics",
             "Cloud sync across every device you sign in on",
-            "Includes future upgrades — no subscriptions",
           ].map(line => (
             <li key={line} className="flex items-start gap-2">
               <CheckCircle2 size={16} style={{ color: C.goldDeep, marginTop: 2, flexShrink: 0 }} />
