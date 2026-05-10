@@ -6,6 +6,7 @@ import { getSupabase } from "../../lib/supabase";
 import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LABEL } from "../../lib/waitlist";
 import { emitAnalyticsEvent } from "../../lib/analytics-events";
 import { fetchPublicServices, type PublicService } from "../../lib/services";
+import { collectPublicContext } from "../../lib/waitlist";
 
 // Minimal palette — kept inline so this page never imports the main
 // app shell (it's served to anonymous visitors).
@@ -79,6 +80,14 @@ export default function PublicBookingPage() {
     setWaitlistError(null);
     if (!name.trim()) { setWaitlistError("Please enter your name."); return; }
     if (!link?.user_id) { setWaitlistError("This booking link is misconfigured."); return; }
+    // Phase B1 — when the studio has a real catalog, every waitlist
+    // entry must carry a service so the stylist knows what they're
+    // matching against. Free-text legacy links keep their old
+    // permissive behaviour.
+    if (hasCatalog && !selectedCatalogService) {
+      setWaitlistError("Please pick a service above before joining the waitlist.");
+      return;
+    }
     setWaitlistSubmitting(true);
     const selectedId = hasCatalog
       ? selectedCatalogService?.id || null
@@ -183,27 +192,59 @@ export default function PublicBookingPage() {
       const price = hasCatalog
         ? selectedCatalogService?.base_price
         : (selected as any)?.totalPrice;
-      const res = await fetch(`${FUNCTIONS_URL}/booking-request`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          slug,
-          clientName: name.trim(),
-          clientPhone: phone.trim() || null,
-          clientEmail: email.trim() || null,
-          serviceId: hasCatalog && selectedCatalogService ? selectedCatalogService.id : null,
-          serviceName: serviceName || null,
-          serviceDuration: dur ?? null,
-          servicePrice: price ?? null,
-          serviceDepositRequired: hasCatalog && selectedCatalogService ? selectedCatalogService.deposit_required : null,
-          serviceDepositAmount: hasCatalog && selectedCatalogService ? selectedCatalogService.deposit_amount : null,
-          preferredDate: preferredDate || null,
-          preferredTime: preferredTime || null,
-          notes: notes.trim() || null,
-        }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error || "Couldn't send request");
+      // Phase B1 — prefer the security-definer RPC so the booking
+      // request lands with the full service snapshot (price /
+      // duration / deposit / prep instructions), not just the id.
+      // Falls back to the legacy edge function if the RPC isn't
+      // deployed yet (older Supabase env) so existing booking links
+      // never break.
+      let submittedOk = false;
+      const ctx = collectPublicContext();
+      const supabase = getSupabase();
+      const { data: rpcId, error: rpcErr } = await supabase.rpc(
+        "public_submit_booking_request",
+        {
+          slug_in: slug,
+          client_name_in: name.trim(),
+          client_phone_in: phone.trim() || null,
+          client_email_in: email.trim() || null,
+          service_id_in: hasCatalog && selectedCatalogService ? selectedCatalogService.id : null,
+          preferred_date_in: preferredDate || null,
+          preferred_time_in: preferredTime || null,
+          notes_in: notes.trim() || null,
+          timezone_in: ctx.timezone,
+          locale_in: ctx.locale,
+        },
+      );
+      if (!rpcErr && rpcId) {
+        submittedOk = true;
+      } else {
+        // Legacy edge-function fallback. Only triggers when the
+        // RPC isn't deployed (404) or returns null.
+        const res = await fetch(`${FUNCTIONS_URL}/booking-request`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            slug,
+            clientName: name.trim(),
+            clientPhone: phone.trim() || null,
+            clientEmail: email.trim() || null,
+            serviceId: hasCatalog && selectedCatalogService ? selectedCatalogService.id : null,
+            serviceName: serviceName || null,
+            serviceDuration: dur ?? null,
+            servicePrice: price ?? null,
+            serviceDepositRequired: hasCatalog && selectedCatalogService ? selectedCatalogService.deposit_required : null,
+            serviceDepositAmount: hasCatalog && selectedCatalogService ? selectedCatalogService.deposit_amount : null,
+            preferredDate: preferredDate || null,
+            preferredTime: preferredTime || null,
+            notes: notes.trim() || null,
+          }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body?.error || "Couldn't send request");
+        submittedOk = true;
+      }
+      if (!submittedOk) throw new Error("Couldn't send your request.");
       setSubmitted(true);
       if (link?.user_id) {
         void emitAnalyticsEvent({
