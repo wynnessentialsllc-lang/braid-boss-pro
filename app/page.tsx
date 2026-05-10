@@ -1866,10 +1866,6 @@ const TabBar = ({ active, setActive }: {
         paddingBottom: "env(safe-area-inset-bottom, 0px)",
         boxShadow: "0 -8px 24px -16px rgba(42, 24, 16, 0.18)",
       }}>
-      <style>{`
-        @keyframes bbpTabActivate { 0% { transform: scale(0.85); opacity: 0; } 60% { transform: scale(1.04); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
-        .bbp-tab-active-pill { animation: bbpTabActivate 0.22s cubic-bezier(.2,.8,.2,1) both; }
-      `}</style>
       <div className="flex items-center justify-around px-2 py-2">
         {tabs.map(t => {
           const Icon = t.icon;
@@ -1880,44 +1876,37 @@ const TabBar = ({ active, setActive }: {
               key={t.id}
               onClick={() => setActive(t.id)}
               aria-current={isActive ? "page" : undefined}
-              className="relative flex flex-col items-center justify-center gap-1 px-3 py-1.5 rounded-2xl transition"
+              className="relative flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition"
               style={{
-                color: isActive ? C.paper : C.mutedSoft,
+                color: isActive ? C.goldDeep : C.mutedSoft,
                 minWidth: 60,
               }}
             >
-              {/* Gradient pill behind the active icon. Animates in on
-                  the first frame after activation; stays static after. */}
-              {isActive && (
-                <span
-                  aria-hidden
-                  className="bbp-tab-active-pill absolute"
-                  style={{
-                    top: 0,
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    width: 44, height: 32,
-                    borderRadius: 999,
-                    background: `linear-gradient(180deg, ${C.gold} 0%, ${C.goldDeep} 100%)`,
-                    boxShadow:
-                      "0 6px 14px -6px rgba(168, 137, 63, 0.55), 0 0 0 4px rgba(201, 169, 97, 0.14)",
-                  }}
-                />
-              )}
-              <span className="relative" style={{ zIndex: 1 }}>
-                <Icon size={20} strokeWidth={isActive ? 2.4 : 1.9} />
-              </span>
+              <Icon size={22} strokeWidth={isActive ? 2.4 : 1.85} />
               <span
-                className="text-[10px] tracking-wide relative"
+                className="text-[10px] tracking-wide"
                 style={{
                   fontWeight: isActive ? 700 : 600,
                   color: isActive ? C.espresso : C.mutedSoft,
                   letterSpacing: "0.06em",
-                  zIndex: 1,
                 }}
               >
                 {t.label}
               </span>
+              {isActive && (
+                <span
+                  aria-hidden
+                  className="absolute"
+                  style={{
+                    bottom: 2,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    width: 18, height: 2.5,
+                    borderRadius: 999,
+                    background: `linear-gradient(90deg, ${C.gold}, ${C.goldDeep})`,
+                  }}
+                />
+              )}
             </button>
           );
         })}
