@@ -9353,6 +9353,35 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
               </Card>
             )}
 
+            <SectionTitle>Payments</SectionTitle>
+            <Card
+              className="p-4 active:scale-[0.99]"
+              onClick={() => {
+                if (typeof window !== "undefined") window.location.assign("/settings/payments");
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div
+                    aria-hidden
+                    style={{
+                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                      background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                    }}
+                  >
+                    <DollarSign size={15} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold" style={{ color: C.espresso }}>Stripe Connect</p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      Take deposits directly into your own Stripe account
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight size={18} style={{ color: C.muted }} />
+              </div>
+            </Card>
+
             <SectionTitle>Studio offers</SectionTitle>
             <Card className="p-4 active:scale-[0.99]" onClick={openDiscounts}>
               <div className="flex items-center justify-between">
