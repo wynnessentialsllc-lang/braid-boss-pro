@@ -1,12 +1,23 @@
 // POST /api/stripe-connect/onboard
 //
-// Auth required. Creates a Stripe Express connected account for the
-// signed-in stylist if one doesn't exist yet, then returns a fresh
-// Stripe-hosted onboarding URL (`account_link`). The browser
-// redirects to that URL; Stripe redirects the stylist back to
-// NEXT_PUBLIC_SITE_URL/settings/payments?connect=ok (or ?connect=refresh
-// if the link expired) where we poll /api/stripe-connect/status until
-// charges_enabled flips true.
+// Auth required. Creates a Stripe **Express** connected account for
+// the signed-in stylist if one doesn't exist yet, persists the
+// resulting `acct_XXX` to `profiles.stripe_connect_account_id`, then
+// generates a Stripe-hosted onboarding URL via accountLinks.create
+// (type=account_onboarding) and returns it. The browser redirects
+// the stylist to that URL.
+//
+// Stripe redirects the stylist back to:
+//   ${APP_PUBLIC_URL}/settings/payments?stripe_return=true   (success)
+//   ${APP_PUBLIC_URL}/settings/payments?refresh=true         (link expired)
+//
+// The payments page reads those flags to sync charges_enabled /
+// payouts_enabled / details_submitted from Stripe and update the UI.
+//
+// IMPORTANT: This route only produces Stripe-hosted Express onboarding
+// URLs (connect.stripe.com/setup/...). It does not — and must not —
+// redirect stylists to dashboard.stripe.com (that's the platform-owner
+// surface).
 //
 // Idempotent — re-calling reuses the existing acct id.
 
@@ -28,7 +39,11 @@ const fail = (status: number, message: string) =>
   NextResponse.json({ error: message }, { status });
 
 const baseUrlOf = (req: Request): string => {
-  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+  // Honour an explicit override (APP_PUBLIC_URL is the canonical one;
+  // NEXT_PUBLIC_SITE_URL kept for backwards compat with earlier code).
+  const explicit =
+    process.env.APP_PUBLIC_URL?.replace(/\/$/, "") ||
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
   if (explicit) return explicit;
   try {
     return new URL(req.url).origin;
@@ -121,8 +136,12 @@ export async function POST(req: Request) {
     const linkForm = new URLSearchParams();
     linkForm.set("account", accountId);
     linkForm.set("type", "account_onboarding");
-    linkForm.set("return_url", `${baseUrl}/settings/payments?connect=ok`);
-    linkForm.set("refresh_url", `${baseUrl}/settings/payments?connect=refresh`);
+    // URL contract — stylist returns to /settings/payments with
+    // ?stripe_return=true after completing onboarding, or
+    // ?refresh=true when the original link expires. The page reads
+    // either flag to trigger an immediate status sync.
+    linkForm.set("return_url", `${baseUrl}/settings/payments?stripe_return=true`);
+    linkForm.set("refresh_url", `${baseUrl}/settings/payments?refresh=true`);
     const link = await stripePost("/account_links", linkForm, stripeSecret);
     if (!link?.url) return fail(502, "Stripe didn't return an onboarding URL.");
 
