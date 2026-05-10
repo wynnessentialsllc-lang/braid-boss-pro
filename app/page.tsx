@@ -110,6 +110,19 @@ import {
   repeatClientStats,
   lastBookingForClient,
   ticketTotal as reportTicketTotal,
+  ticketBalance as reportTicketBalance,
+  todayCompletedAppts,
+  weekRevenueAppts,
+  weekClientRows,
+  type WeekClientRow,
+  avgTicket30dBreakdown,
+  type AvgTicketBreakdown,
+  weekDepositBuckets,
+  type WeekDepositBuckets,
+  pendingBalanceAppts,
+  monthExpectedAppts,
+  monthProfitBreakdown,
+  type MonthProfitBreakdown,
 } from "./lib/reports";
 import {
   type BookingPolicy,
@@ -2483,7 +2496,311 @@ const DashboardHero = ({
   );
 };
 
-const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState }: { store: any; setActive: any; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState }) => {
+// ============================================================
+//  KPI DETAIL SHEET — drill-down for the Home dashboard cards
+// ============================================================
+//
+// Each Dashboard KPI tap opens this sheet with a `kind` discriminator.
+// Aggregations live in app/lib/reports.ts so the sheet's totals match
+// the headline number on the card.
+type KpiDetailKind =
+  | "today"
+  | "week"
+  | "weekClients"
+  | "avgTicket"
+  | "deposits"
+  | "pending"
+  | "monthExpected"
+  | "monthProfit";
+
+const KPI_TITLES: Record<KpiDetailKind, string> = {
+  today: "Today's revenue",
+  week: "This week's revenue",
+  weekClients: "Clients this week",
+  avgTicket: "Average ticket (30 days)",
+  deposits: "Deposits this week",
+  pending: "Pending balances",
+  monthExpected: "Expected this month",
+  monthProfit: "Profit this month",
+};
+
+const KpiDetailSheet = ({
+  kind, onClose, appointments, clients, currency, revenueStats, onOpenAppointment, markAppointmentPaid,
+}: {
+  kind: KpiDetailKind | null;
+  onClose: () => void;
+  appointments: any[];
+  clients: any[];
+  currency: string;
+  revenueStats: DashboardRevenue;
+  onOpenAppointment: (a: any) => void;
+  markAppointmentPaid: (a: any) => Promise<void> | void;
+}) => {
+  const today = todayISO();
+  const open = !!kind;
+  const title = kind ? KPI_TITLES[kind] : "";
+
+  // Compact appointment row used by every list-style KPI. Tappable
+  // unless `tappable` is false (deposit-due / missing rows still want
+  // to open the booking, so default true). Real <button> for iOS.
+  const ApptRow = ({ a, rightLabel, tone }: { a: any; rightLabel?: string; tone?: "warning" | "success" | "danger" | "muted" }) => {
+    const total = Number(a?.totalPrice) || 0;
+    const dep = Number(a?.depositPaid) || 0;
+    const balance = Math.max(0, total - dep - (Number(a?.discountAmount) || 0));
+    const ps = paymentStatusOf(a, today);
+    const rightColor = tone === "warning" ? C.warning : tone === "success" ? C.success : tone === "danger" ? C.danger : tone === "muted" ? C.muted : C.coffee;
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenAppointment(a)}
+        className="w-full text-left rounded-2xl px-3.5 py-3 mb-2 active:scale-[0.99] transition"
+        style={{
+          background: C.paper,
+          border: `1px solid ${C.hairline}`,
+          color: "inherit",
+          font: "inherit",
+          appearance: "none",
+          WebkitAppearance: "none",
+        }}
+      >
+        <div className="flex items-start justify-between gap-3" style={{ pointerEvents: "none" }}>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <Pill tone={STATUS_TONE[a?.status || "scheduled"] || "neutral"}>
+                {STATUS_LABEL[a?.status || "scheduled"] || a?.status || "Scheduled"}
+              </Pill>
+              {a?.status !== "cancelled" && (
+                <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>
+              )}
+            </div>
+            <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>
+              {a?.clientName || "Walk-in"}
+            </p>
+            <p className="text-[11px] mt-0.5 truncate" style={{ color: C.muted }}>
+              {a?.style || "Service"} · {a?.date ? fmtDate(a.date) : "—"}{a?.time ? ` · ${fmtTime(a.time)}` : ""}
+            </p>
+          </div>
+          <div className="text-right shrink-0">
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 16, fontWeight: 600, color: C.goldDeep, lineHeight: 1 }}>
+              {fmtMoney(total, currency)}
+            </p>
+            {balance > 0 && (
+              <p className="text-[11px] mt-1" style={{ color: rightColor }}>
+                {rightLabel || `Balance ${fmtMoney(balance, currency)}`}
+              </p>
+            )}
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  const Hero = ({ value, hint }: { value: string; hint?: string }) => (
+    <Card className="p-4 mb-3" style={{ background: `linear-gradient(180deg, ${C.espresso}, ${C.coffee})`, border: `1px solid ${C.goldDeep}` }}>
+      <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.gold, letterSpacing: "0.16em" }}>
+        Total
+      </p>
+      <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 600, color: C.cream, lineHeight: 1 }}>
+        {value}
+      </p>
+      {hint && <p className="text-[11px] mt-1.5" style={{ color: "rgba(245, 235, 217, 0.78)" }}>{hint}</p>}
+    </Card>
+  );
+
+  const renderBody = () => {
+    if (!open) return null;
+    switch (kind!) {
+      case "today": {
+        const list = todayCompletedAppts(appointments, today);
+        const total = list.reduce((s, a) => s + reportTicketTotal(a), 0);
+        return (
+          <>
+            <Hero value={fmtMoney(total, currency)} hint={`${list.length} completed today`} />
+            {list.length === 0 ? (
+              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No completed bookings yet today.</p></Card>
+            ) : list.map(a => <ApptRow key={a.id} a={a} tone="success" />)}
+          </>
+        );
+      }
+      case "week": {
+        const list = weekRevenueAppts(appointments, today);
+        const total = list.reduce((s, a) => s + reportTicketTotal(a), 0);
+        return (
+          <>
+            <Hero value={fmtMoney(total, currency)} hint={`${list.length} appointment${list.length === 1 ? "" : "s"} this week`} />
+            {list.length === 0 ? (
+              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>Nothing on the books for this week yet.</p></Card>
+            ) : list.map(a => <ApptRow key={a.id} a={a} />)}
+          </>
+        );
+      }
+      case "weekClients": {
+        const rows = weekClientRows(appointments, today);
+        return (
+          <>
+            <Hero value={String(rows.length)} hint={`Unique clients booked this week`} />
+            {rows.length === 0 ? (
+              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No clients on the books this week.</p></Card>
+            ) : rows.map(r => (
+              <Card key={r.clientId} className="p-3.5 mb-2 flex items-center justify-between">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{r.clientName}</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>{r.visitCount} {r.visitCount === 1 ? "visit" : "visits"}</p>
+                </div>
+                <span className="text-[13px] font-semibold tabular-nums" style={{ color: C.goldDeep }}>
+                  {fmtMoney(r.totalSpend, currency)}
+                </span>
+              </Card>
+            ))}
+          </>
+        );
+      }
+      case "avgTicket": {
+        const b: AvgTicketBreakdown = avgTicket30dBreakdown(appointments, today);
+        return (
+          <>
+            <Hero value={fmtMoney(b.average, currency)} hint={`${fmtMoney(b.total, currency)} ÷ ${b.count} bookings`} />
+            <Card className="p-3.5 mb-3" style={{ background: C.paper }}>
+              <p className="text-[11px]" style={{ color: C.coffee }}>
+                <strong>Calculation:</strong> sum of ticket totals (post-discount) divided by appointment count, last 30 days.
+              </p>
+            </Card>
+            {b.appointments.length === 0 ? (
+              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No bookings in the last 30 days.</p></Card>
+            ) : b.appointments.map(a => <ApptRow key={a.id} a={a} />)}
+          </>
+        );
+      }
+      case "deposits": {
+        const buckets: WeekDepositBuckets = weekDepositBuckets(appointments, today);
+        return (
+          <>
+            <Hero value={fmtMoney(buckets.collected.total, currency)} hint={`Collected this week`} />
+            <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.success, letterSpacing: "0.14em" }}>
+              Collected · {buckets.collected.appointments.length}
+            </p>
+            {buckets.collected.appointments.length === 0
+              ? <Card className="p-3 mb-3 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No deposits collected yet this week.</p></Card>
+              : buckets.collected.appointments.map(a => <ApptRow key={`c_${a.id}`} a={a} tone="success" rightLabel={`Deposit ${fmtMoney(Number(a.depositPaid) || 0, currency)}`} />)}
+            <p className="text-[10px] uppercase tracking-widest font-bold mt-3 mb-2" style={{ color: C.warning, letterSpacing: "0.14em" }}>
+              Due · {buckets.due.appointments.length}
+            </p>
+            {buckets.due.appointments.length === 0
+              ? <Card className="p-3 mb-3 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No deposits due this week.</p></Card>
+              : buckets.due.appointments.map(a => <ApptRow key={`d_${a.id}`} a={a} tone="warning" rightLabel="Deposit due" />)}
+            <p className="text-[10px] uppercase tracking-widest font-bold mt-3 mb-2" style={{ color: C.danger, letterSpacing: "0.14em" }}>
+              Missing · {buckets.missing.appointments.length}
+            </p>
+            {buckets.missing.appointments.length === 0
+              ? <Card className="p-3 text-center"><p className="text-[12px]" style={{ color: C.muted }}>None missing — nice.</p></Card>
+              : buckets.missing.appointments.map(a => <ApptRow key={`m_${a.id}`} a={a} tone="danger" rightLabel="No deposit" />)}
+          </>
+        );
+      }
+      case "pending": {
+        const list = pendingBalanceAppts(appointments);
+        const total = list.reduce((s, a) => s + reportTicketBalance(a), 0);
+        return (
+          <>
+            <Hero value={fmtMoney(total, currency)} hint={`Across ${list.length} appointment${list.length === 1 ? "" : "s"}`} />
+            {list.length === 0 ? (
+              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No outstanding balances. 💛</p></Card>
+            ) : list.map(a => {
+              const balance = reportTicketBalance(a);
+              return (
+                <div
+                  key={a.id}
+                  className="rounded-2xl mb-2 overflow-hidden flex"
+                  style={{ background: C.paper, border: `1px solid ${C.hairline}` }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onOpenAppointment(a)}
+                    className="text-left px-3.5 py-3 flex-1 active:scale-[0.99] transition"
+                    style={{ background: "transparent", border: 0, color: "inherit", font: "inherit", appearance: "none", WebkitAppearance: "none" }}
+                  >
+                    <div style={{ pointerEvents: "none" }}>
+                      <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{a.clientName || "Walk-in"}</p>
+                      <p className="text-[11px] mt-0.5 truncate" style={{ color: C.muted }}>{a.style || "Service"} · {a.date ? fmtDate(a.date) : "—"}</p>
+                      <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+                        Total {fmtMoney(Number(a.totalPrice) || 0, currency)} · Deposit {fmtMoney(Number(a.depositPaid) || 0, currency)}
+                      </p>
+                    </div>
+                  </button>
+                  <div className="flex flex-col items-end justify-center px-3 py-3 gap-1.5 shrink-0" style={{ borderLeft: `1px solid ${C.hairline}` }}>
+                    <p className="text-[12px] font-bold" style={{ color: C.warning }}>
+                      {fmtMoney(balance, currency)}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => markAppointmentPaid(a)}
+                      className="text-[10px] font-semibold px-2 py-1 rounded-md active:scale-[0.97] transition"
+                      style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}
+                    >
+                      Mark paid
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        );
+      }
+      case "monthExpected": {
+        const list = monthExpectedAppts(appointments, today);
+        const total = list.reduce((s, a) => s + reportTicketTotal(a), 0);
+        return (
+          <>
+            <Hero value={fmtMoney(total, currency)} hint={`${list.length} non-cancelled appointment${list.length === 1 ? "" : "s"} this month`} />
+            {list.length === 0 ? (
+              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>Nothing on the books this month.</p></Card>
+            ) : list.map(a => <ApptRow key={a.id} a={a} />)}
+          </>
+        );
+      }
+      case "monthProfit": {
+        const b: MonthProfitBreakdown = monthProfitBreakdown(appointments, today);
+        return (
+          <>
+            <Hero value={fmtMoney(b.estimatedProfit, currency)} hint={`Across ${b.appointments.length} completed booking${b.appointments.length === 1 ? "" : "s"}`} />
+            <Card className="p-3.5 mb-3 space-y-2" style={{ background: C.paper }}>
+              <div className="flex items-center justify-between">
+                <span className="text-[12px]" style={{ color: C.muted }}>Revenue (collected)</span>
+                <span className="text-[13px] font-semibold tabular-nums" style={{ color: C.espresso }}>{fmtMoney(b.revenue, currency)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[12px]" style={{ color: C.muted }}>Discounts applied</span>
+                <span className="text-[13px] font-semibold tabular-nums" style={{ color: C.goldDeep }}>− {fmtMoney(b.discounts, currency)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[12px]" style={{ color: C.muted }}>Estimated costs</span>
+                <span className="text-[13px] font-semibold tabular-nums" style={{ color: C.muted }}>—</span>
+              </div>
+              <div className="flex items-center justify-between pt-2" style={{ borderTop: `1px solid ${C.hairline}` }}>
+                <span className="text-[13px] font-semibold" style={{ color: C.espresso }}>Estimated profit</span>
+                <span className="text-[14px] font-bold tabular-nums" style={{ color: C.success }}>{fmtMoney(b.estimatedProfit, currency)}</span>
+              </div>
+              <p className="text-[10px] mt-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+                Cost tracking lands in a future phase. Profit currently equals collected revenue minus 0 — discounts are surfaced so the impact is visible.
+              </p>
+            </Card>
+            {b.appointments.length === 0 ? (
+              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No completed bookings this month yet.</p></Card>
+            ) : b.appointments.map(a => <ApptRow key={a.id} a={a} />)}
+          </>
+        );
+      }
+    }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title={title}>
+      <div className="pb-2">{renderBody()}</div>
+    </Sheet>
+  );
+};
+
+const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, openAppointmentRecord }: { store: any; setActive: any; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; openAppointmentRecord?: (a: any) => void }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
@@ -2531,6 +2848,13 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
     [rebookingOpportunities],
   );
   const topRebookings = rebookingOpportunities.slice(0, 3);
+
+  // Drill-down state — every KPI card opens this sheet with a `kind`
+  // discriminator. The sheet pulls the matching helper from
+  // app/lib/reports.ts so the headline number always matches the rows.
+  const [kpiKind, setKpiKind] = useState<KpiDetailKind | null>(null);
+  const openKpi = (k: KpiDetailKind) => setKpiKind(k);
+  const closeKpi = () => setKpiKind(null);
 
   // Phase 1 — pure aggregations from app/lib/reports.ts so the
   // Dashboard cards and the Reports screen share one source of truth.
@@ -2641,16 +2965,36 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
 
 
         <div className="grid grid-cols-2 gap-3">
-          <KpiCard label="Today revenue" value={fmtMoney(revenueStats.todayRevenue, business.currency)} icon={<DollarSign size={16} />} tone={revenueStats.todayRevenue > 0 ? "gold" : "neutral"} onClick={() => setActive("schedule")} />
-          <KpiCard label="Week revenue" value={fmtMoney(stats.weekRevenue, business.currency)} icon={<ArrowUpRight size={16} />} tone="gold" onClick={() => setActive("money")} />
-          <KpiCard label="Week clients" value={stats.weekAppts} icon={<Users size={16} />} onClick={() => setActive("schedule")} />
-          <KpiCard label="Avg ticket (30d)" value={fmtMoney(revenueStats.averageTicket30d, business.currency)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => setActive("money")} />
-          <KpiCard label="Deposits (week)" value={fmtMoney(revenueStats.weekDeposits, business.currency)} icon={<Check size={16} />} tone={revenueStats.weekDeposits > 0 ? "success" : "neutral"} onClick={() => setActive("schedule")} />
-          <KpiCard label="Pending balance" value={fmtMoney(stats.pendingBalance, business.currency)} icon={<Clock size={16} />} tone={stats.pendingBalance > 0 ? "warning" : "neutral"} onClick={() => setActive("schedule")} />
-          <KpiCard label="Month expected" value={fmtMoney(revenueStats.monthExpected, business.currency)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "gold" : "neutral"} onClick={() => setActive("schedule")} />
-          <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} onClick={() => setActive("money")} />
+          <KpiCard label="Today revenue" value={fmtMoney(revenueStats.todayRevenue, business.currency)} icon={<DollarSign size={16} />} tone={revenueStats.todayRevenue > 0 ? "gold" : "neutral"} onClick={() => openKpi("today")} />
+          <KpiCard label="Week revenue" value={fmtMoney(stats.weekRevenue, business.currency)} icon={<ArrowUpRight size={16} />} tone="gold" onClick={() => openKpi("week")} />
+          <KpiCard label="Week clients" value={stats.weekAppts} icon={<Users size={16} />} onClick={() => openKpi("weekClients")} />
+          <KpiCard label="Avg ticket (30d)" value={fmtMoney(revenueStats.averageTicket30d, business.currency)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => openKpi("avgTicket")} />
+          <KpiCard label="Deposits (week)" value={fmtMoney(revenueStats.weekDeposits, business.currency)} icon={<Check size={16} />} tone={revenueStats.weekDeposits > 0 ? "success" : "neutral"} onClick={() => openKpi("deposits")} />
+          <KpiCard label="Pending balance" value={fmtMoney(stats.pendingBalance, business.currency)} icon={<Clock size={16} />} tone={stats.pendingBalance > 0 ? "warning" : "neutral"} onClick={() => openKpi("pending")} />
+          <KpiCard label="Month expected" value={fmtMoney(revenueStats.monthExpected, business.currency)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "gold" : "neutral"} onClick={() => openKpi("monthExpected")} />
+          <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} onClick={() => openKpi("monthProfit")} />
           <KpiCard label="Year made" value={fmtMoney(revenueStats.yearMade, business.currency)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => setActive("money")} />
         </div>
+
+        <KpiDetailSheet
+          kind={kpiKind}
+          onClose={closeKpi}
+          appointments={appointments as any[]}
+          clients={clients as any[]}
+          currency={business.currency || "USD"}
+          revenueStats={revenueStats}
+          onOpenAppointment={(a) => { closeKpi(); openAppointmentRecord?.(a); }}
+          markAppointmentPaid={async (a) => {
+            const next = {
+              ...a,
+              depositPaid: Number(a.totalPrice) || 0,
+              paymentStatus: "paid",
+              paymentDate: a.paymentDate || todayISO(),
+              status: a.status === "scheduled" || a.status === "confirmed" ? "completed" : a.status,
+            };
+            await store.upsertAppointment(next);
+          }}
+        />
 
         <BossInsightsCard
           clients={clients}
@@ -13239,7 +13583,8 @@ export default function App() {
                 setSecondary("analytics");
               }}
               openPresets={() => setSecondary("presets")}
-              openTimer={() => setSecondary("timer")} />
+              openTimer={() => setSecondary("timer")}
+              openAppointmentRecord={(a) => { setActive("schedule"); setApptPrefill(a); }} />
           )}
           {active === "calculator" && (
             <Calculator store={store}

@@ -328,3 +328,195 @@ const formatMonthLabel = (iso: string): string => {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
 };
+
+// ---- KPI drill-down aggregates ----------------------------------------
+//
+// Each helper returns the rows that back a specific Dashboard KPI card,
+// so the KpiDetailSheet can never disagree with the headline number.
+// Filters reuse `isBillable` (drops cancelled / no_show / personal /
+// blocked) and the existing month/year/week boundary helpers.
+
+export const todayCompletedAppts = (
+  appointments: AppointmentLike[] | null | undefined,
+  reference: string = todayISO(),
+): AppointmentLike[] => {
+  return (appointments || [])
+    .filter(isBillable)
+    .filter(a => a.date === reference)
+    .filter(a => a.status === "completed" || a.paymentStatus === "paid")
+    .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+};
+
+export const weekRevenueAppts = (
+  appointments: AppointmentLike[] | null | undefined,
+  reference: string = todayISO(),
+): AppointmentLike[] => {
+  const ws = startOfWeekISO(reference);
+  return (appointments || [])
+    .filter(isBillable)
+    .filter(a => a.date && a.date >= ws && a.date <= reference)
+    .sort((a, b) => ((a.date || "") + (a.time || "")).localeCompare((b.date || "") + (b.time || "")));
+};
+
+export type WeekClientRow = {
+  clientId: string;
+  clientName: string;
+  visitCount: number;
+  totalSpend: number;
+  appointments: AppointmentLike[];
+};
+
+export const weekClientRows = (
+  appointments: AppointmentLike[] | null | undefined,
+  reference: string = todayISO(),
+): WeekClientRow[] => {
+  const list = weekRevenueAppts(appointments, reference);
+  const byClient = new Map<string, WeekClientRow>();
+  for (const a of list) {
+    const id = a.clientId || "_unknown";
+    const cur = byClient.get(id) || {
+      clientId: id,
+      clientName: a.clientName || "Walk-in",
+      visitCount: 0,
+      totalSpend: 0,
+      appointments: [],
+    };
+    cur.visitCount += 1;
+    cur.totalSpend += ticketTotal(a);
+    cur.appointments.push(a);
+    if (a.clientName && cur.clientName !== a.clientName) cur.clientName = a.clientName;
+    byClient.set(id, cur);
+  }
+  return Array.from(byClient.values())
+    .map(r => ({ ...r, totalSpend: round2(r.totalSpend) }))
+    .sort((a, b) => b.visitCount - a.visitCount || a.clientName.localeCompare(b.clientName));
+};
+
+export type AvgTicketBreakdown = {
+  appointments: AppointmentLike[];
+  total: number;
+  count: number;
+  average: number;
+};
+
+export const avgTicket30dBreakdown = (
+  appointments: AppointmentLike[] | null | undefined,
+  reference: string = todayISO(),
+): AvgTicketBreakdown => {
+  const cutoff = subDaysISO(reference, 30);
+  const list = (appointments || [])
+    .filter(isBillable)
+    .filter(a => a.date && a.date >= cutoff && a.date <= reference)
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const total = list.reduce((s, a) => s + ticketTotal(a), 0);
+  return {
+    appointments: list,
+    total: round2(total),
+    count: list.length,
+    average: list.length > 0 ? round2(total / list.length) : 0,
+  };
+};
+
+export type DepositBucket = {
+  appointments: AppointmentLike[];
+  total: number;
+};
+
+export type WeekDepositBuckets = {
+  collected: DepositBucket;
+  due: DepositBucket;        // upcoming this week with no deposit yet
+  missing: DepositBucket;    // past this week, still no deposit
+};
+
+export const weekDepositBuckets = (
+  appointments: AppointmentLike[] | null | undefined,
+  reference: string = todayISO(),
+): WeekDepositBuckets => {
+  const ws = startOfWeekISO(reference);
+  const collected: AppointmentLike[] = [];
+  const due: AppointmentLike[] = [];
+  const missing: AppointmentLike[] = [];
+  for (const a of (appointments || [])) {
+    if (!isBillable(a)) continue;
+    if (!a.date || a.date < ws || a.date > reference) {
+      // Allow due/missing buckets to span the *week*, not just the
+      // past — extend forward to end of week.
+      const we = addDaysISO(ws, 6);
+      if (!a.date || a.date < ws || a.date > we) continue;
+    }
+    const dep = num(a.depositPaid);
+    if (dep > 0) {
+      collected.push(a);
+    } else if (a.date && a.date < reference) {
+      missing.push(a);
+    } else {
+      due.push(a);
+    }
+  }
+  const sumDeposits = (xs: AppointmentLike[]) => xs.reduce((s, a) => s + num(a.depositPaid), 0);
+  return {
+    collected: { appointments: collected, total: round2(sumDeposits(collected)) },
+    due:       { appointments: due,       total: 0 },
+    missing:   { appointments: missing,   total: 0 },
+  };
+};
+
+export const pendingBalanceAppts = (
+  appointments: AppointmentLike[] | null | undefined,
+): AppointmentLike[] => {
+  return (appointments || [])
+    .filter(isBillable)
+    .filter(a => ticketBalance(a) > 0)
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+};
+
+export const monthExpectedAppts = (
+  appointments: AppointmentLike[] | null | undefined,
+  reference: string = todayISO(),
+): AppointmentLike[] => {
+  // Match computeDashboardRevenue.monthExpected: every billable
+  // appointment in the calendar month, paid or not.
+  // Local-date string comparison is timezone-safe.
+  const d = new Date(reference + "T00:00:00");
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const start = `${y}-${String(m + 1).padStart(2, "0")}-01`;
+  const next = new Date(y, m + 1, 1);
+  const end = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-01`;
+  return (appointments || [])
+    .filter(isBillable)
+    .filter(a => a.date && a.date >= start && a.date < end)
+    .sort((a, b) => ((a.date || "") + (a.time || "")).localeCompare((b.date || "") + (b.time || "")));
+};
+
+export type MonthProfitBreakdown = {
+  appointments: AppointmentLike[];
+  revenue: number;
+  discounts: number;
+  estimatedCosts: number;
+  estimatedProfit: number;
+};
+
+// Profit = collected revenue − estimated costs − discount value.
+// Costs aren't tracked yet in the appointment record, so the helper
+// returns 0 for now (display will say "—") until a Phase 4 cost
+// field lands. Discount and revenue come straight from the
+// appointment snapshot.
+export const monthProfitBreakdown = (
+  appointments: AppointmentLike[] | null | undefined,
+  reference: string = todayISO(),
+): MonthProfitBreakdown => {
+  const month = monthExpectedAppts(appointments, reference)
+    .filter(a => a.status === "completed" || a.paymentStatus === "paid");
+  const revenue = month.reduce((s, a) => s + ticketTotal(a), 0);
+  const discounts = month.reduce((s, a) => s + num(a.discountAmount), 0);
+  const estimatedCosts = 0;
+  const estimatedProfit = revenue - estimatedCosts;
+  return {
+    appointments: month,
+    revenue: round2(revenue),
+    discounts: round2(discounts),
+    estimatedCosts: round2(estimatedCosts),
+    estimatedProfit: round2(estimatedProfit),
+  };
+};
