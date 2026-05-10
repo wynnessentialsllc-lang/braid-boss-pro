@@ -2647,7 +2647,9 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
           <KpiCard label="Avg ticket (30d)" value={fmtMoney(revenueStats.averageTicket30d, business.currency)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => setActive("money")} />
           <KpiCard label="Deposits (week)" value={fmtMoney(revenueStats.weekDeposits, business.currency)} icon={<Check size={16} />} tone={revenueStats.weekDeposits > 0 ? "success" : "neutral"} onClick={() => setActive("schedule")} />
           <KpiCard label="Pending balance" value={fmtMoney(stats.pendingBalance, business.currency)} icon={<Clock size={16} />} tone={stats.pendingBalance > 0 ? "warning" : "neutral"} onClick={() => setActive("schedule")} />
+          <KpiCard label="Month expected" value={fmtMoney(revenueStats.monthExpected, business.currency)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "gold" : "neutral"} onClick={() => setActive("schedule")} />
           <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} onClick={() => setActive("money")} />
+          <KpiCard label="Year made" value={fmtMoney(revenueStats.yearMade, business.currency)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => setActive("money")} />
         </div>
 
         <BossInsightsCard
