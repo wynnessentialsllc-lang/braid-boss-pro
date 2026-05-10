@@ -3903,6 +3903,56 @@ const DayCalendarView = ({
   );
   const formatHourLabel = (h: number) => `${((h + 11) % 12) + 1} ${h >= 12 ? "PM" : "AM"}`;
 
+  // Column-packing for overlapping appointments. Two appointments
+  // that overlap in time render side-by-side instead of stacking on
+  // top of each other (the Square / Apple Calendar treatment). The
+  // algorithm:
+  //   1. Sort by start time.
+  //   2. Walk through; events whose start is before the running
+  //      cluster's max-end stay in the same cluster.
+  //   3. Greedy column packing: drop the event into the lowest-
+  //      indexed column whose previous event has already ended.
+  //   4. Each cluster's width is divided by the max columns used
+  //      inside it.
+  const placedAppts = useMemo(() => {
+    type Placed = { appt: any; startMin: number; endMin: number; col: number; clusterCols: number };
+    const minutes = (a: any) => {
+      const [hh, mm] = (a?.time || "10:00").split(":").map(Number);
+      const s = (hh || 0) * 60 + (mm || 0);
+      const dur = Math.max(30, (Number(a?.durationHours) || 1) * 60);
+      return { s, e: s + dur };
+    };
+    const sorted = [...appts]
+      .map(a => ({ appt: a, ...minutes(a) }))
+      .sort((a, b) => a.s - b.s || a.e - b.e);
+
+    const out: Placed[] = [];
+    type Cluster = { start: number; end: number; cols: number[]; placedIndices: number[] };
+    let cluster: Cluster | null = null;
+    const clusters: Cluster[] = [];
+
+    for (const item of sorted) {
+      if (!cluster || item.s >= cluster.end) {
+        cluster = { start: item.s, end: item.e, cols: [], placedIndices: [] };
+        clusters.push(cluster);
+      } else {
+        cluster.end = Math.max(cluster.end, item.e);
+      }
+      // Find the first column whose last-end is at or before this start.
+      let col = cluster.cols.findIndex(end => end <= item.s);
+      if (col === -1) { col = cluster.cols.length; cluster.cols.push(item.e); }
+      else cluster.cols[col] = item.e;
+      out.push({ appt: item.appt, startMin: item.s, endMin: item.e, col, clusterCols: 0 });
+      cluster.placedIndices.push(out.length - 1);
+    }
+    // Stamp each item with its cluster's final column count.
+    for (const c of clusters) {
+      const k = c.cols.length;
+      for (const i of c.placedIndices) out[i].clusterCols = k;
+    }
+    return out;
+  }, [appts]);
+
   const dayStatusToneBg = (() => {
     switch (dayStatus.status) {
       case "fully_booked": return "rgba(168, 137, 63, 0.18)";
@@ -3971,17 +4021,33 @@ const DayCalendarView = ({
             </div>
           ))}
 
-          {appts.map(a => {
-            const [hh, mm] = (a.time || "10:00").split(":").map(Number);
-            const startMin = (hh || 0) * 60 + (mm || 0);
+          {placedAppts.map(p => {
+            const a = p.appt;
             const dayStartMin = TIMELINE_START_HOUR * 60;
             const dayEndMin = (TIMELINE_END_HOUR + 1) * 60;
-            if (startMin >= dayEndMin) return null;
-            const top = Math.max(0, ((startMin - dayStartMin) / 60) * HOUR_PX);
-            const durationMin = Math.max(30, (Number(a.durationHours) || 1) * 60);
+            if (p.startMin >= dayEndMin) return null;
+            const top = Math.max(0, ((p.startMin - dayStartMin) / 60) * HOUR_PX);
+            const durationMin = p.endMin - p.startMin;
             const rawHeight = (durationMin / 60) * HOUR_PX;
             const maxHeight = HOURS.length * HOUR_PX - top;
             const height = Math.max(44, Math.min(rawHeight, maxHeight));
+
+            // Side-by-side packing: each cluster's usable width is
+            // divided into N columns. Layout container has 60px left
+            // gutter (hour labels) + 8px right padding. A 4px gap
+            // sits between adjacent columns.
+            const cols = p.clusterCols || 1;
+            const isSplit = cols > 1;
+            const leftPct = (p.col / cols) * 100;
+            const widthPct = 100 / cols;
+            const gap = 4;
+            const leftStyle = isSplit
+              ? `calc(60px + (100% - 68px) * ${leftPct / 100} + ${p.col === 0 ? 0 : gap / 2}px)`
+              : "60px";
+            const widthStyle = isSplit
+              ? `calc((100% - 68px) * ${widthPct / 100} - ${gap}px)`
+              : undefined;
+            const rightStyle = isSplit ? undefined : 8;
 
             // Personal events and blocked time skip the standard
             // color coding — both render as neutral / unavailable
@@ -4029,8 +4095,9 @@ const DayCalendarView = ({
                 className="absolute text-left active:scale-[0.99] transition"
                 style={{
                   top: top + 2,
-                  left: 60,
-                  right: 8,
+                  left: leftStyle,
+                  right: rightStyle,
+                  width: widthStyle,
                   height: height - 4,
                   padding: "8px 10px",
                   borderRadius: 12,
