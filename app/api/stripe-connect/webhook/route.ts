@@ -1,15 +1,25 @@
 // POST /api/stripe-connect/webhook
 //
-// Stripe Connect platform webhook. Listens for account-state changes
-// so the stylist's UI doesn't have to poll constantly:
-//   • account.updated                   → mirror charges/payouts/details
-//                                         flags into profiles
-//   • account.application.deauthorized  → mark profile as `disabled`
+// Active production endpoint for Stripe Connect deliveries. NEVER
+// returns 410 — Stripe is configured to send live events here and
+// retiring this URL would break deposit collection.
 //
-// Signature verified manually (same HMAC-SHA256 algorithm as the
-// deposit webhook). Set STRIPE_CONNECT_WEBHOOK_SECRET in env and
-// register the endpoint with these two events in the Stripe dashboard
-// (under "Listen to events on Connected accounts").
+// Handled events:
+//   account.updated                    → mirror flags into profiles
+//   account.application.deauthorized   → flip profile to `disabled`
+//   checkout.session.completed         → mark deposit paid
+//   payment_intent.succeeded           → backstop mark deposit paid
+//                                         when the session metadata
+//                                         path missed
+//   payment_intent.payment_failed      → set payment_status='failed'
+//
+// Anything else is acknowledged with 200 + a server log so Stripe
+// doesn't keep retrying. Signature verified manually with HMAC-SHA256
+// using STRIPE_CONNECT_WEBHOOK_SECRET — no SDK dependency.
+//
+// The endpoint is idempotent: the underlying RPCs (mark_deposit_paid_
+// via_webhook, apply_stripe_connect_account_update) are no-ops once
+// the row is in a terminal state, so Stripe retries are safe.
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -58,6 +68,17 @@ const verifySignature = (
   return { ok: false, reason: "no signature match" };
 };
 
+// Stripe webhooks must POST. GET is documented as 405 by convention;
+// returning a friendly 200 helps when ops curls the URL to check it's
+// alive, but Stripe never GETs so either is fine. Use 200 so health
+// probes succeed.
+export async function GET() {
+  return NextResponse.json(
+    { ok: true, endpoint: "stripe-connect-webhook", method: "GET" },
+    { status: 200 },
+  );
+}
+
 export async function POST(req: Request) {
   let secret: string;
   let supabaseUrl: string;
@@ -67,64 +88,250 @@ export async function POST(req: Request) {
     supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || env("SUPABASE_URL");
     serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
   } catch (e: any) {
+    console.error("[stripe-connect/webhook] missing env:", e?.message);
     return NextResponse.json({ error: e?.message || "not configured" }, { status: 500 });
   }
 
   const rawBody = await req.text();
   const verify = verifySignature(rawBody, req.headers.get("stripe-signature"), secret);
   if (!verify.ok) {
+    console.warn("[stripe-connect/webhook] signature rejected:", verify.reason);
     return NextResponse.json({ error: verify.reason }, { status: 400 });
   }
 
   let evt: any;
   try { evt = JSON.parse(rawBody); }
-  catch { return NextResponse.json({ error: "bad json" }, { status: 400 }); }
+  catch {
+    return NextResponse.json({ error: "bad json" }, { status: 400 });
+  }
+
+  const eventType: string = evt?.type || "";
+  const dataObject = evt?.data?.object || {};
+  const connectAccount: string | undefined = typeof evt?.account === "string" ? evt.account : undefined;
 
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  // For Connect events, `account` is the connected acct id. For
-  // platform events, the object id is the account directly.
-  const eventType: string = evt?.type || "";
-  const account = evt?.data?.object;
+  try {
+    switch (eventType) {
+      // -------------------------------------------------------------
+      // Account state changes
+      // -------------------------------------------------------------
+      case "account.updated": {
+        const accountId: string | undefined = dataObject?.id || connectAccount;
+        if (!accountId) {
+          console.warn("[stripe-connect/webhook] account.updated without account id");
+          return NextResponse.json({ received: true, ignored: "no_account_id" }, { status: 200 });
+        }
+        const { error: rpcErr } = await admin.rpc("apply_stripe_connect_account_update", {
+          account_id_in: accountId,
+          charges_enabled_in: !!dataObject?.charges_enabled,
+          payouts_enabled_in: !!dataObject?.payouts_enabled,
+          details_submitted_in: !!dataObject?.details_submitted,
+          deauthorized_in: false,
+        });
+        if (rpcErr) {
+          console.error("[stripe-connect/webhook] apply_update failed:", rpcErr.message);
+          return NextResponse.json({ error: rpcErr.message }, { status: 500 });
+        }
+        return NextResponse.json({ received: true, event: eventType }, { status: 200 });
+      }
 
-  if (eventType === "account.updated") {
-    const accountId: string | undefined = account?.id;
-    if (!accountId) {
-      return NextResponse.json({ received: true, ignored: "no_account_id" }, { status: 200 });
+      case "account.application.deauthorized": {
+        const accountId: string | undefined = connectAccount || dataObject?.id;
+        if (!accountId) {
+          console.warn("[stripe-connect/webhook] deauthorized without account id");
+          return NextResponse.json({ received: true, ignored: "no_account_id" }, { status: 200 });
+        }
+        const { error: rpcErr } = await admin.rpc("apply_stripe_connect_account_update", {
+          account_id_in: accountId,
+          charges_enabled_in: false,
+          payouts_enabled_in: false,
+          details_submitted_in: false,
+          deauthorized_in: true,
+        });
+        if (rpcErr) {
+          console.error("[stripe-connect/webhook] deauthorize failed:", rpcErr.message);
+          return NextResponse.json({ error: rpcErr.message }, { status: 500 });
+        }
+        return NextResponse.json({ received: true, event: eventType }, { status: 200 });
+      }
+
+      // -------------------------------------------------------------
+      // Payment outcomes — direct charges on connected accounts
+      // -------------------------------------------------------------
+      case "checkout.session.completed": {
+        const requestId: string | undefined =
+          dataObject?.metadata?.booking_request_id ||
+          dataObject?.payment_intent_data?.metadata?.booking_request_id;
+        const sessionId: string | undefined = dataObject?.id;
+        const paymentIntent: string | undefined =
+          typeof dataObject?.payment_intent === "string" ? dataObject.payment_intent : undefined;
+        const paymentStatus: string | undefined = dataObject?.payment_status;
+        const amountTotalCents: number | undefined =
+          typeof dataObject?.amount_total === "number" ? dataObject.amount_total : undefined;
+
+        console.info(
+          "[stripe-connect/webhook] checkout.session.completed received",
+          {
+            sessionId,
+            booking_request_id: requestId,
+            payment_status: paymentStatus,
+            amount_total: amountTotalCents,
+          },
+        );
+
+        if (!requestId) {
+          console.warn("[stripe-connect/webhook] missing booking_request_id metadata");
+          return NextResponse.json({ received: true, ignored: "no_booking_request_id" }, { status: 200 });
+        }
+        if (paymentStatus && paymentStatus !== "paid") {
+          console.warn(`[stripe-connect/webhook] session not paid yet (status=${paymentStatus})`);
+          return NextResponse.json(
+            { received: true, ignored: `payment_status=${paymentStatus}` },
+            { status: 200 },
+          );
+        }
+
+        // Step 1 — flip approval_status / payment_status / deposit_paid
+        // via the security-definer RPC. The RPC is idempotent: a
+        // retried Stripe delivery is a no-op once the row is past
+        // awaiting_deposit, so duplicate retries don't double-process.
+        const { error: rpcErr } = await admin.rpc("mark_deposit_paid_via_webhook", {
+          request_id_in: requestId,
+          stripe_session_id_in: sessionId || null,
+          stripe_payment_intent_in: paymentIntent || null,
+        });
+        if (rpcErr) {
+          console.error(
+            `[stripe-connect/webhook] mark_deposit_paid_via_webhook failed for ${requestId}: ${rpcErr.message}`,
+          );
+          return NextResponse.json({ error: rpcErr.message }, { status: 500 });
+        }
+
+        // Step 2 — persist the actual paid amount (in dollars) from
+        // amount_total when present, so the queue UI shows the truth
+        // instead of the originally-quoted deposit if they ever
+        // diverge. Only writes when the row's deposit_amount is null
+        // or zero so a manual override stays intact.
+        if (typeof amountTotalCents === "number" && amountTotalCents > 0) {
+          const amountDollars = Math.round(amountTotalCents) / 100;
+          const { error: amountErr } = await admin
+            .from("booking_requests")
+            .update({ deposit_amount: amountDollars })
+            .eq("id", requestId)
+            .or("deposit_amount.is.null,deposit_amount.eq.0");
+          if (amountErr) {
+            console.warn(
+              `[stripe-connect/webhook] amount sync failed for ${requestId}: ${amountErr.message}`,
+            );
+            // Don't fail the webhook — the row is already paid.
+          }
+        }
+
+        console.info(
+          `[stripe-connect/webhook] marked deposit paid for booking_request_id=${requestId}`,
+        );
+        return NextResponse.json(
+          {
+            received: true,
+            event: eventType,
+            booking_request_id: requestId,
+            processed: true,
+          },
+          { status: 200 },
+        );
+      }
+
+      case "payment_intent.succeeded": {
+        // Backstop in case checkout.session.completed never arrived or
+        // its metadata was stripped. We mirror booking_request_id into
+        // payment_intent metadata at session creation time, so look
+        // there first.
+        const requestId: string | undefined = dataObject?.metadata?.booking_request_id;
+        const paymentIntentId: string | undefined = dataObject?.id;
+
+        if (!requestId) {
+          // Try to recover by matching against any row we previously
+          // stamped with this payment_intent id.
+          if (paymentIntentId) {
+            const { data: existing } = await admin
+              .from("booking_requests")
+              .select("id")
+              .eq("stripe_payment_intent_id", paymentIntentId)
+              .maybeSingle();
+            if (existing?.id) {
+              const { error: rpcErr } = await admin.rpc("mark_deposit_paid_via_webhook", {
+                request_id_in: existing.id,
+                stripe_session_id_in: null,
+                stripe_payment_intent_in: paymentIntentId,
+              });
+              if (rpcErr) {
+                console.error("[stripe-connect/webhook] mark_paid (pi recover) failed:", rpcErr.message);
+                return NextResponse.json({ error: rpcErr.message }, { status: 500 });
+              }
+              return NextResponse.json({ received: true, event: eventType, recovered: true }, { status: 200 });
+            }
+          }
+          console.warn("[stripe-connect/webhook] payment_intent.succeeded without booking_request_id");
+          return NextResponse.json({ received: true, ignored: "no_booking_request_id" }, { status: 200 });
+        }
+
+        const { error: rpcErr } = await admin.rpc("mark_deposit_paid_via_webhook", {
+          request_id_in: requestId,
+          stripe_session_id_in: null,
+          stripe_payment_intent_in: paymentIntentId || null,
+        });
+        if (rpcErr) {
+          console.error("[stripe-connect/webhook] mark_paid (pi) failed:", rpcErr.message);
+          return NextResponse.json({ error: rpcErr.message }, { status: 500 });
+        }
+        return NextResponse.json({ received: true, event: eventType }, { status: 200 });
+      }
+
+      case "payment_intent.payment_failed": {
+        const requestId: string | undefined = dataObject?.metadata?.booking_request_id;
+        const paymentIntentId: string | undefined = dataObject?.id;
+        const failureMessage: string | undefined =
+          dataObject?.last_payment_error?.message ||
+          dataObject?.failure_message;
+
+        // Flip the matching row to payment_status='failed' so the
+        // approvals queue can surface the failure. Don't change
+        // approval_status — the stylist can still chase or cancel.
+        if (requestId) {
+          const { error: updErr } = await admin
+            .from("booking_requests")
+            .update({ payment_status: "failed" })
+            .eq("id", requestId);
+          if (updErr) {
+            console.error("[stripe-connect/webhook] mark_failed failed:", updErr.message);
+            return NextResponse.json({ error: updErr.message }, { status: 500 });
+          }
+        } else if (paymentIntentId) {
+          await admin
+            .from("booking_requests")
+            .update({ payment_status: "failed" })
+            .eq("stripe_payment_intent_id", paymentIntentId);
+        }
+        if (failureMessage) {
+          console.warn(`[stripe-connect/webhook] payment failed: ${failureMessage}`);
+        }
+        return NextResponse.json({ received: true, event: eventType }, { status: 200 });
+      }
+
+      // -------------------------------------------------------------
+      // Unknown event — 200 + log so Stripe doesn't retry forever
+      // -------------------------------------------------------------
+      default: {
+        console.info("[stripe-connect/webhook] ignored event:", eventType);
+        return NextResponse.json({ received: true, ignored: eventType }, { status: 200 });
+      }
     }
-    const { error: rpcErr } = await admin.rpc("apply_stripe_connect_account_update", {
-      account_id_in: accountId,
-      charges_enabled_in: !!account?.charges_enabled,
-      payouts_enabled_in: !!account?.payouts_enabled,
-      details_submitted_in: !!account?.details_submitted,
-      deauthorized_in: false,
-    });
-    if (rpcErr) {
-      return NextResponse.json({ error: rpcErr.message }, { status: 500 });
-    }
-    return NextResponse.json({ received: true }, { status: 200 });
+  } catch (e: any) {
+    // Unexpected error — return 500 so Stripe retries with backoff.
+    console.error("[stripe-connect/webhook] unexpected error:", e?.message);
+    return NextResponse.json({ error: e?.message || "internal" }, { status: 500 });
   }
-
-  if (eventType === "account.application.deauthorized") {
-    const accountId: string | undefined = evt?.account || account?.id;
-    if (!accountId) {
-      return NextResponse.json({ received: true, ignored: "no_account_id" }, { status: 200 });
-    }
-    const { error: rpcErr } = await admin.rpc("apply_stripe_connect_account_update", {
-      account_id_in: accountId,
-      charges_enabled_in: false,
-      payouts_enabled_in: false,
-      details_submitted_in: false,
-      deauthorized_in: true,
-    });
-    if (rpcErr) {
-      return NextResponse.json({ error: rpcErr.message }, { status: 500 });
-    }
-    return NextResponse.json({ received: true }, { status: 200 });
-  }
-
-  // Other Connect events (capability.updated, etc.) — ack and ignore.
-  return NextResponse.json({ received: true, ignored: eventType }, { status: 200 });
 }
