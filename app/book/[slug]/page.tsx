@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
 import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LABEL } from "../../lib/waitlist";
+import { emitAnalyticsEvent } from "../../lib/analytics-events";
 
 // Minimal palette — kept inline so this page never imports the main
 // app shell (it's served to anonymous visitors).
@@ -89,6 +90,19 @@ export default function PublicBookingPage() {
     setWaitlistSubmitting(false);
     if (!result.ok) { setWaitlistError(result.error); return; }
     setWaitlistDone(true);
+    if (link?.user_id) {
+      void emitAnalyticsEvent({
+        ownerUserId: link.user_id,
+        type: "waitlist_joined",
+        source: "public",
+        payload: {
+          slug,
+          serviceName: serviceName || null,
+          flexibility: waitlistFlex,
+          preferredDate: preferredDate || null,
+        },
+      });
+    }
   };
 
   useEffect(() => {
@@ -149,6 +163,19 @@ export default function PublicBookingPage() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error || "Couldn't send request");
       setSubmitted(true);
+      if (link?.user_id) {
+        void emitAnalyticsEvent({
+          ownerUserId: link.user_id,
+          type: "booking_requested",
+          source: "public",
+          payload: {
+            slug,
+            serviceName: serviceName || null,
+            preferredDate: preferredDate || null,
+            preferredTime: preferredTime || null,
+          },
+        });
+      }
     } catch (err: any) {
       setSubmitError(
         err?.message
@@ -168,7 +195,16 @@ export default function PublicBookingPage() {
         body { margin: 0; }
         input, textarea, select, button { font-family: inherit; }
       `}</style>
-      <div className="mx-auto" style={{ maxWidth: 480, padding: "32px 20px 64px" }}>
+      <div
+        className="mx-auto"
+        style={{
+          maxWidth: 480,
+          padding: "32px 20px",
+          // Generous bottom padding so the last button clears the
+          // sticky CTA bar and the iPhone Safari home indicator.
+          paddingBottom: "calc(120px + env(safe-area-inset-bottom, 0px))",
+        }}
+      >
         <p style={{ textAlign: "center", letterSpacing: "0.22em", textTransform: "uppercase", fontSize: 10, fontWeight: 700, color: C.gold }}>
           Book your appointment
         </p>

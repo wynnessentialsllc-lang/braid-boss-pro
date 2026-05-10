@@ -98,6 +98,10 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     kind: r => cleanString(r.kind) || "appointment",
     service_id: r => cleanString(r.serviceId),
     source: r => cleanString(r.source),
+    referral_source: r => cleanString(r.referralSource),
+    timezone: r => cleanString(r.timezone),
+    locale: r => cleanString(r.locale),
+    created_from_public: r => cleanBool(r.createdFromPublic),
   },
   quotes: {
     label: r => cleanString(r.label),
@@ -214,6 +218,10 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.kind = base.kind ?? row.kind ?? "appointment";
       base.serviceId = base.serviceId ?? row.service_id;
       base.source = base.source ?? row.source ?? null;
+      base.referralSource = base.referralSource ?? row.referral_source ?? null;
+      base.timezone = base.timezone ?? row.timezone ?? null;
+      base.locale = base.locale ?? row.locale ?? null;
+      base.createdFromPublic = base.createdFromPublic ?? row.created_from_public ?? false;
       break;
     case "quotes":
       base.label = base.label ?? row.label;

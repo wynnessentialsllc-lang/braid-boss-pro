@@ -156,6 +156,7 @@ import {
   type ClientLike,
   matchClientByContact,
 } from "./lib/clients-match";
+import { emitAnalyticsEvent } from "./lib/analytics-events";
 import {
   downloadJson,
   downloadPdfBlob,
@@ -13886,11 +13887,29 @@ export default function App() {
               depositPaid: 0,
               status: "scheduled",
               source: "waitlist",
+              referralSource: "waitlist",
               notes: req.notes || "",
               createdAt: new Date().toISOString(),
             };
             await store.upsertAppointment(newAppt);
-            await store.waitlistApi.setStatus(req.id, "booked");
+            // linkConvertedAppointment flips status to booked + stamps
+            // converted_appointment_id in one update.
+            await store.waitlistApi.linkConvertedAppointment(req.id, apptId);
+            // Fire-and-forget analytics. Errors swallowed inside.
+            if (auth.userId) {
+              void emitAnalyticsEvent({
+                ownerUserId: auth.userId,
+                type: "waitlist_converted",
+                source: "app",
+                payload: { waitlistId: req.id, appointmentId: apptId, clientId: client?.id || null },
+              });
+              void emitAnalyticsEvent({
+                ownerUserId: auth.userId,
+                type: "appointment_created",
+                source: "app",
+                payload: { appointmentId: apptId, source: "waitlist" },
+              });
+            }
             setSecondary(null);
             setActive("schedule");
             setApptPrefill(newAppt);
@@ -13992,10 +14011,26 @@ export default function App() {
               depositPaid: 0,
               status: "scheduled",
               source: "public_booking",
+              referralSource: "direct_link",
+              createdFromPublic: true,
               notes: req.notes || "",
               createdAt: new Date().toISOString(),
             };
             await store.upsertAppointment(newAppt);
+            if (auth.userId) {
+              void emitAnalyticsEvent({
+                ownerUserId: auth.userId,
+                type: "booking_approved",
+                source: "app",
+                payload: { requestId: (req as any).id, appointmentId: apptId, clientId: client?.id || null },
+              });
+              void emitAnalyticsEvent({
+                ownerUserId: auth.userId,
+                type: "appointment_created",
+                source: "app",
+                payload: { appointmentId: apptId, source: "public_booking" },
+              });
+            }
             return apptId;
           }}
         />

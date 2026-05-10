@@ -325,13 +325,36 @@ export const WEEKDAY_SHORT = ["S", "M", "T", "W", "T", "F", "S"] as const;
 // to the public booking page via a security-definer RPC; Phase A
 // ships the engine so internal screens can use it today.
 
+// SlotEngineInput is intentionally shaped to support multi-staff /
+// recurring / buffered / double-booked scheduling later without a
+// breaking change. Today we use the single-stylist subset
+// (staffId / bufferMinutes / maxConcurrent left undefined). Phase B
+// onward can opt in by passing the extra fields.
 export type SlotEngineInput = {
   date: string;                       // "YYYY-MM-DD"
   serviceDurationMinutes: number;     // service length to fit
-  appointments: Array<{ time?: string; durationHours?: number | string; status?: string; kind?: string; date?: string }>;
+  appointments: Array<{
+    time?: string;
+    durationHours?: number | string;
+    status?: string;
+    kind?: string;
+    date?: string;
+    // Future-ready: when staff scheduling lands, the engine can
+    // filter `appointments` to only those assigned to staffId.
+    staffId?: string | null;
+  }>;
   availabilityRules: AvailabilityRule[];
   availabilityExceptions: AvailabilityException[];
   slotIntervalMinutes?: number;       // default 30
+  // Future-ready knobs. Leave undefined for V1 single-stylist:
+  // - staffId: filter the calculation to one team member
+  // - bufferMinutes: pad each booking with buffer before/after
+  //   so prep / takedown / clean-up time can't be double-booked
+  // - maxConcurrent: allow N overlapping bookings per slot
+  //   (e.g. classes with 4 chairs, multi-stylist studios)
+  staffId?: string | null;
+  bufferMinutes?: number;
+  maxConcurrent?: number;
 };
 
 export type Slot = {
@@ -365,6 +388,8 @@ export const getAvailableSlots = (input: SlotEngineInput): Slot[] => {
   const duration = Math.max(15, Math.round(Number(input.serviceDurationMinutes) || 0));
   if (duration <= 0) return [];
   const interval = Math.max(5, Math.round(Number(input.slotIntervalMinutes) || 30));
+  const buffer = Math.max(0, Math.round(Number(input.bufferMinutes) || 0));
+  const maxConcurrent = Math.max(1, Math.round(Number(input.maxConcurrent) || 1));
 
   const day = computeDayAvailability(input.date, input.availabilityRules, input.availabilityExceptions);
   if (!day.open) return [];
@@ -372,14 +397,18 @@ export const getAvailableSlots = (input: SlotEngineInput): Slot[] => {
   // Existing bookings for the day. Cancelled entries don't reserve
   // time. Personal events + blocked-kind entries DO (they hold the
   // slot so the public booking can't double-book over them).
+  // When staffId is provided, only that team member's bookings count.
   const reserved: Array<[number, number]> = [];
   for (const a of input.appointments) {
     if (!a || a.date !== input.date) continue;
     if (a.status === "cancelled") continue;
     if (!a.time) continue;
+    if (input.staffId && a.staffId && a.staffId !== input.staffId) continue;
     const start = toMin(a.time);
     const dur = Math.max(15, Math.round((Number(a.durationHours) || 1) * 60));
-    reserved.push([start, start + dur]);
+    // Buffer pads each reserved range so prep / takedown / clean-up
+    // can't be double-booked on either side.
+    reserved.push([Math.max(0, start - buffer), start + dur + buffer]);
   }
   // The day's explicit `blocked` exceptions (in the windows + blocks
   // model from computeDayAvailability) are already exposed:
@@ -392,15 +421,17 @@ export const getAvailableSlots = (input: SlotEngineInput): Slot[] => {
     const wStart = toMin(window.start);
     const wEnd = toMin(window.end);
     // Walk the window in `interval` steps; emit a slot whenever a
-    // service of `duration` minutes fits AND doesn't overlap any
-    // reserved range.
+    // service of `duration` minutes fits. When maxConcurrent > 1
+    // (classes / multi-chair / shared assistant), the slot is
+    // available unless `maxConcurrent` other bookings already
+    // overlap it.
     for (let s = wStart; s + duration <= wEnd; s += interval) {
       const e = s + duration;
-      let conflict = false;
+      let overlapCount = 0;
       for (const [rs, re] of reserved) {
-        if (overlaps(s, e, rs, re)) { conflict = true; break; }
+        if (overlaps(s, e, rs, re)) overlapCount += 1;
       }
-      if (!conflict) {
+      if (overlapCount < maxConcurrent) {
         out.push({ time: toHhmm(s), label: toLabel(s), startMinute: s });
       }
     }
