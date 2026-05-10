@@ -2,11 +2,15 @@
 
 // /settings/payments — Stripe Connect Express management screen.
 //
-// Stripe redirects here after onboarding (return_url) and also when
-// the onboarding link expires (refresh_url with ?connect=refresh).
-// We pull the cached state on mount, optionally sync from Stripe if
-// ?connect=ok is present, and let the stylist re-launch onboarding
-// or refresh the status manually.
+// URL contract:
+//   ?stripe_return=true → Stripe sent the stylist back after onboarding.
+//                         Sync charges_enabled / payouts_enabled /
+//                         details_submitted from Stripe and update the
+//                         UI to reflect the result.
+//   ?refresh=true       → Stripe's onboarding link expired. Kick off
+//                         a brand new accountLinks.create flow.
+//   (legacy: ?connect=ok / ?connect=refresh are also honoured for any
+//   onboarding links issued before the URL rename.)
 //
 // Mobile-first; matches the booking-page palette so the visual
 // language carries over from the public side of the app.
@@ -51,7 +55,19 @@ export default function PaymentsPage() {
 function PaymentsInner() {
   const router = useRouter();
   const params = useSearchParams();
-  const connectFlag = params?.get("connect"); // "ok" | "refresh" | null
+  // URL contract: Stripe returns the stylist here with either
+  // ?stripe_return=true (onboarding completed) or ?refresh=true
+  // (link expired, needs a fresh one). The legacy ?connect=ok /
+  // ?connect=refresh values are accepted as fallbacks so any in-
+  // flight links issued before the URL rename still work.
+  const stripeReturn = !!(
+    params?.get("stripe_return") === "true" ||
+    params?.get("connect") === "ok"
+  );
+  const stripeRefresh = !!(
+    params?.get("refresh") === "true" ||
+    params?.get("connect") === "refresh"
+  );
   const [userId, setUserId] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
 
@@ -71,14 +87,30 @@ function PaymentsInner() {
   const status: ConnectStatus = connect.profile.stripe_connect_status;
   const tone = STATUS_TONE[status];
 
-  // If Stripe just bounced us back, pull a fresh status from Stripe
-  // once so the UI doesn't lag behind reality.
+  // On return from Stripe onboarding, pull the latest account state
+  // (charges_enabled / payouts_enabled / details_submitted) and
+  // mirror it into profiles so the UI flips to "Active" without
+  // waiting for the next manual refresh.
   useEffect(() => {
     if (!userId) return;
-    if (connectFlag !== "ok") return;
+    if (!stripeReturn) return;
     void connect.syncFromStripe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, connectFlag]);
+  }, [userId, stripeReturn]);
+
+  // If Stripe sent us back via the refresh_url (link expired), kick
+  // off a brand-new onboarding flow immediately.
+  useEffect(() => {
+    if (!userId) return;
+    if (!stripeRefresh) return;
+    void (async () => {
+      const url = await connect.startOnboarding();
+      if (url && typeof window !== "undefined") {
+        window.location.assign(url);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, stripeRefresh]);
 
   const [launching, setLaunching] = useState(false);
 
