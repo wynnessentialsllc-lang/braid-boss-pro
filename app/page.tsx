@@ -5544,6 +5544,7 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
   const [filters, setFilters] = useState<CustomerFilters>(DEFAULT_CUSTOMER_FILTERS);
   const [comingSoon, setComingSoon] = useState<string | null>(null);
 
+  const today = todayISO();
   const enriched = useMemo(() => clients.map(c => {
     const cAppts = appointments.filter(a => a.clientId === c.id);
     // Lifetime total = sum of what was actually collected, not quoted.
@@ -5553,28 +5554,56 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
         const collected = calculateCollectedAmount(a);
         return s + collected;
       }, 0);
+
+    // Compute past / today / future relative to the local-date `today`
+    // so the row label can pick the right preposition. ISO strings are
+    // YYYY-MM-DD lexically comparable when generated from local time
+    // (todayISO + a.date both use localDateISO()), so plain string
+    // comparison is timezone-safe here.
+    const dates = cAppts
+      .map(a => a.date)
+      .filter((d: any): d is string => typeof d === "string" && d.length >= 8)
+      .filter(d => {
+        // Exclude cancelled bookings — a future cancellation shouldn't
+        // surface as the next "upcoming" visit.
+        const a = cAppts.find(x => x.date === d);
+        return !a || a.status !== "cancelled";
+      })
+      .sort();
+    const pastDates = dates.filter(d => d < today);
+    const todayDates = dates.filter(d => d === today);
+    const futureDates = dates.filter(d => d > today);
+
+    const lastPastDate = pastDates.length > 0 ? pastDates[pastDates.length - 1] : undefined;
+    const todayDate = todayDates[0];
+    const nextFutureDate = futureDates[0];
+
     return {
       ...c,
       apptCount: cAppts.length,
       totalSpent,
-      lastApptDate: cAppts.map(a => a.date).sort().reverse()[0] as string | undefined,
+      lastPastDate,
+      todayDate,
+      nextFutureDate,
       photoCount: photos.filter(p => p.clientId === c.id).length,
     };
-  }).sort((a, b) => a.name.localeCompare(b.name)), [clients, appointments, photos]);
+  }).sort((a, b) => a.name.localeCompare(b.name)), [clients, appointments, photos, today]);
 
-  const today = todayISO();
   const filtered = useMemo(() => {
     return enriched.filter(c => {
       if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
-      // Last visited
+      // Last visited filter is about ACTUAL past visits — ignore
+      // upcoming bookings so a client booked next month doesn't count
+      // as having "visited" recently.
       if (filters.lastVisited !== "any") {
-        if (!c.lastApptDate) {
+        if (!c.lastPastDate && !c.todayDate) {
           if (filters.lastVisited !== "never") return false;
         } else {
           if (filters.lastVisited === "never") return false;
           const days = filters.lastVisited === "30d" ? 30 : filters.lastVisited === "90d" ? 90 : 365;
           const cutoff = addDaysISO(today, -days);
-          if (c.lastApptDate < cutoff) return false;
+          const ref = c.todayDate || c.lastPastDate;
+          if (!ref || ref < cutoff) return false;
         }
       }
       // Frequency
@@ -5737,7 +5766,16 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
                     {c.apptCount > 0
                       ? `${c.apptCount} ${c.apptCount === 1 ? "visit" : "visits"}`
                       : "No visits yet"}
-                    {c.lastApptDate ? ` · last ${fmtDate(c.lastApptDate)}` : ""}
+                    {(() => {
+                      // Pick one date to surface in the subtitle.
+                      // Priority: today → upcoming → most recent past.
+                      // Each renders with the correct preposition so a
+                      // future booking is never labeled "last".
+                      if (c.todayDate) return " · today";
+                      if (c.nextFutureDate) return ` · upcoming ${fmtDate(c.nextFutureDate)}`;
+                      if (c.lastPastDate) return ` · last ${fmtDate(c.lastPastDate)}`;
+                      return "";
+                    })()}
                     {c.photoCount > 0 ? ` · ${c.photoCount} photo${c.photoCount === 1 ? "" : "s"}` : ""}
                   </p>
                 </div>
