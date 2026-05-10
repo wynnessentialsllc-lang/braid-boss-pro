@@ -165,6 +165,15 @@ import {
   useBookingIntelligence,
 } from "./lib/intelligence";
 import {
+  type ApprovalStatus,
+  type BookingRequestRecord,
+  APPROVAL_STATUS_LABEL,
+  APPROVAL_STATUS_TONE,
+  approvalSecondsLeft,
+  formatCountdown,
+  useBookingApprovalQueue,
+} from "./lib/booking-requests";
+import {
   downloadJson,
   downloadPdfBlob,
 } from "./lib/native-download";
@@ -8987,7 +8996,7 @@ const PolicySheet = ({ policy, isNew, onClose, onSave }) => {
 // ============================================================
 //  SETTINGS (V1 extended with Reminders link)
 // ============================================================
-const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void }) => {
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
@@ -9156,7 +9165,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
               </Card>
             )}
 
-            {(openPolicies || openAvailability || openIntelligence) && <SectionTitle>Booking</SectionTitle>}
+            {(openPolicies || openAvailability || openIntelligence || openApprovals) && <SectionTitle>Booking</SectionTitle>}
             {openPolicies && (
               <Card className="p-4 active:scale-[0.99]" onClick={openPolicies}>
                 <div className="flex items-center justify-between">
@@ -9222,6 +9231,39 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                           const waiting = list.filter((r: any) => r.status === "waiting").length;
                           if (list.length === 0) return "Clients waiting for an opening";
                           return `${waiting} waiting · ${list.length} total`;
+                        })()}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openApprovals && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openApprovals}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <CheckCircle2 size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Approvals</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        {(() => {
+                          const list: BookingRequestRecord[] = store.approvalsApi?.requests || [];
+                          const review = list.filter(r => r.approval_status === "pending_review").length;
+                          const deposit = list.filter(r => r.approval_status === "approved_pending_deposit").length;
+                          if (review === 0 && deposit === 0) return "Review requests, set deposits";
+                          const parts: string[] = [];
+                          if (review > 0) parts.push(`${review} to review`);
+                          if (deposit > 0) parts.push(`${deposit} awaiting deposit`);
+                          return parts.join(" · ");
                         })()}
                       </p>
                     </div>
@@ -12847,6 +12889,327 @@ const ServiceBar = ({ pct, color }: { pct: number; color: string }) => (
   </div>
 );
 
+// ============================================================
+//  APPROVAL QUEUE — Phase B5a
+// ============================================================
+const APPROVAL_FILTERS: { id: "active" | "all" | "history"; label: (n: { active: number; all: number; history: number }) => string }[] = [
+  { id: "active",  label: n => `Active · ${n.active}` },
+  { id: "all",     label: n => `All · ${n.all}` },
+  { id: "history", label: n => `History · ${n.history}` },
+];
+
+const ApprovalCountdown = ({ req }: { req: BookingRequestRecord }) => {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (req.approval_status !== "approved_pending_deposit") return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [req.approval_status, req.approval_expires_at]);
+  const left = approvalSecondsLeft(req, now);
+  if (left === null) return null;
+  const tone: "gold" | "warning" | "danger" = left <= 0 ? "danger" : left < 300 ? "warning" : "gold";
+  return <Pill tone={tone}>{formatCountdown(left)}</Pill>;
+};
+
+const ApprovalQueueScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const api = store.approvalsApi;
+  const requests: BookingRequestRecord[] = api?.requests || [];
+  const currency = store.business?.currency || "USD";
+  const [filter, setFilter] = useState<"active" | "all" | "history">("active");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [depositDraft, setDepositDraft] = useState<Record<string, string>>({});
+  const [holdDraft, setHoldDraft] = useState<Record<string, string>>({});
+  const [declineDraft, setDeclineDraft] = useState<Record<string, string>>({});
+
+  const counts = useMemo(() => {
+    const active = requests.filter(r =>
+      r.approval_status === "pending_review" || r.approval_status === "approved_pending_deposit",
+    ).length;
+    const history = requests.filter(r =>
+      r.approval_status === "confirmed" || r.approval_status === "expired" || r.approval_status === "declined",
+    ).length;
+    return { active, all: requests.length, history };
+  }, [requests]);
+
+  const filtered = useMemo(() => {
+    if (filter === "all") return requests;
+    if (filter === "history") {
+      return requests.filter(r => r.approval_status === "confirmed" || r.approval_status === "expired" || r.approval_status === "declined");
+    }
+    return requests.filter(r => r.approval_status === "pending_review" || r.approval_status === "approved_pending_deposit");
+  }, [requests, filter]);
+
+  const handleApprove = async (req: BookingRequestRecord) => {
+    if (busyId) return;
+    setBusyId(req.id);
+    const depositRaw = depositDraft[req.id];
+    const holdRaw = holdDraft[req.id];
+    const deposit = depositRaw === "" || depositRaw === undefined
+      ? (req.service_deposit_required ? Number(req.service_deposit_amount) || null : null)
+      : Number(depositRaw);
+    const hold = holdRaw && Number.isFinite(Number(holdRaw)) ? Math.max(5, Math.round(Number(holdRaw))) : 30;
+    await api.approve(req.id, Number.isFinite(deposit as number) ? deposit : null, hold);
+    setBusyId(null);
+    setExpanded(null);
+  };
+
+  const handleDecline = async (req: BookingRequestRecord) => {
+    if (busyId) return;
+    setBusyId(req.id);
+    await api.decline(req.id, declineDraft[req.id] || "");
+    setBusyId(null);
+    setExpanded(null);
+  };
+
+  const handleMarkPaid = async (req: BookingRequestRecord) => {
+    if (busyId) return;
+    setBusyId(req.id);
+    await api.markPaid(req.id);
+    setBusyId(null);
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Approvals"
+        subtitle="Review requests, set deposits, lock confirmations"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-3">
+        {api?.error && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{api.error}</p>
+          </Card>
+        )}
+
+        <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          {APPROVAL_FILTERS.map(f => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => setFilter(f.id)}
+              className="flex-1 py-2 rounded-lg text-[12px] font-semibold"
+              style={{
+                background: filter === f.id ? C.cream : "transparent",
+                color: filter === f.id ? C.espresso : C.muted,
+                border: filter === f.id ? `1px solid ${C.hairline}` : "1px solid transparent",
+              }}
+            >
+              {f.label(counts)}
+            </button>
+          ))}
+        </div>
+
+        {api?.loading && requests.length === 0 && (
+          <Card className="p-4">
+            <p className="text-[12px]" style={{ color: C.muted }}>Loading approvals…</p>
+          </Card>
+        )}
+
+        {!api?.loading && filtered.length === 0 && (
+          <Card className="p-6 text-center">
+            <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+              {filter === "active" ? "No requests waiting." : "Nothing here yet."}
+            </p>
+            <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+              New booking requests show up here for approval.
+            </p>
+          </Card>
+        )}
+
+        {filtered.map(req => {
+          const status = req.approval_status as ApprovalStatus;
+          const isOpen = expanded === req.id;
+          const fallbackDeposit = req.service_deposit_required && req.service_deposit_amount
+            ? Number(req.service_deposit_amount).toFixed(2)
+            : "";
+          return (
+            <Card key={req.id} className="p-4 space-y-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[14px] font-semibold truncate" style={{ color: C.espresso }}>{req.client_name}</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    {req.service_name || "Service TBD"}
+                    {req.preferred_date ? ` · ${req.preferred_date}` : ""}
+                    {req.preferred_time ? ` · ${req.preferred_time}` : ""}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {status === "approved_pending_deposit" && <ApprovalCountdown req={req} />}
+                  <Pill tone={APPROVAL_STATUS_TONE[status]}>{APPROVAL_STATUS_LABEL[status]}</Pill>
+                </div>
+              </div>
+
+              {(req.client_phone || req.client_email) && (
+                <p className="text-[11px]" style={{ color: C.muted }}>
+                  {[req.client_phone, req.client_email].filter(Boolean).join(" · ")}
+                </p>
+              )}
+
+              {req.notes && (
+                <p className="text-[12px] italic" style={{ color: C.coffee }}>{req.notes}</p>
+              )}
+
+              {req.deposit_amount !== null && req.deposit_amount !== undefined && (
+                <div className="flex items-center justify-between text-[12px]">
+                  <span style={{ color: C.muted }}>Deposit</span>
+                  <span style={{ color: C.goldDeep, fontWeight: 600 }}>
+                    {fmtMoney(Number(req.deposit_amount), currency)}
+                    {req.deposit_paid_at ? " · paid" : ""}
+                  </span>
+                </div>
+              )}
+
+              {status === "declined" && req.decline_reason && (
+                <p className="text-[11px]" style={{ color: C.muted }}>Reason: {req.decline_reason}</p>
+              )}
+
+              {/* Actions */}
+              {status === "pending_review" && (
+                <>
+                  {!isOpen && (
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        disabled={busyId === req.id}
+                        onClick={() => { setExpanded(req.id); setDepositDraft(d => ({ ...d, [req.id]: fallbackDeposit })); }}
+                        className="flex-1 py-2 rounded-lg text-[12px] font-semibold"
+                        style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+                      >
+                        Approve & set deposit
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyId === req.id}
+                        onClick={() => setExpanded(`decline:${req.id}`)}
+                        className="px-3 py-2 rounded-lg text-[12px] font-semibold"
+                        style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  )}
+                  {isOpen && (
+                    <div className="space-y-2 pt-1">
+                      <div>
+                        <p className="text-[11px] font-semibold mb-1" style={{ color: C.coffee }}>
+                          Deposit amount ({currency})
+                        </p>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          value={depositDraft[req.id] ?? fallbackDeposit}
+                          onChange={e => setDepositDraft(d => ({ ...d, [req.id]: e.target.value }))}
+                          placeholder="e.g. 50"
+                        />
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold mb-1" style={{ color: C.coffee }}>
+                          Hold window (minutes)
+                        </p>
+                        <Input
+                          type="number"
+                          inputMode="numeric"
+                          value={holdDraft[req.id] ?? "30"}
+                          onChange={e => setHoldDraft(d => ({ ...d, [req.id]: e.target.value }))}
+                          placeholder="30"
+                        />
+                        <p className="text-[10px] mt-1" style={{ color: C.muted }}>
+                          The slot stays held until the deposit lands. Default 30 minutes.
+                        </p>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={busyId === req.id}
+                          onClick={() => handleApprove(req)}
+                          className="flex-1 py-2 rounded-lg text-[12px] font-semibold"
+                          style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+                        >
+                          {busyId === req.id ? "Approving…" : "Confirm approval"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busyId === req.id}
+                          onClick={() => setExpanded(null)}
+                          className="px-3 py-2 rounded-lg text-[12px] font-semibold"
+                          style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {expanded === `decline:${req.id}` && (
+                <div className="space-y-2 pt-1">
+                  <Textarea
+                    value={declineDraft[req.id] || ""}
+                    onChange={e => setDeclineDraft(d => ({ ...d, [req.id]: e.target.value }))}
+                    rows={2}
+                    placeholder="Optional note for your records"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={busyId === req.id}
+                      onClick={() => handleDecline(req)}
+                      className="flex-1 py-2 rounded-lg text-[12px] font-semibold"
+                      style={{ background: C.danger, color: "#FFFFFF", border: `1px solid ${C.danger}` }}
+                    >
+                      {busyId === req.id ? "Declining…" : "Confirm decline"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === req.id}
+                      onClick={() => setExpanded(null)}
+                      className="px-3 py-2 rounded-lg text-[12px] font-semibold"
+                      style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {status === "approved_pending_deposit" && (
+                <div className="space-y-1.5 pt-1">
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    Stripe Checkout lands in the next phase. Until then, mark deposits paid manually after they clear.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={busyId === req.id}
+                      onClick={() => handleMarkPaid(req)}
+                      className="flex-1 py-2 rounded-lg text-[12px] font-semibold"
+                      style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}` }}
+                    >
+                      {busyId === req.id ? "Saving…" : "Mark deposit paid"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === req.id}
+                      onClick={() => setExpanded(`decline:${req.id}`)}
+                      className="px-3 py-2 rounded-lg text-[12px] font-semibold"
+                      style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}
+                    >
+                      Cancel hold
+                    </button>
+                  </div>
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 const BookingIntelligenceScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const userId = store.userId || null;
   const [windowDays, setWindowDays] = useState<7 | 30 | 90>(30);
@@ -12955,6 +13318,53 @@ const BookingIntelligenceScreen = ({ store, onBack }: { store: any; onBack: () =
                 </p>
               </div>
             </Card>
+
+            {/* Approvals */}
+            {data.approvals && (
+              <>
+                <SectionTitle>Approvals</SectionTitle>
+                <Card className="p-4 space-y-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="text-center p-2 rounded-lg" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                      <p className="text-[18px] font-bold" style={{ color: C.espresso }}>{data.approvals.approvals_sent}</p>
+                      <p className="text-[10px] uppercase tracking-wider" style={{ color: C.muted }}>Sent</p>
+                    </div>
+                    <div className="text-center p-2 rounded-lg" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                      <p className="text-[18px] font-bold" style={{ color: C.success }}>{data.approvals.approvals_confirmed}</p>
+                      <p className="text-[10px] uppercase tracking-wider" style={{ color: C.muted }}>Paid</p>
+                    </div>
+                    <div className="text-center p-2 rounded-lg" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                      <p className="text-[18px] font-bold" style={{ color: C.warning }}>{data.approvals.approvals_expired}</p>
+                      <p className="text-[10px] uppercase tracking-wider" style={{ color: C.muted }}>Expired</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-[12px]" style={{ color: C.coffee }}>Deposit conversion</p>
+                    <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+                      {data.approvals.deposit_conversion_pct !== null
+                        ? `${data.approvals.deposit_conversion_pct.toFixed(0)}%`
+                        : "—"}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-[12px]" style={{ color: C.coffee }}>Awaiting your review</p>
+                    <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>{data.approvals.awaiting_review}</p>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-[12px]" style={{ color: C.coffee }}>Awaiting deposit</p>
+                    <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>{data.approvals.awaiting_deposit}</p>
+                  </div>
+                  {data.approvals.lost_deposit_value > 0 && (
+                    <div className="pt-2 border-t flex items-center justify-between" style={{ borderColor: C.hairline }}>
+                      <p className="text-[12px] font-semibold" style={{ color: C.coffee }}>Expired deposits</p>
+                      <p className="text-[13px] font-bold" style={{ color: C.warning }}>
+                        {fmtMoney(data.approvals.lost_deposit_value, currency)}
+                      </p>
+                    </div>
+                  )}
+                </Card>
+              </>
+            )}
 
             {/* Top services */}
             {data.top_services.length > 0 && (
@@ -13919,6 +14329,7 @@ export default function App() {
   const policiesApi = useBookingPolicy(auth.userId);
   const availabilityApi = useAvailability(auth.userId);
   const waitlistApi = useWaitlist(auth.userId);
+  const approvalsApi = useBookingApprovalQueue(auth.userId);
   const [upgradeFor, setUpgradeFor] = useState<GatedFeature | null>(null);
   const requestUpgrade = useCallback((feature: GatedFeature) => {
     setUpgradeFor(feature);
@@ -13952,6 +14363,7 @@ export default function App() {
       policiesApi,
       availabilityApi,
       waitlistApi,
+      approvalsApi,
       upsertClient: gateNew("clients", rawStore.clients, rawStore.upsertClient),
       // Personal events and blocked time live in the same table but
       // aren't bookings, so they (a) don't count toward the appointment
@@ -13973,7 +14385,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, policiesApi, availabilityApi, waitlistApi]);
+  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, policiesApi, availabilityApi, waitlistApi, approvalsApi]);
 
   const sync = useCloudSync(auth.userId, store);
 
@@ -14281,10 +14693,11 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "intelligence" && <BookingIntelligenceScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "approvals" && <ApprovalQueueScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "waitlist" && (
         <WaitlistScreen
           store={store}

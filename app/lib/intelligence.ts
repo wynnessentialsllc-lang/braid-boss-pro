@@ -62,6 +62,17 @@ export type RevenueOpportunity = {
   estimated_lost_revenue: number;
 };
 
+export type ApprovalsIntelligence = {
+  approvals_sent: number;
+  approvals_confirmed: number;
+  approvals_expired: number;
+  approvals_declined: number;
+  awaiting_review: number;
+  awaiting_deposit: number;
+  deposit_conversion_pct: number | null;
+  lost_deposit_value: number;
+};
+
 export type BookingIntelligence = {
   window: { start: string; end: string };
   funnel: FunnelData;
@@ -71,6 +82,7 @@ export type BookingIntelligence = {
   client_sources: ClientSource[];
   calendar_demand: CalendarDemandPoint[];
   revenue_opportunity: RevenueOpportunity;
+  approvals?: ApprovalsIntelligence;
 };
 
 // ---- Smart insights (rules) -------------------------------------------
@@ -145,6 +157,26 @@ export const generateSmartInsights = (b: BookingIntelligence | null): SmartInsig
       id: "waitlist_pressure",
       title: `${b.waitlist.active} clients are actively waiting for an opening.`,
       body: "Reach out today — every contact lands you a likely booking.",
+      tone: "warning",
+    });
+  }
+
+  // Approval queue pressure
+  if (b.approvals && b.approvals.awaiting_review >= 3) {
+    out.push({
+      id: "awaiting_review",
+      title: `${b.approvals.awaiting_review} requests are awaiting your approval.`,
+      body: "Tap into the approval queue to keep momentum — clients are most likely to pay the deposit while the request is fresh.",
+      tone: "warning",
+    });
+  }
+
+  // Deposit drop-off
+  if (b.approvals && b.approvals.approvals_sent >= 5 && b.approvals.deposit_conversion_pct !== null && b.approvals.deposit_conversion_pct < 50) {
+    out.push({
+      id: "deposit_dropoff",
+      title: `Only ${b.approvals.deposit_conversion_pct.toFixed(0)}% of approvals turn into paid deposits.`,
+      body: `${b.approvals.approvals_expired} holds expired without payment. Consider lowering the deposit or shortening the wait between approval and link.`,
       tone: "warning",
     });
   }
