@@ -82,6 +82,15 @@ import {
   validateDiscount,
 } from "./lib/discounts";
 import {
+  type CalendarPrefs,
+  type CalendarView,
+  type ColorMode,
+  type AppointmentColor,
+  useCalendarPrefs,
+  colorForAppointment,
+  computeDayStatus,
+} from "./lib/calendar";
+import {
   downloadJson,
   downloadPdfBlob,
 } from "./lib/native-download";
@@ -109,7 +118,7 @@ import {
 } from "./lib/push";
 import {
   Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon,
-  Plus, X, ChevronRight, ChevronLeft, Search, Copy, Check, Trash2, Edit3,
+  Plus, X, ChevronRight, ChevronLeft, ChevronDown, Search, Copy, Check, Trash2, Edit3,
   FileText, DollarSign, Clock, Phone, Mail, AlertCircle, Sparkles,
   ArrowUpRight, ArrowDownRight, Save, RefreshCw, Download, Bell, BellOff,
   CalendarPlus, UserPlus, Receipt, ScrollText, Image as ImageIcon, Camera,
@@ -3225,10 +3234,19 @@ const BreakRow = ({ label, value, bold }: { label: string; value: string; bold?:
 // ============================================================
 //  SCHEDULE
 // ============================================================
+// Day timeline runs 6 AM through 9 PM. Each row is HOUR_PX tall so
+// blocks can be absolutely positioned by start time and duration.
+const TIMELINE_START_HOUR = 6;
+const TIMELINE_END_HOUR = 21;
+const HOUR_PX = 60;
+
 const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, openCommunication, openReceipt }: { store: any; prefillNewAppt: any; clearApptPrefill: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void; openReceipt?: (rcp: ReceiptRecord) => void }) => {
   const { appointments, business, recurringSeries } = store;
-  const [filter, setFilter] = useState("upcoming");
   const [editing, setEditing] = useState<EntityRecord | null>(null);
+  const [prefs, setPrefs] = useCalendarPrefs();
+  const [showSettings, setShowSettings] = useState(false);
+  const today = todayISO();
+  const [selectedDate, setSelectedDate] = useState<string>(today);
 
   useEffect(() => {
     if (prefillNewAppt) {
@@ -3238,57 +3256,227 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
     }
   }, [prefillNewAppt]);
 
-  const today = todayISO();
-  const filtered = useMemo(() => {
-    let list = [...appointments];
-    if (filter === "today") list = list.filter(a => a.date === today);
-    else if (filter === "upcoming") list = list.filter(a => a.date >= today && a.status !== "cancelled" && a.status !== "completed");
-    else if (filter === "past") list = list.filter(a => a.date < today || a.status === "completed" || a.status === "cancelled");
-    list.sort((a, b) => {
-      const ka = (a.date || "") + (a.time || "");
-      const kb = (b.date || "") + (b.time || "");
-      return filter === "past" ? kb.localeCompare(ka) : ka.localeCompare(kb);
-    });
-    return list;
-  }, [appointments, filter, today]);
+  // Sunday-anchored 7-day strip around the selected date.
+  const weekDates = useMemo(() => {
+    const sel = new Date(selectedDate + "T00:00:00");
+    const dow = sel.getDay();
+    const sundayIso = addDaysISO(selectedDate, -dow);
+    return Array.from({ length: 7 }, (_, i) => addDaysISO(sundayIso, i));
+  }, [selectedDate]);
+
+  const monthLabel = useMemo(() => {
+    const d = new Date(selectedDate + "T00:00:00");
+    return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  }, [selectedDate]);
+
+  const dateHasAppts = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of appointments) {
+      if (!prefs.showCanceled && a.status === "cancelled") continue;
+      if (a.date) set.add(a.date);
+    }
+    return set;
+  }, [appointments, prefs.showCanceled]);
+
+  const apptsForSelectedDay = useMemo(() => {
+    return (appointments as any[])
+      .filter(a => a.date === selectedDate)
+      .filter(a => prefs.showCanceled || a.status !== "cancelled")
+      .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+  }, [appointments, selectedDate, prefs.showCanceled]);
+
+  const dayStatus = useMemo(
+    () => computeDayStatus(apptsForSelectedDay),
+    [apptsForSelectedDay],
+  );
+
+  // Income view aggregations are scoped to the selected day.
+  const dayMoney = useMemo(() => {
+    let expected = 0;
+    let deposits = 0;
+    let pending = 0;
+    let completed = 0;
+    for (const a of apptsForSelectedDay) {
+      const total = Number(a?.totalPrice) || 0;
+      const discount = Number(a?.discountAmount) || 0;
+      const net = Math.max(0, total - discount);
+      const dep = Number(a?.depositPaid) || 0;
+      const balance = Math.max(0, net - dep);
+      expected += net;
+      deposits += dep;
+      pending += balance;
+      if (a?.status === "completed") completed += net;
+    }
+    return {
+      expected, deposits, pending, completed,
+      count: apptsForSelectedDay.length,
+    };
+  }, [apptsForSelectedDay]);
+
+  const goToToday = () => setSelectedDate(today);
 
   return (
-    <div className="bbp-fade">
-      <Header title="Schedule" />
-      <div className="px-5 pt-4 pb-32 space-y-4">
+    <div className="bbp-fade pb-32">
+      {/* HEADER — overflow / month / plus */}
+      <div
+        className="flex items-center justify-between px-5 pt-4 pb-2"
+        style={{ background: C.cream }}
+      >
+        <button
+          type="button"
+          onClick={() => setShowSettings(true)}
+          aria-label="Calendar settings"
+          className="p-2 rounded-full"
+          style={{ color: C.coffee }}
+        >
+          <Filter size={20} />
+        </button>
+        <button
+          type="button"
+          onClick={goToToday}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-lg active:scale-[0.98] transition"
+          aria-label="Jump to today"
+        >
+          <span style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>
+            {monthLabel}
+          </span>
+          <ChevronDown size={16} style={{ color: C.coffee }} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditing({})}
+          aria-label="New appointment"
+          className="p-2 rounded-full active:scale-[0.97] transition"
+          style={{
+            color: C.paper,
+            background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+            boxShadow: "0 6px 14px -6px rgba(168, 137, 63, 0.55)",
+          }}
+        >
+          <Plus size={18} />
+        </button>
+      </div>
+
+      {/* WEEK STRIP */}
+      <div className="grid grid-cols-7 gap-1 px-3 mb-3">
+        {weekDates.map(iso => {
+          const d = new Date(iso + "T00:00:00");
+          const isSelected = iso === selectedDate;
+          const isToday = iso === today;
+          const dow = d.toLocaleDateString("en-US", { weekday: "narrow" });
+          const dayNum = d.getDate();
+          const has = dateHasAppts.has(iso);
+          return (
+            <button
+              type="button"
+              key={iso}
+              onClick={() => setSelectedDate(iso)}
+              aria-current={isSelected ? "date" : undefined}
+              className="flex flex-col items-center gap-1 py-2 rounded-xl active:scale-[0.97] transition"
+              style={{ color: isSelected ? C.paper : C.coffee }}
+            >
+              <span
+                className="text-[10px] font-semibold tracking-widest"
+                style={{ color: isSelected ? C.gold : C.muted, letterSpacing: "0.12em" }}
+              >
+                {dow}
+              </span>
+              <span
+                className="flex items-center justify-center text-[14px] font-semibold"
+                style={{
+                  width: 32, height: 32, borderRadius: 999,
+                  background: isSelected
+                    ? `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`
+                    : (isToday ? C.ivory : "transparent"),
+                  color: isSelected ? C.paper : C.espresso,
+                  border: isToday && !isSelected ? `1px solid ${C.gold}` : "none",
+                  boxShadow: isSelected ? "0 6px 14px -6px rgba(168, 137, 63, 0.55)" : "none",
+                }}
+              >
+                {dayNum}
+              </span>
+              <span
+                aria-hidden
+                style={{
+                  width: 4, height: 4, borderRadius: 999,
+                  background: has ? (isSelected ? C.cream : C.gold) : "transparent",
+                }}
+              />
+            </button>
+          );
+        })}
+      </div>
+
+      {/* VIEW PILLS */}
+      <div className="px-5 mb-4">
         <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
-          {[{ id: "upcoming", label: "Upcoming" }, { id: "today", label: "Today" }, { id: "past", label: "Past" }, { id: "all", label: "All" }].map(t => (
-            <button type="button" key={t.id} onClick={() => setFilter(t.id)}
-              className="flex-1 py-2 rounded-lg text-[13px] font-semibold transition"
-              style={{ background: filter === t.id ? C.espresso : "transparent", color: filter === t.id ? C.cream : C.coffee }}>
+          {([
+            { id: "day", label: "Day" },
+            { id: "week", label: "Week" },
+            { id: "list", label: "List" },
+            { id: "income", label: "Income" },
+          ] as { id: CalendarView; label: string }[]).map(t => (
+            <button
+              type="button"
+              key={t.id}
+              onClick={() => setPrefs({ view: t.id })}
+              className="flex-1 py-2 rounded-lg text-[12px] font-semibold transition"
+              style={{
+                background: prefs.view === t.id ? C.espresso : "transparent",
+                color: prefs.view === t.id ? C.cream : C.coffee,
+              }}
+            >
               {t.label}
             </button>
           ))}
         </div>
+      </div>
 
-        {filtered.length === 0 ? (
-          <EmptyState
-            icon={<Calendar size={28} style={{ color: C.gold }} />}
-            title="Your chair is waiting"
-            body="Add your first booking with the gold button below — or build a quote and convert it into an appointment."
-            cta={<Button variant="primary" icon={<Plus size={18} />} onClick={() => setEditing({})}>New appointment</Button>}
+      <div className="px-5 space-y-3">
+        {prefs.view === "day" && (
+          <DayCalendarView
+            appts={apptsForSelectedDay}
+            dayStatus={dayStatus}
+            colorMode={prefs.colorMode}
+            today={today}
+            business={business}
+            onTap={(a) => setEditing(a)}
+            onAdd={() => setEditing({ date: selectedDate })}
           />
-        ) : (
-          <>
-            <div className="space-y-2.5">
-              {filtered.map(a => <AppointmentRow key={a.id} appt={a} business={business} recurringSeries={recurringSeries} onClick={() => setEditing(a)} />)}
-            </div>
-            <button
-              type="button" className="w-full text-center text-xs font-semibold mt-3 py-2 flex items-center justify-center gap-1.5"
-              style={{ color: C.goldDeep }}
-              onClick={() => {
-                const ics = buildVCalendar(filtered as IcsAppointment[], { businessName: business?.businessName, currency: business?.currency });
-                const fname = sanitizeFilename(`bbp-${filter}`) + ".ics";
-                downloadIcs(fname, ics);
-              }}>
-              <Download size={13} /> Export {filtered.length} appointment{filtered.length === 1 ? "" : "s"} as .ics
-            </button>
-          </>
+        )}
+
+        {prefs.view === "week" && (
+          <WeekCalendarView
+            allAppts={appointments}
+            weekDates={weekDates}
+            colorMode={prefs.colorMode}
+            today={today}
+            showCanceled={prefs.showCanceled}
+            business={business}
+            recurringSeries={recurringSeries}
+            onTap={(a) => setEditing(a)}
+            onSelectDate={(iso) => { setSelectedDate(iso); setPrefs({ view: "day" }); }}
+          />
+        )}
+
+        {prefs.view === "list" && (
+          <ListCalendarView
+            allAppts={appointments}
+            today={today}
+            showCanceled={prefs.showCanceled}
+            business={business}
+            recurringSeries={recurringSeries}
+            onTap={(a) => setEditing(a)}
+            onAdd={() => setEditing({})}
+          />
+        )}
+
+        {prefs.view === "income" && (
+          <IncomeCalendarView
+            money={dayMoney}
+            currency={business?.currency || "USD"}
+            selectedDate={selectedDate}
+          />
         )}
       </div>
 
@@ -3303,7 +3491,498 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
         openCommunication={openCommunication}
         openReceipt={openReceipt}
       />
+
+      <CalendarSettingsSheet
+        open={showSettings}
+        prefs={prefs}
+        setPrefs={setPrefs}
+        onClose={() => setShowSettings(false)}
+      />
     </div>
+  );
+};
+
+// ---- Day Calendar -----------------------------------------------------
+
+const DayCalendarView = ({
+  appts, dayStatus, colorMode, today, business, onTap, onAdd,
+}: {
+  appts: any[];
+  dayStatus: { status: string; label: string };
+  colorMode: ColorMode;
+  today: string;
+  business: any;
+  onTap: (a: any) => void;
+  onAdd: () => void;
+}) => {
+  const HOURS = Array.from(
+    { length: TIMELINE_END_HOUR - TIMELINE_START_HOUR + 1 },
+    (_, i) => i + TIMELINE_START_HOUR,
+  );
+  const formatHourLabel = (h: number) => `${((h + 11) % 12) + 1} ${h >= 12 ? "PM" : "AM"}`;
+
+  const dayStatusToneBg = (() => {
+    switch (dayStatus.status) {
+      case "fully_booked": return "rgba(168, 137, 63, 0.18)";
+      case "deposit_due":  return "rgba(201, 118, 43, 0.16)";
+      case "openings_available": return "rgba(92, 124, 74, 0.16)";
+      case "off":          return "rgba(74, 44, 26, 0.10)";
+      default:             return C.ivory;
+    }
+  })();
+  const dayStatusToneFg = (() => {
+    switch (dayStatus.status) {
+      case "fully_booked": return C.goldDeep;
+      case "deposit_due":  return C.warning;
+      case "openings_available": return C.success;
+      case "off":          return C.muted;
+      default:             return C.coffee;
+    }
+  })();
+
+  return (
+    <div className="space-y-3">
+      <Card className="px-4 py-3 flex items-center justify-between" style={{ background: dayStatusToneBg, border: `1px solid ${C.hairline}` }}>
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>All day</p>
+          <p className="text-sm font-semibold mt-0.5" style={{ color: dayStatusToneFg }}>{dayStatus.label}</p>
+        </div>
+        <span className="text-[11px] font-semibold" style={{ color: C.muted }}>
+          {appts.length} {appts.length === 1 ? "booking" : "bookings"}
+        </span>
+      </Card>
+
+      {appts.length === 0 ? (
+        <EmptyState
+          icon={<Calendar size={28} style={{ color: C.gold }} />}
+          title="No bookings yet."
+          body="Your appointments, deposits, and balances will appear here."
+          cta={<Button variant="primary" icon={<Plus size={18} />} onClick={onAdd}>Add appointment</Button>}
+        />
+      ) : (
+        <div
+          className="relative"
+          style={{
+            height: HOURS.length * HOUR_PX,
+            background: C.paper,
+            border: `1px solid ${C.hairline}`,
+            borderRadius: 16,
+            overflow: "hidden",
+          }}
+        >
+          {HOURS.map((h, idx) => (
+            <div
+              key={h}
+              className="absolute left-0 right-0 flex items-start"
+              style={{
+                top: idx * HOUR_PX,
+                height: HOUR_PX,
+                borderTop: idx === 0 ? "none" : `1px dashed ${C.hairline}`,
+              }}
+            >
+              <span
+                className="text-[10px] font-semibold tracking-widest pl-3 pt-1"
+                style={{ color: C.muted, width: 56, letterSpacing: "0.08em" }}
+              >
+                {formatHourLabel(h)}
+              </span>
+            </div>
+          ))}
+
+          {appts.map(a => {
+            const [hh, mm] = (a.time || "10:00").split(":").map(Number);
+            const startMin = (hh || 0) * 60 + (mm || 0);
+            const dayStartMin = TIMELINE_START_HOUR * 60;
+            const dayEndMin = (TIMELINE_END_HOUR + 1) * 60;
+            if (startMin >= dayEndMin) return null;
+            const top = Math.max(0, ((startMin - dayStartMin) / 60) * HOUR_PX);
+            const durationMin = Math.max(30, (Number(a.durationHours) || 1) * 60);
+            const rawHeight = (durationMin / 60) * HOUR_PX;
+            const maxHeight = HOURS.length * HOUR_PX - top;
+            const height = Math.max(44, Math.min(rawHeight, maxHeight));
+            const color = colorForAppointment(a, colorMode, today);
+
+            const total = Number(a?.totalPrice) || 0;
+            const discount = Number(a?.discountAmount) || 0;
+            const net = Math.max(0, total - discount);
+            const deposit = Number(a?.depositPaid) || 0;
+            const balance = Math.max(0, net - deposit);
+            const depositLine =
+              deposit <= 0 ? "Deposit due"
+              : deposit < net ? `Deposit ${fmtMoney(deposit, business?.currency)}`
+              : "Deposit paid";
+            const balanceLine = balance > 0 ? `Balance ${fmtMoney(balance, business?.currency)}` : null;
+
+            return (
+              <button
+                type="button"
+                key={a.id}
+                onClick={() => onTap(a)}
+                className="absolute text-left active:scale-[0.99] transition"
+                style={{
+                  top: top + 2,
+                  left: 60,
+                  right: 8,
+                  height: height - 4,
+                  padding: "8px 10px",
+                  borderRadius: 12,
+                  background: color.background,
+                  border: `1px solid ${color.border}`,
+                  borderLeft: `4px solid ${color.accent}`,
+                  color: color.foreground,
+                  overflow: "hidden",
+                }}
+              >
+                <p className="text-[13px] font-semibold leading-tight truncate">
+                  {a.clientName || "Open slot"}
+                </p>
+                <p className="text-[11px] mt-0.5 truncate" style={{ opacity: 0.85 }}>
+                  {fmtTime(a.time)} · {a.style || "Service"}
+                </p>
+                {height >= 60 && (
+                  <p className="text-[11px] mt-0.5 truncate" style={{ opacity: 0.85 }}>
+                    {depositLine}{balanceLine ? ` · ${balanceLine}` : ""}
+                  </p>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ---- Week Calendar (mobile-friendly: day-grouped lists) ---------------
+
+const WeekCalendarView = ({
+  allAppts, weekDates, colorMode, today, showCanceled, business, recurringSeries, onTap, onSelectDate,
+}: {
+  allAppts: any[];
+  weekDates: string[];
+  colorMode: ColorMode;
+  today: string;
+  showCanceled: boolean;
+  business: any;
+  recurringSeries: any;
+  onTap: (a: any) => void;
+  onSelectDate: (iso: string) => void;
+}) => {
+  return (
+    <div className="space-y-4">
+      {weekDates.map(iso => {
+        const list = (allAppts as any[])
+          .filter(a => a.date === iso)
+          .filter(a => showCanceled || a.status !== "cancelled")
+          .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+        const d = new Date(iso + "T00:00:00");
+        const isToday = iso === today;
+        return (
+          <div key={iso}>
+            <button
+              type="button"
+              onClick={() => onSelectDate(iso)}
+              className="flex items-baseline justify-between w-full mb-2 active:scale-[0.99] transition"
+            >
+              <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: isToday ? C.goldDeep : C.muted, letterSpacing: "0.14em" }}>
+                {d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+                {isToday ? " · Today" : ""}
+              </p>
+              <span className="text-[11px] font-semibold" style={{ color: C.muted }}>
+                {list.length === 0 ? "—" : `${list.length} booking${list.length === 1 ? "" : "s"}`}
+              </span>
+            </button>
+            {list.length === 0 ? (
+              <Card className="px-4 py-3 text-center" style={{ background: C.paper }}>
+                <p className="text-[12px]" style={{ color: C.muted }}>No bookings</p>
+              </Card>
+            ) : (
+              <div className="space-y-2">
+                {list.map(a => {
+                  const color = colorForAppointment(a, colorMode, today);
+                  return (
+                    <button
+                      type="button"
+                      key={a.id}
+                      onClick={() => onTap(a)}
+                      className="w-full text-left rounded-xl px-3 py-2.5 active:scale-[0.99] transition"
+                      style={{
+                        background: color.background,
+                        border: `1px solid ${color.border}`,
+                        borderLeft: `4px solid ${color.accent}`,
+                        color: color.foreground,
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-semibold truncate">{a.clientName || "Open slot"}</p>
+                          <p className="text-[11px] truncate" style={{ opacity: 0.85 }}>
+                            {fmtTime(a.time)} · {a.style || "Service"}
+                          </p>
+                        </div>
+                        <span className="text-[12px] font-semibold tabular-nums" style={{ opacity: 0.9 }}>
+                          {fmtMoney(Number(a.totalPrice) || 0, business?.currency)}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// ---- List Calendar (Upcoming / Today / Past / All) --------------------
+
+const ListCalendarView = ({
+  allAppts, today, showCanceled, business, recurringSeries, onTap, onAdd,
+}: {
+  allAppts: any[];
+  today: string;
+  showCanceled: boolean;
+  business: any;
+  recurringSeries: any;
+  onTap: (a: any) => void;
+  onAdd: () => void;
+}) => {
+  const [filter, setFilter] = useState<"upcoming" | "today" | "past" | "all">("upcoming");
+  const filtered = useMemo(() => {
+    let list = (allAppts as any[]).filter(a => showCanceled || a.status !== "cancelled");
+    if (filter === "today") list = list.filter(a => a.date === today);
+    else if (filter === "upcoming") list = list.filter(a => a.date >= today && a.status !== "completed");
+    else if (filter === "past") list = list.filter(a => a.date < today || a.status === "completed");
+    list.sort((a, b) => {
+      const ka = (a.date || "") + (a.time || "");
+      const kb = (b.date || "") + (b.time || "");
+      return filter === "past" ? kb.localeCompare(ka) : ka.localeCompare(kb);
+    });
+    return list;
+  }, [allAppts, filter, today, showCanceled]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+        {[
+          { id: "upcoming", label: "Upcoming" },
+          { id: "today", label: "Today" },
+          { id: "past", label: "Past" },
+          { id: "all", label: "All" },
+        ].map(t => (
+          <button type="button" key={t.id} onClick={() => setFilter(t.id as any)}
+            className="flex-1 py-2 rounded-lg text-[12px] font-semibold transition"
+            style={{ background: filter === t.id ? C.espresso : "transparent", color: filter === t.id ? C.cream : C.coffee }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyState
+          icon={<Calendar size={28} style={{ color: C.gold }} />}
+          title="No bookings yet."
+          body="Your appointments, deposits, and balances will appear here."
+          cta={<Button variant="primary" icon={<Plus size={18} />} onClick={onAdd}>New appointment</Button>}
+        />
+      ) : (
+        <>
+          <div className="space-y-2.5">
+            {filtered.map(a => <AppointmentRow key={a.id} appt={a} business={business} recurringSeries={recurringSeries} onClick={() => onTap(a)} />)}
+          </div>
+          <button
+            type="button"
+            className="w-full text-center text-xs font-semibold mt-3 py-2 flex items-center justify-center gap-1.5"
+            style={{ color: C.goldDeep }}
+            onClick={() => {
+              const ics = buildVCalendar(filtered as IcsAppointment[], { businessName: business?.businessName, currency: business?.currency });
+              const fname = sanitizeFilename(`bbp-${filter}`) + ".ics";
+              downloadIcs(fname, ics);
+            }}>
+            <Download size={13} /> Export {filtered.length} appointment{filtered.length === 1 ? "" : "s"} as .ics
+          </button>
+        </>
+      )}
+    </div>
+  );
+};
+
+// ---- Income view -------------------------------------------------------
+
+const IncomeCalendarView = ({
+  money, currency, selectedDate,
+}: {
+  money: { expected: number; deposits: number; pending: number; completed: number; count: number };
+  currency: string;
+  selectedDate: string;
+}) => {
+  return (
+    <div className="space-y-3">
+      <Card className="p-5" style={{ background: `linear-gradient(180deg, ${C.espresso} 0%, ${C.coffee} 100%)`, border: `1px solid ${C.goldDeep}` }}>
+        <p className="text-[10px] font-bold tracking-widest uppercase" style={{ color: C.gold, letterSpacing: "0.18em" }}>Expected revenue</p>
+        <p style={{ fontFamily: FONT_DISPLAY, fontSize: 40, fontWeight: 600, color: C.cream, lineHeight: 1, marginTop: 6 }}>
+          {fmtMoney(money.expected, currency)}
+        </p>
+        <p className="text-[11px] mt-2" style={{ color: "rgba(245, 235, 217, 0.75)" }}>
+          {fmtDateLong(selectedDate)} · {money.count} {money.count === 1 ? "booking" : "bookings"}
+        </p>
+      </Card>
+      <div className="grid grid-cols-2 gap-3">
+        <Card className="p-4" style={{ background: C.paper }}>
+          <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Deposits collected</p>
+          <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.success }}>
+            {fmtMoney(money.deposits, currency)}
+          </p>
+        </Card>
+        <Card className="p-4" style={{ background: C.paper }}>
+          <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Pending balance</p>
+          <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: money.pending > 0 ? C.warning : C.muted }}>
+            {fmtMoney(money.pending, currency)}
+          </p>
+        </Card>
+        <Card className="p-4" style={{ background: C.paper }}>
+          <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Completed revenue</p>
+          <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>
+            {fmtMoney(money.completed, currency)}
+          </p>
+        </Card>
+        <Card className="p-4" style={{ background: C.paper }}>
+          <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Bookings</p>
+          <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>
+            {money.count}
+          </p>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// ---- Calendar Settings Sheet -------------------------------------------
+
+const CalendarSettingsSheet = ({
+  open, prefs, setPrefs, onClose,
+}: {
+  open: boolean;
+  prefs: CalendarPrefs;
+  setPrefs: (next: Partial<CalendarPrefs>) => void;
+  onClose: () => void;
+}) => {
+  return (
+    <Sheet open={open} onClose={onClose} title="Calendar">
+      <div className="space-y-5 pb-2">
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+            Booking availability
+          </p>
+          <Card className="p-4 opacity-60" style={{ pointerEvents: "none" }}>
+            <p className="text-sm font-semibold" style={{ color: C.coffee }}>Make a one-time change</p>
+            <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>Coming soon</p>
+          </Card>
+          <Card className="p-4 mt-2 opacity-60" style={{ pointerEvents: "none" }}>
+            <p className="text-sm font-semibold" style={{ color: C.coffee }}>Edit repeating schedule</p>
+            <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>Coming soon</p>
+          </Card>
+        </div>
+
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+            Calendar view
+          </p>
+          <div className="space-y-2">
+            {([
+              { id: "day", label: "Day" },
+              { id: "week", label: "Week" },
+              { id: "list", label: "List" },
+              { id: "income", label: "Income" },
+            ] as { id: CalendarView; label: string }[]).map(opt => (
+              <button
+                type="button"
+                key={opt.id}
+                onClick={() => setPrefs({ view: opt.id })}
+                className="w-full text-left rounded-xl px-4 py-3 flex items-center justify-between active:scale-[0.99] transition"
+                style={{
+                  background: prefs.view === opt.id ? C.ivory : C.paper,
+                  border: `1px solid ${prefs.view === opt.id ? C.gold : C.hairline}`,
+                }}
+              >
+                <span className="text-sm font-semibold" style={{ color: C.espresso }}>{opt.label}</span>
+                {prefs.view === opt.id && <Check size={16} style={{ color: C.goldDeep }} />}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+            Filters
+          </p>
+          <Card className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Show canceled bookings</p>
+              <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>Hidden by default to keep the day view clean.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPrefs({ showCanceled: !prefs.showCanceled })}
+              role="switch"
+              aria-checked={prefs.showCanceled}
+              className="relative rounded-full transition"
+              style={{
+                width: 44, height: 26,
+                background: prefs.showCanceled ? C.goldDeep : C.hairline,
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  top: 3, left: prefs.showCanceled ? 21 : 3,
+                  width: 20, height: 20, borderRadius: 999,
+                  background: C.paper,
+                  transition: "left 0.18s",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.12)",
+                }}
+              />
+            </button>
+          </Card>
+        </div>
+
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+            Color code
+          </p>
+          <div className="space-y-2">
+            {([
+              { id: "status",  label: "By status",        hint: "Booked · Completed · Canceled" },
+              { id: "service", label: "By service",       hint: "Soft swatches per style name" },
+              { id: "deposit", label: "By deposit status",hint: "Paid · Partial · Unpaid" },
+              { id: "balance", label: "By balance due",   hint: "No balance · Due · Overdue" },
+            ] as { id: ColorMode; label: string; hint: string }[]).map(opt => (
+              <button
+                type="button"
+                key={opt.id}
+                onClick={() => setPrefs({ colorMode: opt.id })}
+                className="w-full text-left rounded-xl px-4 py-3 flex items-center justify-between active:scale-[0.99] transition"
+                style={{
+                  background: prefs.colorMode === opt.id ? C.ivory : C.paper,
+                  border: `1px solid ${prefs.colorMode === opt.id ? C.gold : C.hairline}`,
+                }}
+              >
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>{opt.label}</p>
+                  <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>{opt.hint}</p>
+                </div>
+                {prefs.colorMode === opt.id && <Check size={16} style={{ color: C.goldDeep }} />}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Button variant="primary" fullWidth onClick={onClose}>Done</Button>
+      </div>
+    </Sheet>
   );
 };
 
