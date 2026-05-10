@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
 import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LABEL } from "../../lib/waitlist";
 import { emitAnalyticsEvent } from "../../lib/analytics-events";
+import { fetchPublicServices, type PublicService } from "../../lib/services";
 
 // Minimal palette — kept inline so this page never imports the main
 // app shell (it's served to anonymous visitors).
@@ -46,6 +47,11 @@ export default function PublicBookingPage() {
   const [link, setLink] = useState<LinkConfig | null>(null);
   const [linkLoading, setLinkLoading] = useState(true);
   const [linkError, setLinkError] = useState<string | null>(null);
+  // Phase B1 — real services catalog from public_list_services RPC.
+  // Falls back to legacy link.services if the RPC errors / is empty
+  // so existing booking links keep working during the rollout.
+  const [catalog, setCatalog] = useState<PublicService[]>([]);
+  const [serviceId, setServiceId] = useState<string>("");
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -74,13 +80,15 @@ export default function PublicBookingPage() {
     if (!name.trim()) { setWaitlistError("Please enter your name."); return; }
     if (!link?.user_id) { setWaitlistError("This booking link is misconfigured."); return; }
     setWaitlistSubmitting(true);
-    const selected = services.find((s: any) => s?.name === serviceName);
+    const selectedId = hasCatalog
+      ? selectedCatalogService?.id || null
+      : ((services as any[]).find((s: any) => s?.name === serviceName)?.id || null);
     const result = await submitPublicWaitlistRequest({
       ownerUserId: link.user_id,
       client_name: name.trim(),
       client_phone: phone.trim() || null,
       client_email: email.trim() || null,
-      service_id: selected?.id || null,
+      service_id: selectedId,
       service_name: serviceName || null,
       preferred_date: preferredDate || null,
       preferred_time: preferredTime || null,
@@ -133,7 +141,27 @@ export default function PublicBookingPage() {
     return () => { cancelled = true; };
   }, [slug]);
 
-  const services = Array.isArray(link?.services) ? link!.services! : [];
+  // Pull the catalog once the slug is known. The RPC is callable
+  // anonymously and returns only is_active = true rows.
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    (async () => {
+      const result = await fetchPublicServices(slug);
+      if (cancelled) return;
+      if (result.ok) setCatalog(result.services);
+    })();
+    return () => { cancelled = true; };
+  }, [slug]);
+
+  // Catalog wins; fall back to legacy free-form list if the RPC
+  // returns nothing (older booking links that haven't migrated).
+  const legacyServices = Array.isArray(link?.services) ? link!.services! : [];
+  const hasCatalog = catalog.length > 0;
+  const services = hasCatalog ? catalog : legacyServices;
+  const selectedCatalogService = hasCatalog
+    ? catalog.find(s => s.id === serviceId) || null
+    : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -143,7 +171,18 @@ export default function PublicBookingPage() {
     if (!phone.trim() && !email.trim()) { setSubmitError("Phone or email is required."); return; }
     setSubmitting(true);
     try {
-      const selected = services.find((s: any) => s?.name === serviceName);
+      // When catalog is in play we send the real service snapshot
+      // (id + duration in hours + base price). Legacy free-form
+      // links keep the old shape — the edge function accepts both.
+      const selected = hasCatalog
+        ? selectedCatalogService
+        : (services as any[]).find((s: any) => s?.name === serviceName);
+      const dur = hasCatalog
+        ? selectedCatalogService?.duration_hours
+        : (selected as any)?.durationHours;
+      const price = hasCatalog
+        ? selectedCatalogService?.base_price
+        : (selected as any)?.totalPrice;
       const res = await fetch(`${FUNCTIONS_URL}/booking-request`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -152,9 +191,12 @@ export default function PublicBookingPage() {
           clientName: name.trim(),
           clientPhone: phone.trim() || null,
           clientEmail: email.trim() || null,
+          serviceId: hasCatalog && selectedCatalogService ? selectedCatalogService.id : null,
           serviceName: serviceName || null,
-          serviceDuration: selected?.durationHours ?? null,
-          servicePrice: selected?.totalPrice ?? null,
+          serviceDuration: dur ?? null,
+          servicePrice: price ?? null,
+          serviceDepositRequired: hasCatalog && selectedCatalogService ? selectedCatalogService.deposit_required : null,
+          serviceDepositAmount: hasCatalog && selectedCatalogService ? selectedCatalogService.deposit_amount : null,
           preferredDate: preferredDate || null,
           preferredTime: preferredTime || null,
           notes: notes.trim() || null,
@@ -254,7 +296,66 @@ export default function PublicBookingPage() {
                 <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" autoComplete="email" />
               </Field>
             </div>
-            {services.length > 0 ? (
+            {hasCatalog ? (
+              <>
+                <Field label="Service">
+                  <select
+                    value={serviceId}
+                    onChange={e => {
+                      const id = e.target.value;
+                      setServiceId(id);
+                      const svc = catalog.find(s => s.id === id);
+                      // Keep serviceName in sync as the human-readable
+                      // label submitted to the booking-request edge
+                      // function (which still expects serviceName).
+                      setServiceName(svc?.name || "");
+                      // Phase B1 view tracking — anon allow-listed.
+                      if (id && link?.user_id && svc) {
+                        void emitAnalyticsEvent({
+                          ownerUserId: link.user_id,
+                          type: "public_service_viewed" as any,
+                          source: "public",
+                          payload: { slug, serviceId: id, serviceName: svc.name },
+                        });
+                      }
+                    }}
+                    style={selectStyle}
+                  >
+                    <option value="">— Pick a service —</option>
+                    {catalog.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} · {s.duration_hours}h · ${s.base_price}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                {selectedCatalogService && (
+                  <div
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      background: C.paper,
+                      border: `1px solid ${C.hairline}`,
+                      fontSize: 12,
+                      color: C.coffee,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    <strong style={{ color: C.espresso }}>{selectedCatalogService.name}</strong>
+                    <br />
+                    {selectedCatalogService.duration_hours}h · ${selectedCatalogService.base_price.toFixed(2)}
+                    {selectedCatalogService.deposit_required && selectedCatalogService.deposit_amount
+                      ? ` · ${`$${selectedCatalogService.deposit_amount.toFixed(2)} deposit required`}`
+                      : ""}
+                    {selectedCatalogService.prep_instructions && (
+                      <p style={{ marginTop: 8, color: C.muted, fontSize: 11 }}>
+                        {selectedCatalogService.prep_instructions}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : services.length > 0 ? (
               <Field label="Service">
                 <select value={serviceName} onChange={e => setServiceName(e.target.value)}
                   style={selectStyle}>

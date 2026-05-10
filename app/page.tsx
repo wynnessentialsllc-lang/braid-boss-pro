@@ -11933,6 +11933,9 @@ const ServicesScreen = ({
     add_ons: [],
     prep_instructions: "",
     is_active: true,
+    buffer_before_minutes: 0,
+    buffer_after_minutes: 0,
+    max_concurrent: 1,
   });
 
   const openEdit = (s: Service) => setEditing({
@@ -11946,6 +11949,9 @@ const ServicesScreen = ({
     add_ons: Array.isArray(s.add_ons) ? s.add_ons : [],
     prep_instructions: s.prep_instructions,
     is_active: s.is_active,
+    buffer_before_minutes: s.buffer_before_minutes ?? 0,
+    buffer_after_minutes: s.buffer_after_minutes ?? 0,
+    max_concurrent: s.max_concurrent ?? 1,
   });
 
   const handleSave = async () => {
@@ -12172,6 +12178,38 @@ const ServicesScreen = ({
                 placeholder="Wash and blow-dry the day before. Bring bands."
               />
             </Field>
+
+            <Card className="p-3.5">
+              <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+                Scheduling
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Buffer before (min)" hint="Prep / setup pad">
+                  <MoneyInput
+                    prefix=""
+                    suffix="min"
+                    value={editing.buffer_before_minutes ?? 0}
+                    onChange={(v) => setEditing({ ...editing, buffer_before_minutes: parseMoney(v) })}
+                  />
+                </Field>
+                <Field label="Buffer after (min)" hint="Takedown / clean-up">
+                  <MoneyInput
+                    prefix=""
+                    suffix="min"
+                    value={editing.buffer_after_minutes ?? 0}
+                    onChange={(v) => setEditing({ ...editing, buffer_after_minutes: parseMoney(v) })}
+                  />
+                </Field>
+              </div>
+              <Field label="Concurrent bookings" hint="1 for solo · raise for classes / multi-chair">
+                <MoneyInput
+                  prefix=""
+                  suffix="at once"
+                  value={editing.max_concurrent ?? 1}
+                  onChange={(v) => setEditing({ ...editing, max_concurrent: parseMoney(v) })}
+                />
+              </Field>
+            </Card>
 
             <Field label="Status">
               <Select

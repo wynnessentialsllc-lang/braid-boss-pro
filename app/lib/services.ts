@@ -26,6 +26,14 @@ export type Service = {
   add_ons: ServiceAddOn[];
   prep_instructions: string | null;
   is_active: boolean;
+  // Phase B1 — feed the slot engine when this service is booked:
+  // buffer_before / buffer_after pad each booking so prep + takedown
+  // can't be double-booked over; max_concurrent unlocks classes /
+  // multi-chair scheduling. All default to V1 single-chair behaviour
+  // (0/0/1) so existing rows continue working.
+  buffer_before_minutes: number;
+  buffer_after_minutes: number;
+  max_concurrent: number;
   created_at: string;
   updated_at: string;
 };
@@ -41,6 +49,9 @@ export type ServiceInput = Pick<
   | "add_ons"
   | "prep_instructions"
   | "is_active"
+  | "buffer_before_minutes"
+  | "buffer_after_minutes"
+  | "max_concurrent"
 >;
 
 // ---- Validation -------------------------------------------------------
@@ -74,6 +85,19 @@ export const validateService = (
     if (!Number.isFinite(amt) || amt <= 0) {
       errors.push({ field: "deposit_amount", message: "Set the required deposit amount." });
     }
+  }
+
+  const buffBefore = Number(draft.buffer_before_minutes ?? 0);
+  if (!Number.isFinite(buffBefore) || buffBefore < 0 || buffBefore > 240) {
+    errors.push({ field: "buffer_before_minutes", message: "Buffer before must be between 0 and 240 minutes." });
+  }
+  const buffAfter = Number(draft.buffer_after_minutes ?? 0);
+  if (!Number.isFinite(buffAfter) || buffAfter < 0 || buffAfter > 240) {
+    errors.push({ field: "buffer_after_minutes", message: "Buffer after must be between 0 and 240 minutes." });
+  }
+  const maxConcurrent = Number(draft.max_concurrent ?? 1);
+  if (!Number.isFinite(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 50) {
+    errors.push({ field: "max_concurrent", message: "Concurrent bookings must be between 1 and 50." });
   }
 
   for (const a of draft.add_ons || []) {
@@ -184,6 +208,9 @@ export const useServices = (
       })),
       prep_instructions: draft.prep_instructions?.trim() || null,
       is_active: draft.is_active ?? true,
+      buffer_before_minutes: Math.max(0, Math.min(240, Math.round(Number(draft.buffer_before_minutes) || 0))),
+      buffer_after_minutes: Math.max(0, Math.min(240, Math.round(Number(draft.buffer_after_minutes) || 0))),
+      max_concurrent: Math.max(1, Math.min(50, Math.round(Number(draft.max_concurrent) || 1))),
     };
     const { data, error: err } = draft.id
       ? await supabase.from("services").update(payload).eq("id", draft.id).eq("user_id", userId).select("*").maybeSingle()
@@ -224,4 +251,54 @@ export const useServices = (
   };
 
   return { services, loading, error, refresh, upsert, remove, setActive };
+};
+
+// ---- Public booking page ----------------------------------------------
+//
+// Returns the active service catalog for a booking-link slug. Calls
+// the security-definer `public_list_services` RPC (Phase B1 migration)
+// so anonymous visitors can read services without granting them
+// SELECT on the underlying RLS-protected table.
+//
+// Shape mirrors the owner-side Service type minus `id` / `user_id`-
+// scoped fields the public surface doesn't need.
+
+export type PublicService = Pick<
+  Service,
+  | "id"
+  | "name"
+  | "description"
+  | "duration_hours"
+  | "base_price"
+  | "deposit_required"
+  | "deposit_amount"
+  | "add_ons"
+  | "prep_instructions"
+  | "buffer_before_minutes"
+  | "buffer_after_minutes"
+  | "max_concurrent"
+>;
+
+export const fetchPublicServices = async (
+  slug: string,
+): Promise<{ ok: true; services: PublicService[] } | { ok: false; error: string }> => {
+  if (!slug) return { ok: false, error: "Missing booking slug." };
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("public_list_services", { slug_in: slug });
+  if (error) return { ok: false, error: error.message };
+  const services = ((data || []) as any[]).map(s => ({
+    id: s.id,
+    name: s.name,
+    description: s.description,
+    duration_hours: Number(s.duration_hours) || 0,
+    base_price: Number(s.base_price) || 0,
+    deposit_required: !!s.deposit_required,
+    deposit_amount: s.deposit_amount == null ? null : Number(s.deposit_amount),
+    add_ons: Array.isArray(s.add_ons) ? s.add_ons : [],
+    prep_instructions: s.prep_instructions ?? null,
+    buffer_before_minutes: Number(s.buffer_before_minutes) || 0,
+    buffer_after_minutes: Number(s.buffer_after_minutes) || 0,
+    max_concurrent: Number(s.max_concurrent) || 1,
+  }));
+  return { ok: true, services };
 };
