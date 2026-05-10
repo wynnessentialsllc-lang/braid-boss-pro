@@ -14,6 +14,7 @@ export type AppointmentLike = {
   time?: string;            // HH:mm
   status?: string;
   kind?: string;            // "appointment" | "personal" | "blocked"
+  paymentStatus?: string | null;
   totalPrice?: number | string;
   depositPaid?: number | string;
   discountAmount?: number | string;
@@ -83,7 +84,39 @@ export type DashboardRevenue = {
   pendingBalance: number;
   weekAppointmentCount: number;
   averageTicket30d: number;
+  // Phase 1.x — added so the Home KPI grid can fill its empty cells.
+  // monthExpected: every non-cancelled / non-no-show appointment in
+  // the calendar month at its full ticket value (paid or not). It's
+  // the studio's *projected* revenue for the month.
+  // yearMade: only completed/paid appointments in the calendar year.
+  // Counted at ticketTotal (post-discount), never deposit + balance
+  // separately, so a paid booking can't double-count.
+  monthExpected: number;
+  yearMade: number;
 };
+
+// Filter helpers for the new month/year aggregates.
+const monthBoundary = (iso: string): { start: string; end: string } => {
+  const d = new Date(iso + "T00:00:00");
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const start = localDateISO(new Date(y, m, 1));
+  // First day of the next month — comparison uses < end, so this
+  // covers every day of the current month inclusively.
+  const end = localDateISO(new Date(y, m + 1, 1));
+  return { start, end };
+};
+
+const yearBoundary = (iso: string): { start: string; end: string } => {
+  const d = new Date(iso + "T00:00:00");
+  const y = d.getFullYear();
+  const start = localDateISO(new Date(y, 0, 1));
+  const end = localDateISO(new Date(y + 1, 0, 1));
+  return { start, end };
+};
+
+const isPaidish = (a: AppointmentLike): boolean =>
+  a?.status === "completed" || a?.paymentStatus === "paid";
 
 export const computeDashboardRevenue = (
   appointments: AppointmentLike[] | null | undefined,
@@ -101,6 +134,11 @@ export const computeDashboardRevenue = (
   let weekAppointmentCount = 0;
   let last30Total = 0;
   let last30Count = 0;
+  let monthExpected = 0;
+  let yearMade = 0;
+
+  const month = monthBoundary(today);
+  const year = yearBoundary(today);
 
   for (const a of list) {
     const d = a.date || "";
@@ -117,6 +155,14 @@ export const computeDashboardRevenue = (
       last30Count += 1;
     }
     pendingBalance += ticketBalance(a);
+    // Month Expected — every non-cancelled / non-no-show booking in
+    // the current calendar month, paid or not. isBillable() already
+    // excludes cancelled and no_show (and personal/blocked kinds).
+    if (d >= month.start && d < month.end) monthExpected += t;
+    // Year Made — only completed or paid bookings in the current
+    // calendar year. ticketTotal (not deposit + balance) so paid
+    // bookings can't double-count.
+    if (d >= year.start && d < year.end && isPaidish(a)) yearMade += t;
   }
 
   const averageTicket30d = last30Count > 0 ? last30Total / last30Count : 0;
@@ -128,6 +174,8 @@ export const computeDashboardRevenue = (
     pendingBalance: round2(pendingBalance),
     weekAppointmentCount,
     averageTicket30d: round2(averageTicket30d),
+    monthExpected: round2(monthExpected),
+    yearMade: round2(yearMade),
   };
 };
 
