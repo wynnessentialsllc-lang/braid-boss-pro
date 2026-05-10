@@ -112,6 +112,27 @@ import {
   ticketTotal as reportTicketTotal,
 } from "./lib/reports";
 import {
+  type BookingPolicy,
+  type BookingPolicyInput,
+  EMPTY_POLICY,
+  POLICY_PRESETS,
+  useBookingPolicy,
+} from "./lib/policies";
+import {
+  type AvailabilityRule,
+  type AvailabilityRuleInput,
+  type AvailabilityException,
+  type AvailabilityExceptionInput,
+  type AvailabilityExceptionKind,
+  type DayAvailability,
+  DEFAULT_WEEKLY_RULES,
+  WEEKDAY_LABELS,
+  WEEKDAY_SHORT,
+  computeDayAvailability,
+  dayCapacityMinutes,
+  useAvailability,
+} from "./lib/availability";
+import {
   downloadJson,
   downloadPdfBlob,
 } from "./lib/native-download";
@@ -3303,7 +3324,7 @@ const TIMELINE_START_HOUR = 6;
 const TIMELINE_END_HOUR = 21;
 const HOUR_PX = 60;
 
-const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, openCommunication, openReceipt, openQuickClient }: { store: any; prefillNewAppt: any; clearApptPrefill: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void; openReceipt?: (rcp: ReceiptRecord) => void; openQuickClient?: () => void }) => {
+const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, openCommunication, openReceipt, openQuickClient, openAvailability }: { store: any; prefillNewAppt: any; clearApptPrefill: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void; openReceipt?: (rcp: ReceiptRecord) => void; openQuickClient?: () => void; openAvailability?: (focus?: "exception" | "weekly") => void }) => {
   const { appointments, business, recurringSeries } = store;
   const [editing, setEditing] = useState<EntityRecord | null>(null);
   const [prefs, setPrefs] = useCalendarPrefs();
@@ -3350,9 +3371,25 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
       .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
   }, [appointments, selectedDate, prefs.showCanceled]);
 
+  // Phase 2 — read the day's availability snapshot if the user has
+  // configured weekly hours / exceptions. computeDayStatus uses it
+  // for "Off" / "Limited" / capacity-aware "Fully booked".
+  const availabilityRules = (store.availabilityApi?.rules as AvailabilityRule[]) || [];
+  const availabilityExceptions = (store.availabilityApi?.exceptions as AvailabilityException[]) || [];
+  const dayAvailability = useMemo(
+    () => computeDayAvailability(selectedDate, availabilityRules, availabilityExceptions),
+    [selectedDate, availabilityRules, availabilityExceptions],
+  );
   const dayStatus = useMemo(
-    () => computeDayStatus(apptsForSelectedDay),
-    [apptsForSelectedDay],
+    () => computeDayStatus(apptsForSelectedDay, {
+      availability: {
+        open: dayAvailability.open,
+        capacityMinutes: dayCapacityMinutes(dayAvailability),
+        label: dayAvailability.label,
+        kind: dayAvailability.kind,
+      },
+    }),
+    [apptsForSelectedDay, dayAvailability],
   );
 
   // Income view aggregations are scoped to the selected day. Personal
@@ -3646,6 +3683,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
         prefs={prefs}
         setPrefs={setPrefs}
         onClose={() => setShowSettings(false)}
+        onOpenAvailability={openAvailability}
       />
 
       <DatePickerSheet
@@ -4311,12 +4349,13 @@ const DatePickerSheet = ({
 };
 
 const CalendarSettingsSheet = ({
-  open, prefs, setPrefs, onClose,
+  open, prefs, setPrefs, onClose, onOpenAvailability,
 }: {
   open: boolean;
   prefs: CalendarPrefs;
   setPrefs: (next: Partial<CalendarPrefs>) => void;
   onClose: () => void;
+  onOpenAvailability?: (focus?: "exception" | "weekly") => void;
 }) => {
   return (
     <Sheet open={open} onClose={onClose} title="Calendar">
@@ -4325,13 +4364,29 @@ const CalendarSettingsSheet = ({
           <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
             Booking availability
           </p>
-          <Card className="p-4 opacity-60" style={{ pointerEvents: "none" }}>
-            <p className="text-sm font-semibold" style={{ color: C.coffee }}>Make a one-time change</p>
-            <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>Coming soon</p>
+          <Card
+            className="p-4 active:scale-[0.99] cursor-pointer"
+            onClick={() => { onClose(); onOpenAvailability?.("exception"); }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold" style={{ color: C.espresso }}>Make a one-time change</p>
+                <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>Block a date · custom hours · vacation</p>
+              </div>
+              <ChevronRight size={16} style={{ color: C.muted }} />
+            </div>
           </Card>
-          <Card className="p-4 mt-2 opacity-60" style={{ pointerEvents: "none" }}>
-            <p className="text-sm font-semibold" style={{ color: C.coffee }}>Edit repeating schedule</p>
-            <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>Coming soon</p>
+          <Card
+            className="p-4 mt-2 active:scale-[0.99] cursor-pointer"
+            onClick={() => { onClose(); onOpenAvailability?.("weekly"); }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold" style={{ color: C.espresso }}>Edit repeating schedule</p>
+                <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>Weekly hours · breaks · off days</p>
+              </div>
+              <ChevronRight size={16} style={{ color: C.muted }} />
+            </div>
           </Card>
         </div>
 
@@ -4448,6 +4503,54 @@ const RECURRENCE_OPTIONS = [
   { value: "custom", label: "Custom" },
 ];
 
+// ---- Service picker (Phase 2) ----------------------------------------
+// Shown above the Style/Service field on appointment forms. Picking a
+// service prefills empty/zero fields only; "Replace with service
+// defaults" overwrites everything catalog-driven for users who want
+// the full reset behavior.
+const ServicePicker = ({
+  services, value, onPick,
+}: {
+  services: Service[];
+  value: string | null;
+  onPick: (svc: Service | null, mode: "fill" | "replace") => void;
+}) => {
+  const active = services.filter(s => s.is_active);
+  const selected = value ? services.find(s => s.id === value) : null;
+  // Surface inactive selected service so the user can keep / unbind.
+  const opts = [
+    { value: "", label: active.length === 0 ? "No services in catalog" : "— Pick a service —" },
+    ...active.map(s => ({ value: s.id, label: `${s.name} · ${s.duration_hours}h` })),
+  ];
+  if (selected && !active.find(s => s.id === selected.id)) {
+    opts.push({ value: selected.id, label: `${selected.name} · ${selected.duration_hours}h (inactive)` });
+  }
+  return (
+    <Field label="Service" hint={active.length === 0 ? "Add services in Settings → Services & styles." : "Picks fill empty fields; manual edits stay."}>
+      <Select
+        value={value || ""}
+        onChange={e => {
+          const v = e.target.value;
+          if (!v) { onPick(null, "fill"); return; }
+          const svc = services.find(s => s.id === v) || null;
+          onPick(svc, "fill");
+        }}
+        options={opts}
+      />
+      {selected && (
+        <button
+          type="button"
+          onClick={() => onPick(selected, "replace")}
+          className="text-[11px] font-semibold mt-1.5 px-1 py-0.5 active:scale-[0.98] transition"
+          style={{ color: C.goldDeep, background: "transparent", border: 0 }}
+        >
+          Replace with service defaults
+        </button>
+      )}
+    </Field>
+  );
+};
+
 const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCommunication, openReceipt }: { open: any; appt: any; store: any; onClose: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void; openReceipt?: (rcp: ReceiptRecord) => void }) => {
   const {
     upsertAppointment, deleteAppointment, clients, upsertClient, business,
@@ -4494,6 +4597,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         discountId: appt?.discountId ?? appt?.discount_id ?? null,
         discountName: appt?.discountName ?? appt?.discount_name ?? null,
         discountAmount: sanitizeMoneyInput(appt?.discountAmount ?? appt?.discount_amount ?? 0),
+        // Phase 2: track which service catalog row this appointment
+        // came from. Snapshot only — used for picker highlight + the
+        // "Replace with service defaults" affordance.
+        serviceId: appt?.serviceId ?? appt?.service_id ?? null,
         // Calendar item kind. Default 'appointment' so existing rows
         // keep their pre-migration semantics. Personal events / blocked
         // time hide the client + payment sections in the form.
@@ -4531,6 +4638,35 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       || allDiscounts.find(d => d.id === form.discountId)
       || null;
   }, [form.discountId, availableDiscounts, allDiscounts]);
+
+  // Phase 2 — apply a service to the form. mode = "fill" only writes
+  // empty/zero fields (default behavior so the user's manual edits
+  // are never silently overwritten); mode = "replace" overwrites
+  // every catalog-driven field. Service id is stored either way as a
+  // soft snapshot.
+  const applyServiceToForm = (svc: Service | null, mode: "fill" | "replace") => {
+    if (!svc) {
+      setForm({ ...form, serviceId: null });
+      return;
+    }
+    const overwriteEmpty = (current: any, next: any) =>
+      mode === "replace" ? next : (current && current !== "" && current !== 0 ? current : next);
+    const dur = Number(svc.duration_hours) || 0;
+    setForm(prev => ({
+      ...prev,
+      serviceId: svc.id,
+      style: overwriteEmpty(prev.style, svc.name),
+      durationHours: overwriteEmpty(Number(prev.durationHours) || 0, dur) || prev.durationHours,
+      totalPrice: overwriteEmpty(Number(prev.totalPrice) || 0, svc.base_price) || prev.totalPrice,
+      depositPaid: prev.depositPaid, // never auto-pay on the user's behalf
+      // Surface deposit_amount in the notes/prep area only — the
+      // appointment's own depositPaid field reflects what the
+      // STYLIST has actually collected, not the required amount.
+      notes: mode === "replace" || !prev.notes
+        ? (svc.prep_instructions ? `${svc.prep_instructions}${prev.notes ? `\n\n${prev.notes}` : ""}` : prev.notes)
+        : prev.notes,
+    }));
+  };
 
   const handleDiscountChange = (id: string) => {
     if (!id) {
@@ -4833,6 +4969,14 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             <Field label="Phone" hint="for SMS"><Input type="tel" value={form.clientPhone} onChange={e => setForm({ ...form, clientPhone: e.target.value })} placeholder="555-0123" /></Field>
             <Field label="Email" hint="for email"><Input type="email" value={form.clientEmail} onChange={e => setForm({ ...form, clientEmail: e.target.value })} placeholder="name@email.com" /></Field>
           </div>
+        )}
+
+        {isAppointment && (
+          <ServicePicker
+            services={(store.servicesApi?.services as Service[]) || []}
+            value={form.serviceId || null}
+            onPick={(svc, mode) => applyServiceToForm(svc, mode)}
+          />
         )}
 
         {isAppointment && (
@@ -7625,7 +7769,7 @@ const PolicySheet = ({ policy, isNew, onClose, onSave }) => {
 // ============================================================
 //  SETTINGS (V1 extended with Reminders link)
 // ============================================================
-const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void }) => {
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
@@ -7787,6 +7931,52 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Reports</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Revenue · top styles · repeat clients</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+
+            {(openPolicies || openAvailability) && <SectionTitle>Booking</SectionTitle>}
+            {openPolicies && (
+              <Card className="p-4 active:scale-[0.99]" onClick={openPolicies}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <ScrollText size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Booking policies</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>Deposit · cancellation · prep · more</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openAvailability && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openAvailability}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.gold, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <Clock size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Availability</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>Weekly hours · time off · one-time changes</p>
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
@@ -10862,6 +11052,435 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
   );
 };
 
+// ============================================================
+//  BOOKING POLICIES (Phase 2)
+// ============================================================
+const POLICY_FIELDS: {
+  key: keyof BookingPolicyInput;
+  label: string;
+  hint: string;
+  presets?: readonly string[];
+  rows?: number;
+  numeric?: boolean;
+}[] = [
+  { key: "deposit_policy",          label: "Deposit policy",          hint: "How much, when, and what it covers.", presets: POLICY_PRESETS.deposit_policy, rows: 3 },
+  { key: "cancellation_window_hours", label: "Cancellation window",   hint: "Hours before the appointment a cancel is still on time.", numeric: true },
+  { key: "cancellation_policy",     label: "Cancellation policy",     hint: "What happens after the window.", presets: POLICY_PRESETS.cancellation_policy, rows: 3 },
+  { key: "late_arrival_policy",     label: "Late arrival policy",     hint: "Grace period and consequences.", presets: POLICY_PRESETS.late_arrival_policy, rows: 3 },
+  { key: "no_show_policy",          label: "No-show policy",          hint: "What happens when a client misses without notice.", presets: POLICY_PRESETS.no_show_policy, rows: 3 },
+  { key: "hair_prep_instructions",  label: "Hair prep instructions",  hint: "What clients should do before arriving.", presets: POLICY_PRESETS.hair_prep_instructions, rows: 3 },
+  { key: "guests_policy",           label: "Children & guests",       hint: "Who can join in the studio.", presets: POLICY_PRESETS.guests_policy, rows: 3 },
+  { key: "reschedule_policy",       label: "Reschedule policy",       hint: "Free rescheduling rules.", presets: POLICY_PRESETS.reschedule_policy, rows: 3 },
+  { key: "custom_notes",            label: "Custom notes",            hint: "Anything else clients should know.", rows: 3 },
+];
+
+const BookingPoliciesScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const api = store.policiesApi;
+  const policy: BookingPolicy | null = api?.policy || null;
+  const [draft, setDraft] = useState<BookingPolicyInput>(EMPTY_POLICY);
+  const [busy, setBusy] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  useEffect(() => {
+    if (policy) {
+      setDraft({
+        deposit_policy: policy.deposit_policy,
+        cancellation_window_hours: policy.cancellation_window_hours,
+        cancellation_policy: policy.cancellation_policy,
+        late_arrival_policy: policy.late_arrival_policy,
+        no_show_policy: policy.no_show_policy,
+        hair_prep_instructions: policy.hair_prep_instructions,
+        guests_policy: policy.guests_policy,
+        reschedule_policy: policy.reschedule_policy,
+        custom_notes: policy.custom_notes,
+      });
+    }
+  }, [policy?.updated_at, policy?.user_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSave = async () => {
+    if (busy) return;
+    setBusy(true);
+    const saved = await api.save(draft);
+    setBusy(false);
+    if (saved) {
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1800);
+    }
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Booking policies"
+        subtitle="What clients agree to when they book"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-4">
+        {api?.error && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{api.error}</p>
+          </Card>
+        )}
+        {api?.loading && !policy && (
+          <Card className="p-4">
+            <p className="text-[12px]" style={{ color: C.muted }}>Loading policies…</p>
+          </Card>
+        )}
+
+        {POLICY_FIELDS.map(f => (
+          <Card key={f.key} className="p-4 space-y-2">
+            <div>
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>{f.label}</p>
+              <p className="text-[11px]" style={{ color: C.muted }}>{f.hint}</p>
+            </div>
+            {f.numeric ? (
+              <Input
+                type="number"
+                inputMode="numeric"
+                value={(draft[f.key] as number | null) ?? ""}
+                onChange={e => {
+                  const v = e.target.value;
+                  setDraft({ ...draft, [f.key]: v === "" ? null : Number(v) } as BookingPolicyInput);
+                }}
+                placeholder="e.g. 24"
+              />
+            ) : (
+              <Textarea
+                value={(draft[f.key] as string | null) || ""}
+                onChange={e => setDraft({ ...draft, [f.key]: e.target.value } as BookingPolicyInput)}
+                rows={f.rows || 2}
+                placeholder="Optional"
+              />
+            )}
+            {f.presets && f.presets.length > 0 && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {f.presets.map(p => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setDraft({ ...draft, [f.key]: p } as BookingPolicyInput)}
+                    className="px-3 py-1.5 rounded-full text-[11px] font-semibold active:scale-[0.97] transition text-left"
+                    style={{
+                      background: C.ivory, color: C.coffee,
+                      border: `1px solid ${C.hairline}`,
+                      maxWidth: "100%",
+                    }}
+                  >
+                    Use: {p.length > 60 ? `${p.slice(0, 57)}…` : p}
+                  </button>
+                ))}
+              </div>
+            )}
+          </Card>
+        ))}
+
+        <div className="grid grid-cols-1 gap-2 pt-2">
+          <Button variant="primary" icon={savedFlash ? <Check size={16} /> : <Save size={16} />} onClick={handleSave} fullWidth>
+            {busy ? "Saving…" : savedFlash ? "Saved" : "Save policies"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
+//  AVAILABILITY (Phase 2)
+// ============================================================
+const AvailabilityScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const api = store.availabilityApi;
+  const rules: AvailabilityRule[] = api?.rules || [];
+  const exceptions: AvailabilityException[] = api?.exceptions || [];
+  const [editingRule, setEditingRule] = useState<AvailabilityRuleInput | null>(null);
+  const [editingException, setEditingException] = useState<(AvailabilityExceptionInput & { id?: string }) | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Build a row per weekday merging existing rules + defaults so the
+  // display shows all 7 days even if the user has only configured some.
+  const merged: AvailabilityRule[] = useMemo(() => {
+    const byDay = new Map(rules.map(r => [r.weekday, r]));
+    return Array.from({ length: 7 }, (_, weekday) => {
+      const r = byDay.get(weekday);
+      if (r) return r;
+      const def = DEFAULT_WEEKLY_RULES.find(d => d.weekday === weekday)!;
+      return { id: `unsaved-${weekday}`, user_id: "", ...def };
+    });
+  }, [rules]);
+
+  const handleSeed = async () => {
+    if (busy) return;
+    setBusy(true);
+    await api.seedDefaults();
+    setBusy(false);
+  };
+
+  const handleEditRule = (r: AvailabilityRule) => {
+    setEditingRule({
+      weekday: r.weekday,
+      start_time: r.start_time,
+      end_time: r.end_time,
+      break_start: r.break_start,
+      break_end: r.break_end,
+      is_open: r.is_open,
+    });
+  };
+
+  const handleSaveRule = async () => {
+    if (!editingRule || busy) return;
+    setBusy(true);
+    await api.upsertRule(editingRule);
+    setBusy(false);
+    setEditingRule(null);
+  };
+
+  const openNewException = (kind: AvailabilityExceptionKind) => {
+    const today = todayISO();
+    setEditingException({
+      kind,
+      start_date: today,
+      end_date: today,
+      start_time: kind === "off" ? null : "09:00",
+      end_time: kind === "off" ? null : "13:00",
+      note: "",
+    });
+  };
+
+  const handleSaveException = async () => {
+    if (!editingException || busy) return;
+    setBusy(true);
+    const saved = await api.upsertException(editingException);
+    setBusy(false);
+    if (saved) setEditingException(null);
+  };
+
+  const handleRemoveException = async (id: string) => {
+    if (!window.confirm("Remove this exception?")) return;
+    setBusy(true);
+    await api.removeException(id);
+    setBusy(false);
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Availability"
+        subtitle="Weekly hours · time off · one-time changes"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-5">
+        {api?.error && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{api.error}</p>
+          </Card>
+        )}
+
+        {/* WEEKLY HOURS */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <SectionTitle>Weekly hours</SectionTitle>
+            {rules.length === 0 && (
+              <button
+                type="button"
+                onClick={handleSeed}
+                className="text-[11px] font-semibold px-2 py-1"
+                style={{ color: C.goldDeep, background: "transparent", border: 0 }}
+              >
+                Seed defaults
+              </button>
+            )}
+          </div>
+          <Card className="p-2">
+            {merged.map((r, i) => {
+              const isUnsaved = r.id.startsWith("unsaved-");
+              return (
+                <button
+                  type="button"
+                  key={r.weekday}
+                  onClick={() => handleEditRule(r)}
+                  className="w-full text-left flex items-center justify-between px-3 py-3 active:scale-[0.99] transition"
+                  style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}`, opacity: isUnsaved ? 0.7 : 1 }}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span
+                      className="flex items-center justify-center text-[11px] font-bold"
+                      style={{
+                        width: 28, height: 28, borderRadius: 999,
+                        background: r.is_open ? C.ivory : "transparent",
+                        color: r.is_open ? C.espresso : C.muted,
+                        border: `1px solid ${r.is_open ? C.gold : C.hairline}`,
+                      }}
+                    >
+                      {WEEKDAY_SHORT[r.weekday]}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+                        {WEEKDAY_LABELS[r.weekday]}
+                      </p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        {r.is_open
+                          ? `${fmtTime(r.start_time)} – ${fmtTime(r.end_time)}${r.break_start && r.break_end ? ` · break ${fmtTime(r.break_start)}–${fmtTime(r.break_end)}` : ""}`
+                          : "Closed"}
+                        {isUnsaved ? " · default" : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={16} style={{ color: C.muted }} />
+                </button>
+              );
+            })}
+          </Card>
+        </div>
+
+        {/* EXCEPTIONS */}
+        <div>
+          <SectionTitle>One-time changes</SectionTitle>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <Button variant="outline" onClick={() => openNewException("off")}>Mark off</Button>
+            <Button variant="outline" onClick={() => openNewException("custom")}>Custom hours</Button>
+            <Button variant="outline" onClick={() => openNewException("blocked")}>Block time</Button>
+          </div>
+          {exceptions.length === 0 ? (
+            <Card className="p-4 text-center">
+              <p className="text-[12px]" style={{ color: C.muted }}>
+                No upcoming changes. Use the buttons above to mark a vacation, set custom hours,
+                or block a window.
+              </p>
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {exceptions.map(e => (
+                <Card key={e.id} className="p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <Pill tone={e.kind === "off" ? "danger" : e.kind === "blocked" ? "warning" : "gold"}>
+                          {e.kind === "off" ? "Off" : e.kind === "blocked" ? "Blocked" : "Custom hours"}
+                        </Pill>
+                        <span className="text-[11px] font-semibold" style={{ color: C.coffee }}>
+                          {e.start_date === e.end_date ? fmtDate(e.start_date) : `${fmtDate(e.start_date)} → ${fmtDate(e.end_date)}`}
+                        </span>
+                      </div>
+                      {e.start_time && e.end_time && (
+                        <p className="text-[11px]" style={{ color: C.muted }}>
+                          {fmtTime(e.start_time)} – {fmtTime(e.end_time)}
+                        </p>
+                      )}
+                      {e.note && (
+                        <p className="text-[12px] mt-1" style={{ color: C.coffee }}>
+                          {e.note}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveException(e.id)}
+                      className="p-2 rounded-lg shrink-0"
+                      style={{ color: C.danger }}
+                      aria-label="Remove exception"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* WEEKLY RULE SHEET */}
+      <Sheet
+        open={!!editingRule}
+        onClose={() => setEditingRule(null)}
+        title={editingRule ? `Edit ${WEEKDAY_LABELS[editingRule.weekday]}` : "Edit"}
+      >
+        {editingRule && (
+          <div className="space-y-3 pb-2">
+            <Card className="p-3.5 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold" style={{ color: C.espresso }}>Open this day</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>Off days hide from booking surfaces.</p>
+              </div>
+              <Toggle
+                checked={!!editingRule.is_open}
+                onChange={v => setEditingRule({ ...editingRule, is_open: v })}
+              />
+            </Card>
+            {editingRule.is_open && (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Open">
+                    <Input type="time" value={editingRule.start_time} onChange={e => setEditingRule({ ...editingRule, start_time: e.target.value })} />
+                  </Field>
+                  <Field label="Close">
+                    <Input type="time" value={editingRule.end_time} onChange={e => setEditingRule({ ...editingRule, end_time: e.target.value })} />
+                  </Field>
+                </div>
+                <SectionTitle>Lunch / break</SectionTitle>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Break start">
+                    <Input type="time" value={editingRule.break_start || ""} onChange={e => setEditingRule({ ...editingRule, break_start: e.target.value || null })} />
+                  </Field>
+                  <Field label="Break end">
+                    <Input type="time" value={editingRule.break_end || ""} onChange={e => setEditingRule({ ...editingRule, break_end: e.target.value || null })} />
+                  </Field>
+                </div>
+              </>
+            )}
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <Button variant="outline" onClick={() => setEditingRule(null)}>Cancel</Button>
+              <Button variant="primary" onClick={handleSaveRule}>{busy ? "Saving…" : "Save"}</Button>
+            </div>
+          </div>
+        )}
+      </Sheet>
+
+      {/* EXCEPTION SHEET */}
+      <Sheet
+        open={!!editingException}
+        onClose={() => setEditingException(null)}
+        title={editingException
+          ? (editingException.kind === "off" ? "Mark off" : editingException.kind === "blocked" ? "Block time" : "Custom hours")
+          : ""}
+      >
+        {editingException && (
+          <div className="space-y-3 pb-2">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="From">
+                <Input type="date" value={editingException.start_date} onChange={e => setEditingException({ ...editingException, start_date: e.target.value })} />
+              </Field>
+              <Field label="To">
+                <Input type="date" value={editingException.end_date} onChange={e => setEditingException({ ...editingException, end_date: e.target.value })} />
+              </Field>
+            </div>
+            {editingException.kind !== "off" && (
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Start time">
+                  <Input type="time" value={editingException.start_time || ""} onChange={e => setEditingException({ ...editingException, start_time: e.target.value })} />
+                </Field>
+                <Field label="End time">
+                  <Input type="time" value={editingException.end_time || ""} onChange={e => setEditingException({ ...editingException, end_time: e.target.value })} />
+                </Field>
+              </div>
+            )}
+            <Field label="Note" hint="Optional. Surfaces in the all-day strip.">
+              <Input
+                value={editingException.note || ""}
+                onChange={e => setEditingException({ ...editingException, note: e.target.value })}
+                placeholder={editingException.kind === "off" ? "Vacation · holiday · personal" : "Doctor's appointment, lunch with mom, …"}
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <Button variant="outline" onClick={() => setEditingException(null)}>Cancel</Button>
+              <Button variant="primary" onClick={handleSaveException}>{busy ? "Saving…" : "Save"}</Button>
+            </div>
+          </div>
+        )}
+      </Sheet>
+    </div>
+  );
+};
+
 const DiscountsScreen = ({
   store, onBack,
 }: {
@@ -11304,6 +11923,8 @@ export default function App() {
   const { premium } = usePremiumStatus(auth.userId);
   const discountsApi = useDiscounts(auth.userId);
   const servicesApi = useServices(auth.userId);
+  const policiesApi = useBookingPolicy(auth.userId);
+  const availabilityApi = useAvailability(auth.userId);
   const [upgradeFor, setUpgradeFor] = useState<GatedFeature | null>(null);
   const requestUpgrade = useCallback((feature: GatedFeature) => {
     setUpgradeFor(feature);
@@ -11333,6 +11954,8 @@ export default function App() {
       requestUpgrade,
       discountsApi,
       servicesApi,
+      policiesApi,
+      availabilityApi,
       upsertClient: gateNew("clients", rawStore.clients, rawStore.upsertClient),
       // Personal events and blocked time live in the same table but
       // aren't bookings, so they (a) don't count toward the appointment
@@ -11354,7 +11977,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, premium, requestUpgrade, discountsApi, servicesApi]);
+  }, [rawStore, premium, requestUpgrade, discountsApi, servicesApi, policiesApi, availabilityApi]);
 
   const sync = useCloudSync(auth.userId, store);
 
@@ -11618,7 +12241,8 @@ export default function App() {
               openTimerForAppt={openTimerForAppt}
               openCommunication={openCommunication}
               openReceipt={openReceipt}
-              openQuickClient={openQuickClient} />
+              openQuickClient={openQuickClient}
+              openAvailability={() => setSecondary("availability")} />
           )}
           {active === "clients" && (
             <Clients store={store} openCommunication={openCommunication} openQuickAppt={openQuickAppt} savePhoto={handleSavePhoto} deletePhoto={handleDeletePhoto} />
@@ -11642,7 +12266,9 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} />}
+      {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "services" && <ServicesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "reports" && <ReportsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "discounts" && <DiscountsScreen store={store} onBack={() => setSecondary("settings")} />}
