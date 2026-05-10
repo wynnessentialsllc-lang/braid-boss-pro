@@ -5,13 +5,17 @@
 -- =====================================================================
 -- waitlist_requests — provenance + lifecycle fields
 -- =====================================================================
+-- converted_appointment_id is `text` (not uuid + FK) because
+-- appointments.id is stamped by the app as text (`appt_<uid>`), not
+-- a uuid. We keep this column unenforced so the link is informational
+-- only — deleting an appointment doesn't auto-null this row, but it
+-- also can't fail with 42830 on a missing unique constraint.
 alter table public.waitlist_requests
   add column if not exists source text default 'public_waitlist'
     check (source is null or source in ('public_waitlist','manual','imported','referral')),
   add column if not exists tags jsonb not null default '[]'::jsonb,
   add column if not exists contacted_at timestamptz,
-  add column if not exists converted_appointment_id uuid
-    references public.appointments(id) on delete set null,
+  add column if not exists converted_appointment_id text,
   add column if not exists timezone text,
   add column if not exists locale text,
   add column if not exists created_from_public boolean not null default false;
