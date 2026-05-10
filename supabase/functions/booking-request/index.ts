@@ -72,18 +72,66 @@ serve(async (req) => {
   if (linkErr) return json(500, { error: "server error" });
   if (!link || !link.active) return json(404, { error: "booking link not found" });
 
+  // Snapshot the service catalog row so subsequent owner edits don't
+  // rewrite history. Phase B1 consolidation migration populated the
+  // canonical snapshot columns on booking_requests; new writes must
+  // follow the same shape so we don't drift again.
+  const serviceIdRaw = cleanString(payload.serviceId, 64);
+  const isUuid = serviceIdRaw && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(serviceIdRaw);
+  let snapshot: {
+    service_id: string | null;
+    service_name: string | null;
+    service_duration: number | null;
+    service_duration_hours: number | null;
+    service_price: number | null;
+    service_deposit_required: boolean | null;
+    service_deposit_amount: number | null;
+    service_prep_instructions: string | null;
+  } = {
+    service_id: null,
+    service_name: cleanString(payload.serviceName, 200),
+    service_duration: cleanNumber(payload.serviceDuration),
+    service_duration_hours: cleanNumber(payload.serviceDuration),
+    service_price: cleanNumber(payload.servicePrice),
+    service_deposit_required: null,
+    service_deposit_amount: null,
+    service_prep_instructions: null,
+  };
+
+  if (isUuid) {
+    const { data: svc } = await supabase
+      .from("services")
+      .select("id, name, duration_hours, base_price, deposit_required, deposit_amount, prep_instructions, is_active, user_id")
+      .eq("id", serviceIdRaw)
+      .eq("user_id", link.user_id)
+      .maybeSingle();
+    if (svc && svc.is_active) {
+      snapshot = {
+        service_id: svc.id,
+        service_name: svc.name,
+        service_duration: svc.duration_hours,
+        service_duration_hours: svc.duration_hours,
+        service_price: svc.base_price,
+        service_deposit_required: svc.deposit_required,
+        service_deposit_amount: svc.deposit_amount,
+        service_prep_instructions: svc.prep_instructions,
+      };
+    }
+  }
+
   const row = {
     user_id: link.user_id,
     link_slug: slug,
     client_name: clientName,
     client_phone: clientPhone,
     client_email: clientEmail,
-    service_name: cleanString(payload.serviceName, 200),
-    service_duration: cleanNumber(payload.serviceDuration),
-    service_price: cleanNumber(payload.servicePrice),
+    ...snapshot,
     preferred_date: cleanDate(payload.preferredDate),
     preferred_time: cleanString(payload.preferredTime, 16),
     notes: cleanString(payload.notes, 4000),
+    timezone: cleanString(payload.timezone, 64),
+    locale: cleanString(payload.locale, 16),
+    created_from_public: true,
     source_user_agent: cleanString(req.headers.get("user-agent"), 256),
   };
 
