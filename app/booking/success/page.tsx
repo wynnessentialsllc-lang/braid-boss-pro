@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
+import { formatAppointmentDate } from "../../lib/utils/formatAppointmentDate";
 
 // Public confirmation page after Stripe Checkout. Polls the new
 // `public_get_booking_request_status` RPC every few seconds until it
@@ -134,8 +135,10 @@ function BookingSuccessInner() {
         <p style={{ marginTop: 12, fontSize: 12, color: C.muted }}>
           Deposit · <strong style={{ color: C.goldDeep }}>{fmtPrice(Number(status.deposit_amount))}</strong> paid
           {status.service_name ? ` for ${status.service_name}` : ""}
-          {status.preferred_date ? ` · ${status.preferred_date}` : ""}
-          {status.preferred_time ? ` · ${status.preferred_time}` : ""}
+          {(() => {
+            const when = formatAppointmentDate(status.preferred_date, status.preferred_time);
+            return when ? ` · ${when}` : "";
+          })()}
         </p>
       )}
       {status && status.approval_status === "deposit_paid_pending_approval" && (

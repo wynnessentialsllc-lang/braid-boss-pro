@@ -12,6 +12,8 @@
 // from a client component will work but the API key envs won't be
 // readable, so send() will skip every time.
 
+import { formatAppointmentDate } from "./utils/formatAppointmentDate";
+
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
 export type EmailResult =
@@ -103,10 +105,11 @@ export const buildApprovalEmail = (args: {
   const dep = args.depositAmount && args.depositAmount > 0
     ? `<p style="font-size:14px;line-height:22px;">Your deposit is <strong>$${args.depositAmount.toFixed(2)}</strong>. Once it lands, your appointment is locked in.</p>`
     : "";
+  const whenLabel = formatAppointmentDate(args.preferredDate);
   const html = wrapHtml(subject, `
     <h1 style="font-size:20px;margin:0 0 12px;color:#1F140A;">You're in, ${escapeHtml(args.clientName)}.</h1>
     <p style="font-size:14px;line-height:22px;">
-      ${escapeHtml(args.studioName)} approved your${args.serviceName ? ` ${escapeHtml(args.serviceName)}` : ""} request${args.preferredDate ? ` for ${escapeHtml(args.preferredDate)}` : ""}.
+      ${escapeHtml(args.studioName)} approved your${args.serviceName ? ` ${escapeHtml(args.serviceName)}` : ""} request${whenLabel ? ` for ${escapeHtml(whenLabel)}` : ""}.
     </p>
     ${dep}
     <p style="margin:22px 0;text-align:center;">
@@ -127,7 +130,7 @@ export const buildDepositReceivedEmail = (args: {
   preferredTime?: string | null;
 }) => {
   const subject = `Deposit received — your appointment with ${args.studioName} is confirmed`;
-  const when = [args.preferredDate, args.preferredTime].filter(Boolean).join(" · ");
+  const when = formatAppointmentDate(args.preferredDate, args.preferredTime);
   const html = wrapHtml(subject, `
     <h1 style="font-size:20px;margin:0 0 12px;color:#1F140A;">You're confirmed.</h1>
     <p style="font-size:14px;line-height:22px;">
@@ -182,7 +185,7 @@ export const buildBookingConfirmationEmail = (args: {
   approvalStatus?: string | null;
   depositRequired?: boolean | null;
 }) => {
-  const when = [args.preferredDate, args.preferredTime].filter(Boolean).join(" · ");
+  const when = formatAppointmentDate(args.preferredDate, args.preferredTime);
   const isAwaitingDeposit = args.approvalStatus === "awaiting_deposit";
   const subject = `Booking request received — ${args.studioName}`;
   const nextLine = (() => {
