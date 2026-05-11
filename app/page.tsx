@@ -51,6 +51,7 @@ import {
   buildReceiptSummaryText,
 } from "./lib/receipts";
 import { renderReceiptPdf } from "./lib/pdf-render";
+import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
 import { getAuthRedirectUrl } from "./lib/site-url";
 import {
   LIFETIME_PRICE_LABEL,
@@ -13529,8 +13530,7 @@ const ApprovalQueueScreen = ({ store, onBack }: { store: any; onBack: () => void
                   <p className="text-[14px] font-semibold truncate" style={{ color: C.espresso }}>{req.client_name}</p>
                   <p className="text-[11px]" style={{ color: C.muted }}>
                     {req.service_name || "Service TBD"}
-                    {req.preferred_date ? ` · ${req.preferred_date}` : ""}
-                    {req.preferred_time ? ` · ${req.preferred_time}` : ""}
+                    {req.preferred_date ? ` · ${formatAppointmentDateShort(req.preferred_date, req.preferred_time)}` : ""}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
