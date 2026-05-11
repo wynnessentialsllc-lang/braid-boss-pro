@@ -394,6 +394,22 @@ export default function PublicBookingPage() {
       }
       if (!submittedOk) throw new Error("Couldn't send your request.");
 
+      // Phase B12 — generate booking contracts attached to this
+      // service (or any template flagged attach_to_all_bookings).
+      // Idempotent server-side; safe if no templates apply or if the
+      // legacy edge-function path created the request (newRequestId
+      // will be null in that case and we just skip).
+      if (newRequestId) {
+        try {
+          await supabase.rpc("generate_booking_contracts", {
+            booking_request_id_in: newRequestId,
+          });
+        } catch {
+          // Don't block submission if contract generation hiccups —
+          // the stylist can still resend signing links from Approvals.
+        }
+      }
+
       // Deposit-required path: kick the client straight to Stripe.
       // The success URL routes them to /booking/success which polls
       // the RPC until the webhook flips approval_status.
