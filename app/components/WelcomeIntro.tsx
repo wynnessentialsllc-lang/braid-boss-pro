@@ -16,6 +16,12 @@
 // No window / matchMedia reads during render; the
 // prefers-reduced-motion check happens inside useEffect on mount and
 // only affects animation duration / delay.
+//
+// Layout note: the page now scrolls naturally (overflowX:hidden,
+// overflowY:visible). The CTAs sit ABOVE the "Inside Braid Boss
+// Pro" preview carousel so users on smaller iPhones can reach Get
+// Started without scrolling; the preview is a "learn more" reward
+// beneath.
 
 import { useEffect, useState } from "react";
 import {
@@ -25,6 +31,7 @@ import {
   TrendingUp,
   ArrowRight,
   Sparkles,
+  DollarSign,
 } from "lucide-react";
 
 // Palette mirrors the project's C tokens (app/page.tsx:231).
@@ -36,14 +43,21 @@ const P = {
   coffee: "#4A2C1A",
   gold: "#C9A961",
   goldDeep: "#A8893F",
+  goldSoft: "#F5E9C8",
   muted: "#8B7355",
+  mutedSoft: "#B8A586",
   hairline: "rgba(74, 44, 26, 0.12)",
+  hairlineSoft: "rgba(74, 44, 26, 0.06)",
+  success: "#5C7C4A",
+  successSoft: "rgba(92, 124, 74, 0.12)",
 } as const;
 
 const FONT_DISPLAY =
   "'Cormorant Garamond', 'Playfair Display', Georgia, serif";
 const FONT_BODY =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+const FONT_MONO =
+  "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
 type Feature = {
   icon: React.ReactNode;
@@ -80,17 +94,588 @@ export type WelcomeIntroProps = {
   onSkip?: () => void;
 };
 
+// =====================================================================
+// Preview-card subcomponents
+// =====================================================================
+// Each one renders an "inside the app" thumbnail — realistic mock
+// data, real layout primitives, no images. They share a common
+// frame via PreviewFrame so a future fifth card slots in cleanly.
+
+const PreviewFrame = ({
+  label,
+  children,
+  delaySec,
+  reduced,
+}: {
+  label: string;
+  children: React.ReactNode;
+  delaySec: number;
+  reduced: boolean;
+}) => (
+  <div
+    style={{
+      // Mobile-first card size — fits comfortably with one neighbor
+      // peeking on a 390px-wide iPhone.
+      flex: "0 0 280px",
+      scrollSnapAlign: "center",
+      borderRadius: 22,
+      background: P.paper,
+      border: `1px solid ${P.hairline}`,
+      boxShadow:
+        "0 18px 38px -22px rgba(42,24,16,0.28), 0 2px 4px rgba(42,24,16,0.04)",
+      overflow: "hidden",
+      animation: reduced
+        ? "none"
+        : `bbp-card-float 7.5s ease-in-out ${delaySec}s infinite`,
+      willChange: "transform",
+    }}
+  >
+    {/* Tiny status-strip evokes a real screen header without faking a
+        Dynamic Island. Three dots + label. */}
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "10px 14px",
+        borderBottom: `1px solid ${P.hairlineSoft}`,
+        background: P.cream,
+      }}
+    >
+      <span
+        style={{
+          width: 5,
+          height: 5,
+          borderRadius: 99,
+          background: P.gold,
+          display: "inline-block",
+        }}
+      />
+      <span
+        style={{
+          width: 5,
+          height: 5,
+          borderRadius: 99,
+          background: P.mutedSoft,
+          display: "inline-block",
+        }}
+      />
+      <span
+        style={{
+          width: 5,
+          height: 5,
+          borderRadius: 99,
+          background: P.mutedSoft,
+          display: "inline-block",
+        }}
+      />
+      <span
+        style={{
+          marginLeft: 6,
+          fontSize: 10,
+          letterSpacing: "0.16em",
+          textTransform: "uppercase",
+          color: P.muted,
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </span>
+    </div>
+    <div style={{ padding: 16 }}>{children}</div>
+  </div>
+);
+
+const PreviewPricing = () => (
+  <>
+    <p
+      style={{
+        margin: 0,
+        fontFamily: FONT_DISPLAY,
+        fontSize: 20,
+        fontWeight: 600,
+        color: P.espresso,
+        lineHeight: 1.15,
+      }}
+    >
+      Knotless braids
+    </p>
+    <p
+      style={{
+        margin: "2px 0 14px",
+        fontSize: 11,
+        color: P.muted,
+        letterSpacing: "0.04em",
+      }}
+    >
+      Medium · waist length
+    </p>
+
+    {[
+      ["Base", "$220.00"],
+      ["Hair", "$45.00"],
+      ["Add-ons · edges, wash", "$30.00"],
+    ].map(([k, v]) => (
+      <div
+        key={k}
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          padding: "5px 0",
+          fontSize: 12,
+          color: P.coffee,
+        }}
+      >
+        <span>{k}</span>
+        <span style={{ fontFamily: FONT_MONO, color: P.espresso }}>{v}</span>
+      </div>
+    ))}
+
+    <div
+      style={{
+        marginTop: 10,
+        paddingTop: 10,
+        borderTop: `1px solid ${P.hairline}`,
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+      }}
+    >
+      <span
+        style={{ fontSize: 11, color: P.muted, letterSpacing: "0.06em", textTransform: "uppercase" }}
+      >
+        Total
+      </span>
+      <span
+        style={{
+          fontFamily: FONT_DISPLAY,
+          fontSize: 26,
+          fontWeight: 600,
+          color: P.goldDeep,
+        }}
+      >
+        $295.00
+      </span>
+    </div>
+
+    <div
+      style={{
+        marginTop: 12,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "5px 10px",
+        borderRadius: 99,
+        background: P.successSoft,
+        color: P.success,
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: "0.05em",
+      }}
+    >
+      <DollarSign size={11} /> Deposit collected · $50
+    </div>
+  </>
+);
+
+const Pill = ({
+  tone,
+  children,
+}: {
+  tone: "gold" | "success" | "neutral";
+  children: React.ReactNode;
+}) => {
+  const colors =
+    tone === "gold"
+      ? { bg: P.goldSoft, fg: P.goldDeep }
+      : tone === "success"
+      ? { bg: P.successSoft, fg: P.success }
+      : { bg: "rgba(74,44,26,0.06)", fg: P.coffee };
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: 99,
+        background: colors.bg,
+        color: colors.fg,
+        fontSize: 9.5,
+        fontWeight: 700,
+        letterSpacing: "0.05em",
+        textTransform: "uppercase",
+      }}
+    >
+      {children}
+    </span>
+  );
+};
+
+const APPTS: Array<{
+  time: string;
+  name: string;
+  service: string;
+  status: "gold" | "success" | "neutral";
+  statusLabel: string;
+}> = [
+  { time: "9:00 AM", name: "Amara", service: "Knotless braids", status: "gold", statusLabel: "Deposit paid" },
+  { time: "12:30 PM", name: "Jasmine", service: "Box braids", status: "success", statusLabel: "Confirmed" },
+  { time: "4:00 PM", name: "Tia", service: "Cornrows", status: "neutral", statusLabel: "Pending" },
+];
+
+const PreviewAppointments = () => (
+  <>
+    <p
+      style={{
+        margin: 0,
+        fontFamily: FONT_DISPLAY,
+        fontSize: 20,
+        fontWeight: 600,
+        color: P.espresso,
+        lineHeight: 1.15,
+      }}
+    >
+      Tuesday
+    </p>
+    <p
+      style={{
+        margin: "2px 0 14px",
+        fontSize: 11,
+        color: P.muted,
+        letterSpacing: "0.04em",
+      }}
+    >
+      May 19 · 3 appointments
+    </p>
+
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {APPTS.map((a) => (
+        <div
+          key={a.time}
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+            padding: "10px 11px",
+            borderRadius: 12,
+            background: P.cream,
+            border: `1px solid ${P.hairlineSoft}`,
+          }}
+        >
+          <div style={{ flex: "0 0 56px" }}>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 11,
+                fontWeight: 700,
+                color: P.goldDeep,
+                letterSpacing: "0.03em",
+              }}
+            >
+              {a.time}
+            </p>
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: P.espresso,
+                lineHeight: 1.25,
+              }}
+            >
+              {a.name}
+            </p>
+            <p
+              style={{
+                margin: "1px 0 6px",
+                fontSize: 10.5,
+                color: P.muted,
+                lineHeight: 1.3,
+              }}
+            >
+              {a.service}
+            </p>
+            <Pill tone={a.status}>{a.statusLabel}</Pill>
+          </div>
+        </div>
+      ))}
+    </div>
+  </>
+);
+
+const PreviewClient = () => (
+  <>
+    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div
+        aria-hidden
+        style={{
+          flex: "0 0 44px",
+          width: 44,
+          height: 44,
+          borderRadius: 99,
+          background: `linear-gradient(135deg, ${P.gold} 0%, ${P.goldDeep} 100%)`,
+          color: P.cream,
+          fontWeight: 700,
+          fontSize: 15,
+          letterSpacing: "0.02em",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        AJ
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p
+          style={{
+            margin: 0,
+            fontFamily: FONT_DISPLAY,
+            fontSize: 18,
+            fontWeight: 600,
+            color: P.espresso,
+            lineHeight: 1.15,
+          }}
+        >
+          Amara Johnson
+        </p>
+        <p style={{ margin: "1px 0 0", fontSize: 11, color: P.muted }}>
+          12 visits · since 2024
+        </p>
+      </div>
+    </div>
+
+    <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
+      <Pill tone="gold">VIP</Pill>
+      <Pill tone="success">Repeat client</Pill>
+    </div>
+
+    <div style={{ marginTop: 14 }}>
+      <p
+        style={{
+          margin: 0,
+          fontSize: 10,
+          fontWeight: 700,
+          color: P.muted,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+        }}
+      >
+        Notes
+      </p>
+      <p
+        style={{
+          margin: "4px 0 0",
+          fontSize: 12,
+          color: P.coffee,
+          lineHeight: 1.45,
+        }}
+      >
+        Sensitive scalp. Prefers tea tree spray. Light tension only.
+      </p>
+    </div>
+
+    <div style={{ marginTop: 12 }}>
+      <p
+        style={{
+          margin: 0,
+          fontSize: 10,
+          fontWeight: 700,
+          color: P.muted,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+        }}
+      >
+        Preferred styles
+      </p>
+      <p style={{ margin: "4px 0 0", fontSize: 12, color: P.coffee }}>
+        Knotless · Boho · Goddess
+      </p>
+    </div>
+
+    <div
+      style={{
+        marginTop: 14,
+        paddingTop: 12,
+        borderTop: `1px solid ${P.hairline}`,
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: P.muted,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+        }}
+      >
+        Lifetime spend
+      </span>
+      <span
+        style={{
+          fontFamily: FONT_DISPLAY,
+          fontSize: 20,
+          fontWeight: 600,
+          color: P.goldDeep,
+        }}
+      >
+        $1,420
+      </span>
+    </div>
+  </>
+);
+
+// 7 mock bars — last bar is "this" period so it pops in gold.
+const BAR_HEIGHTS = [22, 34, 28, 46, 38, 52, 64];
+
+const PreviewMoney = () => (
+  <>
+    <p
+      style={{
+        margin: 0,
+        fontSize: 10,
+        fontWeight: 700,
+        color: P.muted,
+        letterSpacing: "0.12em",
+        textTransform: "uppercase",
+      }}
+    >
+      This week
+    </p>
+    <p
+      style={{
+        margin: "2px 0 0",
+        fontFamily: FONT_DISPLAY,
+        fontSize: 30,
+        fontWeight: 600,
+        color: P.espresso,
+        lineHeight: 1.05,
+      }}
+    >
+      $1,840
+    </p>
+    <p
+      style={{
+        margin: "2px 0 14px",
+        fontSize: 11,
+        color: P.success,
+        fontWeight: 600,
+      }}
+    >
+      ▲ 22% vs last week
+    </p>
+
+    <div
+      aria-hidden
+      style={{
+        display: "flex",
+        alignItems: "flex-end",
+        gap: 6,
+        height: 64,
+        marginBottom: 14,
+      }}
+    >
+      {BAR_HEIGHTS.map((h, i) => {
+        const isLast = i === BAR_HEIGHTS.length - 1;
+        return (
+          <div
+            key={i}
+            style={{
+              flex: 1,
+              height: h,
+              borderRadius: 4,
+              background: isLast
+                ? `linear-gradient(180deg, ${P.gold} 0%, ${P.goldDeep} 100%)`
+                : P.ivory,
+              border: isLast ? "none" : `1px solid ${P.hairlineSoft}`,
+            }}
+          />
+        );
+      })}
+    </div>
+
+    {[
+      ["Income", "$1,840", P.espresso],
+      ["Expenses", "$280", P.coffee],
+    ].map(([k, v, color]) => (
+      <div
+        key={k}
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          padding: "4px 0",
+          fontSize: 12,
+          color: P.coffee,
+        }}
+      >
+        <span>{k}</span>
+        <span style={{ fontFamily: FONT_MONO, color: color as string }}>{v}</span>
+      </div>
+    ))}
+
+    <div
+      style={{
+        marginTop: 8,
+        paddingTop: 10,
+        borderTop: `1px solid ${P.hairline}`,
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: P.muted,
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+        }}
+      >
+        Net
+      </span>
+      <span
+        style={{
+          fontFamily: FONT_DISPLAY,
+          fontSize: 22,
+          fontWeight: 600,
+          color: P.goldDeep,
+        }}
+      >
+        $1,560
+      </span>
+    </div>
+  </>
+);
+
+const PREVIEWS: Array<{
+  label: string;
+  body: React.ReactNode;
+  delaySec: number;
+}> = [
+  { label: "Pricing", body: <PreviewPricing />, delaySec: 0 },
+  { label: "Schedule", body: <PreviewAppointments />, delaySec: 0.6 },
+  { label: "Client", body: <PreviewClient />, delaySec: 1.2 },
+  { label: "Money", body: <PreviewMoney />, delaySec: 1.8 },
+];
+
+// =====================================================================
+// Main component
+// =====================================================================
+
 const WelcomeIntro = ({
   onGetStarted,
   onSignIn,
   onSkip,
 }: WelcomeIntroProps) => {
-  // Reduced motion honored via a single state that's resolved
-  // post-mount. SSR renders the full animation set; the first client
-  // paint then re-applies if the user prefers reduced motion. Because
-  // the animations are CSS keyframes (not JS-driven), the worst case
-  // is a 400ms fade-in the user didn't ask for — acceptable for an
-  // intro screen.
+  // Reduced motion is resolved post-mount so the initial server
+  // render is consistent across all clients. Mounted ref keeps the
+  // matchMedia listener safe in StrictMode double-invocation.
   const [reduced, setReduced] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
@@ -105,8 +690,6 @@ const WelcomeIntro = ({
     }
   }, []);
 
-  const dur = reduced ? 0 : undefined; // 0 → instant via inline style
-
   return (
     <div
       style={{
@@ -115,9 +698,11 @@ const WelcomeIntro = ({
         color: P.espresso,
         fontFamily: FONT_BODY,
         position: "relative",
-        overflow: "hidden",
+        overflowX: "hidden",
         paddingTop: "max(24px, env(safe-area-inset-top))",
-        paddingBottom: "max(24px, env(safe-area-inset-bottom))",
+        // Extra padding bottom keeps the final element clear of the
+        // iOS Safari toolbar even while it's expanded.
+        paddingBottom: "max(40px, calc(env(safe-area-inset-bottom) + 24px))",
         paddingLeft: 20,
         paddingRight: 20,
         display: "flex",
@@ -142,9 +727,19 @@ const WelcomeIntro = ({
           0%, 100% { transform: translateY(0) rotate(0deg); }
           50%      { transform: translateY(-10px) rotate(2deg); }
         }
+        @keyframes bbp-card-float {
+          0%, 100% { transform: translateY(0); }
+          50%      { transform: translateY(-5px); }
+        }
         .bbp-intro-anim { animation-fill-mode: both; animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1); }
+        .bbp-preview-track {
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+        }
+        .bbp-preview-track::-webkit-scrollbar { display: none; }
         @media (prefers-reduced-motion: reduce) {
           .bbp-intro-anim { animation: none !important; opacity: 1 !important; transform: none !important; }
+          .bbp-preview-track > * { animation: none !important; transform: none !important; }
         }
       `}</style>
 
@@ -172,13 +767,13 @@ const WelcomeIntro = ({
         </button>
       )}
 
-      {/* Soft floating gold glow behind the headline card */}
+      {/* Soft floating gold glow behind the headline. Anchored to top
+          so it stays in the hero area even when the page scrolls. */}
       <div
         aria-hidden
-        className="bbp-intro-anim"
         style={{
           position: "absolute",
-          top: "26%",
+          top: 180,
           left: "50%",
           width: 320,
           height: 320,
@@ -186,9 +781,8 @@ const WelcomeIntro = ({
             "radial-gradient(circle, rgba(201,169,97,0.32) 0%, rgba(201,169,97,0) 65%)",
           filter: "blur(2px)",
           pointerEvents: "none",
-          animation: reduced
-            ? "none"
-            : "bbp-glow 6s ease-in-out infinite",
+          animation: reduced ? "none" : "bbp-glow 6s ease-in-out infinite",
+          zIndex: 0,
         }}
       />
 
@@ -200,13 +794,10 @@ const WelcomeIntro = ({
           display: "flex",
           flexDirection: "column",
           alignItems: "stretch",
-          flex: 1,
-          justifyContent: "center",
           gap: 18,
           position: "relative",
           zIndex: 1,
           paddingTop: 12,
-          paddingBottom: 12,
         }}
       >
         {/* Brand mark */}
@@ -230,7 +821,9 @@ const WelcomeIntro = ({
               alignItems: "center",
               justifyContent: "center",
               boxShadow: "0 6px 16px rgba(168,137,63,0.32)",
-              animation: reduced ? "none" : "bbp-float 5s ease-in-out infinite",
+              animation: reduced
+                ? "none"
+                : "bbp-float 5s ease-in-out infinite",
             }}
           >
             <Sparkles size={18} style={{ color: P.espresso }} />
@@ -359,7 +952,8 @@ const WelcomeIntro = ({
           ))}
         </ul>
 
-        {/* CTAs */}
+        {/* CTAs — placed above the preview carousel so they're
+            reachable without scrolling on smaller iPhones. */}
         <div
           className="bbp-intro-anim"
           style={{
@@ -372,9 +966,6 @@ const WelcomeIntro = ({
               : "bbp-fade-up 600ms 880ms both",
           }}
         >
-          {/* Primary CTA wrapper carries a soft gold glow underneath
-              the button — separates it visually from the secondary
-              action without making the surface feel flashy. */}
           <div style={{ position: "relative" }}>
             <div
               aria-hidden
@@ -479,6 +1070,115 @@ const WelcomeIntro = ({
           </button>
         </div>
       </div>
+
+      {/* =====================================================
+          Inside Braid Boss Pro — preview carousel
+          ===================================================== */}
+      <section
+        aria-label="Inside Braid Boss Pro"
+        className="bbp-intro-anim"
+        style={{
+          width: "100%",
+          maxWidth: 720,
+          margin: "32px auto 0",
+          position: "relative",
+          zIndex: 1,
+          animation: reduced ? "none" : "bbp-fade-up 700ms 1100ms both",
+        }}
+      >
+        <div style={{ textAlign: "center", padding: "0 4px" }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.22em",
+              textTransform: "uppercase",
+              color: P.goldDeep,
+            }}
+          >
+            Inside Braid Boss Pro
+          </p>
+          <h2
+            style={{
+              margin: "8px 0 6px",
+              fontFamily: FONT_DISPLAY,
+              fontSize: 26,
+              fontWeight: 600,
+              color: P.espresso,
+              lineHeight: 1.1,
+              letterSpacing: "-0.005em",
+            }}
+          >
+            A real look at the app
+          </h2>
+          <p
+            style={{
+              margin: "0 auto",
+              maxWidth: 360,
+              fontSize: 13,
+              color: P.muted,
+              lineHeight: 1.5,
+            }}
+          >
+            Everything braiders need to run business smoother — pricing,
+            bookings, clients, and money in one place.
+          </p>
+        </div>
+
+        {/* Horizontal scroller with snap. Side padding lets the first
+            and last cards sit centered when snapped. */}
+        <div
+          className="bbp-preview-track"
+          style={{
+            marginTop: 18,
+            display: "flex",
+            gap: 14,
+            overflowX: "auto",
+            overflowY: "hidden",
+            scrollSnapType: "x mandatory",
+            scrollPaddingInline: 20,
+            paddingInline: "max(20px, calc((100% - 280px) / 2))",
+            paddingBlock: 8,
+          }}
+        >
+          {PREVIEWS.map((p) => (
+            <PreviewFrame
+              key={p.label}
+              label={p.label}
+              delaySec={p.delaySec}
+              reduced={reduced}
+            >
+              {p.body}
+            </PreviewFrame>
+          ))}
+        </div>
+
+        {/* Subtle dot row hints there's more to scroll. Purely
+            decorative — no interactive state needed. */}
+        <div
+          aria-hidden
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            gap: 6,
+            marginTop: 14,
+          }}
+        >
+          {PREVIEWS.map((_, i) => (
+            <span
+              key={i}
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 99,
+                background: i === 0 ? P.gold : P.hairline,
+                display: "inline-block",
+              }}
+            />
+          ))}
+        </div>
+      </section>
     </div>
   );
 };
