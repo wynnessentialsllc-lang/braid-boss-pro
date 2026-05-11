@@ -8970,10 +8970,16 @@ const SavedQuotes = ({ store, onBack, onLoadQuote, onConvertToAppt, openReceipt 
                 {openReceipt && (
                   <Button variant="dark" icon={<FileText size={14} />} fullWidth className="mt-2"
                     onClick={async () => {
-                      const newId = `rcp_${uid()}`;
-                      const rcp = buildInvoiceFromQuote({ ...q, totalPrice: q.finalPrice }, (store.receipts || []).length, newId, q.name);
-                      const saved = await store.upsertReceipt(rcp);
-                      openReceipt(saved as ReceiptRecord);
+                      try {
+                        const newId = `rcp_${uid()}`;
+                        const rcp = buildInvoiceFromQuote({ ...q, totalPrice: q.finalPrice }, (store.receipts || []).length, newId, q.name);
+                        const saved = await store.upsertReceipt(rcp);
+                        if (!saved) throw new Error("upsertReceipt returned null");
+                        openReceipt(saved as ReceiptRecord);
+                      } catch (err) {
+                        console.error("[quotes] generate invoice failed:", err);
+                        alert("Couldn't generate that invoice. Please try again.");
+                      }
                     }}>
                     Generate invoice
                   </Button>
@@ -9631,8 +9637,20 @@ const BookingRequestsScreen = ({ userId, onBack, onApprove }: {
                   </Button>
                   <Button variant="primary" disabled={busyId === r.id}
                     onClick={async () => {
-                      const apptId = await onApprove(r);
-                      await setStatus(r, "converted", apptId);
+                      // Latch synchronously so a double-tap on a slow
+                      // network can't fire two approvals before the
+                      // first setStatus settles.
+                      if (busyId === r.id) return;
+                      setBusyId(r.id);
+                      try {
+                        const apptId = await onApprove(r);
+                        await setStatus(r, "converted", apptId);
+                      } catch (err) {
+                        console.error("[bookings] approve failed:", err);
+                        alert("Couldn't approve that booking. Please try again.");
+                      } finally {
+                        setBusyId(null);
+                      }
                     }}>
                     Approve &amp; book
                   </Button>
@@ -10555,7 +10573,10 @@ const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: 
         </div>
         <Button variant="outline" icon={<Copy size={16} />} fullWidth onClick={handleCopy}>Copy summary text</Button>
         {onDelete && (
-          <Button variant="danger" icon={<Trash2 size={16} />} fullWidth onClick={async () => { await onDelete(receipt.id); onClose(); }}>
+          <Button variant="danger" icon={<Trash2 size={16} />} fullWidth onClick={async () => {
+            try { await onDelete(receipt.id); onClose(); }
+            catch { /* alert already shown by onDelete; keep sheet open */ }
+          }}>
             Delete this {isInvoice ? "invoice" : "receipt"}
           </Button>
         )}
@@ -13204,7 +13225,12 @@ const ContractsScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
                 type="button"
                 onClick={async () => {
                   if (!confirm("Delete this template? Existing signed agreements stay intact.")) return;
-                  await remove(t.id);
+                  try {
+                    await remove(t.id);
+                  } catch (err) {
+                    console.error("[contracts] template delete failed:", err);
+                    alert("Couldn't delete that template. Please try again.");
+                  }
                 }}
                 className="px-3 py-2 rounded-lg text-[12px] font-semibold"
                 style={{ background: C.ivory, color: C.danger, border: `1px solid ${C.hairline}` }}
@@ -15555,7 +15581,14 @@ export default function App() {
         business={store.business}
         policies={store.policies}
         onClose={() => setActiveReceipt(null)}
-        onDelete={async (id: string) => { await store.deleteReceipt(id); }}
+        onDelete={async (id: string) => {
+          try { await store.deleteReceipt(id); }
+          catch (err) {
+            console.error("[receipts] delete failed:", err);
+            alert("Couldn't delete that receipt. Please try again.");
+            throw err;
+          }
+        }}
       />
 
       {/* Notifications sheet (bell on dashboard) */}

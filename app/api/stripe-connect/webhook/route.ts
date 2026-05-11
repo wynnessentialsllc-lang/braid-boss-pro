@@ -106,12 +106,38 @@ export async function POST(req: Request) {
   }
 
   const eventType: string = evt?.type || "";
+  const eventId: string | undefined = typeof evt?.id === "string" ? evt.id : undefined;
   const dataObject = evt?.data?.object || {};
   const connectAccount: string | undefined = typeof evt?.account === "string" ? evt.account : undefined;
 
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
+  // Idempotency claim — must happen before any side-effect work.
+  // Duplicate Stripe replays (5xx retries, dashboard "resend") will
+  // short-circuit here instead of double-firing the RPCs.
+  if (eventId) {
+    const { data: firstTime, error: dedupeErr } = await admin.rpc(
+      "record_stripe_webhook_event",
+      {
+        event_id_in: eventId,
+        event_type_in: eventType,
+        endpoint_in: "stripe_connect",
+        account_id_in: connectAccount ?? null,
+      },
+    );
+    if (dedupeErr) {
+      console.error("[stripe-connect/webhook] dedupe failed:", dedupeErr.message);
+      return NextResponse.json({ error: dedupeErr.message }, { status: 500 });
+    }
+    if (firstTime === false) {
+      return NextResponse.json(
+        { received: true, duplicate: true, event: eventType, event_id: eventId },
+        { status: 200 },
+      );
+    }
+  }
 
   try {
     switch (eventType) {

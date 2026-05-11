@@ -304,6 +304,21 @@ serve(async (req) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  // 0. Recover rows stuck in 'processing' from a previous crashed
+  //    worker. Cheap when there's nothing to sweep (indexed partial
+  //    scan); critical for not losing notifications when the edge
+  //    function times out mid-send.
+  const { data: sweptCount, error: sweepErr } = await admin.rpc(
+    "sweep_stuck_notifications",
+    { stuck_after_minutes_in: 30 },
+  );
+  if (sweepErr) {
+    // Sweep is best-effort — don't fail the whole tick on it.
+    console.warn("[process-notification-queue] sweep failed:", sweepErr.message);
+  } else if (typeof sweptCount === "number" && sweptCount > 0) {
+    console.info(`[process-notification-queue] swept ${sweptCount} stuck row(s)`);
+  }
+
   // 1. Atomic claim
   const { data: claimRes, error: claimErr } = await admin.rpc(
     "mark_notification_processing",
