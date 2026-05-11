@@ -7713,7 +7713,8 @@ const Money = ({ store, openTxSheet, editTx, openTimerSessions, openReceipt }: {
         <MoneyTab all={all} income={income} expenses={expenses} net={net} business={store.business}
           editTx={editTx} openTxSheet={openTxSheet}
           receipts={store.receipts || []}
-          openReceipt={openReceipt} />
+          openReceipt={openReceipt}
+          period={period} />
       ) : (
         <ProductivityTab sessions={sessionsInRange} appointments={store.appointments} business={store.business}
           openTimerSessions={openTimerSessions} />
@@ -7722,7 +7723,7 @@ const Money = ({ store, openTxSheet, editTx, openTimerSessions, openReceipt }: {
   );
 };
 
-const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, receipts = [], openReceipt }: {
+const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, receipts = [], openReceipt, period = "week" }: {
   all: any[];
   income: number;
   expenses: number;
@@ -7731,6 +7732,7 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
   editTx: any;
   openTxSheet: any;
   receipts?: any[];
+  period?: string;
   openReceipt?: (rcp: ReceiptRecord) => void;
 }) => (
   <div className="px-5">
@@ -7750,14 +7752,23 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
           .reduce((s: number, t: any) => s + (Number(t.amount) || 0), 0);
         buckets.push(dayIncome);
       }
+      // Eyebrow + subtitle reflect the selected period so the big
+      // number matches the range chip the user just tapped.
+      const rangeMeta = period === "week"
+        ? { eyebrow: "This week", sub: "Income across the last 7 days" }
+        : period === "month"
+          ? { eyebrow: "Last 30 days", sub: "Income across the last 30 days · daily breakdown below" }
+          : period === "quarter"
+            ? { eyebrow: "Last 90 days", sub: "Income across the last 90 days · daily breakdown below" }
+            : { eyebrow: "All time", sub: "Income across all transactions · 7-day breakdown below" };
       return (
         <PreviewStyleCard style={{ marginBottom: 18 }} padding={20}>
-          <SectionEyebrow>This week</SectionEyebrow>
+          <SectionEyebrow>{rangeMeta.eyebrow}</SectionEyebrow>
           <p style={{ margin: "4px 0 0", fontFamily: FONT_DISPLAY, fontSize: 34, fontWeight: 600, color: C.espresso, lineHeight: 1.05, letterSpacing: "-0.01em" }}>
             {fmtMoney(income, business.currency)}
           </p>
-          <p style={{ margin: "2px 0 14px", fontSize: 11, color: C.muted }}>Income across the last 7 days</p>
-          <MiniBarChart data={buckets} ariaLabel="Income for the last 7 days" />
+          <p style={{ margin: "2px 0 14px", fontSize: 11, color: C.muted }}>{rangeMeta.sub}</p>
+          <MiniBarChart data={buckets} ariaLabel="Daily income, last 7 days" />
           <div style={{ marginTop: 14 }}>
             <MetricRow label="Expenses" value={fmtMoney(expenses, business.currency)} />
             <div className="mt-2 pt-2" style={{ borderTop: `1px solid rgba(74,44,26,0.08)` }}>
@@ -7773,8 +7784,22 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
       );
     })()}
 
-    <SectionTitle>Activity</SectionTitle>
-<button type="button" onClick={() => openTxSheet()}>Add</button>
+    <div className="flex items-center justify-between mb-2">
+      <SectionTitle>Activity</SectionTitle>
+      <button
+        type="button"
+        onClick={() => openTxSheet()}
+        className="rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-[0.97] transition"
+        style={{
+          background: C.cream,
+          color: C.espresso,
+          border: `1px solid ${C.hairline}`,
+          letterSpacing: "0.04em",
+        }}
+      >
+        + Add
+      </button>
+    </div>
     {all.length === 0 ? (
       <EmptyState icon={<Receipt size={28} style={{ color: C.muted }} />} title="No money in or out yet" body="Completed appointments auto-appear here. Log hair supplies, tools, and travel as expenses to see your real take-home." />
     ) : (
