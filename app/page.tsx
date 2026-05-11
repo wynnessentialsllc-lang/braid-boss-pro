@@ -52,6 +52,7 @@ import {
 } from "./lib/receipts";
 import { renderReceiptPdf } from "./lib/pdf-render";
 import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
+import WelcomeIntro from "./components/WelcomeIntro";
 import { getAuthRedirectUrl } from "./lib/site-url";
 import {
   LIFETIME_PRICE_LABEL,
@@ -10938,8 +10939,11 @@ const useCloudSync = (userId: string | null, store: any) => {
   return { state, lastOk, pendingCount };
 };
 
-const AuthGate = ({ onContinueGuest }: { onContinueGuest: () => void }) => {
-  const [tab, setTab] = useState<"signin" | "signup" | "reset">("signin");
+const AuthGate = ({ onContinueGuest, initialTab = "signin" }: {
+  onContinueGuest: () => void;
+  initialTab?: "signin" | "signup" | "reset";
+}) => {
+  const [tab, setTab] = useState<"signin" | "signup" | "reset">(initialTab);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -14988,6 +14992,28 @@ const UpgradeSheet = ({
 
 export default function App() {
   const auth = useAuth();
+  // First-launch welcome screen — gates AuthGate until the user
+  // has seen (or skipped) the intro. SSR-safe: introSeen starts as
+  // null and the localStorage probe runs in useEffect on mount.
+  const [introSeen, setIntroSeen] = useState<boolean | null>(null);
+  const [authInitialTab, setAuthInitialTab] = useState<"signin" | "signup">("signin");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      setIntroSeen(window.localStorage.getItem("bbp-intro-seen-v1") === "1");
+    } catch {
+      setIntroSeen(true);
+    }
+  }, []);
+  const markIntroSeen = useCallback((nextTab: "signin" | "signup") => {
+    setAuthInitialTab(nextTab);
+    setIntroSeen(true);
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("bbp-intro-seen-v1", "1");
+      }
+    } catch { /* private mode — gate still works in-memory this session */ }
+  }, []);
   const rawStore = useStorage();
   const { premium } = usePremiumStatus(auth.userId);
   const discountsApi = useDiscounts(auth.userId);
@@ -15255,7 +15281,29 @@ export default function App() {
   // hasn't opted into guest mode. All hooks above this guard so the
   // hook order is stable across renders.
   if (auth.mode === "loading") {
-    return <AuthGate onContinueGuest={auth.continueAsGuest} />;
+    // Show a cream splash until the intro state has resolved on the
+    // client (one tick post-mount). Prevents hydration flicker and
+    // avoids a flash of the AuthGate before the intro.
+    if (introSeen === null) {
+      return (
+        <div className="flex items-center justify-center" style={{ minHeight: "100dvh", background: C.cream }}>
+          <GlobalStyle />
+          <div className="rounded-full p-4 bbp-pulse" style={{ width: 56, height: 56, background: C.gold }}>
+            <Sparkles size={28} style={{ color: C.espresso }} />
+          </div>
+        </div>
+      );
+    }
+    if (introSeen === false) {
+      return (
+        <WelcomeIntro
+          onGetStarted={() => markIntroSeen("signup")}
+          onSignIn={() => markIntroSeen("signin")}
+          onSkip={() => markIntroSeen("signin")}
+        />
+      );
+    }
+    return <AuthGate onContinueGuest={auth.continueAsGuest} initialTab={authInitialTab} />;
   }
 
   if (store.loading) {
