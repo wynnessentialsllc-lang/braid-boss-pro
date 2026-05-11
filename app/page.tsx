@@ -53,6 +53,13 @@ import {
 import { renderReceiptPdf } from "./lib/pdf-render";
 import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
 import WelcomeIntro from "./components/WelcomeIntro";
+import {
+  PreviewStyleCard,
+  SectionEyebrow,
+  StatusPill,
+  MetricRow,
+  MiniBarChart,
+} from "./components/PreviewUI";
 import { getAuthRedirectUrl } from "./lib/site-url";
 import {
   LIFETIME_PRICE_LABEL,
@@ -3840,28 +3847,38 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
           <MoneyInput prefix="" suffix="%" value={tipPct} onChange={setTipPct} />
         </Field>
 
-        <Card className="p-5 mt-4" style={{ background: `linear-gradient(180deg, ${C.espresso} 0%, ${C.coffee} 100%)`, border: `1px solid ${C.goldDeep}` }}>
-          <p className="text-[10px] font-bold tracking-widest uppercase mb-3" style={{ color: C.gold, letterSpacing: "0.18em" }}>The breakdown</p>
-          <BreakRow label="Hair / product" value={fmtMoney(result.hairCost, business.currency)} />
-          <BreakRow label={`Labor (${result.hours || 0}h × ${fmtMoney(result.hourlyRate, business.currency)})`} value={fmtMoney(result.labor, business.currency)} />
-          {result.travelFee > 0 && <BreakRow label="Travel" value={fmtMoney(result.travelFee, business.currency)} />}
-          {result.addOnsTotal > 0 && <BreakRow label="Add-ons" value={fmtMoney(result.addOnsTotal, business.currency)} />}
-          {result.overhead > 0 && <BreakRow label="Overhead" value={fmtMoney(result.overhead, business.currency)} />}
-          {result.profitMargin > 0 && <BreakRow label="Profit margin" value={fmtMoney(result.profitMargin, business.currency)} />}
-          <div className="my-2.5" style={{ borderTop: `1px dashed ${C.gold}`, opacity: 0.4 }} />
+        {/* Preview-style breakdown card — same math, softer chrome. */}
+        <PreviewStyleCard style={{ marginTop: 16 }} padding={20}>
+          <SectionEyebrow>The breakdown</SectionEyebrow>
+          {styleName && (
+            <p style={{ margin: "6px 0 12px", fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso, lineHeight: 1.15 }}>
+              {styleName}
+            </p>
+          )}
+          <div style={{ marginTop: styleName ? 0 : 8 }}>
+            <MetricRow label="Hair / product" value={fmtMoney(result.hairCost, business.currency)} />
+            <MetricRow label={`Labor (${result.hours || 0}h × ${fmtMoney(result.hourlyRate, business.currency)})`} value={fmtMoney(result.labor, business.currency)} />
+            {result.travelFee > 0 && <MetricRow label="Travel" value={fmtMoney(result.travelFee, business.currency)} />}
+            {result.addOnsTotal > 0 && <MetricRow label="Add-ons" value={fmtMoney(result.addOnsTotal, business.currency)} />}
+            {result.overhead > 0 && <MetricRow label="Overhead" value={fmtMoney(result.overhead, business.currency)} />}
+            {result.profitMargin > 0 && <MetricRow label="Profit margin" value={fmtMoney(result.profitMargin, business.currency)} />}
+          </div>
+          <div className="my-3" style={{ borderTop: `1px solid rgba(74,44,26,0.08)` }} />
           {result.discountAmount > 0 && (
-            <BreakRow
+            <MetricRow
               label={selectedDiscount ? `Discount — ${selectedDiscount.name}` : "Discount"}
               value={`− ${fmtMoney(result.discountAmount, business.currency)}`}
             />
           )}
-          <BreakRow label="Subtotal" value={fmtMoney(result.subtotal, business.currency)} bold />
-          {result.tipPct > 0 && <BreakRow label={`Tip (${result.tipPct}% of subtotal)`} value={fmtMoney(result.tipAmount, business.currency)} />}
-          <div className="mt-4 pt-4" style={{ borderTop: `1px solid rgba(201, 169, 97, 0.4)` }}>
-            <p className="text-[10px] font-bold tracking-widest uppercase mb-1" style={{ color: C.gold, letterSpacing: "0.18em" }}>Final price</p>
-            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 44, fontWeight: 600, color: C.cream, lineHeight: 1 }}>{fmtMoney(result.finalPrice, business.currency)}</p>
+          <MetricRow label="Subtotal" value={fmtMoney(result.subtotal, business.currency)} emphasis="strong" />
+          {result.tipPct > 0 && <MetricRow label={`Tip (${result.tipPct}% of subtotal)`} value={fmtMoney(result.tipAmount, business.currency)} />}
+          <div className="mt-4 pt-4" style={{ borderTop: `1px solid rgba(201, 169, 97, 0.4)`, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <SectionEyebrow>Final price</SectionEyebrow>
+            <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 36, fontWeight: 600, color: C.goldDeep, lineHeight: 1, letterSpacing: "-0.01em" }}>
+              {fmtMoney(result.finalPrice, business.currency)}
+            </p>
           </div>
-        </Card>
+        </PreviewStyleCard>
 
         <div className="grid grid-cols-2 gap-3 pt-2">
           <Button variant="primary" icon={savedFlash ? <Check size={18} /> : <Save size={18} />} onClick={handleSave}>
@@ -6158,9 +6175,7 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
       {/* HEADER */}
       <div className="px-5 pt-6 pb-3 flex items-start justify-between">
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.14em" }}>
-            Your book
-          </p>
+          <div className="mb-1"><SectionEyebrow>Your book</SectionEyebrow></div>
           <h1 style={{ fontFamily: FONT_DISPLAY, fontSize: 34, fontWeight: 600, color: C.espresso, lineHeight: 1 }}>
             Customers
           </h1>
@@ -7716,21 +7731,44 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
   openReceipt?: (rcp: ReceiptRecord) => void;
 }) => (
   <div className="px-5">
-    {/* totals */}
-    <div className="grid grid-cols-3 gap-2 mb-5">
-      <Card className="p-3" style={{ background: C.ivory }}>
-        <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.success, letterSpacing: "0.12em" }}>In</p>
-        <p className="text-base font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{fmtMoney(income, business.currency)}</p>
-      </Card>
-      <Card className="p-3" style={{ background: C.ivory }}>
-        <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.danger, letterSpacing: "0.12em" }}>Out</p>
-        <p className="text-base font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{fmtMoney(expenses, business.currency)}</p>
-      </Card>
-      <Card className="p-3" style={{ background: net >= 0 ? "#EFF4E8" : "#FBEAE5", border: `1px solid ${net >= 0 ? C.success : C.danger}` }}>
-        <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: net >= 0 ? C.success : C.danger, letterSpacing: "0.12em" }}>Net</p>
-        <p className="text-base font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{fmtMoney(net, business.currency)}</p>
-      </Card>
-    </div>
+    {/* Weekly hero — editorial card with a 7-day income mini-chart
+        derived from real transactions. Matches the welcome preview's
+        Money tile so the in-app surface feels continuous with what the
+        user saw before sign-in. */}
+    {(() => {
+      const buckets: number[] = [];
+      const todayDate = new Date();
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(todayDate);
+        d.setDate(d.getDate() - i);
+        const iso = localDateISO(d);
+        const dayIncome = (all || [])
+          .filter((t: any) => t && t.type === "income" && t.date === iso)
+          .reduce((s: number, t: any) => s + (Number(t.amount) || 0), 0);
+        buckets.push(dayIncome);
+      }
+      return (
+        <PreviewStyleCard style={{ marginBottom: 18 }} padding={20}>
+          <SectionEyebrow>This week</SectionEyebrow>
+          <p style={{ margin: "4px 0 0", fontFamily: FONT_DISPLAY, fontSize: 34, fontWeight: 600, color: C.espresso, lineHeight: 1.05, letterSpacing: "-0.01em" }}>
+            {fmtMoney(income, business.currency)}
+          </p>
+          <p style={{ margin: "2px 0 14px", fontSize: 11, color: C.muted }}>Income across the last 7 days</p>
+          <MiniBarChart data={buckets} ariaLabel="Income for the last 7 days" />
+          <div style={{ marginTop: 14 }}>
+            <MetricRow label="Expenses" value={fmtMoney(expenses, business.currency)} />
+            <div className="mt-2 pt-2" style={{ borderTop: `1px solid rgba(74,44,26,0.08)` }}>
+              <MetricRow
+                label={<><SectionEyebrow tone="muted">Net</SectionEyebrow></>}
+                value={fmtMoney(net, business.currency)}
+                accent={net >= 0}
+                emphasis="strong"
+              />
+            </div>
+          </div>
+        </PreviewStyleCard>
+      );
+    })()}
 
     <SectionTitle>Activity</SectionTitle>
 <button type="button" onClick={() => openTxSheet()}>Add</button>
