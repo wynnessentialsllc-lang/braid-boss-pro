@@ -163,3 +163,33 @@ export const buildExpirationEmail = (args: {
   `);
   return { subject, html };
 };
+
+// Phase B12 — contract invite. Sent (in B12.1) when a stylist
+// approves a booking request that has unsigned agreements attached,
+// or whenever the stylist taps "Resend agreement" from the
+// Approvals queue.
+export const buildContractInviteEmail = (args: {
+  clientName: string;
+  studioName: string;
+  contractTitle: string;
+  serviceName?: string | null;
+  contractUrl: string;
+}) => {
+  const subject = `Please review and sign your appointment agreement`;
+  const html = wrapHtml(subject, `
+    <h1 style="font-size:20px;margin:0 0 12px;color:#1F140A;">Hi ${escapeHtml(args.clientName)},</h1>
+    <p style="font-size:14px;line-height:22px;">
+      Your stylist at ${escapeHtml(args.studioName)} sent an agreement for your upcoming${args.serviceName ? ` <strong>${escapeHtml(args.serviceName)}</strong>` : ""} appointment.
+    </p>
+    <p style="font-size:14px;line-height:22px;">
+      Please take a minute to review and sign:
+    </p>
+    <p style="margin:22px 0;text-align:center;">
+      <a href="${args.contractUrl}" style="display:inline-block;background:#1F140A;color:#FAF6EE;text-decoration:none;padding:14px 26px;border-radius:999px;font-weight:600;font-size:14px;letter-spacing:0.04em;">Review &amp; sign — ${escapeHtml(args.contractTitle)}</a>
+    </p>
+    <p style="font-size:12px;color:#9A8B72;line-height:18px;">
+      Signing keeps your appointment time secure and policies clear.
+    </p>
+  `);
+  return { subject, html };
+};

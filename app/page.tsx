@@ -174,6 +174,18 @@ import {
   useBookingApprovalQueue,
 } from "./lib/booking-requests";
 import {
+  type ContractTemplate,
+  type ContractTemplateInput,
+  type ContractTemplateType,
+  type BookingContract,
+  TEMPLATE_TYPE_LABEL,
+  STATUS_LABEL as CONTRACT_STATUS_LABEL,
+  STATUS_TONE as CONTRACT_STATUS_TONE,
+  contractSigningUrl,
+  useContractTemplates,
+  useContractsForRequest,
+} from "./lib/contracts";
+import {
   downloadJson,
   downloadPdfBlob,
 } from "./lib/native-download";
@@ -9050,7 +9062,7 @@ const PolicySheet = ({ policy, isNew, onClose, onSave }) => {
 // ============================================================
 //  SETTINGS (V1 extended with Reminders link)
 // ============================================================
-const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void }) => {
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
@@ -9321,6 +9333,30 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                           if (awaitingDeposit > 0) parts.push(`${awaitingDeposit} awaiting deposit`);
                           return parts.join(" · ");
                         })()}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openContracts && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openContracts}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <FileText size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Contracts</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        Agreements clients sign before booking is locked
                       </p>
                     </div>
                   </div>
@@ -12996,6 +13032,311 @@ const ApprovalCountdown = ({ req }: { req: BookingRequestRecord }) => {
   return <Pill tone={tone}>{formatCountdown(left)}</Pill>;
 };
 
+// ============================================================
+//  CONTRACTS — Phase B12
+// ============================================================
+const ContractsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId || null;
+  const api = useContractTemplates(userId);
+  const { templates, loading, error, refresh, upsert, remove, setActive, seedStarters } = api;
+  const [editing, setEditing] = useState<Partial<ContractTemplateInput> & { id?: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [seedFlash, setSeedFlash] = useState<string | null>(null);
+
+  const closeEditor = () => setEditing(null);
+
+  const startNew = () => setEditing({
+    title: "",
+    template_type: "custom" as ContractTemplateType,
+    body: "",
+    is_active: true,
+    require_signature: true,
+    require_initials: false,
+    attach_to_all_bookings: false,
+  });
+
+  const handleSave = async () => {
+    if (!editing) return;
+    setBusy(true);
+    const saved = await upsert(editing);
+    setBusy(false);
+    if (saved) closeEditor();
+  };
+
+  const handleSeedStarters = async () => {
+    if (busy) return;
+    setBusy(true);
+    const n = await seedStarters();
+    setBusy(false);
+    setSeedFlash(n > 0 ? `Added ${n} starter template${n === 1 ? "" : "s"}.` : "Starter templates already in your library.");
+    setTimeout(() => setSeedFlash(null), 2400);
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Contracts"
+        subtitle="Agreements clients sign before a booking is locked"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-3">
+        {error && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{error}</p>
+          </Card>
+        )}
+        {seedFlash && (
+          <Card className="p-3" style={{ border: `1px solid ${C.success}`, background: "rgba(92, 124, 74, 0.08)" }}>
+            <p className="text-[12px]" style={{ color: C.success }}>{seedFlash}</p>
+          </Card>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={startNew}
+            disabled={busy}
+            className="flex-1 py-2.5 rounded-xl text-[13px] font-semibold"
+            style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+          >
+            New template
+          </button>
+          <button
+            type="button"
+            onClick={handleSeedStarters}
+            disabled={busy}
+            className="flex-1 py-2.5 rounded-xl text-[13px] font-semibold"
+            style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}` }}
+          >
+            Add starter templates
+          </button>
+        </div>
+
+        {loading && templates.length === 0 && (
+          <Card className="p-4">
+            <p className="text-[12px]" style={{ color: C.muted }}>Loading templates…</p>
+          </Card>
+        )}
+
+        {!loading && templates.length === 0 && (
+          <Card className="p-6 text-center">
+            <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+              No agreements yet.
+            </p>
+            <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+              Tap <strong>Add starter templates</strong> for a curated set, or build your own.
+            </p>
+          </Card>
+        )}
+
+        {templates.map(t => (
+          <Card key={t.id} className="p-4 space-y-2">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-[14px] font-semibold truncate" style={{ color: C.espresso }}>{t.title}</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>{TEMPLATE_TYPE_LABEL[t.template_type]}</p>
+              </div>
+              <Pill tone={t.is_active ? "success" : "neutral"}>{t.is_active ? "Active" : "Off"}</Pill>
+            </div>
+            <p className="text-[12px] line-clamp-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
+              {t.body.split("\n")[0]}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {t.attach_to_all_bookings && <Pill tone="gold">Attach to all bookings</Pill>}
+              {t.require_signature && <Pill tone="neutral">Signature required</Pill>}
+              {t.require_initials && <Pill tone="neutral">Initials required</Pill>}
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setEditing(t)}
+                className="flex-1 py-2 rounded-lg text-[12px] font-semibold"
+                style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => void setActive(t.id, !t.is_active)}
+                className="px-3 py-2 rounded-lg text-[12px] font-semibold"
+                style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}
+              >
+                {t.is_active ? "Disable" : "Enable"}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!confirm("Delete this template? Existing signed agreements stay intact.")) return;
+                  await remove(t.id);
+                }}
+                className="px-3 py-2 rounded-lg text-[12px] font-semibold"
+                style={{ background: C.ivory, color: C.danger, border: `1px solid ${C.hairline}` }}
+              >
+                Delete
+              </button>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      <Sheet open={!!editing} onClose={closeEditor} title={editing?.id ? "Edit template" : "New template"}>
+        {editing && (
+          <div className="space-y-4 pb-6">
+            <Field label="Title">
+              <Input
+                value={editing.title || ""}
+                onChange={e => setEditing({ ...editing, title: e.target.value })}
+                placeholder="e.g. Booking confirmation agreement"
+              />
+            </Field>
+            <Field label="Type">
+              <Select
+                value={editing.template_type || "custom"}
+                onChange={e => setEditing({ ...editing, template_type: e.target.value as ContractTemplateType })}
+                options={(Object.keys(TEMPLATE_TYPE_LABEL) as ContractTemplateType[]).map(k => ({
+                  value: k, label: TEMPLATE_TYPE_LABEL[k],
+                }))}
+              />
+            </Field>
+            <Field label="Body">
+              <Textarea
+                value={editing.body || ""}
+                onChange={e => setEditing({ ...editing, body: e.target.value })}
+                rows={10}
+                placeholder="The full agreement copy. Plain text. Will be snapshotted at signing time."
+              />
+            </Field>
+            <Card className="p-3 space-y-3" style={{ background: C.cream }}>
+              <ToggleRow
+                label="Active"
+                hint="Inactive templates aren't attached to new bookings."
+                checked={editing.is_active ?? true}
+                onChange={v => setEditing({ ...editing, is_active: v })}
+              />
+              <ToggleRow
+                label="Require signature"
+                hint="Client must type their name to sign."
+                checked={editing.require_signature ?? true}
+                onChange={v => setEditing({ ...editing, require_signature: v })}
+              />
+              <ToggleRow
+                label="Require initials"
+                hint="Adds a separate initials field."
+                checked={editing.require_initials ?? false}
+                onChange={v => setEditing({ ...editing, require_initials: v })}
+              />
+              <ToggleRow
+                label="Attach to all bookings"
+                hint="Automatically generated for every public booking request."
+                checked={editing.attach_to_all_bookings ?? false}
+                onChange={v => setEditing({ ...editing, attach_to_all_bookings: v })}
+              />
+            </Card>
+            <Button variant="primary" onClick={handleSave} disabled={busy} fullWidth>
+              {busy ? "Saving…" : (editing.id ? "Save template" : "Create template")}
+            </Button>
+          </div>
+        )}
+      </Sheet>
+    </div>
+  );
+};
+
+const ToggleRow = ({ label, hint, checked, onChange }: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) => (
+  <div className="flex items-center justify-between gap-3">
+    <div className="flex-1 min-w-0">
+      <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>{label}</p>
+      {hint && <p className="text-[11px]" style={{ color: C.muted }}>{hint}</p>}
+    </div>
+    <Toggle checked={checked} onChange={onChange} />
+  </div>
+);
+
+// Contracts mini-block for an Approvals row. Reads contracts attached
+// to this booking request, surfaces signed/pending counts, and
+// exposes "copy signing link" + "regenerate" controls so the stylist
+// can manually share links until B12.1 wires auto-send via Resend.
+const ApprovalContractsBlock = ({
+  userId, req,
+}: { userId: string | null; req: BookingRequestRecord }) => {
+  const { contracts, loading, generate } = useContractsForRequest(userId, req.id);
+  const [busy, setBusy] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  if (loading && contracts.length === 0) return null;
+  if (contracts.length === 0) return null;
+
+  const signed = contracts.filter(c => c.status === "signed").length;
+  const pending = contracts.filter(c => c.status === "pending" || c.status === "viewed").length;
+  const declined = contracts.filter(c => c.status === "declined").length;
+  const allSigned = signed === contracts.length;
+
+  const copy = async (token: string) => {
+    const url = contractSigningUrl(token);
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(url);
+        setCopiedId(token);
+        setTimeout(() => setCopiedId(null), 1600);
+      }
+    } catch { /* user-cancelled / unsupported — silent */ }
+  };
+
+  return (
+    <div
+      className="space-y-2 px-3 py-2 rounded-xl"
+      style={{
+        background: allSigned ? "rgba(92, 124, 74, 0.08)" : "rgba(201, 169, 97, 0.10)",
+        border: `1px solid ${allSigned ? "rgba(92, 124, 74, 0.30)" : "rgba(201, 169, 97, 0.35)"}`,
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-[12px] font-semibold" style={{ color: C.coffee }}>
+          Agreements · {signed}/{contracts.length} signed
+          {pending > 0 ? ` · ${pending} pending` : ""}
+          {declined > 0 ? ` · ${declined} declined` : ""}
+        </p>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => { setBusy(true); await generate(); setBusy(false); }}
+          className="text-[11px] underline"
+          style={{ color: C.muted }}
+        >
+          {busy ? "…" : "Refresh"}
+        </button>
+      </div>
+      <div className="space-y-1.5">
+        {contracts.map(c => {
+          const tone = CONTRACT_STATUS_TONE[c.status];
+          const label = CONTRACT_STATUS_LABEL[c.status];
+          return (
+            <div key={c.id} className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Pill tone={tone}>{label}</Pill>
+                <span className="text-[11px] truncate" style={{ color: C.coffee }}>{c.title}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void copy(c.public_token)}
+                className="text-[11px] font-semibold whitespace-nowrap"
+                style={{ color: C.goldDeep }}
+              >
+                {copiedId === c.public_token ? "Copied ✓" : "Copy link"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 const ApprovalQueueScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const api = store.approvalsApi;
   const requests: BookingRequestRecord[] = api?.requests || [];
@@ -13207,6 +13548,8 @@ const ApprovalQueueScreen = ({ store, onBack }: { store: any; onBack: () => void
               {req.notes && (
                 <p className="text-[12px] italic" style={{ color: C.coffee }}>{req.notes}</p>
               )}
+
+              <ApprovalContractsBlock userId={store.userId || null} req={req} />
 
               {req.deposit_amount !== null && req.deposit_amount !== undefined && (
                 <div className="flex items-center justify-between text-[12px]">
@@ -14922,7 +15265,8 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} />}
+      {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "intelligence" && <BookingIntelligenceScreen store={store} onBack={() => setSecondary("settings")} />}
