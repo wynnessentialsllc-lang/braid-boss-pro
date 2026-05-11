@@ -6813,6 +6813,11 @@ const ClientProfileSheet = ({
     return evts.sort((x, y) => (y.ts || "").localeCompare(x.ts || ""));
   }, [cAppts, currency, today]);
 
+  // Hook order must be stable across renders — keep useState above the
+  // early-return so the second render (client flips from null to set)
+  // doesn't change the hook count.
+  const [tab, setTab] = useState<"upcoming" | "previous">("upcoming");
+
   if (!client) return null;
 
   const ApptRow = ({ a }: { a: any }) => {
@@ -6888,8 +6893,6 @@ const ClientProfileSheet = ({
       {children}
     </div>
   );
-
-  const [tab, setTab] = useState<"upcoming" | "previous">("upcoming");
 
   return (
     <Sheet
