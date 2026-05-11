@@ -168,6 +168,46 @@ export const buildExpirationEmail = (args: {
 // approves a booking request that has unsigned agreements attached,
 // or whenever the stylist taps "Resend agreement" from the
 // Approvals queue.
+// Phase B12.1a — booking confirmation. Sent immediately after a
+// public booking submit lands (assuming the client provided an email).
+// Tone: warm, premium, mobile-friendly. Tells the client what's
+// happening next so they don't worry about silence between submit
+// and the stylist's approval.
+export const buildBookingConfirmationEmail = (args: {
+  clientName: string;
+  studioName: string;
+  serviceName?: string | null;
+  preferredDate?: string | null;
+  preferredTime?: string | null;
+  approvalStatus?: string | null;
+  depositRequired?: boolean | null;
+}) => {
+  const when = [args.preferredDate, args.preferredTime].filter(Boolean).join(" · ");
+  const isAwaitingDeposit = args.approvalStatus === "awaiting_deposit";
+  const subject = `Booking request received — ${args.studioName}`;
+  const nextLine = (() => {
+    if (isAwaitingDeposit) {
+      return "We've also sent a deposit link separately. Once your deposit lands and the stylist approves, your appointment is locked in.";
+    }
+    if (args.depositRequired) {
+      return "Your stylist will review shortly. If a deposit is required, you'll receive a secure link by email.";
+    }
+    return "Your stylist will review and confirm shortly. You'll hear from us as soon as it's approved.";
+  })();
+
+  const html = wrapHtml(subject, `
+    <h1 style="font-size:20px;margin:0 0 12px;color:#1F140A;">We've got it, ${escapeHtml(args.clientName)}.</h1>
+    <p style="font-size:14px;line-height:22px;">
+      Your booking request${args.serviceName ? ` for <strong>${escapeHtml(args.serviceName)}</strong>` : ""}${when ? ` on <strong>${escapeHtml(when)}</strong>` : ""} has been received by ${escapeHtml(args.studioName)}.
+    </p>
+    <p style="font-size:14px;line-height:22px;">${escapeHtml(nextLine)}</p>
+    <p style="font-size:12px;color:#9A8B72;line-height:18px;margin-top:18px;">
+      We'll only email you about this booking. Reply to this message any time if you need to update something.
+    </p>
+  `);
+  return { subject, html };
+};
+
 export const buildContractInviteEmail = (args: {
   clientName: string;
   studioName: string;
