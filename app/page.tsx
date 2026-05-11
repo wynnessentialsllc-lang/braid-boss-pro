@@ -1466,11 +1466,12 @@ const useStorage = () => {
 // ============================================================
 //  PRIMITIVES
 // ============================================================
-const Card = ({ children, className = "", style, onClick }: {
+const Card = ({ children, className = "", style, onClick, id }: {
   children: React.ReactNode;
   className?: string;
   style?: React.CSSProperties;
   onClick?: () => void;
+  id?: string;
 }) => {
   // When the card is interactive, render with button semantics so:
   //   1. iOS WKWebView reliably routes the touch to a click event
@@ -1489,6 +1490,7 @@ const Card = ({ children, className = "", style, onClick }: {
   };
   return (
     <div
+      id={id}
       onClick={onClick}
       onKeyDown={interactive ? handleKeyDown : undefined}
       role={interactive ? "button" : undefined}
@@ -9900,7 +9902,8 @@ export type NotificationTarget =
   | { kind: "appointment"; appointmentId: string; date?: string }
   | { kind: "client"; clientId: string }
   | { kind: "reminders" }
-  | { kind: "schedule" };
+  | { kind: "schedule" }
+  | { kind: "booking_approval"; requestId: string };
 
 type NotifItem = {
   id: string;
@@ -9952,7 +9955,31 @@ const buildNotifications = (store: any): NotifItem[] => {
   const safeAppts = Array.isArray(store?.appointments) ? store.appointments : [];
   const safeReminders = Array.isArray(store?.reminders) ? store.reminders : [];
   const safeClients = Array.isArray(store?.clients) ? store.clients : [];
+  const safeApprovals = Array.isArray(store?.approvalsApi?.requests) ? store.approvalsApi.requests : [];
   const currency = store?.business?.currency || "USD";
+
+  // APPOINTMENT — deposit paid, needs your approval. One row per
+  // request so each is independently tappable. Routes the stylist
+  // straight to the Approvals queue with that row pre-expanded.
+  const depositPaidPending = safeApprovals.filter((r: any) =>
+    r && r.approval_status === "deposit_paid_pending_approval"
+  );
+  for (const r of depositPaidPending) {
+    const amount = Number(r.deposit_amount) || 0;
+    const dateLabel = r.preferred_date ? fmtDate(r.preferred_date) : "no date";
+    const timeLabel = r.preferred_time ? ` at ${fmtTime(r.preferred_time)}` : "";
+    items.push({
+      id: `appr_${r.id}`,
+      category: "appointment",
+      kind: "booking_approval_pending",
+      tone: "gold",
+      icon: <DollarSign size={16} style={{ color: C.goldDeep }} />,
+      title: `${r.client_name || "Client"} paid deposit · needs approval`,
+      body: `${r.service_name || "Service"} · ${dateLabel}${timeLabel}${amount > 0 ? ` · ${fmtMoney(amount, currency)} deposit` : ""}`,
+      meta: "Tap to review",
+      target: { kind: "booking_approval", requestId: r.id },
+    });
+  }
 
   // FINANCE — overdue balances (actionable)
   const lateBalance = safeAppts.filter((a: any) =>
@@ -10103,7 +10130,8 @@ const useNotifications = (store: any) => {
   }, []);
 
   const allItems = useMemo(() => buildNotifications(store), [
-    store.reminders, store.appointments, store.clients, store.business
+    store.reminders, store.appointments, store.clients, store.business,
+    store.approvalsApi?.requests,
   ]);
   const items = useMemo(() => allItems.filter(n => !dismissed.includes(n.id)), [allItems, dismissed]);
   // Badge counts only actionable (system / finance / retention /
@@ -10177,6 +10205,7 @@ type NotificationRouterCtx = {
   setSecondary: (key: string | null) => void;
   setApptPrefill: (a: any) => void;
   setClientToOpenId: (id: string | null) => void;
+  setApprovalFocusId: (id: string | null) => void;
 };
 
 const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
@@ -10206,6 +10235,13 @@ const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
     case "schedule":
       ctx.setActive("schedule");
       break;
+    case "booking_approval": {
+      // Stash the request id so the Approvals queue can scroll to and
+      // pre-expand that row, then navigate.
+      ctx.setApprovalFocusId(target.requestId);
+      ctx.setSecondary("approvals");
+      break;
+    }
   }
 };
 
@@ -13337,7 +13373,14 @@ const ApprovalContractsBlock = ({
   );
 };
 
-const ApprovalQueueScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+const ApprovalQueueScreen = ({
+  store, onBack, focusRequestId, clearFocusRequestId,
+}: {
+  store: any;
+  onBack: () => void;
+  focusRequestId?: string | null;
+  clearFocusRequestId?: () => void;
+}) => {
   const api = store.approvalsApi;
   const requests: BookingRequestRecord[] = api?.requests || [];
   const currency = store.business?.currency || "USD";
@@ -13347,6 +13390,25 @@ const ApprovalQueueScreen = ({ store, onBack }: { store: any; onBack: () => void
   const [depositDraft, setDepositDraft] = useState<Record<string, string>>({});
   const [holdDraft, setHoldDraft] = useState<Record<string, string>>({});
   const [declineDraft, setDeclineDraft] = useState<Record<string, string>>({});
+
+  // Deep-link focus — when a notification routes here with a specific
+  // request id, scroll its card into view and highlight it briefly so
+  // the stylist can see what they tapped. Clears once consumed so a
+  // later visit to the queue doesn't re-trigger the scroll.
+  useEffect(() => {
+    if (!focusRequestId) return;
+    const t = setTimeout(() => {
+      const el = typeof document !== "undefined"
+        ? document.getElementById(`approval-row-${focusRequestId}`)
+        : null;
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      clearFocusRequestId?.();
+    }, 80);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRequestId]);
 
   // Phase B10 buckets:
   //   active  → anything that wants the stylist's attention
@@ -13519,11 +13581,17 @@ const ApprovalQueueScreen = ({ store, onBack }: { store: any; onBack: () => void
         {filtered.map(req => {
           const status = req.approval_status as ApprovalStatus;
           const isOpen = expanded === req.id;
+          const isFocused = focusRequestId === req.id;
           const fallbackDeposit = req.service_deposit_required && req.service_deposit_amount
             ? Number(req.service_deposit_amount).toFixed(2)
             : "";
           return (
-            <Card key={req.id} className="p-4 space-y-2">
+            <Card
+              id={`approval-row-${req.id}`}
+              key={req.id}
+              className="p-4 space-y-2"
+              style={isFocused ? { boxShadow: `0 0 0 2px ${C.gold}`, transition: "box-shadow 220ms ease" } : undefined}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-[14px] font-semibold truncate" style={{ color: C.espresso }}>{req.client_name}</p>
@@ -15035,6 +15103,7 @@ export default function App() {
   // Notification deep-link plumbing: when a notification routes to a
   // client, App stamps the id and Clients pops the matching profile.
   const [clientToOpenId, setClientToOpenId] = useState<string | null>(null);
+  const [approvalFocusId, setApprovalFocusId] = useState<string | null>(null);
   const [commPickerCtx, setCommPickerCtx] = useState<CommContext | null>(null);
   const [activeComm, setActiveComm] = useState<(CommContext & { templateKey: CommTemplateKey }) | null>(null);
   const [activeReceipt, setActiveReceipt] = useState<ReceiptRecord | null>(null);
@@ -15103,6 +15172,7 @@ export default function App() {
       setSecondary,
       setApptPrefill,
       setClientToOpenId,
+      setApprovalFocusId,
     });
   }, [notifications, store.appointments]);
 
@@ -15270,7 +15340,7 @@ export default function App() {
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "intelligence" && <BookingIntelligenceScreen store={store} onBack={() => setSecondary("settings")} />}
-      {secondary === "approvals" && <ApprovalQueueScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "approvals" && <ApprovalQueueScreen store={store} onBack={() => setSecondary("settings")} focusRequestId={approvalFocusId} clearFocusRequestId={() => setApprovalFocusId(null)} />}
       {secondary === "waitlist" && (
         <WaitlistScreen
           store={store}
