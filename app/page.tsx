@@ -6111,7 +6111,19 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
       nextFutureDate,
       photoCount: photos.filter(p => p.clientId === c.id).length,
     };
-  }).sort((a, b) => a.name.localeCompare(b.name)), [clients, appointments, photos, today]);
+  }).sort((a, b) => {
+    // Alphabetize A → Z, case- and diacritic-insensitive, whitespace
+    // trimmed. Clients with missing/blank names sink to the bottom so
+    // the list reads like a contact book. `useMemo` above + the
+    // `.map(...)` array means we're not mutating the original
+    // store.clients array.
+    const an = (a.name || "").trim();
+    const bn = (b.name || "").trim();
+    if (!an && !bn) return 0;
+    if (!an) return 1;
+    if (!bn) return -1;
+    return an.localeCompare(bn, undefined, { sensitivity: "base", numeric: true });
+  }), [clients, appointments, photos, today]);
 
   const filtered = useMemo(() => {
     return enriched.filter(c => {
