@@ -69,8 +69,8 @@ const FEATURES: Feature[] = [
   },
   {
     icon: <TrendingUp size={18} />,
-    title: "Track money, policies, and growth",
-    body: "Income, expenses, and lifetime client value — automatic.",
+    title: "Track income, policies, and business growth",
+    body: "See income, expenses, client value, and business progress in one place.",
   },
 ];
 
@@ -372,49 +372,92 @@ const WelcomeIntro = ({
               : "bbp-fade-up 600ms 880ms both",
           }}
         >
-          <button
-            type="button"
-            onClick={onGetStarted}
+          {/* Primary CTA wrapper carries a soft gold glow underneath
+              the button — separates it visually from the secondary
+              action without making the surface feel flashy. */}
+          <div style={{ position: "relative" }}>
+            <div
+              aria-hidden
+              style={{
+                position: "absolute",
+                inset: -6,
+                borderRadius: 999,
+                background:
+                  "radial-gradient(ellipse at center, rgba(201,169,97,0.42) 0%, rgba(201,169,97,0) 70%)",
+                filter: "blur(6px)",
+                pointerEvents: "none",
+                zIndex: 0,
+              }}
+            />
+            <button
+              type="button"
+              onClick={onGetStarted}
+              style={{
+                appearance: "none",
+                border: "none",
+                borderRadius: 999,
+                padding: "16px 22px",
+                background: P.espresso,
+                color: P.cream,
+                fontSize: 15,
+                fontWeight: 600,
+                letterSpacing: "0.02em",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                boxShadow: "0 10px 22px rgba(42,24,16,0.18)",
+                cursor: "pointer",
+                transitionProperty: "transform, box-shadow",
+                transitionDuration: "180ms",
+                minHeight: 52,
+                position: "relative",
+                zIndex: 1,
+                width: "100%",
+              }}
+              onMouseDown={(e) => {
+                const el = e.currentTarget as HTMLButtonElement;
+                el.style.transform = "scale(0.985)";
+                el.style.boxShadow = "0 6px 14px rgba(42,24,16,0.22)";
+              }}
+              onMouseUp={(e) => {
+                const el = e.currentTarget as HTMLButtonElement;
+                el.style.transform = "";
+                el.style.boxShadow = "0 10px 22px rgba(42,24,16,0.18)";
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget as HTMLButtonElement;
+                el.style.transform = "";
+                el.style.boxShadow = "0 10px 22px rgba(42,24,16,0.18)";
+              }}
+              onTouchStart={(e) => {
+                const el = e.currentTarget as HTMLButtonElement;
+                el.style.transform = "scale(0.985)";
+                el.style.boxShadow = "0 6px 14px rgba(42,24,16,0.22)";
+              }}
+              onTouchEnd={(e) => {
+                const el = e.currentTarget as HTMLButtonElement;
+                el.style.transform = "";
+                el.style.boxShadow = "0 10px 22px rgba(42,24,16,0.18)";
+              }}
+            >
+              Get Started <ArrowRight size={16} />
+            </button>
+          </div>
+
+          <p
             style={{
-              appearance: "none",
-              border: "none",
-              borderRadius: 999,
-              padding: "16px 22px",
-              background: P.espresso,
-              color: P.cream,
-              fontSize: 15,
-              fontWeight: 600,
-              letterSpacing: "0.02em",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              boxShadow: "0 10px 22px rgba(42,24,16,0.18)",
-              cursor: "pointer",
-              transitionProperty: "transform, box-shadow",
-              transitionDuration: "180ms",
-              minHeight: 52,
-            }}
-            onMouseDown={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.transform =
-                "scale(0.985)";
-            }}
-            onMouseUp={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.transform = "";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.transform = "";
-            }}
-            onTouchStart={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.transform =
-                "scale(0.985)";
-            }}
-            onTouchEnd={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.transform = "";
+              margin: "4px 0 0",
+              textAlign: "center",
+              fontSize: 11,
+              letterSpacing: "0.04em",
+              color: P.muted,
+              lineHeight: 1.5,
             }}
           >
-            Get Started <ArrowRight size={16} />
-          </button>
+            Free to start · Mobile friendly · Guest mode available
+          </p>
+
           <button
             type="button"
             onClick={onSignIn}
@@ -429,6 +472,7 @@ const WelcomeIntro = ({
               border: `1px solid ${P.hairline}`,
               cursor: "pointer",
               minHeight: 48,
+              marginTop: 4,
             }}
           >
             Sign In
