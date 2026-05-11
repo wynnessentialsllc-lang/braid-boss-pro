@@ -72,15 +72,18 @@ serve(async (req) => {
   if (linkErr) return json(500, { error: "server error" });
   if (!link || !link.active) return json(404, { error: "booking link not found" });
 
-  // Snapshot the service catalog row so subsequent owner edits don't
-  // rewrite history. Phase B1 consolidation migration populated the
+  // Snapshot the service catalog row at submit time so later owner
+  // edits don't rewrite history. service_name stays mutable for
+  // legacy code; service_name_snapshot is the immutable
+  // name-at-time-of-submission. Phase B1 consolidation populated the
   // canonical snapshot columns on booking_requests; new writes must
   // follow the same shape so we don't drift again.
   const serviceIdRaw = cleanString(payload.serviceId, 64);
-  const isUuid = serviceIdRaw && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(serviceIdRaw);
+  const isUuid = !!serviceIdRaw && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(serviceIdRaw);
   let snapshot: {
     service_id: string | null;
     service_name: string | null;
+    service_name_snapshot: string | null;
     service_duration: number | null;
     service_duration_hours: number | null;
     service_price: number | null;
@@ -90,6 +93,7 @@ serve(async (req) => {
   } = {
     service_id: null,
     service_name: cleanString(payload.serviceName, 200),
+    service_name_snapshot: cleanString(payload.serviceName, 200),
     service_duration: cleanNumber(payload.serviceDuration),
     service_duration_hours: cleanNumber(payload.serviceDuration),
     service_price: cleanNumber(payload.servicePrice),
@@ -109,6 +113,7 @@ serve(async (req) => {
       snapshot = {
         service_id: svc.id,
         service_name: svc.name,
+        service_name_snapshot: svc.name,
         service_duration: svc.duration_hours,
         service_duration_hours: svc.duration_hours,
         service_price: svc.base_price,
