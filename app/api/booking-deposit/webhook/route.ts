@@ -84,10 +84,39 @@ export async function POST(req: Request) {
   try { evt = JSON.parse(rawBody); }
   catch { return NextResponse.json({ error: "bad json" }, { status: 400 }); }
 
+  const eventId: string | undefined = typeof evt?.id === "string" ? evt.id : undefined;
+
   // We only care about completed Checkout Sessions for this flow.
   // Other event types (refund, dispute, etc.) are ignored for V1.
   if (evt?.type !== "checkout.session.completed") {
     return NextResponse.json({ received: true, ignored: evt?.type }, { status: 200 });
+  }
+
+  const admin = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  // Idempotency claim — atomic. A duplicate replay returns false
+  // and we short-circuit before any side effects.
+  if (eventId) {
+    const { data: firstTime, error: dedupeErr } = await admin.rpc(
+      "record_stripe_webhook_event",
+      {
+        event_id_in: eventId,
+        event_type_in: evt.type,
+        endpoint_in: "booking_deposit",
+        account_id_in: typeof evt?.account === "string" ? evt.account : null,
+      },
+    );
+    if (dedupeErr) {
+      // Don't proceed if the dedupe write failed — better to let
+      // Stripe retry than risk double-processing.
+      console.error("[booking-deposit/webhook] dedupe failed:", dedupeErr.message);
+      return NextResponse.json({ error: dedupeErr.message }, { status: 500 });
+    }
+    if (firstTime === false) {
+      return NextResponse.json({ received: true, duplicate: true, event_id: eventId }, { status: 200 });
+    }
   }
 
   const session = evt?.data?.object;
@@ -105,10 +134,6 @@ export async function POST(req: Request) {
   if (session?.payment_status && session.payment_status !== "paid") {
     return NextResponse.json({ received: true, ignored: `payment_status=${session.payment_status}` }, { status: 200 });
   }
-
-  const admin = createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
 
   const { error: rpcErr } = await admin.rpc("mark_deposit_paid_via_webhook", {
     request_id_in: requestId,
