@@ -15,11 +15,6 @@ import {
   type MonthDayStatus,
 } from "../../lib/services";
 import { collectPublicContext } from "../../lib/waitlist";
-import { queueNotification, dedupe } from "../../lib/notifications";
-import {
-  buildBookingConfirmationEmail,
-  buildContractInviteEmail,
-} from "../../lib/email";
 
 // Local-date "YYYY-MM-DD" — never UTC-shifts so the calendar lines up
 // with what the visitor sees on their phone.
@@ -415,22 +410,22 @@ export default function PublicBookingPage() {
         }
 
         // Phase B12.1a — enqueue notifications via the universal
-        // queue. Inline sends are not allowed by the architecture;
-        // all outbound mail goes through the queue. Failures here
-        // never block the submit — the queue insert is best-effort.
-        const clientEmail = email.trim();
-        if (clientEmail) {
-          await maybeEnqueueBookingAndContractEmails({
-            ownerUserId: link?.user_id || null,
-            bookingRequestId: newRequestId,
-            studioName: link?.business_name || "Braid Boss Pro",
-            clientName: name.trim(),
-            clientEmail,
-            serviceName: serviceName || selectedCatalogService?.name || null,
-            preferredDate: preferredDate || null,
-            preferredTime: preferredTime || null,
-            depositRequired: needsDeposit,
+        // queue. The public booking page runs as anon, which can't
+        // call queue_notification directly (security: would let
+        // anyone spam emails). Instead we call the SECURITY DEFINER
+        // wrapper enqueue_public_booking_emails, scoped to the
+        // request id we just submitted; it looks up the row server-
+        // side and enqueues the right rows. Failures are
+        // best-effort and never block the submit.
+        try {
+          const base = typeof window !== "undefined" ? window.location.origin : null;
+          await supabase.rpc("enqueue_public_booking_emails", {
+            request_id_in: newRequestId,
+            app_base_url_in: base,
           });
+        } catch {
+          // Stylist can always resend signing links manually from
+          // the Approvals queue Contracts mini-card.
         }
       }
 
@@ -886,119 +881,6 @@ const Field = ({ label, children }: { label: string; children: React.ReactNode }
 const Input = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
   <input {...props} style={inputStyle} />
 );
-
-// ---- Phase B12.1a — notification queue helper ------------------------
-//
-// Fire-and-forget enqueue after a successful public submit. We enqueue
-// the booking confirmation email immediately, then fetch the newly-
-// generated contract rows and enqueue one contract_signing email per
-// row. All sends route through the universal queue — no inline
-// dispatch — and every enqueue carries a dedupe key so retried
-// submits don't double-send.
-
-const APP_PUBLIC_URL = (
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  process.env.NEXT_PUBLIC_APP_PUBLIC_URL ||
-  ""
-).replace(/\/$/, "");
-
-const contractSigningUrl = (token: string): string => {
-  if (typeof window !== "undefined" && !APP_PUBLIC_URL) {
-    return `${window.location.origin}/contract/${encodeURIComponent(token)}`;
-  }
-  return `${APP_PUBLIC_URL}/contract/${encodeURIComponent(token)}`;
-};
-
-const maybeEnqueueBookingAndContractEmails = async (args: {
-  ownerUserId: string | null;
-  bookingRequestId: string;
-  studioName: string;
-  clientName: string;
-  clientEmail: string;
-  serviceName: string | null;
-  preferredDate: string | null;
-  preferredTime: string | null;
-  depositRequired: boolean;
-}): Promise<void> => {
-  if (!args.ownerUserId || !args.clientEmail) return;
-
-  const confirmation = buildBookingConfirmationEmail({
-    clientName: args.clientName,
-    studioName: args.studioName,
-    serviceName: args.serviceName,
-    preferredDate: args.preferredDate,
-    preferredTime: args.preferredTime,
-    approvalStatus: args.depositRequired ? "awaiting_deposit" : "pending_review",
-    depositRequired: args.depositRequired,
-  });
-  await queueNotification({
-    channel: "email",
-    messageType: "booking_confirmation",
-    recipient: args.clientEmail,
-    subject: confirmation.subject,
-    body: confirmation.subject,
-    templateData: { html: confirmation.html },
-    userId: args.ownerUserId,
-    bookingRequestId: args.bookingRequestId,
-    dedupeKey: dedupe.bookingConfirmation(args.bookingRequestId),
-  }).catch(() => undefined);
-
-  // Pull the contracts that generate_booking_contracts just inserted
-  // so we can enqueue per-contract signing invites. The public RPC
-  // is scoped to the booking_request_id the caller just submitted,
-  // so no auth required.
-  const supabase = getSupabase();
-  try {
-    const { data: contractRows } = await supabase.rpc(
-      "public_list_contracts_for_request",
-      { request_id_in: args.bookingRequestId },
-    );
-    const contracts = (contractRows || []) as Array<{
-      id: string;
-      title: string;
-      public_token: string;
-      status: string;
-      client_name: string | null;
-      client_email: string | null;
-    }>;
-    await Promise.all(contracts
-      .filter(c =>
-        c?.public_token
-        && c.status !== "signed"
-        && c.status !== "declined"
-        && c.status !== "voided"
-      )
-      .map(async (c) => {
-        const targetEmail = c.client_email || args.clientEmail;
-        if (!targetEmail) return;
-        const url = contractSigningUrl(c.public_token);
-        const invite = buildContractInviteEmail({
-          clientName: c.client_name || args.clientName,
-          studioName: args.studioName,
-          contractTitle: c.title,
-          serviceName: args.serviceName,
-          contractUrl: url,
-        });
-        await queueNotification({
-          channel: "email",
-          messageType: "contract_signing",
-          recipient: targetEmail,
-          subject: invite.subject,
-          body: invite.subject,
-          templateData: { html: invite.html, contractUrl: url, contractTitle: c.title },
-          userId: args.ownerUserId!,
-          bookingRequestId: args.bookingRequestId,
-          bookingContractId: c.id,
-          dedupeKey: dedupe.contractInvite(c.id),
-        }).catch(() => undefined);
-      })
-    );
-  } catch {
-    // Best-effort. Failure here doesn't block the submit — the
-    // stylist can still resend signing links from the Approvals
-    // queue once the row is in their dashboard.
-  }
-};
 
 // ---- Phase B7 — booking calendar -------------------------------------
 
