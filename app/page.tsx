@@ -206,6 +206,7 @@ import {
 import { buildCsv } from "./lib/csv";
 import ImportStudio, { IMPORT_TAGLINE } from "./components/ImportStudio";
 import { deriveClientInsights, formatLastBookedHint } from "./lib/client-insights";
+import { uploadBookingLogo, removeBookingLogo } from "./lib/booking-logo-storage";
 import { openExternal } from "./lib/open-external";
 import {
   computeRebookingOpportunities,
@@ -2880,11 +2881,12 @@ const ACCENT_PALETTE = [
   "#3D5A80", // navy
   "#7556A0", // lavender
 ];
-const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved }: {
+const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   open: boolean;
   onClose: () => void;
   link: any;
   onSaved: (next: any) => void;
+  userId: string | null;
 }) => {
   const [businessName, setBusinessName] = useState<string>(link?.business_name || "");
   const [intro, setIntro] = useState<string>(link?.intro || "");
@@ -2894,7 +2896,9 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved }: {
   const [policies, setPolicies] = useState<string>(link?.policies || "");
   const [accent, setAccent] = useState<string>(link?.accent_color || "#C9A961");
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
 
   // Re-hydrate when the link prop changes (e.g. after a save).
   useEffect(() => {
@@ -2948,13 +2952,87 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved }: {
         <Field label="Intro line" hint="Optional — one sentence that greets visitors.">
           <Input value={intro} onChange={(e) => setIntro(e.target.value)} placeholder="Welcome — let's get you on the books." />
         </Field>
-        <Field label="Logo URL" hint="Optional — paste an image URL (HTTPS).">
-          <Input value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…/logo.png" />
-        </Field>
-        {logoUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={logoUrl} alt="Logo preview" style={{ maxHeight: 80, maxWidth: 160, objectFit: "contain", borderRadius: 12, border: `1px solid ${C.hairline}` }} />
-        )}
+        <div>
+          <p className="text-[11px] font-bold uppercase mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>Studio logo</p>
+          <div className="flex items-center gap-3" style={{ flexWrap: "wrap" }}>
+            {logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoUrl}
+                alt="Logo preview"
+                style={{
+                  height: 72, width: 72, objectFit: "contain",
+                  borderRadius: 16, background: C.cream,
+                  border: `1px solid ${C.hairline}`, padding: 6,
+                }}
+              />
+            ) : (
+              <div
+                aria-hidden
+                style={{
+                  height: 72, width: 72, borderRadius: 16,
+                  border: `1px dashed ${C.caramel}`,
+                  background: C.cream,
+                  display: "grid", placeItems: "center",
+                  color: C.muted, fontSize: 11, letterSpacing: "0.08em",
+                  textTransform: "uppercase", fontWeight: 700,
+                }}
+              >
+                No logo
+              </div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!f) return;
+                  if (!userId) { setErr("Sign in required."); return; }
+                  setErr(null);
+                  setUploading(true);
+                  try {
+                    const { publicUrl } = await uploadBookingLogo(userId, f);
+                    setLogoUrl(publicUrl);
+                  } catch (ex: any) {
+                    setErr(ex?.message || "Upload failed.");
+                  } finally {
+                    setUploading(false);
+                  }
+                }}
+              />
+              <Button
+                variant="outline"
+                icon={<Upload size={14} />}
+                onClick={() => logoInputRef.current?.click()}
+                disabled={uploading}
+              >
+                {uploading ? "Uploading…" : logoUrl ? "Replace logo" : "Upload logo"}
+              </Button>
+              {logoUrl && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (userId) {
+                      try { await removeBookingLogo(userId); } catch { /* ignore */ }
+                    }
+                    setLogoUrl("");
+                  }}
+                  className="text-[11px] font-semibold"
+                  style={{ color: C.danger, background: "transparent", border: 0, padding: "4px 0", textAlign: "left" }}
+                >
+                  Remove logo
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="text-[11px] mt-2" style={{ color: C.muted }}>
+            JPG / PNG / SVG up to 8 MB. We resize to 512px so the file stays small.
+          </p>
+        </div>
         <Field label="Location" hint="Shown as a small chip under your studio name.">
           <Input value={locationText} onChange={(e) => setLocationText(e.target.value)} placeholder="Dallas, TX" />
         </Field>
@@ -12705,6 +12783,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
             onClose={() => setBookingCustomizeOpen(false)}
             link={bookingLink}
             onSaved={(updated) => setBookingLink({ ...bookingLink, ...updated })}
+            userId={userId}
           />
         )}
 
