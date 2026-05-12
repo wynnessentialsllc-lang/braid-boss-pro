@@ -9953,17 +9953,25 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
 
         <SectionTitle>Data</SectionTitle>
 
-        {/* Import — top-level Card with onClick so iOS Safari routes
-            the tap through the Card primitive's button semantics (the
-            same pattern Stripe Connect / Analytics use). Wrapping the
-            interactive area in a nested <button> inside a parent
-            <Card> intermittently lost the tap on iOS WebView. */}
-        <Card
-          className="p-4 active:scale-[0.99]"
-          style={{ background: C.ivory, border: `1px dashed ${C.caramel}` }}
+        {/* Import — native <button> per the same lesson the Account
+            row already learned: Card+onClick (a <div role=button>) is
+            inconsistent on iOS WKWebView, so use a real button so the
+            tap is guaranteed to fire. Visual styling matches the
+            dashed-cream card so the appearance is unchanged. */}
+        <button
+          type="button"
           onClick={() => { setImportOpen(true); trackEvent("import_open", { category: "feature" }); }}
+          className="w-full text-left rounded-2xl p-4 active:scale-[0.99] cursor-pointer select-none transition"
+          style={{
+            background: C.ivory,
+            border: `1px dashed ${C.caramel}`,
+            font: "inherit",
+            color: "inherit",
+            appearance: "none",
+            WebkitAppearance: "none",
+          }}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3" style={{ pointerEvents: "none" }}>
             <div className="rounded-full p-2 flex-shrink-0" style={{ background: C.gold, color: C.espresso }}>
               <Upload size={16} />
             </div>
@@ -9973,7 +9981,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
             </div>
             <ChevronRight size={16} style={{ color: C.muted }} />
           </div>
-        </Card>
+        </button>
 
         <Card className="p-4 space-y-2">
 
