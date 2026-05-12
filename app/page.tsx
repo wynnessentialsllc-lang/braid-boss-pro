@@ -2868,6 +2868,133 @@ const KpiDetailSheet = ({
   );
 };
 
+// Stylist-side editor for the public /book/<slug> page. Lets the
+// stylist customize the headline, logo, location, phone, policies,
+// and a single accent color. All fields write directly to
+// booking_links under owner RLS — no new RPC needed.
+const ACCENT_PALETTE = [
+  "#C9A961", // gold (default)
+  "#1F140A", // espresso
+  "#9C3D2E", // crimson
+  "#5C7C4A", // forest
+  "#3D5A80", // navy
+  "#7556A0", // lavender
+];
+const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved }: {
+  open: boolean;
+  onClose: () => void;
+  link: any;
+  onSaved: (next: any) => void;
+}) => {
+  const [businessName, setBusinessName] = useState<string>(link?.business_name || "");
+  const [intro, setIntro] = useState<string>(link?.intro || "");
+  const [logoUrl, setLogoUrl] = useState<string>(link?.logo_url || "");
+  const [locationText, setLocationText] = useState<string>(link?.location_text || "");
+  const [phone, setPhone] = useState<string>(link?.phone || "");
+  const [policies, setPolicies] = useState<string>(link?.policies || "");
+  const [accent, setAccent] = useState<string>(link?.accent_color || "#C9A961");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Re-hydrate when the link prop changes (e.g. after a save).
+  useEffect(() => {
+    if (!open) return;
+    setBusinessName(link?.business_name || "");
+    setIntro(link?.intro || "");
+    setLogoUrl(link?.logo_url || "");
+    setLocationText(link?.location_text || "");
+    setPhone(link?.phone || "");
+    setPolicies(link?.policies || "");
+    setAccent(link?.accent_color || "#C9A961");
+    setErr(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot when the sheet opens
+  }, [open, link?.slug]);
+
+  const save = async () => {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const supabase = getSupabase();
+      const patch = {
+        business_name: businessName.trim() || null,
+        intro: intro.trim() || null,
+        logo_url: logoUrl.trim() || null,
+        location_text: locationText.trim() || null,
+        phone: phone.trim() || null,
+        policies: policies.trim() || null,
+        accent_color: /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(accent) ? accent : null,
+      };
+      const { error } = await supabase
+        .from("booking_links")
+        .update(patch)
+        .eq("slug", link.slug);
+      if (error) throw error;
+      onSaved(patch);
+      onClose();
+    } catch (e: any) {
+      setErr(e?.message || "Couldn't save changes.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Customize booking page">
+      <div className="space-y-4">
+        <Field label="Studio name">
+          <Input value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="SBW Braiding" />
+        </Field>
+        <Field label="Intro line" hint="Optional — one sentence that greets visitors.">
+          <Input value={intro} onChange={(e) => setIntro(e.target.value)} placeholder="Welcome — let's get you on the books." />
+        </Field>
+        <Field label="Logo URL" hint="Optional — paste an image URL (HTTPS).">
+          <Input value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…/logo.png" />
+        </Field>
+        {logoUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={logoUrl} alt="Logo preview" style={{ maxHeight: 80, maxWidth: 160, objectFit: "contain", borderRadius: 12, border: `1px solid ${C.hairline}` }} />
+        )}
+        <Field label="Location" hint="Shown as a small chip under your studio name.">
+          <Input value={locationText} onChange={(e) => setLocationText(e.target.value)} placeholder="Dallas, TX" />
+        </Field>
+        <Field label="Phone for clients" hint="Powers the 'send a message' button (sms/tel).">
+          <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="555-204-1839" />
+        </Field>
+        <Field label="Studio policies" hint="Optional — shown in a collapsible card above the form.">
+          <Textarea value={policies} onChange={(e) => setPolicies(e.target.value)} rows={5}
+            placeholder="Deposit non-refundable. Late > 15 min cancels the slot." />
+        </Field>
+        <div>
+          <p className="text-[11px] font-bold uppercase mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>Accent color</p>
+          <div className="flex gap-2 flex-wrap">
+            {ACCENT_PALETTE.map((hex) => (
+              <button
+                key={hex}
+                type="button"
+                onClick={() => setAccent(hex)}
+                aria-label={`Accent ${hex}`}
+                style={{
+                  width: 36, height: 36, borderRadius: 999,
+                  background: hex,
+                  border: accent === hex ? `3px solid ${C.espresso}` : `1px solid ${C.hairline}`,
+                  boxShadow: accent === hex ? "0 0 0 3px rgba(74,44,26,0.06)" : "none",
+                  cursor: "pointer",
+                }}
+              />
+            ))}
+          </div>
+          <p className="text-[11px] mt-2" style={{ color: C.muted }}>Tints the primary CTA + accents on your public page.</p>
+        </div>
+        {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
+        <Button variant="primary" fullWidth disabled={busy} onClick={save}>
+          {busy ? "Saving…" : "Save customization"}
+        </Button>
+      </div>
+    </Sheet>
+  );
+};
+
 const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, openAppointmentRecord }: { store: any; setActive: any; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; openAppointmentRecord?: (a: any) => void }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
@@ -12234,10 +12361,21 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
 
   // Public booking link: one slug per user for V1. Slug is generated
   // client-side and inserted under the owner's RLS context.
-  const [bookingLink, setBookingLink] = useState<{ slug: string; active: boolean; intro: string | null; business_name: string | null } | null>(null);
+  const [bookingLink, setBookingLink] = useState<{
+    slug: string;
+    active: boolean;
+    intro: string | null;
+    business_name: string | null;
+    logo_url?: string | null;
+    location_text?: string | null;
+    phone?: string | null;
+    policies?: string | null;
+    accent_color?: string | null;
+  } | null>(null);
   const [bookingBusy, setBookingBusy] = useState(false);
   const [bookingCopied, setBookingCopied] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
+  const [bookingCustomizeOpen, setBookingCustomizeOpen] = useState(false);
   const [pendingRequests, setPendingRequests] = useState<number>(0);
 
   // eslint-disable-next-line react-hooks/preserve-manual-memoization -- depends on window.location which the React Compiler can't statically memoize, intentional
@@ -12256,7 +12394,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
       const [{ data: link }, { count }] = await Promise.all([
         supabase
           .from("booking_links")
-          .select("slug, active, intro, business_name")
+          .select("slug, active, intro, business_name, logo_url, location_text, phone, policies, accent_color")
           .eq("user_id", userId)
           .order("created_at", { ascending: false })
           .limit(1)
@@ -12520,12 +12658,23 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
               </div>
             )}
             {bookingLink ? (
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" icon={<Copy size={14} />} onClick={handleCopyBookingUrl}>{bookingCopied ? "Copied" : "Copy URL"}</Button>
-                <Button variant={bookingLink.active ? "outline" : "primary"} disabled={bookingBusy} onClick={handleToggleBooking}>
-                  {bookingLink.active ? "Pause" : "Resume"}
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button variant="outline" icon={<Copy size={14} />} onClick={handleCopyBookingUrl}>{bookingCopied ? "Copied" : "Copy URL"}</Button>
+                  <Button variant={bookingLink.active ? "outline" : "primary"} disabled={bookingBusy} onClick={handleToggleBooking}>
+                    {bookingLink.active ? "Pause" : "Resume"}
+                  </Button>
+                </div>
+                <Button
+                  variant="ghost"
+                  icon={<Sparkles size={14} />}
+                  fullWidth
+                  className="mt-2"
+                  onClick={() => setBookingCustomizeOpen(true)}
+                >
+                  Customize booking page
                 </Button>
-              </div>
+              </>
             ) : (
               <Button variant="primary" icon={<CalendarPlus size={15} />} fullWidth disabled={bookingBusy} onClick={handleEnableBooking}>
                 {bookingBusy ? "Working…" : "Generate booking link"}
@@ -12548,6 +12697,15 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
               </button>
             )}
           </Card>
+        )}
+
+        {bookingLink && (
+          <CustomizeBookingPageSheet
+            open={bookingCustomizeOpen}
+            onClose={() => setBookingCustomizeOpen(false)}
+            link={bookingLink}
+            onSaved={(updated) => setBookingLink({ ...bookingLink, ...updated })}
+          />
         )}
 
         {mode === "authed" && (
