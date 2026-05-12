@@ -62,6 +62,7 @@ import {
 } from "./components/PreviewUI";
 import { useStripeConnect, type StripeConnectProfile } from "./lib/stripe-connect";
 import { trackEvent } from "./lib/track";
+import { isAdminUser } from "./lib/admin";
 import { getAuthRedirectUrl } from "./lib/site-url";
 import {
   LIFETIME_PRICE_LABEL,
@@ -9616,6 +9617,41 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
           </button>
         )}
 
+        {/* Admin-only — only renders for emails on the allow-list in
+            app/lib/admin.ts. Hidden from every other user. */}
+        {isAdminUser(store?.email) && (
+          <>
+            <SectionTitle>Admin</SectionTitle>
+            <Card
+              className="p-4 active:scale-[0.99]"
+              onClick={() => {
+                if (typeof window !== "undefined") window.location.assign("/admin/analytics");
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div
+                    aria-hidden
+                    style={{
+                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                      background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                    }}
+                  >
+                    <BarChart3 size={15} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold" style={{ color: C.espresso }}>Analytics</p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      Pre-launch dashboard · admin only
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight size={18} style={{ color: C.muted }} />
+              </div>
+            </Card>
+          </>
+        )}
+
         <SectionTitle>Data</SectionTitle>
         <Card className="p-4 space-y-2">
           <Button variant="outline" icon={<Download size={15} />} onClick={exportData} fullWidth>Export all data (JSON)</Button>
@@ -15184,6 +15220,7 @@ export default function App() {
     return {
       ...rawStore,
       userId: auth.userId,
+      email: auth.email,
       premium,
       requestUpgrade,
       discountsApi,
