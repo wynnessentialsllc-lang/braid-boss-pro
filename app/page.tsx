@@ -9952,23 +9952,30 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
         )}
 
         <SectionTitle>Data</SectionTitle>
-        <Card className="p-4 space-y-2">
-          {/* Import — primary action; opens the guided sheet. */}
-          <button
-            type="button"
-            onClick={() => { setImportOpen(true); trackEvent("import_open", { category: "feature" }); }}
-            className="w-full p-3 rounded-xl flex items-center gap-3 text-left active:scale-[0.99] transition"
-            style={{ background: C.ivory, border: `1px dashed ${C.caramel}`, color: C.coffee }}
-          >
-            <div className="rounded-full p-2" style={{ background: C.gold, color: C.espresso }}><Upload size={16} /></div>
-            <div className="flex-1">
+
+        {/* Import — top-level Card with onClick so iOS Safari routes
+            the tap through the Card primitive's button semantics (the
+            same pattern Stripe Connect / Analytics use). Wrapping the
+            interactive area in a nested <button> inside a parent
+            <Card> intermittently lost the tap on iOS WebView. */}
+        <Card
+          className="p-4 active:scale-[0.99]"
+          style={{ background: C.ivory, border: `1px dashed ${C.caramel}` }}
+          onClick={() => { setImportOpen(true); trackEvent("import_open", { category: "feature" }); }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="rounded-full p-2 flex-shrink-0" style={{ background: C.gold, color: C.espresso }}>
+              <Upload size={16} />
+            </div>
+            <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold" style={{ color: C.espresso }}>Import studio data</p>
               <p className="text-[11px]" style={{ color: C.muted }}>Bring clients and services from another app.</p>
             </div>
             <ChevronRight size={16} style={{ color: C.muted }} />
-          </button>
+          </div>
+        </Card>
 
-          <div className="pt-1" style={{ borderTop: `1px solid ${C.hairline}` }} />
+        <Card className="p-4 space-y-2">
 
           {/* CSV exports — narrower scope than the JSON dump. */}
           <Button variant="outline" icon={<Download size={15} />} onClick={exportClientsCsv} fullWidth>Export clients (CSV)</Button>
