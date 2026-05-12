@@ -205,6 +205,7 @@ import {
 } from "./lib/native-download";
 import { buildCsv } from "./lib/csv";
 import ImportStudio, { IMPORT_TAGLINE } from "./components/ImportStudio";
+import { deriveClientInsights, formatLastBookedHint } from "./lib/client-insights";
 import { openExternal } from "./lib/open-external";
 import {
   computeRebookingOpportunities,
@@ -2930,6 +2931,38 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
     [appointments],
   );
 
+  // Smart-studio KPIs — derived from existing appointment + client
+  // data, no schema changes. "Top spending client" walks the book
+  // once; "Most booked" + "Returning %" reuse the existing
+  // calculateStylePerformance / calculateRetentionAnalytics helpers.
+  const todayISOForKpi = todayISO();
+  const styleStats = useMemo(
+    () => calculateStylePerformance(appointments),
+    [appointments],
+  );
+  const retention = useMemo(
+    () => calculateRetentionAnalytics(clients, appointments, todayISOForKpi),
+    [clients, appointments, todayISOForKpi],
+  );
+  const topClient = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const a of (appointments || []) as any[]) {
+      if (!a?.clientId) continue;
+      if (a.status === "cancelled") continue;
+      if (!(a.status === "completed" || a.paymentStatus === "paid")) continue;
+      totals.set(a.clientId, (totals.get(a.clientId) || 0) + calculateCollectedAmount(a));
+    }
+    let bestId: string | null = null;
+    let bestSpend = 0;
+    for (const [id, spend] of totals) {
+      if (spend > bestSpend) { bestId = id; bestSpend = spend; }
+    }
+    if (!bestId) return null;
+    const client = (clients || []).find((c: any) => c?.id === bestId) || null;
+    return { client, spend: bestSpend };
+  }, [appointments, clients]);
+  const mostBooked = styleStats[0] || null;
+
   const stats = useMemo(() => {
     const now = new Date();
     const wk = new Date(now); wk.setDate(now.getDate() - 7);
@@ -3041,6 +3074,35 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
           <KpiCard label="Month expected" value={fmtMoney(revenueStats.monthExpected, business.currency)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "gold" : "neutral"} onClick={() => openKpi("monthExpected")} />
           <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} onClick={() => openKpi("monthProfit")} />
           <KpiCard label="Year made" value={fmtMoney(revenueStats.yearMade, business.currency)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => setActive("money")} />
+
+          {/* Smart-studio KPIs */}
+          {mostBooked && (
+            <KpiCard
+              label="Most booked"
+              value={mostBooked.style.length > 14 ? `${mostBooked.style.slice(0, 14)}…` : mostBooked.style}
+              icon={<Sparkles size={16} />}
+              tone="gold"
+              onClick={() => setActive("schedule")}
+            />
+          )}
+          {topClient?.client && (
+            <KpiCard
+              label="Top client"
+              value={(topClient.client.name || "—").split(" ")[0]}
+              icon={<Users size={16} />}
+              tone="gold"
+              onClick={() => setActive("clients")}
+            />
+          )}
+          {retention.repeatBookingRatePct > 0 && (
+            <KpiCard
+              label="Returning"
+              value={`${retention.repeatBookingRatePct}%`}
+              icon={<TrendingUp size={16} />}
+              tone="success"
+              onClick={() => setActive("clients")}
+            />
+          )}
         </div>
 
         <KpiDetailSheet
@@ -3693,6 +3755,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
       setProfitMargin(p.profitMargin ?? 0);
       setAddOns((p.defaultAddOns || []).map(a => ({ ...a, id: uid() })));
       onClearPresetPrefill?.();
+      trackEvent("preset_used", { category: "feature" });
     }
   }, [prefillFromPreset]);
 
@@ -5475,6 +5538,15 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
     const saved = await upsertAppointment(baseAppt);
     if (!saved) return; // Gated by upgrade sheet.
+    // Track repeat bookings for the smart-studio funnel — fires when
+    // the booked client already has a prior completed visit.
+    if (saved?.clientId) {
+      const hasPrior = (store.appointments || []).some((a: any) =>
+        a && a.clientId === saved.clientId && a.id !== saved.id &&
+        (a.status === "completed" || a.paymentStatus === "paid"),
+      );
+      if (hasPrior) trackEvent("repeat_booking_created", { category: "feature" });
+    }
     await scheduleRemindersForAppointment({
       ...saved,
       remindersEnabled,
@@ -6769,6 +6841,31 @@ const ClientProfileSheet = ({
   const lastVisit = past.length > 0 ? past[past.length - 1].date : null;
   const upcomingCount = future.length + todays.length;
 
+  // Derived insights — surfaced at the top of the profile sheet as
+  // short conversational lines + a "Last booked: X · 7 weeks ago"
+  // booking-assist hint. Pure derivation from existing data; safe to
+  // call even when the client has zero visits.
+  const insights = useMemo(
+    () => deriveClientInsights(client, allAppts, today),
+    [client, allAppts, today],
+  );
+  const lastBookedHint = useMemo(
+    () => formatLastBookedHint(insights),
+    [insights],
+  );
+  // Fire once per profile view when we actually have something
+  // intelligent to surface — drives the "smart suggestion shown"
+  // funnel signal in /admin/analytics.
+  useEffect(() => {
+    if (insights.insights.length > 0 || lastBookedHint) {
+      trackEvent("smart_suggestion_used", {
+        category: "feature",
+        metadata: { lines: insights.insights.length, has_last: !!lastBookedHint },
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once per client open
+  }, [client?.id]);
+
   // Tags persist on the client record's `tags` array. The clients
   // table promotes some columns and round-trips the rest through the
   // data jsonb, so this works without a schema change.
@@ -6943,8 +7040,47 @@ const ClientProfileSheet = ({
             <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600, color: C.cream, lineHeight: 1 }}>
               {fmtMoney(lifetimeSpend, currency)}
             </p>
+            {insights.averageTicket > 0 && (
+              <p className="mt-1 text-[11px]" style={{ color: C.mutedSoft }}>
+                Avg ticket {fmtMoney(insights.averageTicket, currency)}
+              </p>
+            )}
           </Card>
         </div>
+
+        {/* INSIGHTS — pure derivation from existing appointments.
+            Hidden for brand-new clients with nothing to summarize. */}
+        {(insights.insights.length > 0 || lastBookedHint) && (
+          <Card className="p-4" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles size={14} style={{ color: C.goldDeep }} />
+              <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.goldDeep, letterSpacing: "0.18em" }}>
+                Insights
+              </p>
+            </div>
+            {lastBookedHint && (
+              <p className="text-[13px] font-semibold" style={{ color: C.espresso, lineHeight: 1.35 }}>
+                {lastBookedHint}
+              </p>
+            )}
+            {insights.insights.length > 0 && (
+              <ul className="mt-2 space-y-1" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {insights.insights.map((line, i) => (
+                  <li key={i} className="text-[12px] flex items-start gap-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                    <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
+                    <span>{line}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {(insights.isVip || insights.isRepeat) && (
+              <div className="mt-2.5 flex gap-1.5 flex-wrap">
+                {insights.isVip && <Pill tone="gold">VIP</Pill>}
+                {insights.isRepeat && !insights.isVip && <Pill tone="success">Repeat client</Pill>}
+              </div>
+            )}
+          </Card>
+        )}
 
         {/* CONTACT */}
         <Section
@@ -8840,7 +8976,7 @@ const PresetsScreen = ({ store, onBack, onUsePreset }) => {
           preset={creating ? blank() : editing}
           isNew={creating}
           onClose={() => { setEditing(null); setCreating(false); }}
-          onSave={async (p) => { await store.upsertPreset({ ...p, updatedAt: new Date().toISOString() }); setEditing(null); setCreating(false); }}
+          onSave={async (p) => { await store.upsertPreset({ ...p, updatedAt: new Date().toISOString() }); trackEvent("preset_saved", { category: "feature" }); setEditing(null); setCreating(false); }}
           onDelete={async (id) => { await store.deletePreset(id); setEditing(null); }}
           onUse={(p) => { onUsePreset(p); setEditing(null); }} />
       )}
