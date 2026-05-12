@@ -55,24 +55,37 @@ begin
     return jsonb_build_object('ok', false, 'reason', 'not_found');
   end if;
 
-  -- Surface the stylist's display name from profiles + business name
-  -- from app_settings so the page can read like "Pay Amara at Studio
-  -- 32" not just "Pay $80".
-  select coalesce(p.full_name, p.email, '')
-    into stylist_name
+  -- Stylist display name from profiles. Studio name chained:
+  -- profiles.business_name → settings.business_name → first active
+  -- booking_links.business_name. The Settings → Business form writes
+  -- to public.settings, so that fallback is the most common hit.
+  select coalesce(p.full_name, ''), nullif(trim(coalesce(p.business_name, '')), '')
+    into stylist_name, studio_name
   from public.profiles p
   where p.id = row_out.user_id;
-  select coalesce(s.data->>'businessName', '')
-    into studio_name
-  from public.app_settings s
-  where s.user_id = row_out.user_id
-  limit 1;
+
+  if studio_name is null or studio_name = '' then
+    select nullif(trim(coalesce(s.business_name, '')), '')
+      into studio_name
+    from public.settings s
+    where s.user_id = row_out.user_id
+    limit 1;
+  end if;
+
+  if studio_name is null or studio_name = '' then
+    select nullif(trim(coalesce(b.business_name, '')), '')
+      into studio_name
+    from public.booking_links b
+    where b.user_id = row_out.user_id and b.active = true
+    order by b.created_at desc nulls last
+    limit 1;
+  end if;
 
   return jsonb_build_object(
     'ok', true,
     'id', row_out.id,
-    'stylist_name', stylist_name,
-    'studio_name', studio_name,
+    'stylist_name', coalesce(stylist_name, ''),
+    'studio_name', coalesce(studio_name, ''),
     'service_name', row_out.style,
     'client_name', row_out.client_name,
     'appt_date', row_out.appt_date,

@@ -78,13 +78,27 @@ const Shell = ({ children }: { children: React.ReactNode }) => (
   </div>
 );
 
-const Brand = () => (
-  <div style={{ textAlign: "center", marginBottom: 24 }}>
-    <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: "0.24em", textTransform: "uppercase", color: C.goldDeep }}>
-      Braid Boss Pro
-    </p>
-  </div>
-);
+const Brand = ({ studio }: { studio?: string }) => {
+  const cleanStudio = studio?.trim();
+  return (
+    <div style={{ textAlign: "center", marginBottom: 24 }}>
+      {cleanStudio ? (
+        <>
+          <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso, letterSpacing: "-0.005em", lineHeight: 1.1 }}>
+            {cleanStudio}
+          </p>
+          <p style={{ margin: "4px 0 0", fontSize: 9, fontWeight: 600, letterSpacing: "0.22em", textTransform: "uppercase", color: C.muted }}>
+            powered by Braid Boss Pro
+          </p>
+        </>
+      ) : (
+        <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: "0.24em", textTransform: "uppercase", color: C.goldDeep }}>
+          Braid Boss Pro
+        </p>
+      )}
+    </div>
+  );
+};
 
 const BalancePayInner = ({ id }: { id: string }) => {
   const params = useSearchParams();
@@ -144,7 +158,7 @@ const BalancePayInner = ({ id }: { id: string }) => {
   if (!info && !err) {
     return (
       <Shell>
-        <Brand />
+        <Brand studio={info && (info as any).ok ? (info as any).studio_name : undefined} />
         <p style={{ textAlign: "center", color: C.muted, fontSize: 13 }}>Loading…</p>
       </Shell>
     );
@@ -154,7 +168,7 @@ const BalancePayInner = ({ id }: { id: string }) => {
     const reason = info && !info.ok ? info.reason : err;
     return (
       <Shell>
-        <Brand />
+        <Brand studio={info && (info as any).ok ? (info as any).studio_name : undefined} />
         <div style={card}>
           <h1 style={{ ...h1, color: C.danger }}>We couldn&apos;t load this page.</h1>
           <p style={muted}>
@@ -176,7 +190,7 @@ const BalancePayInner = ({ id }: { id: string }) => {
   if (showSuccess) {
     return (
       <Shell>
-        <Brand />
+        <Brand studio={info && (info as any).ok ? (info as any).studio_name : undefined} />
         <div style={card}>
           <div style={{ textAlign: "center", marginBottom: 14 }}>
             <div style={{
@@ -202,7 +216,7 @@ const BalancePayInner = ({ id }: { id: string }) => {
   if (isCancelledQuery) {
     return (
       <Shell>
-        <Brand />
+        <Brand studio={info && (info as any).ok ? (info as any).studio_name : undefined} />
         <div style={card}>
           <h1 style={h1}>Payment cancelled.</h1>
           <p style={muted}>No charge made. Tap below to try again.</p>
@@ -218,7 +232,7 @@ const BalancePayInner = ({ id }: { id: string }) => {
   if (info.is_cancelled) {
     return (
       <Shell>
-        <Brand />
+        <Brand studio={info && (info as any).ok ? (info as any).studio_name : undefined} />
         <div style={card}>
           <h1 style={h1}>This appointment was cancelled.</h1>
           <p style={muted}>Reach out to {studio} if you think that&apos;s a mistake.</p>
@@ -232,7 +246,7 @@ const BalancePayInner = ({ id }: { id: string }) => {
   if (balance <= 0) {
     return (
       <Shell>
-        <Brand />
+        <Brand studio={info && (info as any).ok ? (info as any).studio_name : undefined} />
         <div style={card}>
           <h1 style={h1}>No balance to pay.</h1>
           <p style={muted}>Your appointment with {studio} is already settled.</p>
@@ -244,7 +258,7 @@ const BalancePayInner = ({ id }: { id: string }) => {
   // ---- Main pay state ----
   return (
     <Shell>
-      <Brand />
+      <Brand studio={info && (info as any).ok ? (info as any).studio_name : undefined} />
       <div style={card}>
         <p style={eyebrow}>Balance due</p>
         <h1 style={{ ...h1, fontSize: 40, color: C.goldDeep }}>{fmtMoney(balance)}</h1>
