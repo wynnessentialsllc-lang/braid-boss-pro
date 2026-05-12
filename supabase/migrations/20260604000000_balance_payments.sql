@@ -55,24 +55,19 @@ begin
     return jsonb_build_object('ok', false, 'reason', 'not_found');
   end if;
 
-  -- Surface the stylist's display name from profiles + business name
-  -- from app_settings so the page can read like "Pay Amara at Studio
-  -- 32" not just "Pay $80".
-  select coalesce(p.full_name, p.email, '')
-    into stylist_name
+  -- profiles carries full_name + business_name directly. Email lives
+  -- in auth.users and isn't surfaced here; we don't need it for the
+  -- pay-page render.
+  select coalesce(p.full_name, ''), coalesce(p.business_name, '')
+    into stylist_name, studio_name
   from public.profiles p
   where p.id = row_out.user_id;
-  select coalesce(s.data->>'businessName', '')
-    into studio_name
-  from public.app_settings s
-  where s.user_id = row_out.user_id
-  limit 1;
 
   return jsonb_build_object(
     'ok', true,
     'id', row_out.id,
-    'stylist_name', stylist_name,
-    'studio_name', studio_name,
+    'stylist_name', coalesce(stylist_name, ''),
+    'studio_name', coalesce(studio_name, ''),
     'service_name', row_out.style,
     'client_name', row_out.client_name,
     'appt_date', row_out.appt_date,
