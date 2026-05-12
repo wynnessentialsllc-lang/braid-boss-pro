@@ -55,13 +55,31 @@ begin
     return jsonb_build_object('ok', false, 'reason', 'not_found');
   end if;
 
-  -- profiles carries full_name + business_name directly. Email lives
-  -- in auth.users and isn't surfaced here; we don't need it for the
-  -- pay-page render.
-  select coalesce(p.full_name, ''), coalesce(p.business_name, '')
+  -- Stylist display name from profiles. Studio name chained:
+  -- profiles.business_name → settings.business_name → first active
+  -- booking_links.business_name. The Settings → Business form writes
+  -- to public.settings, so that fallback is the most common hit.
+  select coalesce(p.full_name, ''), nullif(trim(coalesce(p.business_name, '')), '')
     into stylist_name, studio_name
   from public.profiles p
   where p.id = row_out.user_id;
+
+  if studio_name is null or studio_name = '' then
+    select nullif(trim(coalesce(s.business_name, '')), '')
+      into studio_name
+    from public.settings s
+    where s.user_id = row_out.user_id
+    limit 1;
+  end if;
+
+  if studio_name is null or studio_name = '' then
+    select nullif(trim(coalesce(b.business_name, '')), '')
+      into studio_name
+    from public.booking_links b
+    where b.user_id = row_out.user_id and b.active = true
+    order by b.created_at desc nulls last
+    limit 1;
+  end if;
 
   return jsonb_build_object(
     'ok', true,
