@@ -15,6 +15,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isAdminUser } from "../../../lib/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,9 +63,12 @@ export async function POST(req: Request) {
       ? body.metadata
       : {};
 
-  // Resolve user_id from the request's bearer token if present; never
-  // trust body.user_id directly.
+  // Resolve user_id + email from the request's bearer token if
+  // present; never trust body.user_id directly. The email is only
+  // used here to drop admin-originated events on write — never
+  // persisted to analytics_events.
   let user_id: string | null = null;
+  let user_email: string | null = null;
   const auth = req.headers.get("authorization") || "";
   const token = auth.replace(/^Bearer\s+/i, "").trim();
   if (token) {
@@ -75,6 +79,7 @@ export async function POST(req: Request) {
       });
       const { data } = await userClient.auth.getUser();
       user_id = data?.user?.id ?? null;
+      user_email = data?.user?.email ?? null;
     } catch {
       /* anon */
     }
@@ -82,12 +87,21 @@ export async function POST(req: Request) {
   // Fallback: caller may pass user_id directly when no JWT header was
   // sent (most browser fetch calls won't attach the supabase JWT). We
   // accept it best-effort — analytics integrity isn't a security
-  // boundary because the table is admin-read-only.
+  // boundary because the table is admin-read-only. When we hit this
+  // path we have no email; admin filtering relies on the JWT-resolved
+  // path above.
   if (!user_id) {
     const raw = body?.user_id;
     if (typeof raw === "string" && /^[0-9a-f-]{36}$/i.test(raw)) {
       user_id = raw;
     }
+  }
+
+  // Skip admin-originated events so the dashboard reflects real
+  // user behavior, not your own dogfooding. Only effective when the
+  // request had a Bearer JWT we could resolve to an email.
+  if (isAdminUser(user_email)) {
+    return NextResponse.json({ ok: true, dropped: "admin" }, { status: 200 });
   }
 
   const admin = createClient(supabaseUrl, serviceKey, {
