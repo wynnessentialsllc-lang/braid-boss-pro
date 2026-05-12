@@ -60,6 +60,7 @@ import {
   MetricRow,
   MiniBarChart,
 } from "./components/PreviewUI";
+import { useStripeConnect, type StripeConnectProfile } from "./lib/stripe-connect";
 import { getAuthRedirectUrl } from "./lib/site-url";
 import {
   LIFETIME_PRICE_LABEL,
@@ -9150,7 +9151,44 @@ const PolicySheet = ({ policy, isNew, onClose, onSave }) => {
 // ============================================================
 //  SETTINGS (V1 extended with Reminders link)
 // ============================================================
+// Derives the Settings card display from the cached Stripe Connect
+// profile. Mirrors the 4 states called out in the design spec plus a
+// loading fallback. Returns the Pill copy + tone + subtitle in one
+// place so the markup below stays clean.
+type StripeConnectCardDisplay = {
+  pill: string;
+  tone: "success" | "gold" | "warning" | "neutral";
+  subtitle: string;
+};
+const deriveStripeConnectDisplay = (
+  profile: StripeConnectProfile,
+  loading: boolean,
+): StripeConnectCardDisplay | null => {
+  if (loading) {
+    return { pill: "Checking", tone: "neutral", subtitle: "Checking your payment status…" };
+  }
+  if (!profile.stripe_connect_account_id) {
+    return { pill: "Not connected", tone: "neutral", subtitle: "Connect Stripe to accept client deposits." };
+  }
+  if (profile.stripe_connect_charges_enabled && profile.stripe_connect_payouts_enabled) {
+    return { pill: "Approved", tone: "success", subtitle: "Ready to accept deposits and payouts." };
+  }
+  if (profile.stripe_connect_charges_enabled) {
+    return { pill: "Payments on", tone: "gold", subtitle: "You can accept deposits, but payouts still need attention." };
+  }
+  return { pill: "Action needed", tone: "warning", subtitle: "Finish Stripe setup to accept deposits." };
+};
+
 const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void }) => {
+  // Stripe Connect status — read from the cached profile via the same
+  // hook the /settings/payments screen uses, so the badge here can't
+  // disagree with that page. Authed-only; in guest mode userId is null
+  // and the hook short-circuits.
+  const stripeConnect = useStripeConnect(store?.userId || null);
+  const stripeDisplay = deriveStripeConnectDisplay(
+    stripeConnect.profile,
+    stripeConnect.loading,
+  );
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
@@ -9496,9 +9534,12 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                     <DollarSign size={15} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold" style={{ color: C.espresso }}>Stripe Connect</p>
-                    <p className="text-[11px]" style={{ color: C.muted }}>
-                      Take deposits directly into your own Stripe account
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Stripe Connect</p>
+                      {stripeDisplay && <Pill tone={stripeDisplay.tone}>{stripeDisplay.pill}</Pill>}
+                    </div>
+                    <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
+                      {stripeDisplay?.subtitle || "Take deposits directly into your own Stripe account"}
                     </p>
                   </div>
                 </div>
