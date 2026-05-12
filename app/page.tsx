@@ -9524,6 +9524,17 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
   };
 
   const [importOpen, setImportOpen] = useState(false);
+  // Belt-and-suspenders open handler — see Import button below. Ref
+  // persists across re-renders so onClick + onTouchEnd + onPointerUp
+  // can fire in quick succession without double-opening.
+  const importFiredRef = useRef(false);
+  const openImport = useCallback(() => {
+    if (importFiredRef.current) return;
+    importFiredRef.current = true;
+    setImportOpen(true);
+    trackEvent("import_open", { category: "feature" });
+    setTimeout(() => { importFiredRef.current = false; }, 500);
+  }, []);
 
   return (
     <div className="bbp-fade pb-32">
@@ -9958,9 +9969,16 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
             inconsistent on iOS WKWebView, so use a real button so the
             tap is guaranteed to fire. Visual styling matches the
             dashed-cream card so the appearance is unchanged. */}
+        {/* Belt-and-suspenders touch handling. Some iOS Safari sessions
+            (notably in installed PWAs) eat the synthetic click that
+            follows touchend, so we also wire touchend and pointerup.
+            The importFiredRef latch (declared above) dedupes when
+            multiple events fire in quick succession. */}
         <button
           type="button"
-          onClick={() => { setImportOpen(true); trackEvent("import_open", { category: "feature" }); }}
+          onClick={openImport}
+          onTouchEnd={(e) => { e.preventDefault(); openImport(); }}
+          onPointerUp={openImport}
           className="w-full text-left rounded-2xl p-4 active:scale-[0.99] cursor-pointer select-none transition"
           style={{
             background: C.ivory,
@@ -9969,6 +9987,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
             color: "inherit",
             appearance: "none",
             WebkitAppearance: "none",
+            touchAction: "manipulation",
           }}
         >
           <div className="flex items-center gap-3" style={{ pointerEvents: "none" }}>
