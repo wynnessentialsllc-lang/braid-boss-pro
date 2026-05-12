@@ -603,8 +603,9 @@ export default function PublicBookingPage() {
               border: `1px solid ${C.hairline}`,
             }}
           >
-            <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: C.coffee, listStyle: "none" }}>
-              Studio policies
+            <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600, letterSpacing: "0.04em", color: C.coffee, listStyle: "none", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <span>Tap to see studio policies</span>
+              <span aria-hidden style={{ fontSize: 14, color: C.muted, lineHeight: 1 }}>＋</span>
             </summary>
             <p style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: C.coffee, whiteSpace: "pre-wrap" }}>
               {link.policies}
