@@ -49,6 +49,12 @@ type LinkConfig = {
   intro?: string | null;
   services?: any[] | null;
   active?: boolean;
+  // Customization fields — added by 20260606 migration
+  logo_url?: string | null;
+  location_text?: string | null;
+  phone?: string | null;
+  policies?: string | null;
+  accent_color?: string | null;
 };
 
 const SUPABASE_URL =
@@ -169,7 +175,7 @@ export default function PublicBookingPage() {
         const supabase = getSupabase();
         const { data, error } = await supabase
           .from("booking_links")
-          .select("slug, user_id, business_name, intro, services, active")
+          .select("slug, user_id, business_name, intro, services, active, logo_url, location_text, phone, policies, accent_color")
           .eq("slug", slug)
           .maybeSingle();
         if (cancelled) return;
@@ -490,6 +496,12 @@ export default function PublicBookingPage() {
     }
   };
 
+  // Per-link accent color from the customization fields, with the
+  // brand gold as the default. The CHECK constraint on the column
+  // guarantees this is a safe hex string before it lands in
+  // production, so dropping it into inline `style` is fine.
+  const accent = link?.accent_color || C.gold;
+
   return (
     <div style={{ minHeight: "100dvh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso }}>
       <style>{`
@@ -508,16 +520,96 @@ export default function PublicBookingPage() {
           paddingBottom: "calc(120px + env(safe-area-inset-bottom, 0px))",
         }}
       >
-        <p style={{ textAlign: "center", letterSpacing: "0.22em", textTransform: "uppercase", fontSize: 10, fontWeight: 700, color: C.gold }}>
+        {/* Logo — rendered only when the stylist set logo_url. Uses
+            a plain <img> so any public CDN URL works without
+            configuring next/image domains. */}
+        {link?.logo_url && (
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={link.logo_url}
+              alt={link.business_name || "Studio logo"}
+              style={{
+                maxHeight: 96,
+                maxWidth: 200,
+                objectFit: "contain",
+                borderRadius: 16,
+              }}
+            />
+          </div>
+        )}
+        <p style={{ textAlign: "center", letterSpacing: "0.22em", textTransform: "uppercase", fontSize: 10, fontWeight: 700, color: accent }}>
           Book your appointment
         </p>
         <h1 style={{ fontFamily: FONT_DISPLAY, fontSize: 36, fontWeight: 600, color: C.espresso, textAlign: "center", lineHeight: 1.1, marginTop: 8 }}>
           {link?.business_name || "Braid Boss Pro"}
         </h1>
+        {/* Contact pills row — location + phone surface as small
+            chips beneath the headline. Phone is tappable (tel: on
+            mobile). */}
+        {(link?.location_text || link?.phone) && (
+          <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            {link?.location_text && (
+              <span style={{ fontSize: 11, color: C.coffee, padding: "4px 10px", borderRadius: 99, background: C.cream, border: `1px solid ${C.hairline}` }}>
+                {link.location_text}
+              </span>
+            )}
+            {link?.phone && (
+              <a href={`tel:${link.phone.replace(/\s/g, "")}`} style={{ fontSize: 11, color: C.coffee, padding: "4px 10px", borderRadius: 99, background: C.cream, border: `1px solid ${C.hairline}`, textDecoration: "none" }}>
+                {link.phone}
+              </a>
+            )}
+          </div>
+        )}
         {link?.intro && (
-          <p style={{ textAlign: "center", color: C.muted, marginTop: 8, fontSize: 14 }}>
+          <p style={{ textAlign: "center", color: C.muted, marginTop: 10, fontSize: 14 }}>
             {link.intro}
           </p>
+        )}
+        {/* Send-a-message CTA — uses sms: when phone is set, mailto:
+            falls through to a future stylist contact email. Shown
+            only when at least one channel is available. */}
+        {link?.phone && (
+          <div style={{ textAlign: "center", marginTop: 14 }}>
+            <a
+              href={`sms:${link.phone.replace(/\s/g, "")}`}
+              style={{
+                display: "inline-block",
+                fontSize: 12,
+                fontWeight: 600,
+                color: accent,
+                textDecoration: "none",
+                padding: "8px 14px",
+                borderRadius: 99,
+                background: "transparent",
+                border: `1px solid ${accent}`,
+                letterSpacing: "0.04em",
+              }}
+            >
+              Send {link.business_name || "the studio"} a message
+            </a>
+          </div>
+        )}
+        {/* Policies — collapsible cream card so the headline stays
+            uncluttered for browsing clients but power-users can read
+            them before committing. */}
+        {link?.policies && (
+          <details
+            style={{
+              marginTop: 16,
+              padding: "12px 14px",
+              borderRadius: 14,
+              background: C.paper,
+              border: `1px solid ${C.hairline}`,
+            }}
+          >
+            <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: C.coffee, listStyle: "none" }}>
+              Studio policies
+            </summary>
+            <p style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: C.coffee, whiteSpace: "pre-wrap" }}>
+              {link.policies}
+            </p>
+          </details>
         )}
 
         {linkLoading && (
@@ -770,7 +862,7 @@ export default function PublicBookingPage() {
                 marginTop: 6,
                 padding: "14px 18px",
                 borderRadius: 12,
-                background: C.gold,
+                background: accent,
                 color: C.espresso,
                 border: `1.5px solid ${C.goldDeep}`,
                 fontWeight: 700,
