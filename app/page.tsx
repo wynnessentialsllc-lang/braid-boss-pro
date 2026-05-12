@@ -8490,7 +8490,7 @@ const ActiveTimerScreen = ({ store, prefillAppt, onBack, onComplete }) => {
   if (!timer) {
     if (isSimpleMode) {
       return (
-        <div className="bbp-fade pb-32" style={{ minHeight: "100vh", background: C.cream }}>
+        <div className="bbp-fade pb-32" style={{ minHeight: "100dvh", background: C.cream }}>
           <Header title="Timer" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
           <div className="px-5 pt-2">
             <Card className="p-5 mb-4 text-center" style={{ background: `linear-gradient(180deg, ${C.ivory}, ${C.cream})` }}>
@@ -8509,7 +8509,7 @@ const ActiveTimerScreen = ({ store, prefillAppt, onBack, onComplete }) => {
       );
     } else {
       return (
-        <div className="bbp-fade pb-32" style={{ minHeight: "100vh", background: C.cream }}>
+        <div className="bbp-fade pb-32" style={{ minHeight: "100dvh", background: C.cream }}>
           <Header title="Chair timer" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
           <div className="px-5 pt-2">
             <Card className="p-5 mb-4 text-center" style={{ background: `linear-gradient(180deg, ${C.ivory}, ${C.cream})` }}>
@@ -8562,7 +8562,7 @@ const ActiveTimerScreen = ({ store, prefillAppt, onBack, onComplete }) => {
 
   return (
     <div className="bbp-fade" style={{
-      minHeight: "100vh",
+      minHeight: "100dvh",
       background: `linear-gradient(180deg, ${C.espresso} 0%, ${C.coffee} 100%)`,
       color: C.cream
     }}>
@@ -8683,7 +8683,7 @@ const SessionSummaryScreen = ({ session, business, onSaveNote, onSkip }) => {
   const underran = variance != null && variance < -0.05;
 
   return (
-    <div className="bbp-fade pb-32" style={{ minHeight: "100vh", background: C.cream }}>
+    <div className="bbp-fade pb-32" style={{ minHeight: "100dvh", background: C.cream }}>
       <div className="px-5 pt-12 pb-4 text-center">
         <div className="mx-auto rounded-full flex items-center justify-center mb-3"
           style={{ width: 64, height: 64, background: C.success, color: C.cream }}>
@@ -15386,7 +15386,7 @@ export default function App() {
 
   if (store.loading) {
     return (
-      <div className="flex items-center justify-center" style={{ minHeight: "100vh", background: C.cream }}>
+      <div className="flex items-center justify-center" style={{ minHeight: "100dvh", background: C.cream }}>
         <GlobalStyle />
         <div className="text-center">
           <div className="rounded-full p-4 mx-auto mb-3 bbp-pulse" style={{ width: 64, height: 64, background: C.gold }}>

@@ -116,6 +116,25 @@ export async function POST(req: Request) {
   if (!profile?.stripe_connect_charges_enabled) {
     return fail(409, "Stylist's Stripe account isn't ready to take charges.");
   }
+  // Mid-flow account flip guard. If the booking_request was stamped
+  // with a connected account at submit time and the stylist has since
+  // disconnected + reconnected under a different account, refuse to
+  // route funds to the new one and tell the client to restart the
+  // booking so they get a fresh checkout against the current account.
+  if (
+    row.stripe_connect_account_id &&
+    profile?.stripe_connect_account_id &&
+    row.stripe_connect_account_id !== profile.stripe_connect_account_id
+  ) {
+    console.warn(
+      "[booking-deposit/checkout] account flip detected — refusing checkout",
+      { request_id: row.id, original: row.stripe_connect_account_id, current: profile.stripe_connect_account_id },
+    );
+    return fail(
+      409,
+      "Stylist's Stripe account changed since this booking was created. Please start the booking again.",
+    );
+  }
 
   const baseUrl = baseUrlOf(req);
   const cents = Math.round(Number(row.deposit_amount) * 100);

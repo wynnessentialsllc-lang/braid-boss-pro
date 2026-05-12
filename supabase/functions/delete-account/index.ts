@@ -61,6 +61,13 @@ const handle = async (req: Request): Promise<Response> => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
   const tables = [
+    // B12 tables — clear children before their parents so the
+    // explicit-delete loop doesn't race FK cascades.
+    "notification_queue",
+    "communication_logs",
+    "booking_contracts",
+    "service_contract_templates",
+    "contract_templates",
     "appointments",
     "clients",
     "quotes",
