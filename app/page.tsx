@@ -61,6 +61,7 @@ import {
   MiniBarChart,
 } from "./components/PreviewUI";
 import { useStripeConnect, type StripeConnectProfile } from "./lib/stripe-connect";
+import { trackEvent } from "./lib/track";
 import { getAuthRedirectUrl } from "./lib/site-url";
 import {
   LIFETIME_PRICE_LABEL,
@@ -3636,6 +3637,8 @@ const QuickTile = ({ icon, label, onClick }) => (
 //  CALCULATOR
 // ============================================================
 const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, openConvertToAppt, openPresets, prefillFromPreset, onClearPresetPrefill }) => {
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
+  useEffect(() => { trackEvent("pricing_calculator_open", { category: "feature" }); }, []);
   const { business, upsertQuote } = store;
   const [styleName, setStyleName] = useState("");
   const [hairCost, setHairCost] = useState("");
@@ -7642,6 +7645,8 @@ const PhotoEditSheet = ({ photo, appointments, onClose, onSave }: {
 //  MONEY + PRODUCTIVITY
 // ============================================================
 const Money = ({ store, openTxSheet, editTx, openTimerSessions, openReceipt }: { store: any; openTxSheet: any; editTx: any; openTimerSessions: any; openReceipt?: (rcp: ReceiptRecord) => void }) => {
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
+  useEffect(() => { trackEvent("money_tab_view", { category: "feature" }); }, []);
   const [period, setPeriod] = useState("week");
   const [tab, setTab] = useState("money"); // money | productivity
 
@@ -9189,6 +9194,8 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
     stripeConnect.profile,
     stripeConnect.loading,
   );
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
+  useEffect(() => { trackEvent("settings_view", { category: "feature" }); }, []);
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional

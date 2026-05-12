@@ -33,6 +33,7 @@ import {
   Sparkles,
   DollarSign,
 } from "lucide-react";
+import { trackEvent } from "../lib/track";
 
 // Palette mirrors the project's C tokens (app/page.tsx:231).
 const P = {
@@ -690,6 +691,11 @@ const WelcomeIntro = ({
     }
   }, []);
 
+  // Track the welcome view once per mount — entrance funnel signal.
+  useEffect(() => {
+    trackEvent("welcome_intro_view", { category: "activation" });
+  }, []);
+
   return (
     <div
       style={{
@@ -747,7 +753,7 @@ const WelcomeIntro = ({
       {onSkip && (
         <button
           type="button"
-          onClick={onSkip}
+          onClick={() => { trackEvent("welcome_intro_skip", { category: "activation" }); onSkip(); }}
           aria-label="Skip introduction"
           style={{
             position: "absolute",
@@ -982,7 +988,7 @@ const WelcomeIntro = ({
             />
             <button
               type="button"
-              onClick={onGetStarted}
+              onClick={() => { trackEvent("get_started_click", { category: "activation" }); onGetStarted(); }}
               style={{
                 appearance: "none",
                 border: "none",
@@ -1051,7 +1057,7 @@ const WelcomeIntro = ({
 
           <button
             type="button"
-            onClick={onSignIn}
+            onClick={() => { trackEvent("sign_in_click", { category: "activation" }); onSignIn(); }}
             style={{
               appearance: "none",
               borderRadius: 999,
