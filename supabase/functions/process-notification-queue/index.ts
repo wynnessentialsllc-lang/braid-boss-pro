@@ -167,6 +167,96 @@ const renderContractSigning = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- appointment_approved ------------------------------------------
+const renderAppointmentApproved = (p: Record<string, any>) => {
+  const clientName  = p.clientName  || "there";
+  const studioName  = p.studioName  || "your stylist";
+  const serviceName = p.serviceName || null;
+  const date        = p.preferredDate || null;
+  const time        = p.preferredTime || null;
+  const when        = [date, time].filter(Boolean).join(" · ");
+  const depositAmount = Number(p.depositAmount) > 0 ? Number(p.depositAmount) : null;
+  const paymentUrl  = String(p.paymentUrl || "").trim();
+  const expiresMin  = Number(p.expiresMinutes) > 0 ? Number(p.expiresMinutes) : null;
+
+  const subject = depositAmount && depositAmount > 0
+    ? `${studioName} approved your booking — secure with a deposit`
+    : `${studioName} approved your booking`;
+
+  const dep = depositAmount
+    ? `<p style="font-size:14px;line-height:22px;">Your deposit is <strong>$${depositAmount.toFixed(2)}</strong>. Once it lands, your appointment is locked in.</p>`
+    : "";
+  const cta = paymentUrl && depositAmount
+    ? ctaButton("Pay deposit", paymentUrl)
+    : "";
+  const expiresLine = paymentUrl && depositAmount && expiresMin
+    ? `<p style="font-size:12px;color:${C.muted};line-height:18px;">This hold expires in ${expiresMin} minutes. After that, the slot opens back up.</p>`
+    : "";
+
+  const html = wrapHtml(subject, `
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">You're in, ${escape(clientName)}.</h1>
+    <p style="font-size:14px;line-height:22px;">
+      ${escape(studioName)} approved your${serviceName ? ` ${escape(serviceName)}` : ""} request${when ? ` for ${escape(when)}` : ""}.
+    </p>
+    ${dep}
+    ${cta}
+    ${expiresLine}
+  `);
+  return { subject, html };
+};
+
+// ---- deposit_received ----------------------------------------------
+const renderDepositReceived = (p: Record<string, any>) => {
+  const clientName  = p.clientName  || "there";
+  const studioName  = p.studioName  || "your stylist";
+  const serviceName = p.serviceName || null;
+  const date        = p.preferredDate || null;
+  const time        = p.preferredTime || null;
+  const when        = [date, time].filter(Boolean).join(" · ");
+  const subject = `Deposit received — your appointment with ${studioName} is confirmed`;
+  const html = wrapHtml(subject, `
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">You're confirmed.</h1>
+    <p style="font-size:14px;line-height:22px;">
+      Thanks ${escape(clientName)} — your deposit landed and ${escape(studioName)} has your${serviceName ? ` ${escape(serviceName)}` : ""} appointment locked in${when ? ` for <strong>${escape(when)}</strong>` : ""}.
+    </p>
+    <p style="font-size:12px;color:${C.muted};line-height:18px;">
+      You'll get a reminder closer to the day. Reach out if anything changes.
+    </p>
+  `);
+  return { subject, html };
+};
+
+// ---- balance_paid (with review link) -------------------------------
+const renderBalancePaid = (p: Record<string, any>) => {
+  const clientName  = p.clientName  || "there";
+  const studioName  = p.studioName  || "your stylist";
+  const serviceName = p.serviceName || null;
+  const amountPaid  = Number(p.amountPaid) > 0 ? Number(p.amountPaid) : null;
+  const reviewUrl   = String(p.reviewUrl || "").trim();
+  const subject = `Thank you — your balance is paid, ${studioName}`;
+  const amount = amountPaid
+    ? `<p style="font-size:14px;line-height:22px;">We received <strong>$${amountPaid.toFixed(2)}</strong> for your${serviceName ? ` ${escape(serviceName)}` : ""} appointment. You're all set.</p>`
+    : "";
+  const cta = reviewUrl
+    ? `<p style="margin:18px 0 8px;text-align:center;"><a href="${reviewUrl}" style="display:inline-block;background:${C.espresso};color:${C.cream};text-decoration:none;padding:14px 26px;border-radius:999px;font-weight:600;font-size:14px;letter-spacing:0.04em;">Leave a review · ★★★★★</a></p>`
+    : "";
+  const html = wrapHtml(subject, `
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">Thank you, ${escape(clientName)}.</h1>
+    <p style="font-size:14px;line-height:22px;">
+      Thanks for visiting ${escape(studioName)} — your balance is paid in full.
+    </p>
+    ${amount}
+    <p style="font-size:14px;line-height:22px;margin-top:18px;">
+      If you have a moment, your feedback means the world. It only takes 30 seconds.
+    </p>
+    ${cta}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;text-align:center;">
+      Rate your experience and share anything you'd want ${escape(studioName)} to know.
+    </p>
+  `);
+  return { subject, html };
+};
+
 // ---- generic fallback -----------------------------------------------
 const renderGeneric = (row: ClaimedRow) => {
   const subject = row.subject || "Notification from Braid Boss Pro";
@@ -199,6 +289,12 @@ const renderForRow = (row: ClaimedRow): Rendered => {
     case "contract_signing_email":
     case "contract_invite":
       return renderContractSigning(row.payload || {});
+    case "appointment_approved":
+      return renderAppointmentApproved(row.payload || {});
+    case "deposit_received":
+      return renderDepositReceived(row.payload || {});
+    case "balance_paid":
+      return renderBalancePaid(row.payload || {});
     default:
       return renderGeneric(row);
   }

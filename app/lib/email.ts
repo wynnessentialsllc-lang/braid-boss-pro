@@ -143,6 +143,39 @@ export const buildDepositReceivedEmail = (args: {
   return { subject, html };
 };
 
+// Sent from the balance-payment webhook when the client pays the
+// final balance through Stripe. Includes a private review link so
+// the stylist can collect feedback while the appointment is fresh.
+export const buildBalancePaidEmail = (args: {
+  clientName: string;
+  studioName: string;
+  serviceName?: string | null;
+  amountPaid?: number | null;
+  reviewUrl: string;
+}) => {
+  const subject = `Thank you — your balance is paid, ${args.studioName}`;
+  const amount = args.amountPaid && args.amountPaid > 0
+    ? `<p style="font-size:14px;line-height:22px;">We received <strong>$${args.amountPaid.toFixed(2)}</strong> for your${args.serviceName ? ` ${escapeHtml(args.serviceName)}` : ""} appointment. You're all set.</p>`
+    : "";
+  const html = wrapHtml(subject, `
+    <h1 style="font-size:20px;margin:0 0 12px;color:#1F140A;">Thank you, ${escapeHtml(args.clientName)}.</h1>
+    <p style="font-size:14px;line-height:22px;">
+      Thanks for visiting ${escapeHtml(args.studioName)} — your balance is paid in full.
+    </p>
+    ${amount}
+    <p style="font-size:14px;line-height:22px;margin-top:18px;">
+      If you have a moment, your feedback means the world. It only takes 30 seconds.
+    </p>
+    <p style="margin:18px 0 8px;text-align:center;">
+      <a href="${args.reviewUrl}" style="display:inline-block;background:#1F140A;color:#FAF6EE;text-decoration:none;padding:14px 26px;border-radius:999px;font-weight:600;font-size:14px;letter-spacing:0.04em;">Leave a review · ★★★★★</a>
+    </p>
+    <p style="font-size:12px;color:#9A8B72;line-height:18px;text-align:center;">
+      Rate your experience and share anything you'd want ${escapeHtml(args.studioName)} to know.
+    </p>
+  `);
+  return { subject, html };
+};
+
 export const buildExpirationEmail = (args: {
   clientName: string;
   studioName: string;
