@@ -412,6 +412,30 @@ export default function AdminAnalyticsPage() {
       `}</style>
 
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
+        {/* Back to app — pill button at the top so the admin can
+            return to the main shell without using the browser back
+            button (which doesn't exist in the installed PWA). */}
+        <a
+          href="/"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "8px 14px",
+            borderRadius: 99,
+            background: "transparent",
+            color: C.coffee,
+            border: `1px solid ${C.hairline}`,
+            fontSize: 12,
+            fontWeight: 600,
+            letterSpacing: "0.04em",
+            textDecoration: "none",
+            marginBottom: 14,
+          }}
+        >
+          ← Back to app
+        </a>
+
         <header style={{ marginBottom: 18 }}>
           <SectionEyebrow>Admin</SectionEyebrow>
           <h1 style={{ margin: "6px 0 4px", fontFamily: FONT_DISPLAY, fontSize: 34, fontWeight: 600, letterSpacing: "-0.01em" }}>
