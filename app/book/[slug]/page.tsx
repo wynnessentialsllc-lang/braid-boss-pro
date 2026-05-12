@@ -178,7 +178,22 @@ export default function PublicBookingPage() {
         } else if (!data.active) {
           setLinkError("This booking link is currently paused.");
         } else {
-          setLink(data as LinkConfig);
+          // Personalization fallback: if the booking_links row
+          // doesn't carry a business_name, ask the RPC for the
+          // best display name (settings → profiles → other links).
+          // Keeps the public booking page personalized even when
+          // the stylist never explicitly named this link.
+          let displayName = (data as LinkConfig).business_name;
+          if (!displayName || !String(displayName).trim()) {
+            try {
+              const { data: studio } = await supabase
+                .rpc("public_get_studio_name", { user_id_in: (data as any).user_id });
+              if (typeof studio === "string" && studio.trim()) {
+                displayName = studio.trim();
+              }
+            } catch { /* leave as null; UI falls back to "Braid Boss Pro" */ }
+          }
+          setLink({ ...(data as LinkConfig), business_name: displayName });
         }
       } catch {
         if (!cancelled) setLinkError("Couldn't load this booking link.");

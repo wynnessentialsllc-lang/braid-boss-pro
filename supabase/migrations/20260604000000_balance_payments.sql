@@ -229,3 +229,51 @@ $$;
 
 revoke all on function public.mark_balance_paid_manually(text, text, text) from public;
 grant execute on function public.mark_balance_paid_manually(text, text, text) to authenticated;
+
+-- =====================================================================
+-- 5. public_get_studio_name — shared display-name chain
+-- =====================================================================
+-- Returns the best business name for the given stylist:
+--   settings.business_name → profiles.business_name → most recent
+--   active booking_links.business_name → ''.
+-- Used by the public balance pay page and the public /book/<slug>
+-- page as a fallback when the booking_links row didn't carry a name.
+create or replace function public.public_get_studio_name(
+  user_id_in uuid
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  out_name text;
+begin
+  if user_id_in is null then return ''; end if;
+  select nullif(trim(coalesce(s.business_name, '')), '')
+    into out_name
+  from public.settings s
+  where s.user_id = user_id_in
+  limit 1;
+  if out_name is not null and out_name <> '' then return out_name; end if;
+
+  select nullif(trim(coalesce(p.business_name, '')), '')
+    into out_name
+  from public.profiles p
+  where p.id = user_id_in
+  limit 1;
+  if out_name is not null and out_name <> '' then return out_name; end if;
+
+  select nullif(trim(coalesce(b.business_name, '')), '')
+    into out_name
+  from public.booking_links b
+  where b.user_id = user_id_in and b.active = true
+  order by b.created_at desc nulls last
+  limit 1;
+  return coalesce(out_name, '');
+end;
+$$;
+
+revoke all on function public.public_get_studio_name(uuid) from public;
+grant execute on function public.public_get_studio_name(uuid) to anon;
+grant execute on function public.public_get_studio_name(uuid) to authenticated;
