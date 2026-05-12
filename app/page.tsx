@@ -5880,22 +5880,53 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             </Pill>
           </div>
           {balanceDue > 0 ? (
-            <Button variant="primary" icon={<Check size={16} />} fullWidth
-              onClick={() => {
-                const apptDate = form.date || todayISO();
-                const isPastOrToday = apptDate <= todayISO();
-                setForm({
-                  ...form,
-                  depositPaid: parseMoney(form.totalPrice),
-                  paymentStatus: "paid",
-                  paymentDate: form.paymentDate || todayISO(),
-                  status: isPastOrToday && form.status !== "cancelled" && form.status !== "no_show"
-                    ? "completed"
-                    : form.status,
-                });
-              }}>
-              Collect balance / Mark as paid
-            </Button>
+            <>
+              {/* Stripe balance payment link — copy the public /pay
+                  page URL so the stylist can text it / DM it to the
+                  client. The actual checkout session is created
+                  server-side when the client taps Pay on that page. */}
+              {appt?.id && (
+                <Button
+                  variant="outline"
+                  icon={<Copy size={16} />}
+                  fullWidth
+                  onClick={async () => {
+                    const url = `${typeof window !== "undefined" ? window.location.origin : ""}/pay/balance/${appt.id}`;
+                    try {
+                      if (typeof navigator !== "undefined" && navigator.clipboard) {
+                        await navigator.clipboard.writeText(url);
+                        alert("Balance payment link copied.\n\nText or email it to your client — they'll pay through Stripe.");
+                      } else {
+                        // Older Safari — surface the URL so the
+                        // stylist can long-press / copy manually.
+                        window.prompt("Copy this link to share with your client:", url);
+                      }
+                      trackEvent("balance_link_copied", { category: "feature", metadata: { appt: appt.id.slice(0, 8) } });
+                    } catch {
+                      window.prompt("Copy this link to share with your client:", url);
+                    }
+                  }}
+                >
+                  Copy balance payment link
+                </Button>
+              )}
+              <Button variant="primary" icon={<Check size={16} />} fullWidth
+                onClick={() => {
+                  const apptDate = form.date || todayISO();
+                  const isPastOrToday = apptDate <= todayISO();
+                  setForm({
+                    ...form,
+                    depositPaid: parseMoney(form.totalPrice),
+                    paymentStatus: "paid",
+                    paymentDate: form.paymentDate || todayISO(),
+                    status: isPastOrToday && form.status !== "cancelled" && form.status !== "no_show"
+                      ? "completed"
+                      : form.status,
+                  });
+                }}>
+                Mark balance paid (manual)
+              </Button>
+            </>
           ) : (
             <Button variant="outline" icon={<RefreshCw size={14} />} fullWidth
               onClick={() => setForm({
