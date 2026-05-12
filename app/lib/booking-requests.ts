@@ -161,8 +161,45 @@ export const useBookingApprovalQueue = (userId: string | null): {
       expires_minutes_in: expiresMinutes,
     });
     if (err) { setError(err.message); return null; }
+
+    // Best-effort: enqueue the "approval — pay deposit" email to the
+    // client. queue_notification dedupes on
+    // `appointment_approved:<id>` so a re-approve doesn't double-send.
+    const row = (data as BookingRequestRecord) || null;
+    if (row?.client_email) {
+      try {
+        const { data: studio } = await supabase
+          .rpc("public_get_studio_name", { user_id_in: userId });
+        const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+        const paymentUrl = `${baseUrl}/booking/success?request_id=${row.id}`;
+        await supabase.rpc("queue_notification", {
+          user_id_in: userId,
+          channel_in: "email",
+          notification_type_in: "appointment_approved",
+          body_in: "Your booking was approved.",
+          subject_in: `${(typeof studio === "string" && studio.trim()) || "Your stylist"} approved your booking`,
+          recipient_email_in: row.client_email,
+          recipient_name_in: row.client_name || null,
+          payload_in: {
+            clientName: row.client_name || "there",
+            studioName: (typeof studio === "string" && studio.trim()) ? studio.trim() : "your stylist",
+            serviceName: (row as any).service_name_snapshot || (row as any).service_name || null,
+            preferredDate: (row as any).preferred_date || null,
+            preferredTime: (row as any).preferred_time || null,
+            depositAmount: depositAmount || (row as any).deposit_amount || null,
+            paymentUrl,
+            expiresMinutes,
+          },
+          dedupe_key_in: `appointment_approved:${row.id}`,
+          booking_request_id_in: row.id,
+        });
+      } catch {
+        // Approval already succeeded — email failure shouldn't surface.
+      }
+    }
+
     await refresh();
-    return (data as BookingRequestRecord) || null;
+    return row;
   };
 
   const decline: ReturnType<typeof useBookingApprovalQueue>["decline"] = async (id, reason) => {

@@ -146,5 +146,43 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: rpcErr.message }, { status: 500 });
   }
 
+  // Best-effort: enqueue the "deposit received — your appointment is
+  // confirmed" email. The RPC's idempotency contract means this only
+  // runs after a successful state transition, and queue_notification
+  // dedupes on `deposit_received:<request_id>` so a Stripe replay
+  // can't double-send.
+  try {
+    const { data: br } = await admin
+      .from("booking_requests")
+      .select("user_id, client_email, client_name, service_name_snapshot, service_name, preferred_date, preferred_time")
+      .eq("id", requestId)
+      .maybeSingle();
+    if (br?.client_email) {
+      const { data: studio } = await admin
+        .rpc("public_get_studio_name", { user_id_in: br.user_id });
+      await admin.rpc("queue_notification", {
+        user_id_in: br.user_id,
+        channel_in: "email",
+        notification_type_in: "deposit_received",
+        body_in: "Deposit received — your appointment is confirmed.",
+        subject_in: "Deposit received — your appointment is confirmed",
+        recipient_email_in: br.client_email,
+        recipient_name_in: br.client_name || null,
+        payload_in: {
+          clientName: br.client_name || "there",
+          studioName: (typeof studio === "string" && studio.trim()) ? studio.trim() : "your stylist",
+          serviceName: br.service_name_snapshot || br.service_name || null,
+          preferredDate: br.preferred_date || null,
+          preferredTime: br.preferred_time || null,
+        },
+        dedupe_key_in: `deposit_received:${requestId}`,
+        booking_request_id_in: requestId,
+      });
+    }
+  } catch (e) {
+    // Email enqueue failure is non-fatal — the row is already paid.
+    console.warn("[booking-deposit/webhook] email enqueue failed:", e);
+  }
+
   return NextResponse.json({ received: true }, { status: 200 });
 }
