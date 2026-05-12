@@ -9524,15 +9524,18 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
   };
 
   const [importOpen, setImportOpen] = useState(false);
-  // Belt-and-suspenders open handler — see Import button below. Ref
-  // persists across re-renders so onClick + onTouchEnd + onPointerUp
-  // can fire in quick succession without double-opening.
+  // Diagnostic state — temporary on-screen counter that updates when
+  // each event type fires. Lets us figure out from a phone screenshot
+  // which event the iOS WebView is actually delivering without
+  // needing Safari Web Inspector.
+  const [importDebug, setImportDebug] = useState<string>("");
   const importFiredRef = useRef(false);
-  const openImport = useCallback(() => {
+  const openImport = useCallback((source: string) => {
+    setImportDebug(`${source} · ${new Date().toLocaleTimeString()}`);
     if (importFiredRef.current) return;
     importFiredRef.current = true;
     setImportOpen(true);
-    trackEvent("import_open", { category: "feature" });
+    trackEvent("import_open", { category: "feature", metadata: { source } });
     setTimeout(() => { importFiredRef.current = false; }, 500);
   }, []);
 
@@ -9976,9 +9979,9 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
             multiple events fire in quick succession. */}
         <button
           type="button"
-          onClick={openImport}
-          onTouchEnd={(e) => { e.preventDefault(); openImport(); }}
-          onPointerUp={openImport}
+          onClick={() => openImport("click")}
+          onTouchEnd={(e) => { e.preventDefault(); openImport("touchend"); }}
+          onPointerUp={() => openImport("pointerup")}
           className="w-full text-left rounded-2xl p-4 active:scale-[0.99] cursor-pointer select-none transition"
           style={{
             background: C.ivory,
@@ -10001,6 +10004,19 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
             <ChevronRight size={16} style={{ color: C.muted }} />
           </div>
         </button>
+
+        {/* DIAGNOSTIC — temporary. Shows which event last fired so we
+            can confirm from a phone screenshot whether the tap is
+            registering at all. Will be removed once the root cause is
+            identified. */}
+        {importDebug && (
+          <p
+            className="text-[11px] text-center"
+            style={{ color: C.muted, marginTop: -6, marginBottom: 4 }}
+          >
+            last event: {importDebug} · sheet open: {String(importOpen)}
+          </p>
+        )}
 
         <Card className="p-4 space-y-2">
 
