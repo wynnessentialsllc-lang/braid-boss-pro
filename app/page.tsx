@@ -10242,8 +10242,18 @@ const useNotifications = (store: any) => {
   // Prune dismissed / read IDs that no longer exist in the live items.
   // Without this, deleting an appointment leaves its notification id
   // pinned in storage forever, slowly bloating the persisted list.
+  //
+  // CRITICAL: skip pruning while `allItems` is empty. On a fresh app
+  // load `useStorage` hydrates `store.appointments` asynchronously, so
+  // for the first render or two after `hydrated=true` the live items
+  // are an empty array even though the user does have real
+  // appointments. If we prune in that window, every dismissed ID is
+  // wiped from disk and the notifications reappear once the
+  // appointments finally arrive. Treating empty as "haven't observed
+  // yet" keeps dismissals durable across refresh / cold start.
   useEffect(() => {
     if (!hydrated) return;
+    if (allItems.length === 0) return;
     const liveIds = new Set(allItems.map(n => n.id));
     const cleanDismissed = dismissed.filter(id => liveIds.has(id));
     const cleanRead = read.filter(id => liveIds.has(id));
