@@ -15,6 +15,7 @@
 //     surface to the user. The function returns void synchronously.
 
 import { getSupabase } from "./supabase";
+import { isAdminUser } from "./admin";
 
 const SESSION_KEY = "bbp-analytics-sid";
 
@@ -99,11 +100,21 @@ export const trackEvent = (
 
   (async () => {
     let userId: string | null = null;
+    let accessToken: string | null = null;
+    let email: string | null = null;
     try {
       const supabase = getSupabase();
       const { data } = await supabase.auth.getSession();
       userId = data?.session?.user?.id ?? null;
+      email = data?.session?.user?.email ?? null;
+      accessToken = data?.session?.access_token ?? null;
     } catch { /* anon */ }
+
+    // Fast-skip: admin events never leave the device. The server has
+    // a second check (in /api/analytics/track) using the JWT, so a
+    // future call site that bypasses this helper still won't pollute
+    // the dataset with admin behavior.
+    if (isAdminUser(email)) return;
 
     const body = {
       event_name: eventName,
@@ -115,9 +126,13 @@ export const trackEvent = (
     };
 
     try {
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      // Sending the JWT lets the server resolve the email and apply
+      // the admin filter as a defense-in-depth backstop.
+      if (accessToken) headers.authorization = `Bearer ${accessToken}`;
       await fetch("/api/analytics/track", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify(body),
         keepalive: true,
       });
