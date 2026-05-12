@@ -203,7 +203,8 @@ import {
   downloadCsv,
   downloadPdfBlob,
 } from "./lib/native-download";
-import { buildCsv, parseCsv, pickField } from "./lib/csv";
+import { buildCsv } from "./lib/csv";
+import ImportStudio, { IMPORT_TAGLINE } from "./components/ImportStudio";
 import { openExternal } from "./lib/open-external";
 import {
   computeRebookingOpportunities,
@@ -9198,240 +9199,28 @@ const deriveStripeConnectDisplay = (
 };
 
 // =====================================================================
-// Import studio data — guided CSV import for clients + services.
+// Import studio data — thin Sheet wrapper around the dedicated
+// wizard at app/components/ImportStudio.tsx. The wizard owns parsing,
+// auto-mapping, duplicate detection, and the 6-step UI; this file
+// just hosts it inside the existing Sheet primitive so the rest of
+// Settings keeps the same call shape.
 // =====================================================================
-// Detects the target table from header columns (case-insensitive,
-// space/underscore tolerant). Shows a 5-row preview before commit so
-// the user can sanity-check the parse. Calls existing store mutations
-// (store.upsertClient, store.servicesApi.upsert) one row at a time
-// with progress reporting; the underlying writes are already
-// idempotent per record so a re-import won't duplicate cleanly-named
-// rows when the user uploads the same file twice.
-//
-// XLSX is intentionally NOT supported here — adding sheetjs would
-// balloon the bundle and the round-trip CSV the export above produces
-// works in every spreadsheet app. Combined CSV (both clients and
-// services in one file) is also out of scope; users should re-run the
-// import sheet per file.
-
-type ImportTarget = "clients" | "services" | "unknown";
-
-const detectImportTarget = (headers: string[]): ImportTarget => {
-  const norm = new Set(headers.map(h => h.toLowerCase().replace(/[\s_-]+/g, "")));
-  // Services have duration / price columns the clients sheet never
-  // would. Check those first.
-  if (norm.has("durationhours") || norm.has("baseprice") || norm.has("price")) return "services";
-  if (norm.has("phone") || norm.has("email") || norm.has("name") || norm.has("clientname")) return "clients";
-  return "unknown";
-};
-
-const ImportStudioDataSheet = ({ open, onClose, store }: {
+const ImportStudioDataSheet = ({ open, onClose, store, onViewClients, onViewServices }: {
   open: boolean;
   onClose: () => void;
   store: any;
-}) => {
-  const [parsed, setParsed] = useState<{
-    target: ImportTarget;
-    headers: string[];
-    rows: Record<string, string>[];
-    rawName: string;
-  } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<{ ok: number; failed: number } | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  const reset = () => { setParsed(null); setBusy(false); setDone(null); setErr(null); };
-  const close = () => { reset(); onClose(); };
-
-  const handleFile = async (file: File) => {
-    setErr(null);
-    setDone(null);
-    try {
-      const text = await file.text();
-      const { headers, rows } = parseCsv(text);
-      if (headers.length === 0 || rows.length === 0) {
-        setErr("That file looks empty or unreadable.");
-        return;
-      }
-      const target = detectImportTarget(headers);
-      setParsed({ target, headers, rows, rawName: file.name });
-    } catch (e: any) {
-      setErr(e?.message || "Couldn't read that file.");
-    }
-  };
-
-  const commit = async () => {
-    if (!parsed) return;
-    setBusy(true);
-    let ok = 0; let failed = 0;
-    try {
-      if (parsed.target === "clients") {
-        for (const r of parsed.rows) {
-          const name = pickField(r, ["name", "client name", "full name", "first name"]).trim();
-          if (!name) { failed++; continue; }
-          try {
-            await store.upsertClient({
-              name,
-              phone: pickField(r, ["phone", "mobile", "cell"]) || undefined,
-              email: pickField(r, ["email", "e-mail"]) || undefined,
-              notes: pickField(r, ["notes", "note"]) || undefined,
-              preferredStyles: pickField(r, ["preferred styles", "preferred_styles", "styles"]) || undefined,
-              tags: (() => {
-                const raw = pickField(r, ["tags", "labels"]);
-                return raw ? raw.split(/[,;]/).map(s => s.trim()).filter(Boolean) : undefined;
-              })(),
-            });
-            ok++;
-          } catch { failed++; }
-        }
-      } else if (parsed.target === "services") {
-        const api = store.servicesApi;
-        if (!api?.upsert) throw new Error("Services API unavailable.");
-        for (const r of parsed.rows) {
-          const name = pickField(r, ["name", "service", "service name", "title"]).trim();
-          if (!name) { failed++; continue; }
-          const dur = parseFloat(pickField(r, ["duration_hours", "duration hours", "duration", "hours"]) || "0");
-          const price = parseFloat(pickField(r, ["base_price", "price", "base price", "cost"]) || "0");
-          const depReq = /^(true|yes|y|1)$/i.test(pickField(r, ["deposit_required", "deposit required"]) || "");
-          const depAmt = parseFloat(pickField(r, ["deposit_amount", "deposit amount", "deposit"]) || "0");
-          const active = !/^(false|no|n|0)$/i.test(pickField(r, ["is_active", "active"]) || "true");
-          try {
-            await api.upsert({
-              name,
-              duration_hours: Number.isFinite(dur) && dur > 0 ? dur : 1,
-              base_price: Number.isFinite(price) ? price : 0,
-              deposit_required: depReq,
-              deposit_amount: Number.isFinite(depAmt) ? depAmt : 0,
-              prep_instructions: pickField(r, ["prep_instructions", "prep instructions", "prep"]) || null,
-              is_active: active,
-            });
-            ok++;
-          } catch { failed++; }
-        }
-      } else {
-        throw new Error("Couldn't recognize that file as a clients or services CSV.");
-      }
-      setDone({ ok, failed });
-      trackEvent(failed > 0 ? "import_partial" : "import_success", {
-        category: failed > 0 ? "error" : "feature",
-        metadata: { target: parsed.target, ok, failed },
-      });
-    } catch (e: any) {
-      setErr(e?.message || "Couldn't import that file.");
-      trackEvent("import_failure", { category: "error", metadata: { target: parsed.target } });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Sheet open={open} onClose={close} title="Import studio data">
-      <div className="space-y-4">
-        {!parsed && (
-          <>
-            <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.55 }}>
-              Bring clients or services in from another app. Upload a CSV file —
-              we'll detect whether it's clients or services from the column headers
-              and show you a preview before anything is saved.
-            </p>
-            <Card className="p-4" style={{ background: C.cream, border: `1px dashed ${C.caramel}` }}>
-              <label className="block">
-                <input
-                  type="file"
-                  accept=".csv,text/csv"
-                  onChange={async (e) => {
-                    const f = e.target.files?.[0];
-                    if (f) await handleFile(f);
-                    e.target.value = "";
-                  }}
-                  className="block w-full text-[12px]"
-                  style={{ color: C.coffee }}
-                />
-              </label>
-              <p className="text-[11px] mt-2" style={{ color: C.muted }}>
-                Tip: export from this app first to see the expected column shape.
-              </p>
-            </Card>
-            {err && (
-              <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>
-            )}
-          </>
-        )}
-
-        {parsed && !done && (
-          <>
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-bold uppercase" style={{ color: C.muted, letterSpacing: "0.14em" }}>
-                {parsed.rawName} · {parsed.rows.length} row{parsed.rows.length === 1 ? "" : "s"}
-              </p>
-              <Pill tone={parsed.target === "unknown" ? "warning" : "gold"}>
-                {parsed.target === "unknown" ? "Unrecognized" : `${parsed.target} import`}
-              </Pill>
-            </div>
-
-            {parsed.target === "unknown" ? (
-              <p className="text-[12px]" style={{ color: C.danger }}>
-                We couldn't detect this as a clients or services file. Expected columns: <strong>name, phone, email</strong> for clients or <strong>name, duration_hours, base_price</strong> for services.
-              </p>
-            ) : (
-              <Card className="p-3 overflow-x-auto" style={{ background: C.paper }}>
-                <table className="text-[11px]" style={{ minWidth: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr>
-                      {parsed.headers.slice(0, 6).map(h => (
-                        <th key={h} style={{ textAlign: "left", padding: "4px 8px 4px 0", color: C.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", whiteSpace: "nowrap" }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {parsed.rows.slice(0, 5).map((r, i) => (
-                      <tr key={i}>
-                        {parsed.headers.slice(0, 6).map(h => (
-                          <td key={h} style={{ padding: "4px 8px 4px 0", color: C.coffee, borderTop: `1px solid ${C.hairline}`, whiteSpace: "nowrap", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }}>{r[h]}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {parsed.rows.length > 5 && (
-                  <p className="text-[10px] mt-2" style={{ color: C.muted }}>+{parsed.rows.length - 5} more row{parsed.rows.length - 5 === 1 ? "" : "s"}</p>
-                )}
-              </Card>
-            )}
-
-            {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
-
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" onClick={reset} fullWidth>Choose another file</Button>
-              <Button
-                variant="primary"
-                onClick={commit}
-                disabled={busy || parsed.target === "unknown"}
-                fullWidth
-              >
-                {busy ? "Importing…" : `Import ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}`}
-              </Button>
-            </div>
-          </>
-        )}
-
-        {done && (
-          <>
-            <Card className="p-4" style={{ background: done.failed > 0 ? "rgba(201,118,43,0.08)" : "rgba(92,124,74,0.08)", border: `1px solid ${done.failed > 0 ? C.warning : C.success}` }}>
-              <p className="text-sm font-semibold" style={{ color: C.espresso }}>
-                {done.failed === 0 ? "Import complete" : "Import finished with some skips"}
-              </p>
-              <p className="text-[12px] mt-1" style={{ color: C.coffee }}>
-                {done.ok} row{done.ok === 1 ? "" : "s"} imported{done.failed > 0 ? ` · ${done.failed} skipped (missing required fields)` : ""}.
-              </p>
-            </Card>
-            <Button variant="primary" onClick={close} fullWidth>Done</Button>
-          </>
-        )}
-      </div>
-    </Sheet>
-  );
-};
+  onViewClients?: () => void;
+  onViewServices?: () => void;
+}) => (
+  <Sheet open={open} onClose={onClose} title="Import studio data">
+    <ImportStudio
+      store={store}
+      onClose={onClose}
+      onViewClients={onViewClients}
+      onViewServices={onViewServices}
+    />
+  </Sheet>
+);
 
 const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
@@ -9972,6 +9761,9 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
         )}
 
         <SectionTitle>Data</SectionTitle>
+        <p className="text-[12px]" style={{ color: C.muted, marginTop: -8, marginBottom: 4, fontStyle: "italic" }}>
+          {IMPORT_TAGLINE}
+        </p>
 
         {/* Import — native <button> per the same lesson the Account
             row already learned: Card+onClick (a <div role=button>) is
