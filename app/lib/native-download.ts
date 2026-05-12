@@ -179,6 +179,15 @@ export const downloadJson = (filename: string, value: unknown): Promise<Download
     shareTitle: filename,
   });
 
+export const downloadCsv = (filename: string, csv: string): Promise<DownloadResult> =>
+  downloadFile({
+    filename,
+    // BOM so Excel opens UTF-8 CSV correctly without prompting.
+    mimeType: "text/csv;charset=utf-8",
+    data: `﻿${csv}`,
+    shareTitle: filename,
+  });
+
 export const downloadIcs = (filename: string, ics: string): Promise<DownloadResult> =>
   downloadFile({
     filename,
