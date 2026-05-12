@@ -20,8 +20,13 @@ export default function manifest(): MetadataRoute.Manifest {
     scope: "/",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#F5EFE6",
-    theme_color: "#3B2A1A",
+    // theme_color + background_color must match the viewport
+    // themeColor in app/layout.tsx and the actual surface (cream) so
+    // iOS Safari's status bar + Android's task switcher tint don't
+    // flash a different shade on launch. Splash background matches
+    // too so the install + cold-start sequence is uniform.
+    background_color: "#FAF5EC",
+    theme_color: "#FAF5EC",
     icons: [
       {
         src: "/icons/icon-192.png",
@@ -34,6 +39,17 @@ export default function manifest(): MetadataRoute.Manifest {
         sizes: "512x512",
         type: "image/png",
         purpose: "any",
+      },
+      // Same source flagged "maskable" so Android install banners
+      // (Samsung, Pixel) get a valid maskable candidate instead of
+      // skipping the install prompt. A dedicated icon with a 50px
+      // safe zone can replace this entry later without changing the
+      // manifest contract.
+      {
+        src: "/icons/icon-512.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "maskable",
       },
     ],
   };
