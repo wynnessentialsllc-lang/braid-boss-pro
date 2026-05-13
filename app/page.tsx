@@ -6209,10 +6209,29 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error || `cancel_${res.status}`);
+
+      // CRITICAL: mirror the cancel into local React state. The
+      // server already flipped status='cancelled' in the DB, but
+      // `store.appointments` is the source of truth for every UI
+      // view (Schedule, Dashboard, Money). Without this merge the
+      // row keeps showing as active until the next full sync —
+      // which was the production bug.
+      const existing = store.appointments.find((a: any) => a?.id === form.id);
+      if (existing) {
+        await store.upsertAppointment({
+          ...existing,
+          status: "cancelled",
+          cancelledAt: new Date().toISOString(),
+          cancellationReason: reason || existing.cancellationReason || null,
+        });
+      }
+
       if (body.refunded > 0) {
         alert(`Cancelled. Refunded $${Number(body.refunded).toFixed(2)} to the client via Stripe.`);
       } else if (body.failures?.length) {
         alert("Cancelled, but one or more refunds failed. Check Stripe and refund manually if needed.");
+      } else {
+        alert("Appointment cancelled.");
       }
       trackEvent("appointment_cancelled", { category: "feature", metadata: { refunded: body.refunded || 0 } });
     } catch (err: any) {
@@ -6235,11 +6254,22 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         const { data: sess } = await supabase.auth.getSession();
         const token = sess?.session?.access_token;
         if (!token) continue;
-        await fetch("/api/cancel-appointment", {
+        const res = await fetch("/api/cancel-appointment", {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
           body: JSON.stringify({ appointment_id: f.id, reason: "recurring series cancelled" }),
         });
+        if (res.ok) {
+          // Mirror into local state for the same reason as above —
+          // otherwise the series keeps showing as a wall of active
+          // future appointments even after every cancel succeeded.
+          await store.upsertAppointment({
+            ...f,
+            status: "cancelled",
+            cancelledAt: new Date().toISOString(),
+            cancellationReason: "recurring series cancelled",
+          });
+        }
       } catch (e) {
         console.warn("[appt] series cancel failed for", f.id, e);
       }
