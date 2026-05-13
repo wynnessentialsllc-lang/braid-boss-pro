@@ -160,7 +160,12 @@ export const colorForAppointment = (
     key = swatchForString(appt?.style);
     label = appt?.style || undefined;
   } else if (mode === "deposit") {
-    if (deposit <= 0) { key = "unpaid"; label = "Deposit due"; }
+    // "Deposit due" only when the appointment actually requires one.
+    // Manual appointments default to depositRequired=false and read
+    // as "No deposit" instead of falsely flagging as overdue.
+    const requires = appt?.depositRequired === true;
+    if (!requires && deposit <= 0) { key = "noBalance"; label = "No deposit"; }
+    else if (deposit <= 0) { key = "unpaid"; label = "Deposit due"; }
     else if (deposit < net) { key = "partial"; label = "Partial deposit"; }
     else { key = "paid"; label = "Deposit paid"; }
   } else if (mode === "balance") {
@@ -226,7 +231,12 @@ export const computeDayStatus = (
     a?.status !== "cancelled" && a?.status !== "canceled" && (!a?.kind || a.kind === "appointment"),
   );
   const totalHours = billable.reduce((s, a) => s + (Number(a?.durationHours) || 0), 0);
-  const anyDepositDue = billable.some(a => (Number(a?.depositPaid) || 0) <= 0);
+  // Only surface "Deposit due" when the appointment actually requires
+  // a deposit. Manually-created appointments default to no deposit,
+  // so a zero depositPaid alone shouldn't poison the calendar pill.
+  const anyDepositDue = billable.some(a =>
+    a?.depositRequired === true && (Number(a?.depositPaid) || 0) <= 0,
+  );
 
   // 4. Use availability capacity (in minutes) when present so
   //    "Fully booked" reflects the user's real schedule, not a
