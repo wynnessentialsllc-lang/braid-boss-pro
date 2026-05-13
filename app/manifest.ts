@@ -1,5 +1,7 @@
 import type { MetadataRoute } from "next";
 
+export const dynamic = "force-static";
+
 // Web App Manifest. Next.js convention: a `manifest.ts` (or .json)
 // at this path is served at /manifest.webmanifest automatically and
 // linked from <head> on every page.

@@ -3,7 +3,9 @@
 // Mirrors the discounts.ts pattern: types, validation, a Supabase-backed
 // hook with CRUD + active toggle. Phase 1 only ships the catalog UI;
 // Phase 2 will wire services into the appointment form so picking a
-// service prefills duration / price / deposit-required.
+// service prefills duration / price / deposit). Phase 1 only ships the
+// catalog UI; Phase 2 will wire services into the appointment form so
+// picking a service prefills duration / price / deposit.
 
 import { useEffect, useState } from "react";
 import { getSupabase } from "./supabase";
@@ -28,12 +30,11 @@ export type Service = {
   is_active: boolean;
   // Phase B1 — feed the slot engine when this service is booked:
   // buffer_before / buffer_after pad each booking so prep + takedown
-  // can't be double-booked over; max_concurrent unlocks classes /
-  // multi-chair scheduling. All default to V1 single-chair behaviour
-  // (0/0/1) so existing rows continue working.
   buffer_before_minutes: number;
   buffer_after_minutes: number;
   max_concurrent: number;
+  // Phase Contract Templates — optional contract to attach
+  contract_template_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -52,6 +53,7 @@ export type ServiceInput = Pick<
   | "buffer_before_minutes"
   | "buffer_after_minutes"
   | "max_concurrent"
+  | "contract_template_id"
 >;
 
 // ---- Validation -------------------------------------------------------
@@ -66,53 +68,61 @@ export const validateService = (
 ): ServiceValidationError[] => {
   const errors: ServiceValidationError[] = [];
   const name = (draft.name || "").trim();
-  if (!name) errors.push({ field: "name", message: "Name is required." });
-
-  const duration = Number(draft.duration_hours);
-  if (!Number.isFinite(duration) || duration <= 0) {
-    errors.push({ field: "duration_hours", message: "Duration must be greater than 0 hours." });
-  } else if (duration > 48) {
-    errors.push({ field: "duration_hours", message: "Duration can't exceed 48 hours." });
+  if (!name) {
+    errors.push({ field: "name", message: "Name is required." });
   }
-
-  const price = Number(draft.base_price);
-  if (!Number.isFinite(price) || price < 0) {
-    errors.push({ field: "base_price", message: "Price can't be negative." });
+  if (name.length > 100) {
+    errors.push({ field: "name", message: "Name must be 100 characters or less." });
   }
-
-  if (draft.deposit_required) {
-    const amt = Number(draft.deposit_amount);
-    if (!Number.isFinite(amt) || amt <= 0) {
-      errors.push({ field: "deposit_amount", message: "Set the required deposit amount." });
+  const description = draft.description?.trim() || null;
+  if (description && description.length > 500) {
+    errors.push({ field: "description", message: "Description must be 500 characters or less." });
+  }
+  if (draft.duration_hours == null || draft.duration_hours <= 0 || draft.duration_hours > 48) {
+    errors.push({ field: "duration_hours", message: "Duration must be between 0.25 and 48 hours." });
+  }
+  if (draft.base_price == null || draft.base_price < 0) {
+    errors.push({ field: "base_price", message: "Base price can't be negative." });
+  }
+  if (draft.deposit_required && (draft.deposit_amount == null || draft.deposit_amount <= 0)) {
+    errors.push({ field: "deposit_amount", message: "Deposit amount is required when deposit is required." });
+  }
+  if (draft.deposit_amount != null && draft.deposit_amount < 0) {
+    errors.push({ field: "deposit_amount", message: "Deposit amount can't be negative." });
+  }
+  if (draft.base_price != null &&
+draft.deposit_amount != null &&
+draft.deposit_amount > draft.base_price) {
+    errors.push({ field: "deposit_amount", message: "Deposit can't exceed the base price." });
+  }
+  draft.add_ons?.forEach((a, i) => {
+    const aname = (a.name || "").trim();
+    if (!aname) {
+      errors.push({ field: "add_ons", message: `Add-on ${i + 1} needs a name.` });
+      return;
     }
+    if (aname.length > 50) {
+      errors.push({ field: "add_ons", message: `Add-on ${i + 1} name must be 50 characters or less.` });
+      return;
+    }
+    if (!Number.isFinite(a.amount) || a.amount < 0) {
+      errors.push({ field: "add_ons", message: `Add-on ${i + 1} amount can't be negative.` });
+      return;
+    }
+  });
+  const prep = draft.prep_instructions?.trim() || null;
+  if (prep && prep.length > 1000) {
+    errors.push({ field: "prep_instructions", message: "Prep instructions must be 1000 characters or less." });
   }
-
-  const buffBefore = Number(draft.buffer_before_minutes ?? 0);
-  if (!Number.isFinite(buffBefore) || buffBefore < 0 || buffBefore > 240) {
+  if (draft.buffer_before_minutes != null && (draft.buffer_before_minutes < 0 || draft.buffer_before_minutes > 240)) {
     errors.push({ field: "buffer_before_minutes", message: "Buffer before must be between 0 and 240 minutes." });
   }
-  const buffAfter = Number(draft.buffer_after_minutes ?? 0);
-  if (!Number.isFinite(buffAfter) || buffAfter < 0 || buffAfter > 240) {
+  if (draft.buffer_after_minutes != null && (draft.buffer_after_minutes < 0 || draft.buffer_after_minutes > 240)) {
     errors.push({ field: "buffer_after_minutes", message: "Buffer after must be between 0 and 240 minutes." });
   }
-  const maxConcurrent = Number(draft.max_concurrent ?? 1);
-  if (!Number.isFinite(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 50) {
-    errors.push({ field: "max_concurrent", message: "Concurrent bookings must be between 1 and 50." });
+  if (draft.max_concurrent != null && (draft.max_concurrent < 1 || draft.max_concurrent > 50)) {
+    errors.push({ field: "max_concurrent", message: "Max concurrent must be between 1 and 50." });
   }
-
-  for (const a of draft.add_ons || []) {
-    const aname = (a?.name || "").trim();
-    const aamount = Number(a?.amount);
-    if (!aname) {
-      errors.push({ field: "add_ons", message: "Each add-on needs a name." });
-      break;
-    }
-    if (!Number.isFinite(aamount) || aamount < 0) {
-      errors.push({ field: "add_ons", message: "Add-on amounts can't be negative." });
-      break;
-    }
-  }
-
   return errors;
 };
 
@@ -211,6 +221,7 @@ export const useServices = (
       buffer_before_minutes: Math.max(0, Math.min(240, Math.round(Number(draft.buffer_before_minutes) || 0))),
       buffer_after_minutes: Math.max(0, Math.min(240, Math.round(Number(draft.buffer_after_minutes) || 0))),
       max_concurrent: Math.max(1, Math.min(50, Math.round(Number(draft.max_concurrent) || 1))),
+      contract_template_id: draft.contract_template_id || null,
     };
     const { data, error: err } = draft.id
       ? await supabase.from("services").update(payload).eq("id", draft.id).eq("user_id", userId).select("*").maybeSingle()
@@ -254,14 +265,12 @@ export const useServices = (
 };
 
 // ---- Public booking page ----------------------------------------------
-//
+
 // Returns the active service catalog for a booking-link slug. Calls
 // the security-definer `public_list_services` RPC (Phase B1 migration)
 // so anonymous visitors can read services without granting them
 // SELECT on the underlying RLS-protected table.
 //
-// Shape mirrors the owner-side Service type minus `id` / `user_id`-
-// scoped fields the public surface doesn't need.
 
 export type PublicService = Pick<
   Service,
@@ -277,6 +286,7 @@ export type PublicService = Pick<
   | "buffer_before_minutes"
   | "buffer_after_minutes"
   | "max_concurrent"
+  | "contract_template_id"
 >;
 
 export const fetchPublicServices = async (
@@ -299,91 +309,7 @@ export const fetchPublicServices = async (
     buffer_before_minutes: Number(s.buffer_before_minutes) || 0,
     buffer_after_minutes: Number(s.buffer_after_minutes) || 0,
     max_concurrent: Number(s.max_concurrent) || 1,
+    contract_template_id: s.contract_template_id ?? null,
   }));
   return { ok: true, services };
-};
-
-// ---- Public availability ----------------------------------------------
-//
-// Phase B2: anonymous slot lookup. Calls the security-definer RPC
-// `public_list_availability` so anon visitors can see real slots
-// without reading owner availability data directly.
-//
-// All required filtering — weekly hours, breaks, off / custom /
-// blocked exceptions, existing appointments, buffers, and
-// max_concurrent — happens inside the RPC. The client just
-// renders chips.
-export type PublicSlot = {
-  time: string;        // "HH:mm"
-  label: string;       // "9:00 AM"
-  startMinute: number;
-};
-
-// ---- Public month availability (Phase B3 / B7) -----------------------
-//
-// One round-trip per month. Returns one row per calendar day with a
-// status label the booking heatmap renders directly. Backed by the
-// security-definer `public_get_month_availability` RPC, which loops
-// `public_list_availability` server-side so the slot algorithm stays
-// single-source.
-export type MonthDayStatus = "off" | "booked" | "limited" | "available";
-
-export type MonthDay = {
-  day: string;          // "YYYY-MM-DD"
-  slotCount: number;
-  status: MonthDayStatus;
-};
-
-export const fetchPublicMonthAvailability = async (params: {
-  slug: string;
-  year: number;          // 4-digit year
-  month: number;         // 1-12
-  serviceId?: string | null;
-  durationMinutes?: number | null;
-}): Promise<{ ok: true; days: MonthDay[] } | { ok: false; error: string }> => {
-  if (!params.slug) return { ok: false, error: "Missing booking slug." };
-  if (!Number.isFinite(params.year) || !Number.isFinite(params.month)) {
-    return { ok: false, error: "Invalid month." };
-  }
-  const supabase = getSupabase();
-  const { data, error } = await supabase.rpc("public_get_month_availability", {
-    slug_in: params.slug,
-    year_in: Math.trunc(params.year),
-    month_in: Math.trunc(params.month),
-    service_id_in: params.serviceId ?? null,
-    duration_minutes_in: params.durationMinutes ?? null,
-  });
-  if (error) return { ok: false, error: error.message };
-  const days = ((data || []) as any[]).map(d => ({
-    day: String(d.day_iso),
-    slotCount: Number(d.slot_count) || 0,
-    status: (d.status as MonthDayStatus) || "off",
-  }));
-  return { ok: true, days };
-};
-
-export const fetchPublicAvailability = async (params: {
-  slug: string;
-  dateIso: string;          // "YYYY-MM-DD"
-  serviceId?: string | null;
-  durationMinutes?: number | null;
-  slotIntervalMinutes?: number;
-}): Promise<{ ok: true; slots: PublicSlot[] } | { ok: false; error: string }> => {
-  if (!params.slug) return { ok: false, error: "Missing booking slug." };
-  if (!params.dateIso) return { ok: false, error: "Pick a date first." };
-  const supabase = getSupabase();
-  const { data, error } = await supabase.rpc("public_list_availability", {
-    slug_in: params.slug,
-    date_in: params.dateIso,
-    duration_minutes_in: params.durationMinutes ?? null,
-    service_id_in: params.serviceId ?? null,
-    slot_interval_minutes_in: params.slotIntervalMinutes ?? 30,
-  });
-  if (error) return { ok: false, error: error.message };
-  const slots = ((data || []) as any[]).map(s => ({
-    time: String(s.slot_time),
-    label: String(s.slot_label),
-    startMinute: Number(s.start_minute) || 0,
-  }));
-  return { ok: true, slots };
 };

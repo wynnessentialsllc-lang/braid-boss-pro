@@ -230,6 +230,8 @@ import {
   refreshSubscriptionHeartbeat,
   type PushCapability,
 } from "./lib/push";
+import { useContractTemplates, type ContractTemplate, CONTRACT_TEMPLATES_EMPTY_COPY } from "./lib/contracts";
+import { useServices, type Service, SERVICES_EMPTY_COPY } from "./lib/services";
 import {
   Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon,
   Plus, X, ChevronRight, ChevronLeft, ChevronDown, Search, Copy, Check, Trash2, Edit3,
@@ -1929,6 +1931,7 @@ const TabBar = ({ active, setActive }: {
 }) => {
   const tabs = [
     { id: "dashboard", label: "Home", icon: Home },
+    { id: "studio", label: "Studio", icon: SettingsIcon },
     { id: "calculator", label: "Quote", icon: CalcIcon },
     { id: "schedule", label: "Schedule", icon: Calendar },
     { id: "clients", label: "Clients", icon: Users },
@@ -3972,6 +3975,308 @@ const QuickTile = ({ icon, label, onClick }) => (
     <span className="font-semibold text-[14px]">{label}</span>
   </button>
 );
+
+// ============================================================
+//  STUDIO (Services & Contracts)
+// ============================================================
+const Studio = ({ store }) => {
+  const { userId } = store;
+  const contracts = useContractTemplates(userId);
+  const services = useServices(userId);
+
+  const [contractForm, setContractForm] = useState<Partial<ContractTemplate>>({});
+  const [contractAttachToAll, setContractAttachToAll] = useState(false);
+  const [contractAttachedServiceIds, setContractAttachedServiceIds] = useState<string[]>([]);
+  const [contractServiceSearch, setContractServiceSearch] = useState("");
+  const [contractServiceQuickFilter, setContractServiceQuickFilter] = useState<"All" | "Knotless" | "Boho" | "Locs" | "Braids">("All");
+  const [showNewContractModal, setShowNewContractModal] = useState(false);
+  const [serviceForm, setServiceForm] = useState<Partial<Service>>({});
+  const [editingContract, setEditingContract] = useState<string | null>(null);
+  const [editingService, setEditingService] = useState<string | null>(null);
+
+  const filteredContractServices = services.services.filter((s) => {
+    const query = contractServiceSearch.trim().toLowerCase();
+    const matchesSearch = !query || s.name.toLowerCase().includes(query) || (s.description || "").toLowerCase().includes(query);
+    const filter = contractServiceQuickFilter;
+    const matchesFilter = filter === "All"
+      || (filter === "Knotless" && s.name.toLowerCase().includes("knotless"))
+      || (filter === "Boho" && s.name.toLowerCase().includes("boho"))
+      || (filter === "Locs" && s.name.toLowerCase().includes("locs"))
+      || (filter === "Braids" && s.name.toLowerCase().includes("braid"));
+    return matchesSearch && matchesFilter;
+  });
+
+  useEffect(() => {
+    if (!editingContract) return;
+    const assigned = services.services
+      .filter(s => s.contract_template_id === editingContract)
+      .map(s => s.id);
+    setContractAttachedServiceIds(assigned);
+    setContractAttachToAll(assigned.length > 0 && assigned.length === services.services.length);
+  }, [editingContract, services.services]);
+
+  const updateContractServiceAssignments = async (contractId: string) => {
+    const selectedIds = contractAttachToAll ? services.services.map(s => s.id) : contractAttachedServiceIds;
+    const selectedSet = new Set(selectedIds);
+    const dirtyServices = services.services.filter(s =>
+      s.contract_template_id === contractId || selectedSet.has(s.id),
+    );
+    await Promise.all(dirtyServices.map(async (service) => {
+      const nextContractId = selectedSet.has(service.id) ? contractId : null;
+      if (service.contract_template_id === nextContractId) return null;
+      return services.upsert({ ...service, contract_template_id: nextContractId });
+    }));
+    await services.refresh();
+  };
+
+  const saveContract = async () => {
+    if (!contractForm.title?.trim() || !contractForm.content?.trim()) return;
+    const saved = await contracts.upsert(contractForm);
+    if (!saved) return;
+    await updateContractServiceAssignments(saved.id);
+    setContractForm({});
+    setContractAttachToAll(false);
+    setContractAttachedServiceIds([]);
+    setContractServiceSearch("");
+    setContractServiceQuickFilter("All");
+    setEditingContract(null);
+    setShowNewContractModal(false);
+  };
+
+  const saveService = async () => {
+    if (!serviceForm.name?.trim()) return;
+    await services.upsert(serviceForm);
+    setServiceForm({});
+    setEditingService(null);
+  };
+
+  const editContract = (c: ContractTemplate) => {
+    setContractForm(c);
+    setEditingContract(c.id);
+    const assigned = services.services.filter(s => s.contract_template_id === c.id).map(s => s.id);
+    setContractAttachedServiceIds(assigned);
+    setContractAttachToAll(assigned.length > 0 && assigned.length === services.services.length);
+    setContractServiceSearch("");
+    setContractServiceQuickFilter("All");
+  };
+
+  const editService = (s: Service) => {
+    setServiceForm(s);
+    setEditingService(s.id);
+  };
+
+  return (
+    <div className="p-4 space-y-6">
+      {/* Contracts Section */}
+      <div>
+        <h2 className="text-lg font-bold mb-4" style={{ color: C.espresso }}>Contract Templates</h2>
+        <div className="space-y-3">
+          {contracts.contractTemplates.map(c => (
+            <div key={c.id} className="p-3 rounded-lg border" style={{ background: C.paper, borderColor: C.hairline }}>
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="font-semibold" style={{ color: C.espresso }}>{c.title}</h3>
+                  <p className="text-sm mt-1" style={{ color: C.muted }}>{c.content.slice(0, 100)}...</p>
+                  {!c.is_active && <span className="text-xs px-2 py-1 rounded" style={{ background: C.muted, color: C.paper }}>Inactive</span>}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => editContract(c)} className="p-1" style={{ color: C.gold }}><Edit3 size={16} /></button>
+                  <button onClick={() => contracts.setActive(c.id, !c.is_active)} className="p-1" style={{ color: c.is_active ? C.success : C.muted }}>{c.is_active ? <CheckCircle2 size={16} /> : <XCircle size={16} />}</button>
+                  <button onClick={() => contracts.remove(c.id)} className="p-1" style={{ color: C.danger }}><Trash2 size={16} /></button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {contracts.contractTemplates.length === 0 && (
+            <p className="text-sm" style={{ color: C.muted }}>{CONTRACT_TEMPLATES_EMPTY_COPY}</p>
+          )}
+        </div>
+        <div className="mt-4 p-3 rounded-lg border" style={{ background: C.cream, borderColor: C.hairline }}>
+          <h4 className="font-semibold mb-2" style={{ color: C.espresso }}>{editingContract ? 'Edit Contract' : 'New Contract'}</h4>
+          <input
+            type="text"
+            placeholder="Contract Title"
+            value={contractForm.title || ''}
+            onChange={e => setContractForm({ ...contractForm, title: e.target.value })}
+            className="w-full p-2 mb-2 rounded border"
+            style={{ borderColor: C.hairline, background: C.paper }}
+          />
+          <textarea
+            placeholder="Contract Content"
+            value={contractForm.content || ''}
+            onChange={e => setContractForm({ ...contractForm, content: e.target.value })}
+            className="w-full p-2 mb-2 rounded border"
+            rows={6}
+            style={{ borderColor: C.hairline, background: C.paper }}
+          />
+          <div className="mb-3 border rounded p-2" style={{ borderColor: C.hairline }}>
+            <h5 className="font-semibold mb-1" style={{ color: C.espresso }}>Attach to Services</h5>
+            <input
+              type="search"
+              placeholder="Search services"
+              value={contractServiceSearch}
+              onChange={e => setContractServiceSearch(e.target.value)}
+              className="w-full p-2 mb-2 rounded border"
+              style={{ borderColor: C.hairline, background: C.paper }}
+            />
+            <div className="flex flex-wrap gap-2 mb-3">
+              {contractAttachToAll ? (
+                <span className="text-xs px-2 py-1 rounded" style={{ background: C.gold, color: C.espresso }}>All services attached</span>
+              ) : contractAttachedServiceIds.length > 0 ? (
+                contractAttachedServiceIds.map((serviceId) => {
+                  const service = services.services.find(s => s.id === serviceId);
+                  return service ? (
+                    <span key={serviceId} className="text-xs px-2 py-1 rounded" style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}>
+                      {service.name}
+                    </span>
+                  ) : null;
+                })
+              ) : (
+                <span className="text-xs text-muted">No services selected.</span>
+              )}
+            </div>
+            <div className="max-h-56 overflow-y-auto mb-4 rounded-lg border" style={{ borderColor: C.hairline, background: C.paper }}>
+              {filteredContractServices.map((service) => {
+                const selected = contractAttachedServiceIds.includes(service.id);
+                return (
+                  <label key={service.id} className="flex items-center justify-between gap-2 p-2 border-b" style={{ borderColor: C.hairline }}>
+                    <div>
+                      <div className="font-medium" style={{ color: C.espresso }}>{service.name}</div>
+                      <div className="text-xs" style={{ color: C.muted }}>{service.description || 'No description'}</div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={contractAttachToAll || selected}
+                      disabled={contractAttachToAll}
+                      onChange={() => {
+                        if (selected) {
+                          setContractAttachedServiceIds(ids => ids.filter(id => id !== service.id));
+                        } else {
+                          setContractAttachedServiceIds(ids => [...ids, service.id]);
+                        }
+                      }}
+                    />
+                  </label>
+                );
+              })}
+              {filteredContractServices.length === 0 && (
+                <div className="p-3 text-sm" style={{ color: C.muted }}>No services match this search.</div>
+              )}
+            </div>
+          </div>
+          <label className="flex items-center gap-2 mb-2">
+            <input
+              type="checkbox"
+              checked={contractForm.is_active ?? true}
+              onChange={e => setContractForm({ ...contractForm, is_active: e.target.checked })}
+            />
+            <span className="text-sm">Active</span>
+          </label>
+          <button onClick={saveContract} className="px-4 py-2 rounded font-semibold" style={{ background: C.gold, color: C.espresso }}>
+            {editingContract ? 'Update' : 'Create'} Contract
+          </button>
+          {editingContract && (
+            <button onClick={() => { setContractForm({}); setEditingContract(null); }} className="ml-2 px-4 py-2 rounded font-semibold" style={{ background: C.muted, color: C.paper }}>
+              Cancel
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Services Section */}
+      <div>
+        <h2 className="text-lg font-bold mb-4" style={{ color: C.espresso }}>Services</h2>
+        <div className="space-y-3">
+          {services.services.map(s => (
+            <div key={s.id} className="p-3 rounded-lg border" style={{ background: C.paper, borderColor: C.hairline }}>
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="font-semibold" style={{ color: C.espresso }}>{s.name}</h3>
+                  <p className="text-sm mt-1" style={{ color: C.muted }}>{s.description || 'No description'}</p>
+                  <p className="text-xs mt-1">${s.base_price} · {s.duration_hours}h</p>
+                  {s.contract_template_id && <span className="text-xs px-2 py-1 rounded mt-1 inline-block" style={{ background: C.gold, color: C.espresso }}>Contract required</span>}
+                  {!s.is_active && <span className="text-xs px-2 py-1 rounded mt-1 inline-block ml-2" style={{ background: C.muted, color: C.paper }}>Inactive</span>}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => editService(s)} className="p-1" style={{ color: C.gold }}><Edit3 size={16} /></button>
+                  <button onClick={() => services.setActive(s.id, !s.is_active)} className="p-1" style={{ color: s.is_active ? C.success : C.muted }}>{s.is_active ? <CheckCircle2 size={16} /> : <XCircle size={16} />}</button>
+                  <button onClick={() => services.remove(s.id)} className="p-1" style={{ color: C.danger }}><Trash2 size={16} /></button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {services.services.length === 0 && (
+            <p className="text-sm" style={{ color: C.muted }}>{SERVICES_EMPTY_COPY}</p>
+          )}
+        </div>
+        <div className="mt-4 p-3 rounded-lg border" style={{ background: C.cream, borderColor: C.hairline }}>
+          <h4 className="font-semibold mb-2" style={{ color: C.espresso }}>{editingService ? 'Edit Service' : 'New Service'}</h4>
+          <input
+            type="text"
+            placeholder="Service Name"
+            value={serviceForm.name || ''}
+            onChange={e => setServiceForm({ ...serviceForm, name: e.target.value })}
+            className="w-full p-2 mb-2 rounded border"
+            style={{ borderColor: C.hairline, background: C.paper }}
+          />
+          <textarea
+            placeholder="Description"
+            value={serviceForm.description || ''}
+            onChange={e => setServiceForm({ ...serviceForm, description: e.target.value })}
+            className="w-full p-2 mb-2 rounded border"
+            rows={2}
+            style={{ borderColor: C.hairline, background: C.paper }}
+          />
+          <div className="flex gap-2 mb-2">
+            <input
+              type="number"
+              placeholder="Duration (hours)"
+              value={serviceForm.duration_hours || ''}
+              onChange={e => setServiceForm({ ...serviceForm, duration_hours: Number(e.target.value) })}
+              className="flex-1 p-2 rounded border"
+              style={{ borderColor: C.hairline, background: C.paper }}
+            />
+            <input
+              type="number"
+              placeholder="Base Price"
+              value={serviceForm.base_price || ''}
+              onChange={e => setServiceForm({ ...serviceForm, base_price: Number(e.target.value) })}
+              className="flex-1 p-2 rounded border"
+              style={{ borderColor: C.hairline, background: C.paper }}
+            />
+          </div>
+          <select
+            value={serviceForm.contract_template_id || ''}
+            onChange={e => setServiceForm({ ...serviceForm, contract_template_id: e.target.value || null })}
+            className="w-full p-2 mb-2 rounded border"
+            style={{ borderColor: C.hairline, background: C.paper }}
+          >
+            <option value="">No contract required</option>
+            {contracts.contractTemplates.filter(c => c.is_active).map(c => (
+              <option key={c.id} value={c.id}>{c.title}</option>
+            ))}
+          </select>
+          <label className="flex items-center gap-2 mb-2">
+            <input
+              type="checkbox"
+              checked={serviceForm.is_active ?? true}
+              onChange={e => setServiceForm({ ...serviceForm, is_active: e.target.checked })}
+            />
+            <span className="text-sm">Active</span>
+          </label>
+          <button onClick={saveService} className="px-4 py-2 rounded font-semibold" style={{ background: C.gold, color: C.espresso }}>
+            {editingService ? 'Update' : 'Create'} Service
+          </button>
+          {editingService && (
+            <button onClick={() => { setServiceForm({}); setEditingService(null); }} className="ml-2 px-4 py-2 rounded font-semibold" style={{ background: C.muted, color: C.paper }}>
+              Cancel
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ============================================================
 //  CALCULATOR
@@ -16230,6 +16535,9 @@ export default function App() {
               openPresets={() => setSecondary("presets")}
               openTimer={() => setSecondary("timer")}
               openAppointmentRecord={(a) => { setActive("schedule"); setApptPrefill(a); }} />
+          )}
+          {active === "studio" && (
+            <Studio store={store} />
           )}
           {active === "calculator" && (
             <Calculator store={store}
