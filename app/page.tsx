@@ -110,6 +110,7 @@ import {
   SERVICES_EMPTY_COPY,
   formatServicePrice,
   useServices,
+  validateService,
 } from "./lib/services";
 import {
   type DashboardRevenue,
@@ -13458,6 +13459,20 @@ const ServicesScreen = ({
   const [editing, setEditing] = useState<(Partial<ServiceInput> & { id?: string }) | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Service | null>(null);
   const [busy, setBusy] = useState(false);
+  // Inline save error. The editor is a sheet that covers the parent
+  // services screen where api.error renders, so silent validation
+  // failures previously looked like the Save button was disabled —
+  // the click was firing, but the bad field was below the modal's
+  // viewport and nothing surfaced near the button. Now we run the
+  // validator first and pin the message right above Save.
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Clear any stale error whenever the user opens / closes / swaps
+  // the editing draft. Stops a previous failure from haunting the
+  // next edit session.
+  useEffect(() => {
+    setSaveError(null);
+  }, [editing?.id, editing == null]);
 
   const openNew = () => setEditing({
     name: "",
@@ -13492,10 +13507,28 @@ const ServicesScreen = ({
 
   const handleSave = async () => {
     if (!editing || busy) return;
+    // Surface validation errors inline so the click never looks
+    // ignored. api.upsert runs the same validator internally and
+    // returns null on failure; we replicate it here so the failing
+    // field's message lands right above the button instead of in
+    // the parent screen's banner that the editor sheet covers.
+    setSaveError(null);
+    const errs = validateService(editing);
+    if (errs.length > 0) {
+      setSaveError(errs[0].message);
+      return;
+    }
     setBusy(true);
     const saved = await api.upsert(editing);
     setBusy(false);
-    if (saved) setEditing(null);
+    if (saved) {
+      setEditing(null);
+      return;
+    }
+    // upsert returned null after passing local validation — most
+    // likely a Supabase / network error. Pull the message off the
+    // hook so the stylist isn't left guessing.
+    setSaveError(api?.error || "Couldn't save the service. Please try again.");
   };
 
   const handleDelete = async () => {
@@ -13875,11 +13908,20 @@ const ServicesScreen = ({
               />
             </Field>
 
+            {saveError && (
+              <div
+                role="alert"
+                className="p-3 rounded-lg"
+                style={{ background: C.ivory, border: `1px solid ${C.danger}` }}
+              >
+                <p className="text-[12px]" style={{ color: C.danger }}>{saveError}</p>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3 pt-2">
               <Button variant="primary" icon={<Save size={16} />} onClick={handleSave}>
                 {busy ? "Saving…" : "Save service"}
               </Button>
-              <Button variant="outline" onClick={() => setEditing(null)}>
+              <Button variant="outline" onClick={() => { setSaveError(null); setEditing(null); }}>
                 Cancel
               </Button>
             </div>
