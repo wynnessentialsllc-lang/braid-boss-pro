@@ -1086,7 +1086,15 @@ const planRemindersForAppointment = (appt: any, settings: any, templates: any[],
   if (settings.timings.h48) queue.push({ purpose: "reminder_48h", at: new Date(apptDateTime.getTime() - 48 * 3600000) });
   if (settings.timings.h24) queue.push({ purpose: "reminder_24h", at: new Date(apptDateTime.getTime() - 24 * 3600000) });
   if (settings.timings.sameDay) queue.push({ purpose: "reminder_same_day", at: new Date(apptDateTime.getTime() - settings.timings.sameDayHoursBefore * 3600000) });
-  if (settings.timings.depositDue && Number(appt.depositPaid || 0) === 0) queue.push({ purpose: "deposit_due", at: new Date() });
+  // Only nag for a deposit when the appointment actually requires
+  // one. Manual appointments default to depositRequired=false, so
+  // they no longer trigger the "Deposit due" reminder unless the
+  // stylist explicitly opts in via the AppointmentSheet toggle.
+  if (settings.timings.depositDue
+      && appt.depositRequired === true
+      && Number(appt.depositPaid || 0) === 0) {
+    queue.push({ purpose: "deposit_due", at: new Date() });
+  }
   if (settings.timings.balanceDue && Number(appt.balanceDue || 0) > 0) queue.push({ purpose: "balance_due", at: new Date(apptDateTime.getTime() - 4 * 3600000) });
 
   for (const item of queue) {
@@ -5134,10 +5142,14 @@ const DayCalendarView = ({
             const net = Math.max(0, total - discount);
             const deposit = Number(a?.depositPaid) || 0;
             const balance = Math.max(0, net - deposit);
+            // Only flag "Deposit due" when the appointment requires
+            // one — manual appts default to depositRequired=false.
+            const requiresDeposit = a?.depositRequired === true;
             const depositLine =
-              deposit <= 0 ? "Deposit due"
-              : deposit < net ? `Deposit ${fmtMoney(deposit, business?.currency)}`
-              : "Deposit paid";
+              deposit <= 0
+                ? (requiresDeposit ? "Deposit due" : null)
+                : deposit < net ? `Deposit ${fmtMoney(deposit, business?.currency)}`
+                  : "Deposit paid";
             const balanceLine = balance > 0 ? `Balance ${fmtMoney(balance, business?.currency)}` : null;
 
             const titleLine = isBlockedBlock
@@ -5925,6 +5937,15 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         // came from. Snapshot only — used for picker highlight + the
         // "Replace with service defaults" affordance.
         serviceId: appt?.serviceId ?? appt?.service_id ?? null,
+        // Deposit-by-source. Defaults to false for manual creates so
+        // the dashboard's "Deposit due" filter doesn't surface
+        // appointments where no deposit was ever asked for. Existing
+        // public-booking-link rows carry depositRequired=true from
+        // approval and we honor whatever value the appt already has.
+        depositRequired: appt?.depositRequired ?? false,
+        // Booking provenance. New manual appts land as "manual";
+        // existing rows keep whatever was previously stamped.
+        source: appt?.source ?? (appt?.id ? null : "manual"),
         // Calendar item kind. Default 'appointment' so existing rows
         // keep their pre-migration semantics. Personal events / blocked
         // time hide the client + payment sections in the form.
@@ -6473,6 +6494,28 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           {isAppointment && <Field label="Total price"><MoneyInput value={form.totalPrice} onChange={(v) => setForm({ ...form, totalPrice: v })} /></Field>}
           {isAppointment && <Field label="Deposit paid"><MoneyInput value={form.depositPaid} onChange={(v) => setForm({ ...form, depositPaid: v })} /></Field>}
         </div>
+
+        {isAppointment && (
+          <Card className="p-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold" style={{ color: C.espresso }}>Request a deposit</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>
+                  Off by default for appointments you create here. Turn on to mark a deposit as expected — it'll show on the dashboard's Deposits due list until paid.
+                </p>
+              </div>
+              <Toggle
+                checked={!!form.depositRequired}
+                onChange={(v: boolean) => setForm({ ...form, depositRequired: v })}
+              />
+            </div>
+            {form.source && (
+              <p className="mt-2 text-[10px]" style={{ color: C.muted }}>
+                Source: {form.source === "public_booking" ? "Booking link" : form.source === "manual" ? "Manual" : form.source}
+              </p>
+            )}
+          </Card>
+        )}
 
         {isAppointment && (
         <Field
@@ -15019,14 +15062,34 @@ const ApprovalQueueScreen = ({
       if (!client?.id) throw new Error("Couldn't resolve client");
 
       const apptId = req.appointment_id || `appt_${uid()}`;
-      // Variation snapshot — the submit RPC already rolled variation
-      // pricing into req.service_price / req.service_name / etc., so
-      // the headline price/style fields are correct out of the box.
-      // We additionally carry the raw variation snapshot onto the
-      // appointment so future analytics + UI can show which flavor
-      // was booked without having to re-read the live services row.
+      // Deposit accounting at approval time:
+      //   * req.deposit_paid is the source of truth (flipped by the
+      //     Stripe webhook via mark_deposit_paid_via_webhook). Only
+      //     credit the appointment with the deposit if Stripe actually
+      //     received the money.
+      //   * paymentDate has to be set for Dashboard → "Deposits this
+      //     week" to count this row (weekDepositBuckets requires
+      //     paymentDate < appointment date). Use the webhook's
+      //     deposit_paid_at when available, falling back to today.
+      // The submit RPC already rolled variation pricing into
+      // req.service_price / req.service_name / etc., so the headline
+      // price/style fields are correct out of the box. We additionally
+      // carry the raw variation snapshot onto the appointment below
+      // so future analytics + UI can show which flavor was booked
+      // without having to re-read the live services row.
       const totalPriceResolved = Number(req.service_price || 0) || 0;
-      const depositPaidResolved = req.deposit_paid ? (Number(req.deposit_amount || 0) || 0) : 0;
+      const depositAmtRaw = Number(req.deposit_amount || 0) || 0;
+      const depositActuallyPaid = !!req.deposit_paid && depositAmtRaw > 0;
+      const depositPaidAmount = depositActuallyPaid ? depositAmtRaw : 0;
+      const paymentDateISO = (() => {
+        if (!depositActuallyPaid) return "";
+        if (req.deposit_paid_at) {
+          // deposit_paid_at is a full timestamptz; we want YYYY-MM-DD.
+          const slice = String(req.deposit_paid_at).slice(0, 10);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(slice)) return slice;
+        }
+        return todayISO();
+      })();
       const newAppt: any = {
         id: apptId,
         clientId: client.id,
@@ -15038,12 +15101,29 @@ const ApprovalQueueScreen = ({
         time: req.preferred_time || "",
         durationHours: Number(req.service_duration_hours || req.service_duration || 0) || null,
         totalPrice: totalPriceResolved,
-        depositPaid: depositPaidResolved,
-        balanceDue: Math.max(0, totalPriceResolved - depositPaidResolved),
+        depositPaid: depositPaidAmount,
+        balanceDue: Math.max(0, totalPriceResolved - depositPaidAmount),
+        // Surface payment provenance so reports + reminders can see
+        // the Stripe deposit landed. paymentStatus tracks whether
+        // we've only got the deposit ("partial") or the whole ticket
+        // ("paid"); "unpaid" otherwise.
+        paymentStatus: depositActuallyPaid
+          ? (depositPaidAmount >= totalPriceResolved && totalPriceResolved > 0 ? "paid" : "partial")
+          : "unpaid",
+        paymentDate: paymentDateISO,
+        paymentMethod: depositActuallyPaid ? "stripe" : "",
         status: "scheduled",
         kind: "appointment",
         serviceId: req.service_id || null,
+        // Source tracking — drives deposit-due rules + future
+        // analytics breakdowns. The approval flow always lands as
+        // public_booking; manual creates pick up "manual" below.
         source: "public_booking",
+        // depositRequired comes straight from the snapshot the submit
+        // RPC stamped onto the booking_request row. Drives the
+        // dashboard "Deposit due" filter so we don't flag rows where
+        // no deposit was ever asked for.
+        depositRequired: !!req.deposit_required,
         notes: req.notes || "",
         isAllDay: false,
         blocksAvailability: true,

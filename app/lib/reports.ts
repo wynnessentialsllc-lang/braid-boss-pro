@@ -23,6 +23,12 @@ export type AppointmentLike = {
   clientId?: string | null;
   clientName?: string | null;
   style?: string | null;
+  // Deposit-by-source tracking. Manual appointments default to
+  // depositRequired=false so they don't poison the "deposit due"
+  // dashboard. Public-booking-link appointments inherit the service's
+  // deposit_required setting at approval time.
+  depositRequired?: boolean | null;
+  source?: string | null;   // "public_booking" | "manual" | "owner_created" | ...
 };
 
 const num = (v: unknown): number => {
@@ -471,9 +477,13 @@ export const weekDepositBuckets = (
     }
 
     // Due / Missing — forward-looking buckets keyed to appointments
-    // scheduled within this week's range (ws..we).
+    // scheduled within this week's range (ws..we). Only count rows
+    // that actually require a deposit; manual appointments with no
+    // deposit set up are excluded so the dashboard doesn't surface
+    // them as "missing" money the stylist never asked for.
     if (!a.date || a.date < ws || a.date > we) continue;
     if (dep > 0) continue; // already collected (paid earlier than this week)
+    if (a.depositRequired !== true) continue;
     if (a.date < reference) missing.push(a);
     else                    due.push(a);
   }
