@@ -7509,6 +7509,14 @@ const ClientProfileSheet = ({
     () => allAppts.filter(a => a?.clientId === client?.id && !isCanceledAppointment(a)),
     [allAppts, client?.id],
   );
+  // Cancelled appointments are kept OUT of cAppts (so stats / money /
+  // upcoming aren't poisoned) but surfaced separately so the client's
+  // record still shows the booking history. The Previous tab below
+  // merges this in so cancelled rows stay visible to the stylist.
+  const cancelledClientAppts = useMemo(
+    () => allAppts.filter(a => a?.clientId === client?.id && isCanceledAppointment(a)),
+    [allAppts, client?.id],
+  );
   const cPhotos = useMemo(
     () => photos.filter(p => p?.clientId === client?.id),
     [photos, client?.id],
@@ -7989,7 +7997,7 @@ const ClientProfileSheet = ({
           <div className="flex p-1 rounded-xl mb-2" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
             {([
               { id: "upcoming", label: `Upcoming · ${future.length + todays.length}` },
-              { id: "previous", label: `Previous · ${past.length}` },
+              { id: "previous", label: `Previous · ${past.length + cancelledClientAppts.length}` },
             ] as { id: "upcoming" | "previous"; label: string }[]).map(t => (
               <button
                 type="button"
@@ -8014,12 +8022,28 @@ const ClientProfileSheet = ({
               <>{[...todays, ...future].map(a => <ApptRow key={a.id} a={a} />)}</>
             )
           ) : (
-            past.length === 0 ? (
+            (past.length + cancelledClientAppts.length) === 0 ? (
               <Card className="p-4 text-center">
                 <p className="text-[12px]" style={{ color: C.muted }}>No past appointments yet.</p>
               </Card>
             ) : (
-              <>{[...past].reverse().map(a => <ApptRow key={a.id} a={a} />)}</>
+              // Combine completed past appointments with cancelled
+              // ones (any date) so the client's record reads as a
+              // full booking history. The ApptRow renders a
+              // status pill which already shows "Cancelled" tone
+              // for cancelled rows. Sort by date desc, falling
+              // back to createdAt so cancelled rows without a
+              // future date still slot into a sensible position.
+              <>
+                {[...past, ...cancelledClientAppts]
+                  .slice()
+                  .sort((a, b) => {
+                    const ka = (a?.date || a?.createdAt || "") as string;
+                    const kb = (b?.date || b?.createdAt || "") as string;
+                    return kb.localeCompare(ka);
+                  })
+                  .map(a => <ApptRow key={a.id} a={a} />)}
+              </>
             )
           )}
         </Section>
