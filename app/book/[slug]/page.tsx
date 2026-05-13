@@ -843,7 +843,11 @@ export default function PublicBookingPage() {
                     ))}
                   </select>
                 </Field>
-                {selectedCatalogService && (
+                {/* When the service has no variations, render a plain
+                    summary card. When variations exist we hand off to
+                    the unified picker below (base + every saved
+                    variation as selectable options). */}
+                {selectedCatalogService && !hasVariations && (
                   <div
                     style={{
                       padding: 12,
@@ -861,7 +865,7 @@ export default function PublicBookingPage() {
                     {" · $"}{(resolved?.price ?? selectedCatalogService.base_price).toFixed(2)}
                     {resolved && resolved.depositRequired && resolved.depositAmount > 0
                       ? ` · $${resolved.depositAmount.toFixed(2)} deposit due today`
-                      : selectedCatalogService.deposit_required && selectedCatalogService.deposit_amount && !hasVariations
+                      : selectedCatalogService.deposit_required && selectedCatalogService.deposit_amount
                         ? ` · $${Number(selectedCatalogService.deposit_amount).toFixed(2)} deposit required`
                         : ""}
                     {selectedCatalogService.prep_instructions && (
@@ -876,55 +880,99 @@ export default function PublicBookingPage() {
                     )}
                   </div>
                 )}
-                {/* Variation picker — only shown when the service has
-                    one or more variations. Each card shows its own
-                    price, duration, and deposit due today so the
-                    client can pick with all costs visible upfront. */}
-                {hasVariations && (
-                  <Field label="Variation">
-                    <div style={{ display: "grid", gap: 8 }}>
-                      {variations.map(v => {
-                        const r = resolveVariationPricing(selectedCatalogService!, v.id);
-                        const picked = selectedVariationId === v.id;
-                        return (
-                          <button
-                            key={v.id}
-                            type="button"
-                            onClick={() => setSelectedVariationId(v.id)}
-                            aria-pressed={picked}
-                            style={{
-                              textAlign: "left",
-                              padding: 12,
-                              borderRadius: 12,
-                              background: picked ? C.cream : C.paper,
-                              border: `1.5px solid ${picked ? C.goldDeep : C.hairline}`,
-                              cursor: "pointer",
-                              font: "inherit",
-                              color: "inherit",
-                              appearance: "none",
-                              WebkitAppearance: "none",
-                            }}
-                          >
-                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
-                              <span style={{ fontWeight: 600, color: C.espresso, fontSize: 13 }}>
-                                {v.name || "Variation"}
-                              </span>
-                              <span style={{ fontWeight: 700, color: C.goldDeep, fontSize: 14, whiteSpace: "nowrap" }}>
-                                ${r.price.toFixed(2)}
-                              </span>
-                            </div>
-                            <p style={{ marginTop: 4, fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
-                              {r.durationHours}h
-                              {r.depositRequired && r.depositAmount > 0
-                                ? ` · $${r.depositAmount.toFixed(2)} deposit due today`
-                                : " · No deposit"}
-                            </p>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </Field>
-                )}
+                {/* Unified picker: the base service is the first
+                    selectable option (variation_id = "" means book
+                    the parent service unchanged), followed by every
+                    saved variation in order. Each card shows the
+                    fully-resolved price / duration / deposit so the
+                    client can compare every option side-by-side.
+                    Inherited values flow through resolveVariationPricing,
+                    so a variation with no price/duration/deposit
+                    override displays the parent's values. */}
+                {hasVariations && selectedCatalogService && (() => {
+                  // Build options: base first, then every variation.
+                  // We pass `null` to the resolver for the base so it
+                  // returns the parent service's price/duration/deposit
+                  // straight — identical to picking no variation.
+                  const baseResolved = resolveVariationPricing(selectedCatalogService, null);
+                  const options: Array<{
+                    id: string;       // "" for base, addon id for variations
+                    label: string;
+                    subLabel: string | null;
+                    resolved: ReturnType<typeof resolveVariationPricing>;
+                  }> = [
+                    {
+                      id: "",
+                      label: selectedCatalogService.name,
+                      subLabel: "Standard",
+                      resolved: baseResolved,
+                    },
+                    ...variations.map(v => ({
+                      id: v.id,
+                      label: (v.name || "").trim() || "Variation",
+                      subLabel: null,
+                      resolved: resolveVariationPricing(selectedCatalogService, v.id),
+                    })),
+                  ];
+                  return (
+                    <Field label="Choose an option">
+                      <div style={{ display: "grid", gap: 8 }}>
+                        {options.map(opt => {
+                          const picked = selectedVariationId === opt.id;
+                          const r = opt.resolved;
+                          return (
+                            <button
+                              key={opt.id || "__base__"}
+                              type="button"
+                              onClick={() => setSelectedVariationId(opt.id)}
+                              aria-pressed={picked}
+                              style={{
+                                textAlign: "left",
+                                padding: 12,
+                                borderRadius: 12,
+                                background: picked ? C.cream : C.paper,
+                                border: `1.5px solid ${picked ? C.goldDeep : C.hairline}`,
+                                cursor: "pointer",
+                                font: "inherit",
+                                color: "inherit",
+                                appearance: "none",
+                                WebkitAppearance: "none",
+                              }}
+                            >
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                                <span style={{ fontWeight: 600, color: C.espresso, fontSize: 13 }}>
+                                  {opt.label}
+                                  {opt.subLabel && (
+                                    <span style={{ fontWeight: 500, color: C.muted, fontSize: 11, marginLeft: 6 }}>
+                                      · {opt.subLabel}
+                                    </span>
+                                  )}
+                                </span>
+                                <span style={{ fontWeight: 700, color: C.goldDeep, fontSize: 14, whiteSpace: "nowrap" }}>
+                                  ${r.price.toFixed(2)}
+                                </span>
+                              </div>
+                              <p style={{ marginTop: 4, fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
+                                {r.durationHours}h
+                                {r.depositRequired && r.depositAmount > 0
+                                  ? ` · $${r.depositAmount.toFixed(2)} deposit due today`
+                                  : " · No deposit"}
+                                {r.depositRequired && r.depositAmount > 0 && r.balanceDue > 0
+                                  ? ` · Balance $${r.balanceDue.toFixed(2)}`
+                                  : ""}
+                              </p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {selectedCatalogService.prep_instructions && (
+                        <p style={{ marginTop: 8, color: C.muted, fontSize: 11, lineHeight: 1.4 }}>
+                          {selectedCatalogService.prep_instructions}
+                        </p>
+                      )}
+                    </Field>
+                  );
+                })()}
               </>
             ) : services.length > 0 ? (
               <Field label="Service">
