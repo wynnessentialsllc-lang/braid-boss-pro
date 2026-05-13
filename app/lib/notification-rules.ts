@@ -63,12 +63,19 @@ const isoToMs = (iso: string | null | undefined): number => {
   const t = new Date(iso).getTime();
   return isFinite_(t) ? t : NaN;
 };
+// 12-hour clock for in-app notification copy. Drops ":00" on the
+// hour so "10:00" reads as "10 AM" — matches the canonical fmtTime
+// helper in app/page.tsx.
 const fmtClock = (date: string, time: string): string => {
   const t = time || "10:00";
   const [hh, mm] = t.split(":").map(Number);
+  if (!Number.isFinite(hh)) return t;
   const period = hh >= 12 ? "PM" : "AM";
   const h12 = (hh % 12) || 12;
-  return `${h12}:${String(mm || 0).padStart(2, "0")} ${period}`;
+  const mins = Number.isFinite(mm) ? mm : 0;
+  return mins === 0
+    ? `${h12} ${period}`
+    : `${h12}:${String(mins).padStart(2, "0")} ${period}`;
 };
 
 // ---- rule generators ---------------------------------------------------

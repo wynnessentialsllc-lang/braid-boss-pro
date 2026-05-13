@@ -3,6 +3,21 @@
 // medical/financial/legal claims, no vague encouragements without
 // data. Every insight points at a concrete action target.
 
+// 12-hour user-facing time, dropping ":00" on the hour
+// ("14:00" → "2 PM", "14:30" → "2:30 PM"). Mirrors the canonical
+// fmtTime in app/page.tsx; kept local so this lib has no app deps.
+const fmtTime12 = (t: string | null | undefined): string => {
+  if (!t) return "";
+  const [hStr, mStr] = String(t).split(":");
+  const h = Number(hStr);
+  const m = Number(mStr);
+  if (!Number.isFinite(h)) return String(t);
+  const period = h >= 12 ? "PM" : "AM";
+  const hh = h % 12 || 12;
+  const mins = Number.isFinite(m) ? m : 0;
+  return mins === 0 ? `${hh} ${period}` : `${hh}:${String(mins).padStart(2, "0")} ${period}`;
+};
+
 export type InsightCategory =
   | "revenue"
   | "retention"
@@ -169,7 +184,7 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
       category: "schedule",
       priority: "high",
       title: `${todayAppts.length} appointment${todayAppts.length === 1 ? "" : "s"} today`,
-      body: first?.clientName ? `Starts with ${first.clientName} at ${first.time || "—"}.` : "",
+      body: first?.clientName ? `Starts with ${first.clientName} at ${fmtTime12(first.time) || "—"}.` : "",
       why: "Knowing who's coming first helps you prep the chair and order your day.",
       actionLabel: "View schedule",
       actionTarget: "tab:schedule",

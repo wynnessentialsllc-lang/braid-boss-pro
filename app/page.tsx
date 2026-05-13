@@ -730,12 +730,20 @@ const fmtDateLong = (iso: string): string => {
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 };
+// User-facing 12-hour time. Drops ":00" on the hour so "14:00" reads
+// as "2 PM" and "14:30" as "2:30 PM" — matches how stylists speak
+// about appointment times. Database values stay HH:mm; this helper
+// is presentation-only.
 const fmtTime = (t: string): string => {
   if (!t) return "";
   const [h, m] = t.split(":").map(Number);
+  if (!Number.isFinite(h)) return t;
   const period = h >= 12 ? "PM" : "AM";
   const hh = h % 12 || 12;
-  return `${hh}:${String(m).padStart(2, "0")} ${period}`;
+  const mins = Number.isFinite(m) ? m : 0;
+  return mins === 0
+    ? `${hh} ${period}`
+    : `${hh}:${String(mins).padStart(2, "0")} ${period}`;
 };
 const fmtDuration = (ms: number): string => {
   const total = Math.floor(ms / 1000);

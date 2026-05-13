@@ -22,12 +22,18 @@ const fmtDate = (iso: string): string => {
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 };
 
+// 12-hour time; drops ":00" on the hour ("14:00" → "2 PM").
+// Matches the canonical formatter in app/page.tsx.
 const fmtTime = (t: string): string => {
   if (!t) return "";
   const [h, m] = t.split(":").map(Number);
+  if (!Number.isFinite(h)) return t;
   const period = h >= 12 ? "PM" : "AM";
   const hh = h % 12 || 12;
-  return `${hh}:${String(m).padStart(2, "0")} ${period}`;
+  const mins = Number.isFinite(m) ? m : 0;
+  return mins === 0
+    ? `${hh} ${period}`
+    : `${hh}:${String(mins).padStart(2, "0")} ${period}`;
 };
 
 const formatCurrency = (n: number, currency: string = "USD"): string => {
