@@ -868,6 +868,14 @@ export default function PublicBookingPage() {
                       : selectedCatalogService.deposit_required && selectedCatalogService.deposit_amount
                         ? ` · $${Number(selectedCatalogService.deposit_amount).toFixed(2)} deposit required`
                         : ""}
+                    {/* Description sits directly under the title, where
+                        the stylist's wording naturally belongs. Keeps
+                        prep instructions visually separate. */}
+                    {selectedCatalogService.description && (
+                      <p style={{ marginTop: 8, color: C.coffee, fontSize: 12 }}>
+                        {selectedCatalogService.description}
+                      </p>
+                    )}
                     {selectedCatalogService.prep_instructions && (
                       <p style={{ marginTop: 8, color: C.muted, fontSize: 11 }}>
                         {selectedCatalogService.prep_instructions}
@@ -876,6 +884,44 @@ export default function PublicBookingPage() {
                     {resolved && resolved.depositRequired && resolved.depositAmount > 0 && resolved.balanceDue > 0 && (
                       <p style={{ marginTop: 6, color: C.muted, fontSize: 11 }}>
                         Remaining balance after deposit: ${resolved.balanceDue.toFixed(2)}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {/* Parent-service header card. Sits above the variation
+                    picker so the description belongs to the SERVICE,
+                    not to any one option. Title → base price/duration →
+                    description → prep instructions, in that order. */}
+                {selectedCatalogService && hasVariations && (
+                  <div
+                    style={{
+                      padding: 12,
+                      borderRadius: 12,
+                      background: C.paper,
+                      border: `1px solid ${C.hairline}`,
+                      fontSize: 12,
+                      color: C.coffee,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    <strong style={{ color: C.espresso, fontSize: 14 }}>
+                      {selectedCatalogService.name}
+                    </strong>
+                    <p style={{ margin: "2px 0 0", fontSize: 11, color: C.muted }}>
+                      {selectedCatalogService.duration_hours}h
+                      {" · $"}{Number(selectedCatalogService.base_price).toFixed(2)}
+                      {selectedCatalogService.deposit_required && selectedCatalogService.deposit_amount
+                        ? ` · $${Number(selectedCatalogService.deposit_amount).toFixed(2)} deposit`
+                        : ""}
+                    </p>
+                    {selectedCatalogService.description && (
+                      <p style={{ marginTop: 8, color: C.coffee, fontSize: 12 }}>
+                        {selectedCatalogService.description}
+                      </p>
+                    )}
+                    {selectedCatalogService.prep_instructions && (
+                      <p style={{ marginTop: 8, color: C.muted, fontSize: 11 }}>
+                        {selectedCatalogService.prep_instructions}
                       </p>
                     )}
                   </div>
@@ -1002,11 +1048,10 @@ export default function PublicBookingPage() {
                           );
                         })}
                       </div>
-                      {selectedCatalogService.prep_instructions && (
-                        <p style={{ marginTop: 8, color: C.muted, fontSize: 11, lineHeight: 1.4 }}>
-                          {selectedCatalogService.prep_instructions}
-                        </p>
-                      )}
+                      {/* Description + prep instructions live on the
+                          parent-service header card above the picker
+                          (they belong to the SERVICE, not to any one
+                          variation). Don't duplicate them here. */}
                     </Field>
                   );
                 })()}
