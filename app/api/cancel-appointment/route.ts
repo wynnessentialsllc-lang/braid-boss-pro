@@ -118,7 +118,7 @@ export async function POST(req: Request) {
     .eq("user_id", user.id)
     .maybeSingle();
   if (readErr || !appt) return fail(404, "Appointment not found.");
-  if (appt.status === "cancelled") {
+  if (appt.status === "cancelled" || appt.status === "canceled") {
     return NextResponse.json({ ok: true, already_cancelled: true });
   }
 

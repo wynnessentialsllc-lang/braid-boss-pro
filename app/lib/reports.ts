@@ -30,9 +30,12 @@ const num = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
+const isCanceledStatus = (status: unknown): boolean =>
+  status === "cancelled" || status === "canceled";
+
 const isBillable = (a: AppointmentLike): boolean => {
   if (!a) return false;
-  if (a.status === "cancelled" || a.status === "no_show") return false;
+  if (isCanceledStatus(a.status) || a.status === "no_show") return false;
   if (a.kind && a.kind !== "appointment") return false;
   return true;
 };

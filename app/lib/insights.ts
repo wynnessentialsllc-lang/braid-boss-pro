@@ -31,6 +31,9 @@ const num = (v: any): number => {
   return isFinite_(n) ? n : 0;
 };
 const safeArr = <T,>(v: T[] | null | undefined): T[] => Array.isArray(v) ? v : [];
+const isCanceledStatus = (status: unknown): boolean =>
+  status === "cancelled" || status === "canceled";
+const isCanceledAppointment = (a: any): boolean => isCanceledStatus(a?.status);
 const fmt = (n: number, currency: string = "USD"): string => {
   try { return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(n || 0); }
   catch { return `$${(n || 0).toFixed(2)}`; }
@@ -48,7 +51,7 @@ export type InsightInput = {
 };
 
 const collected = (a: any): number => {
-  if (!a || a.status === "cancelled") return 0;
+  if (!a || isCanceledAppointment(a)) return 0;
   const dep = num(a.depositPaid);
   if (dep > 0) return dep;
   if (num(a.balanceDue) === 0 && num(a.totalPrice) > 0) return num(a.totalPrice);
@@ -67,7 +70,7 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
   const today = input.today || new Date().toISOString().slice(0, 10);
   const business = input.settings?.business || {};
   const currency = business?.currency || "USD";
-  const appts = safeArr(input.appointments).filter(a => a && a.status !== "cancelled");
+  const appts = safeArr(input.appointments).filter(a => a && !isCanceledAppointment(a));
   const clients = safeArr(input.clients);
   const out: Insight[] = [];
   const now = new Date().toISOString();
@@ -182,7 +185,7 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
       const mine = apptsByClient[c.id] || [];
       const completed = mine.filter(a => a.status === "completed" || a.paymentStatus === "paid");
       const ltv = completed.reduce((s, a) => s + collected(a), 0);
-      const upcoming = mine.find(a => a.date >= today && a.status !== "cancelled" && a.status !== "completed");
+      const upcoming = mine.find(a => a.date >= today && !isCanceledAppointment(a) && a.status !== "completed");
       if (upcoming) return null;
       const lastDate = completed.map(a => a.date).filter(Boolean).sort().pop();
       if (!lastDate) return null;

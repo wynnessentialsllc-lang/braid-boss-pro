@@ -401,7 +401,7 @@ export const getAvailableSlots = (input: SlotEngineInput): Slot[] => {
   const reserved: Array<[number, number]> = [];
   for (const a of input.appointments) {
     if (!a || a.date !== input.date) continue;
-    if (a.status === "cancelled") continue;
+    if (a.status === "cancelled" || a.status === "canceled") continue;
     if (!a.time) continue;
     if (input.staffId && a.staffId && a.staffId !== input.staffId) continue;
     const start = toMin(a.time);

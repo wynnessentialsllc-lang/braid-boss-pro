@@ -76,7 +76,7 @@ export async function POST(req: Request) {
     .maybeSingle();
 
   if (readErr || !row) return fail(404, "Appointment not found.");
-  if (row.status === "cancelled") return fail(409, "Appointment is cancelled.");
+  if (row.status === "cancelled" || row.status === "canceled") return fail(409, "Appointment is cancelled.");
   if (row.balance_paid) return fail(409, "Balance already paid.");
 
   const total = Number(row.total_price) || 0;

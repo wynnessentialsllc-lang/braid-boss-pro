@@ -415,6 +415,11 @@ const roundCents = (n: number): number => Math.round((Number(n) + Number.EPSILON
 
 const formatCurrency = (n: unknown, currency: string = "USD"): string => fmtMoney(parseMoney(n as any), currency);
 
+const CANCELED_APPOINTMENT_STATUSES = new Set(["cancelled", "canceled"]);
+const isCanceledStatus = (status: unknown): boolean =>
+  CANCELED_APPOINTMENT_STATUSES.has(String(status || "").toLowerCase());
+const isCanceledAppointment = (appt: any): boolean => isCanceledStatus(appt?.status);
+
 // Normalize a raw appointment record from storage / form input. Fills in
 // defaults so downstream math never has to second-guess undefined fields,
 // and clamps the numeric trio (totalPrice, depositPaid, balanceDue) to a
@@ -443,7 +448,7 @@ const normalizeAppointment = (raw: any): any => {
 // Falls back to totalPrice for fully paid records that don't have an
 // explicit depositPaid value (legacy data).
 const calculateCollectedAmount = (appt: any): number => {
-  if (!appt || appt.status === "cancelled") return 0;
+  if (!appt || isCanceledAppointment(appt)) return 0;
   const deposit = parseMoney(appt.depositPaid);
   if (deposit > 0) return roundCents(deposit);
   if (parseMoney(appt.balanceDue) === 0 && parseMoney(appt.totalPrice) > 0) {
@@ -454,7 +459,7 @@ const calculateCollectedAmount = (appt: any): number => {
 
 // True when an appointment counts as income (collected money).
 const isIncomeAppt = (appt: any): boolean => {
-  if (!appt || appt.status === "cancelled") return false;
+  if (!appt || isCanceledAppointment(appt)) return false;
   return appt.status === "completed" || appt.paymentStatus === "paid" || calculateCollectedAmount(appt) > 0;
 };
 
@@ -464,7 +469,7 @@ const isIncomeAppt = (appt: any): boolean => {
 const calculatePendingBalance = (appts: any[], todayIso: string): number => {
   if (!Array.isArray(appts)) return 0;
   return roundCents(appts
-    .filter(a => a && a.status !== "cancelled")
+    .filter(a => a && !isCanceledAppointment(a))
     .map(a => ({ a, ps: paymentStatusOf(a, todayIso) }))
     .filter(({ ps }) => ps !== "paid")
     .reduce((s, { a }) => s + parseMoney(a.balanceDue), 0));
@@ -546,7 +551,7 @@ const calculateClientMetrics = (clientId: string, appointments: any[], todayIso:
   if (mine.length === 0) return empty;
 
   const completed = mine.filter(a => a.status === "completed" || a.paymentStatus === "paid");
-  const cancelled = mine.filter(a => a.status === "cancelled").length;
+  const cancelled = mine.filter(isCanceledAppointment).length;
   const noShow = mine.filter(a => a.status === "no_show").length;
 
   const lifetimeValue = roundCents(mine.reduce((s, a) => s + calculateCollectedAmount(a), 0));
@@ -582,7 +587,7 @@ const calculateClientMetrics = (clientId: string, appointments: any[], todayIso:
 
   // Earliest upcoming non-cancelled / non-completed appointment.
   const upcoming = mine
-    .filter(a => a.date >= todayIso && a.status !== "cancelled" && a.status !== "completed")
+    .filter(a => a.date >= todayIso && !isCanceledAppointment(a) && a.status !== "completed")
     .map(a => a.date)
     .sort()[0] || null;
 
@@ -667,7 +672,7 @@ const getRebookingCandidates = (clients: any[], appointments: any[], todayIso: s
 const getPendingBalanceAppointments = (appointments: any[], todayIso: string): any[] => {
   if (!Array.isArray(appointments)) return [];
   return appointments
-    .filter(a => a && a.status !== "cancelled")
+    .filter(a => a && !isCanceledAppointment(a))
     .filter(a => parseMoney(a.balanceDue) > 0)
     .filter(a => paymentStatusOf(a, todayIso) !== "paid")
     .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
@@ -676,7 +681,7 @@ const getPendingBalanceAppointments = (appointments: any[], todayIso: string): a
 const getTodaysAppointments = (appointments: any[], todayIso: string, excludeIds: Set<string> = new Set()): any[] => {
   if (!Array.isArray(appointments)) return [];
   const today = appointments
-    .filter(a => a && a.status !== "cancelled" && a.date === todayIso)
+    .filter(a => a && !isCanceledAppointment(a) && a.date === todayIso)
     .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
   // If excluding pending-balance items would leave Today's Chair empty,
   // we fall back to the un-filtered list so the section never goes silent
@@ -693,7 +698,7 @@ const getUpcomingAppointments = (
 ): any[] => {
   if (!Array.isArray(appointments)) return [];
   return appointments
-    .filter(a => a && a.status !== "cancelled" && a.status !== "completed")
+    .filter(a => a && !isCanceledAppointment(a) && a.status !== "completed")
     .filter(a => a.date && a.date > todayIso)
     .filter(a => !excludeIds.has(a.id))
     .sort((a, b) => ((a.date || "") + (a.time || "")).localeCompare((b.date || "") + (b.time || "")))
@@ -975,7 +980,7 @@ const getClientAppointmentContext = (clientId: string | null | undefined, appoin
   const sortKey = (a: any) => `${a.date || ""}${a.time || ""}`;
 
   const upcoming = mine
-    .filter(a => a.date >= todayIso && a.status !== "cancelled" && a.status !== "completed")
+    .filter(a => a.date >= todayIso && !isCanceledAppointment(a) && a.status !== "completed")
     .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
   if (upcoming.length > 0) return upcoming[0];
 
@@ -983,7 +988,7 @@ const getClientAppointmentContext = (clientId: string | null | undefined, appoin
   if (today.length > 0) return today[0];
 
   const unfinished = mine
-    .filter(a => a.status !== "cancelled" && a.status !== "completed")
+    .filter(a => !isCanceledAppointment(a) && a.status !== "completed")
     .sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
   if (unfinished.length > 0) return unfinished[0];
 
@@ -2000,8 +2005,8 @@ const TabBar = ({ active, setActive }: {
   );
 };
 
-const STATUS_TONE = { scheduled: "neutral", confirmed: "gold", completed: "success", cancelled: "danger", no_show: "warning" };
-const STATUS_LABEL = { scheduled: "Scheduled", confirmed: "Confirmed", completed: "Completed", cancelled: "Cancelled", no_show: "No-show" };
+const STATUS_TONE = { scheduled: "neutral", confirmed: "gold", completed: "success", cancelled: "danger", canceled: "danger", no_show: "warning" };
+const STATUS_LABEL = { scheduled: "Scheduled", confirmed: "Confirmed", completed: "Completed", cancelled: "Cancelled", canceled: "Canceled", no_show: "No-show" };
 const REMINDER_STATUS_TONE = { pending: "warning", sent: "gold", delivered: "success", failed: "danger", cancelled: "neutral" };
 
 // ============================================================
@@ -2062,7 +2067,7 @@ const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: {
             <Pill tone={STATUS_TONE[appt.status] || "neutral"}>{STATUS_LABEL[appt.status] || appt.status}</Pill>
             {(() => {
               const ps = paymentStatusOf(appt, todayISO());
-              return appt.status !== "cancelled" ? (
+              return !isCanceledAppointment(appt) ? (
                 <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>
               ) : null;
             })()}
@@ -2070,7 +2075,7 @@ const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: {
               // Partial-deposit % pill so you can read "60% deposit" at a
               // glance without opening the appointment. Reuses the same
               // ticket math as Reports / Income view.
-              if (appt.status === "cancelled") return null;
+              if (isCanceledAppointment(appt)) return null;
               const total = reportTicketTotal(appt);
               const deposit = Number(appt.depositPaid) || 0;
               if (total <= 0 || deposit <= 0 || deposit >= total) return null;
@@ -2641,7 +2646,7 @@ const KpiDetailSheet = ({
               <Pill tone={STATUS_TONE[a?.status || "scheduled"] || "neutral"}>
                 {STATUS_LABEL[a?.status || "scheduled"] || a?.status || "Scheduled"}
               </Pill>
-              {a?.status !== "cancelled" && (
+              {!isCanceledAppointment(a) && (
                 <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>
               )}
             </div>
@@ -3294,7 +3299,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
       paymentDate: appt.paymentDate || todayISO(),
       // If the service has happened, completing the appointment lets the
       // money tracker + client lifetime total pick it up immediately.
-      status: isPastOrToday && appt.status !== "cancelled" && appt.status !== "no_show"
+      status: isPastOrToday && !isCanceledAppointment(appt) && appt.status !== "no_show"
         ? "completed"
         : appt.status,
     };
@@ -4602,7 +4607,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
   const dateHasAppts = useMemo(() => {
     const set = new Set<string>();
     for (const a of appointments) {
-      if (!prefs.showCanceled && a.status === "cancelled") continue;
+      if (!prefs.showCanceled && isCanceledAppointment(a)) continue;
       if (a.date) set.add(a.date);
     }
     return set;
@@ -4611,7 +4616,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
   const apptsForSelectedDay = useMemo(() => {
     return (appointments as any[])
       .filter(a => a.date === selectedDate)
-      .filter(a => prefs.showCanceled || a.status !== "cancelled")
+      .filter(a => prefs.showCanceled || !isCanceledAppointment(a))
       .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
   }, [appointments, selectedDate, prefs.showCanceled]);
 
@@ -5212,7 +5217,7 @@ const WeekCalendarView = ({
       {weekDates.map(iso => {
         const list = (allAppts as any[])
           .filter(a => a.date === iso)
-          .filter(a => showCanceled || a.status !== "cancelled")
+          .filter(a => showCanceled || !isCanceledAppointment(a))
           .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
         const d = new Date(iso + "T00:00:00");
         const isToday = iso === today;
@@ -5317,7 +5322,7 @@ const ListCalendarView = ({
 }) => {
   const [filter, setFilter] = useState<"upcoming" | "today" | "past" | "all">("upcoming");
   const filtered = useMemo(() => {
-    let list = (allAppts as any[]).filter(a => showCanceled || a.status !== "cancelled");
+    let list = (allAppts as any[]).filter(a => showCanceled || !isCanceledAppointment(a));
     if (filter === "today") list = list.filter(a => a.date === today);
     else if (filter === "upcoming") list = list.filter(a => a.date >= today && a.status !== "completed");
     else if (filter === "past") list = list.filter(a => a.date < today || a.status === "completed");
@@ -6552,7 +6557,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                     depositPaid: parseMoney(form.totalPrice),
                     paymentStatus: "paid",
                     paymentDate: form.paymentDate || todayISO(),
-                    status: isPastOrToday && form.status !== "cancelled" && form.status !== "no_show"
+                    status: isPastOrToday && !isCanceledAppointment(form) && form.status !== "no_show"
                       ? "completed"
                       : form.status,
                   });
@@ -6844,7 +6849,7 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
     const cAppts = appointments.filter(a => a.clientId === c.id);
     // Lifetime total = sum of what was actually collected, not quoted.
     const totalSpent = cAppts
-      .filter(a => (a.status === "completed" || a.paymentStatus === "paid") && a.status !== "cancelled")
+      .filter(a => (a.status === "completed" || a.paymentStatus === "paid") && !isCanceledAppointment(a))
       .reduce((s, a) => {
         const collected = calculateCollectedAmount(a);
         return s + collected;
@@ -6862,7 +6867,7 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
         // Exclude cancelled bookings — a future cancellation shouldn't
         // surface as the next "upcoming" visit.
         const a = cAppts.find(x => x.date === d);
-        return !a || a.status !== "cancelled";
+        return !a || !isCanceledAppointment(a);
       })
       .sort();
     const pastDates = dates.filter(d => d < today);
@@ -7471,7 +7476,7 @@ const ClientProfileSheet = ({
   const allAppts: any[] = (store.appointments as any[]) || [];
   const photos: any[] = (store.photos as any[]) || [];
   const cAppts = useMemo(
-    () => allAppts.filter(a => a?.clientId === client?.id && a?.status !== "cancelled"),
+    () => allAppts.filter(a => a?.clientId === client?.id && !isCanceledAppointment(a)),
     [allAppts, client?.id],
   );
   const cPhotos = useMemo(
@@ -7623,7 +7628,7 @@ const ClientProfileSheet = ({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <Pill tone={STATUS_TONE[status] || "neutral"}>{STATUS_LABEL[status] || status}</Pill>
-              {ps !== "pending" && status !== "cancelled" && (
+              {ps !== "pending" && !isCanceledStatus(status) && (
                 <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>
               )}
             </div>
@@ -8073,7 +8078,7 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
   , [photos, form.id]);
 
   const totalSpent = myAppts
-    .filter((a: any) => (a.status === "completed" || a.paymentStatus === "paid") && a.status !== "cancelled")
+    .filter((a: any) => (a.status === "completed" || a.paymentStatus === "paid") && !isCanceledAppointment(a))
     .reduce((s: number, a: any) => {
       const collected = calculateCollectedAmount(a);
       return s + collected;
@@ -11130,7 +11135,7 @@ const buildNotifications = (store: any): NotifItem[] => {
 
   // FINANCE — overdue balances (actionable)
   const lateBalance = safeAppts.filter((a: any) =>
-    a && a.status !== "cancelled" && a.status !== "completed" &&
+    a && !isCanceledAppointment(a) && a.status !== "completed" &&
     parseMoney(a.balanceDue) > 0 && a.date && a.date < today
   );
   for (const a of lateBalance) {
@@ -11149,7 +11154,7 @@ const buildNotifications = (store: any): NotifItem[] => {
 
   // APPOINTMENT — upcoming within 7 days (action: prep / confirm)
   const upcoming = safeAppts.filter((a: any) =>
-    a && a.status !== "cancelled" && a.status !== "completed" &&
+    a && !isCanceledAppointment(a) && a.status !== "completed" &&
     a.date && a.date >= today && a.date <= in7
   ).sort((a: any, b: any) =>
     ((a.date || "") + (a.time || "")).localeCompare((b.date || "") + (b.time || ""))
@@ -11407,7 +11412,7 @@ const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
 // falls back to deposit / balance / date heuristics.
 const paymentStatusOf = (a: any, todayIso: string): "paid" | "deposit" | "pending" | "overdue" => {
   if (!a) return "pending";
-  if (a.status === "cancelled") return "pending";
+  if (isCanceledAppointment(a)) return "pending";
   const total = Number(a.totalPrice) || 0;
   const balance = Number(a.balanceDue ?? Math.max(0, total - (Number(a.depositPaid) || 0)));
   const deposit = Number(a.depositPaid) || 0;

@@ -46,6 +46,9 @@ const num = (v: any): number => {
   return isFinite_(n) ? n : 0;
 };
 const safeArr = <T,>(v: T[] | null | undefined): T[] => Array.isArray(v) ? v : [];
+const isCanceledStatus = (status: unknown): boolean =>
+  status === "cancelled" || status === "canceled";
+const isCanceledAppointment = (a: any): boolean => isCanceledStatus(a?.status);
 const cleanIso = (date: string, time: string): string | null => {
   if (!date) return null;
   const t = time || "10:00";
@@ -84,7 +87,7 @@ export const getAppointmentReminderNotifications = (
 
   for (const a of safeArr(appointments)) {
     if (!a?.id || !a.date) continue;
-    if (a.status === "cancelled" || a.status === "completed" || a.status === "no_show") continue;
+    if (isCanceledAppointment(a) || a.status === "completed" || a.status === "no_show") continue;
     const startIso = cleanIso(a.date, a.time);
     const startMs = isoToMs(startIso);
     if (!isFinite_(startMs)) continue;
@@ -132,7 +135,7 @@ export const getBalanceDueNotifications = (
   const out: NotificationRule[] = [];
   for (const a of safeArr(appointments)) {
     if (!a?.id) continue;
-    if (a.status === "cancelled" || a.paymentStatus === "paid") continue;
+    if (isCanceledAppointment(a) || a.paymentStatus === "paid") continue;
     const balance = num(a.balanceDue);
     if (balance <= 0) continue;
     const apptDate = a.date || "";
@@ -193,7 +196,7 @@ export const getRetentionNotifications = (
     const completed = mine.filter(a => a.status === "completed" || a.paymentStatus === "paid");
     if (completed.length === 0) continue;
     const lifetimeValue = completed.reduce((s, a) => s + num(a.depositPaid || a.totalPrice), 0);
-    const upcoming = mine.find(a => a.date >= todayIso && a.status !== "cancelled" && a.status !== "completed");
+    const upcoming = mine.find(a => a.date >= todayIso && !isCanceledAppointment(a) && a.status !== "completed");
     if (upcoming) continue; // already booked, no nudge needed
 
     const lastDate = completed.map(a => a.date).filter(Boolean).sort().pop();
@@ -252,7 +255,7 @@ export const getBusinessInsightNotifications = (
   const out: NotificationRule[] = [];
   const today = state.today;
   const todays = safeArr(state.appointments)
-    .filter(a => a?.date === today && a.status !== "cancelled");
+    .filter(a => a?.date === today && !isCanceledAppointment(a));
 
   if (todays.length === 0) {
     out.push({
@@ -277,7 +280,7 @@ export const getBusinessInsightNotifications = (
   }
 
   const pendingTotal = safeArr(state.appointments)
-    .filter(a => a?.status !== "cancelled" && a?.paymentStatus !== "paid")
+    .filter(a => !isCanceledAppointment(a) && a?.paymentStatus !== "paid")
     .reduce((s, a) => s + num(a.balanceDue), 0);
   if (pendingTotal > 0) {
     out.push({

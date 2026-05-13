@@ -103,7 +103,7 @@ export const buildVEvent = (appt: IcsAppointment, business?: { businessName?: st
   if (appt.notes) descParts.push(appt.notes);
   const description = descParts.join("\n");
   const status = appt.status === "completed" ? "CONFIRMED"
-    : appt.status === "cancelled" ? "CANCELLED"
+    : appt.status === "cancelled" || appt.status === "canceled" ? "CANCELLED"
     : appt.status === "no_show" ? "CANCELLED"
     : "CONFIRMED";
 

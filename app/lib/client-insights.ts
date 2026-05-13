@@ -11,12 +11,15 @@ const DAY_NAMES = [
   "Thursday", "Friday", "Saturday",
 ];
 
+const isCanceledStatus = (status: unknown): boolean =>
+  status === "cancelled" || status === "canceled";
+
 const isCompleted = (a: any): boolean =>
-  a && a.status !== "cancelled" && (
+  a && !isCanceledStatus(a.status) && (
     a.status === "completed" || a.paymentStatus === "paid"
   );
 
-const isCancelled = (a: any): boolean => a?.status === "cancelled";
+const isCancelled = (a: any): boolean => isCanceledStatus(a?.status);
 const isNoShow = (a: any): boolean => a?.status === "no_show";
 
 const parseISODate = (iso?: string | null): Date | null => {

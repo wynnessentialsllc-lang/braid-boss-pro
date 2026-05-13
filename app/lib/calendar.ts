@@ -92,6 +92,7 @@ const PALETTE = {
   confirmed: { bg: "rgba(168, 137, 63, 0.28)", border: "#A8893F", fg: "#2A1810", accent: "#A8893F" },
   completed: { bg: "rgba(92, 124, 74, 0.18)", border: "rgba(92, 124, 74, 0.55)", fg: "#2A1810", accent: "#5C7C4A" },
   cancelled: { bg: "rgba(139, 115, 85, 0.14)", border: "rgba(139, 115, 85, 0.4)",  fg: "#8B7355", accent: "#8B7355" },
+  canceled: { bg: "rgba(139, 115, 85, 0.14)", border: "rgba(139, 115, 85, 0.4)",  fg: "#8B7355", accent: "#8B7355" },
   pending:   { bg: "rgba(201, 118, 43, 0.16)", border: "rgba(201, 118, 43, 0.5)",  fg: "#4A2C1A", accent: "#C9762B" },
   noShow:    { bg: "rgba(156, 61, 46, 0.14)", border: "rgba(156, 61, 46, 0.45)",  fg: "#9C3D2E", accent: "#9C3D2E" },
 
@@ -127,6 +128,7 @@ const STATUS_LABELS: Record<string, string> = {
   confirmed: "Confirmed",
   completed: "Completed",
   cancelled: "Canceled",
+  canceled: "Canceled",
   no_show: "No-show",
 };
 
@@ -146,7 +148,7 @@ export const colorForAppointment = (
   let label: string | undefined;
 
   if (mode === "status") {
-    if (status === "scheduled" || status === "confirmed" || status === "completed" || status === "cancelled") {
+    if (status === "scheduled" || status === "confirmed" || status === "completed" || status === "cancelled" || status === "canceled") {
       key = status;
     } else if (appt?.status === "no_show") {
       key = "noShow";
@@ -214,14 +216,14 @@ export const computeDayStatus = (
   //    counts as Off (legacy behavior — pre-availability users still
   //    use blocked-time entries to mark a day closed).
   const blockedHours = apptsForDay
-    .filter(a => a?.kind === "blocked" && a?.status !== "cancelled")
+    .filter(a => a?.kind === "blocked" && a?.status !== "cancelled" && a?.status !== "canceled")
     .reduce((s, a) => s + (Number(a?.durationHours) || 0), 0);
   if (blockedHours >= cap) return { status: "off", label: "Off" };
 
   // 3. Billable bookings only — personal/blocked don't drive the
   //    booked / openings logic.
   const billable = apptsForDay.filter(a =>
-    a?.status !== "cancelled" && (!a?.kind || a.kind === "appointment"),
+    a?.status !== "cancelled" && a?.status !== "canceled" && (!a?.kind || a.kind === "appointment"),
   );
   const totalHours = billable.reduce((s, a) => s + (Number(a?.durationHours) || 0), 0);
   const anyDepositDue = billable.some(a => (Number(a?.depositPaid) || 0) <= 0);

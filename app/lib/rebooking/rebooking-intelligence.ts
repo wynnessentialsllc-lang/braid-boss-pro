@@ -184,6 +184,7 @@ export const computeRebookingOpportunities = (
       typeof a.date === "string" &&
       a.date >= todayIso &&
       a.status !== "cancelled" &&
+      a.status !== "canceled" &&
       a.status !== "completed",
     );
     if (hasFuture) continue;

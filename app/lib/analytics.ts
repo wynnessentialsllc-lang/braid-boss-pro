@@ -9,15 +9,18 @@ const num = (v: any): number => {
   return isFinite_(n) ? n : 0;
 };
 const safeArr = <T,>(v: T[] | null | undefined): T[] => Array.isArray(v) ? v : [];
+const isCanceledStatus = (status: unknown): boolean =>
+  status === "cancelled" || status === "canceled";
+const isCanceledAppointment = (a: any): boolean => isCanceledStatus(a?.status);
 const collected = (a: any): number => {
-  if (!a || a.status === "cancelled") return 0;
+  if (!a || isCanceledAppointment(a)) return 0;
   const dep = num(a.depositPaid);
   if (dep > 0) return dep;
   if (num(a.balanceDue) === 0 && num(a.totalPrice) > 0) return num(a.totalPrice);
   return 0;
 };
 const isPaidLike = (a: any): boolean =>
-  !!a && a.status !== "cancelled" && (a.status === "completed" || a.paymentStatus === "paid");
+  !!a && !isCanceledAppointment(a) && (a.status === "completed" || a.paymentStatus === "paid");
 
 const monthBoundaries = (today: string) => {
   const [y, m] = today.split("-").map(Number);
@@ -66,7 +69,7 @@ export const calculateRevenueAnalytics = (
   }
   const topStyleEntry = Object.entries(styleTotals).sort(([, a], [, b]) => b - a)[0];
   const pendingBalance = appts
-    .filter(a => a?.status !== "cancelled" && a?.paymentStatus !== "paid")
+    .filter(a => !isCanceledAppointment(a) && a?.paymentStatus !== "paid")
     .reduce((s, a) => s + num(a.balanceDue), 0);
   return {
     thisMonth: round2(thisMonth),
@@ -123,7 +126,7 @@ export const calculateClientAnalytics = (
       ? Math.round((todayMs - new Date(lastDate + "T00:00:00").getTime()) / 86400_000)
       : null;
     const ltv = completed.reduce((s, a) => s + collected(a), 0);
-    const upcoming = mine.find(a => a.date >= today && a.status !== "cancelled" && a.status !== "completed");
+    const upcoming = mine.find(a => a.date >= today && !isCanceledAppointment(a) && a.status !== "completed");
     if (ltv >= vipThreshold && completed.length >= 3) vip += 1;
     if (days !== null && days > 90 && !upcoming) inactive += 1;
     if (days !== null && days >= 60 && days <= 90 && !upcoming && completed.length >= 2) atRisk += 1;
@@ -161,8 +164,9 @@ export const calculateAppointmentAnalytics = (
   const { cur: monthStart, prev: prevStart } = monthBoundaries(today);
   const appts = safeArr(appointments);
   const inMonth = appts.filter(a => a?.date && a.date >= monthStart);
+  const activeInMonth = inMonth.filter(a => !isCanceledAppointment(a));
   const completed = inMonth.filter(a => a.status === "completed" || a.paymentStatus === "paid").length;
-  const cancelled = inMonth.filter(a => a.status === "cancelled").length;
+  const cancelled = inMonth.filter(isCanceledAppointment).length;
   const noShow = inMonth.filter(a => a.status === "no_show").length;
 
   const dowCounts = [0, 0, 0, 0, 0, 0, 0];
@@ -186,7 +190,7 @@ export const calculateAppointmentAnalytics = (
     if (h > 0) { durSum += h; durN += 1; }
   }
   return {
-    thisMonthTotal: inMonth.length,
+    thisMonthTotal: activeInMonth.length,
     completed,
     cancelled,
     noShow,
@@ -272,7 +276,7 @@ export const calculateRetentionAnalytics = (
       if (isFinite_(da) && isFinite_(db)) gaps.push(Math.round((db - da) / 86400_000));
     }
     const last = completed[completed.length - 1];
-    const upcoming = mine.find(a => a.date >= today && a.status !== "cancelled" && a.status !== "completed");
+    const upcoming = mine.find(a => a.date >= today && !isCanceledAppointment(a) && a.status !== "completed");
     if (upcoming) continue;
     const days = Math.round((todayMs - new Date(last + "T00:00:00").getTime()) / 86400_000);
     if (days >= 42) candidates += 1;
