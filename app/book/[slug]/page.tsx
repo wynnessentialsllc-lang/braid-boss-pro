@@ -78,6 +78,52 @@ export default function PublicBookingPage() {
   const [link, setLink] = useState<LinkConfig | null>(null);
   const [linkLoading, setLinkLoading] = useState(true);
   const [linkError, setLinkError] = useState<string | null>(null);
+  // Tap-to-expand lightbox for the stylist's photo gallery. Stores
+  // the active index into the sorted gallery_photos array so prev /
+  // next swipes stay in order.
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+
+  // Keyboard navigation when the lightbox is open. Mounted once and
+  // gated on the open state inside the handler so we don't churn
+  // listeners on every render.
+  useEffect(() => {
+    if (lightboxIndex === null) return;
+    const total = Array.isArray(link?.gallery_photos)
+      ? Math.min(8, link!.gallery_photos!.length)
+      : 0;
+    if (total === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightboxIndex(null);
+      else if (e.key === "ArrowRight") setLightboxIndex((cur) => cur === null ? null : (cur + 1) % total);
+      else if (e.key === "ArrowLeft") setLightboxIndex((cur) => cur === null ? null : (cur - 1 + total) % total);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxIndex, link?.gallery_photos]);
+
+  // Touch-swipe navigation. Tracks the initial touch X and fires
+  // prev/next when the horizontal delta exceeds a small threshold
+  // and the gesture wasn't a vertical scroll.
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const onLightboxTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    touchStartRef.current = { x: t.clientX, y: t.clientY };
+  };
+  const onLightboxTouchEnd = (e: React.TouchEvent) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) < 40 || Math.abs(dy) > Math.abs(dx)) return;
+    const total = Array.isArray(link?.gallery_photos)
+      ? Math.min(8, link!.gallery_photos!.length)
+      : 0;
+    if (total === 0) return;
+    if (dx < 0) setLightboxIndex((cur) => cur === null ? null : (cur + 1) % total);
+    else setLightboxIndex((cur) => cur === null ? null : (cur - 1 + total) % total);
+  };
   // Phase B1 — real services catalog from public_list_services RPC.
   // Falls back to legacy link.services if the RPC errors / is empty
   // so existing booking links keep working during the rollout.
@@ -638,24 +684,38 @@ export default function PublicBookingPage() {
                 .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
                 .slice(0, 8)
                 .map((p, i) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <button
                     key={p.url || i}
-                    src={p.url}
-                    alt={`${link?.business_name || "Studio"} — photo ${i + 1}`}
-                    loading="lazy"
-                    decoding="async"
+                    type="button"
+                    onClick={() => setLightboxIndex(i)}
+                    aria-label={`Open photo ${i + 1}`}
                     style={{
                       flex: "0 0 auto",
-                      width: 200,
-                      height: 240,
-                      objectFit: "cover",
-                      borderRadius: 16,
-                      scrollSnapAlign: "center",
+                      appearance: "none",
+                      WebkitAppearance: "none",
+                      padding: 0,
                       border: `1px solid ${C.hairline}`,
+                      borderRadius: 16,
                       background: C.paper,
+                      cursor: "zoom-in",
+                      scrollSnapAlign: "center",
+                      overflow: "hidden",
                     }}
-                  />
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={p.url}
+                      alt={`${link?.business_name || "Studio"} — photo ${i + 1}`}
+                      loading="lazy"
+                      decoding="async"
+                      style={{
+                        display: "block",
+                        width: 200,
+                        height: 240,
+                        objectFit: "cover",
+                      }}
+                    />
+                  </button>
                 ))}
             </div>
           </div>
@@ -1011,6 +1071,131 @@ export default function PublicBookingPage() {
           </div>
         )}
       </div>
+
+      {/* Tap-to-expand lightbox. Self-contained — no portal needed
+          because this page is its own scope with no parent
+          transform / overflow that would trap fixed positioning. */}
+      {lightboxIndex !== null && Array.isArray(link?.gallery_photos) && (() => {
+        const photos = (link!.gallery_photos || [])
+          .slice()
+          .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+          .slice(0, 8);
+        const i = Math.max(0, Math.min(lightboxIndex, photos.length - 1));
+        const p = photos[i];
+        if (!p) return null;
+        const close = () => setLightboxIndex(null);
+        const prev = () => setLightboxIndex((cur) => cur === null ? null : (cur - 1 + photos.length) % photos.length);
+        const next = () => setLightboxIndex((cur) => cur === null ? null : (cur + 1) % photos.length);
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            onClick={close}
+            onTouchStart={onLightboxTouchStart}
+            onTouchEnd={onLightboxTouchEnd}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(26, 15, 8, 0.92)",
+              zIndex: 9999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "max(24px, env(safe-area-inset-top)) 12px max(24px, env(safe-area-inset-bottom)) 12px",
+            }}
+          >
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); close(); }}
+              aria-label="Close photo"
+              style={{
+                position: "absolute",
+                top: "max(20px, env(safe-area-inset-top))",
+                right: 16,
+                width: 40, height: 40, borderRadius: 999,
+                background: "rgba(0,0,0,0.5)", color: "#fff",
+                border: "1px solid rgba(255,255,255,0.2)",
+                fontSize: 22, fontWeight: 400, lineHeight: 1,
+                cursor: "pointer", padding: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              ×
+            </button>
+
+            {photos.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); prev(); }}
+                  aria-label="Previous photo"
+                  style={{
+                    position: "absolute", left: 10, top: "50%",
+                    transform: "translateY(-50%)",
+                    width: 44, height: 44, borderRadius: 999,
+                    background: "rgba(0,0,0,0.4)", color: "#fff",
+                    border: "1px solid rgba(255,255,255,0.15)",
+                    fontSize: 22, lineHeight: 1, cursor: "pointer",
+                    padding: 0,
+                  }}
+                >‹</button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); next(); }}
+                  aria-label="Next photo"
+                  style={{
+                    position: "absolute", right: 10, top: "50%",
+                    transform: "translateY(-50%)",
+                    width: 44, height: 44, borderRadius: 999,
+                    background: "rgba(0,0,0,0.4)", color: "#fff",
+                    border: "1px solid rgba(255,255,255,0.15)",
+                    fontSize: 22, lineHeight: 1, cursor: "pointer",
+                    padding: 0,
+                  }}
+                >›</button>
+              </>
+            )}
+
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={p.url}
+              alt={`Photo ${i + 1} of ${photos.length}`}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                maxWidth: "100%",
+                maxHeight: "100%",
+                objectFit: "contain",
+                borderRadius: 8,
+                boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+              }}
+            />
+
+            {photos.length > 1 && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: "absolute",
+                  bottom: "max(28px, env(safe-area-inset-bottom))",
+                  left: 0, right: 0,
+                  display: "flex", justifyContent: "center", gap: 6,
+                  pointerEvents: "none",
+                }}
+              >
+                {photos.map((_, j) => (
+                  <span
+                    key={j}
+                    style={{
+                      width: j === i ? 18 : 6, height: 6, borderRadius: 99,
+                      background: j === i ? "#fff" : "rgba(255,255,255,0.35)",
+                      transition: "width 200ms ease",
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
