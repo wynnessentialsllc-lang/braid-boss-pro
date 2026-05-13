@@ -5737,19 +5737,81 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
   const handleDelete = async () => {
     if (!form.id) return;
-    const confirmCopy = form.kind === "personal" ? "Delete this personal event?"
-      : form.kind === "blocked" ? "Remove this blocked time?"
-      : "Delete this appointment?";
-    if (!window.confirm(confirmCopy)) return;
-    await deleteAppointment(form.id);
+    // Personal events / blocked time are just calendar holds with no
+    // money attached — they delete cleanly. Real appointments get
+    // cancelled (status flip) so the books keep a record, and any
+    // Stripe deposit / balance gets refunded automatically.
+    const isRealAppointment = form.kind !== "personal" && form.kind !== "blocked";
+
+    if (!isRealAppointment) {
+      const confirmCopy = form.kind === "personal"
+        ? "Delete this personal event?"
+        : "Remove this blocked time?";
+      if (!window.confirm(confirmCopy)) return;
+      await deleteAppointment(form.id);
+      onClose();
+      return;
+    }
+
+    // Real appointment — confirm with a refund warning if we know
+    // there's a Stripe deposit or balance attached.
+    const depositPaid = Number(form.depositPaid) || 0;
+    const hasMoney = depositPaid > 0;
+    const reason = window.prompt(
+      hasMoney
+        ? `Cancel this appointment and refund ${form.totalPrice ? "all collected payments" : "the deposit"}?\n\nOptional: reason for cancellation (visible only to you).`
+        : "Cancel this appointment?\n\nOptional: reason for cancellation (visible only to you).",
+      "",
+    );
+    if (reason === null) return; // user hit Cancel on the prompt
+
+    try {
+      const supabase = getSupabase();
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) throw new Error("Sign in required.");
+      const res = await fetch("/api/cancel-appointment", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ appointment_id: form.id, reason: reason || undefined }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || `cancel_${res.status}`);
+      if (body.refunded > 0) {
+        alert(`Cancelled. Refunded $${Number(body.refunded).toFixed(2)} to the client via Stripe.`);
+      } else if (body.failures?.length) {
+        alert("Cancelled, but one or more refunds failed. Check Stripe and refund manually if needed.");
+      }
+      trackEvent("appointment_cancelled", { category: "feature", metadata: { refunded: body.refunded || 0 } });
+    } catch (err: any) {
+      console.error("[appt] cancel failed:", err);
+      alert(`Couldn't cancel: ${err?.message || "Please try again."}`);
+      return;
+    }
     onClose();
   };
 
   const handleDeleteSeries = async () => {
     if (!form.seriesId) return;
-    if (!window.confirm("Delete this entire recurring series? Past appointments stay; future ones are removed.")) return;
+    if (!window.confirm("Cancel this entire recurring series? Past appointments stay; future ones are cancelled (and deposits refunded).")) return;
     const futures = appointments.filter(a => a.seriesId === form.seriesId && a.date >= todayISO());
-    for (const f of futures) await deleteAppointment(f.id);
+    for (const f of futures) {
+      // Reuse the cancel-and-refund route per future occurrence so
+      // each Stripe charge gets refunded individually.
+      try {
+        const supabase = getSupabase();
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess?.session?.access_token;
+        if (!token) continue;
+        await fetch("/api/cancel-appointment", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({ appointment_id: f.id, reason: "recurring series cancelled" }),
+        });
+      } catch (e) {
+        console.warn("[appt] series cancel failed for", f.id, e);
+      }
+    }
     await deleteSeries(form.seriesId);
     onClose();
   };
