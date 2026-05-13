@@ -9,11 +9,13 @@ import {
   fetchPublicServices,
   fetchPublicAvailability,
   fetchPublicMonthAvailability,
+  resolveVariationPricing,
   type PublicService,
   type PublicSlot,
   type MonthDay,
   type MonthDayStatus,
 } from "../../lib/services";
+import { trackEvent } from "../../lib/track";
 import { collectPublicContext } from "../../lib/waitlist";
 
 // Local-date "YYYY-MM-DD" — never UTC-shifts so the calendar lines up
@@ -129,6 +131,9 @@ export default function PublicBookingPage() {
   // so existing booking links keep working during the rollout.
   const [catalog, setCatalog] = useState<PublicService[]>([]);
   const [serviceId, setServiceId] = useState<string>("");
+  // Picked variation (one of service.add_ons). "" = no variation
+  // selected; the resolver then falls back to the parent service.
+  const [selectedVariationId, setSelectedVariationId] = useState<string>("");
   // Phase B2 — live slot picker driven by public_list_availability.
   const [slots, setSlots] = useState<PublicSlot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
@@ -280,11 +285,31 @@ export default function PublicBookingPage() {
     ? catalog.find(s => s.id === serviceId) || null
     : null;
 
+  // Available variations for the picked service. When empty, we fall
+  // through to the parent service's price/duration/deposit and skip
+  // rendering the variation picker entirely (back-compat).
+  const variations = selectedCatalogService?.add_ons || [];
+  const hasVariations = variations.length > 0;
+
+  // Resolved pricing for the CURRENT selection. Tells the rest of the
+  // flow exactly what to charge / book / show — variation overrides
+  // when picked, parent service otherwise. See lib/services.ts for
+  // the inheritance rules.
+  const resolved = useMemo(() => {
+    if (!selectedCatalogService) return null;
+    return resolveVariationPricing(
+      selectedCatalogService,
+      selectedVariationId || null,
+    );
+  }, [selectedCatalogService, selectedVariationId]);
+
   // Phase B7 — derived duration. When a catalog service is picked we
   // use its real duration; otherwise default to 60 minutes so the
-  // calendar still surfaces meaningful slot counts.
+  // calendar still surfaces meaningful slot counts. With variations,
+  // the resolved duration wins (e.g. human-hair install adds time).
   const activeServiceId = selectedCatalogService?.id ?? null;
-  const activeServiceDurationHours = selectedCatalogService?.duration_hours ?? 0;
+  const activeServiceDurationHours =
+    resolved?.durationHours ?? selectedCatalogService?.duration_hours ?? 0;
   const activeDurationMinutes = activeServiceId
     ? Math.max(15, Math.round((activeServiceDurationHours || 0) * 60))
     : DEFAULT_DURATION_MIN;
@@ -425,6 +450,9 @@ export default function PublicBookingPage() {
           notes_in: notes.trim() || null,
           timezone_in: ctx.timezone,
           locale_in: ctx.locale,
+          // New param — RPC resolves variation pricing server-side
+          // against services.add_ons. Null = no variation picked.
+          variation_id_in: hasCatalog && selectedVariationId ? selectedVariationId : null,
         },
       );
       if (!rpcErr && rpcRows) {
@@ -481,6 +509,29 @@ export default function PublicBookingPage() {
           // Stylist can always resend signing links manually from
           // the Approvals queue Contracts mini-card.
         }
+      }
+
+      // Analytics — record that a per-variation deposit was used so
+      // we can spot adoption of the new pricing model. Metadata-only;
+      // no client name / email / phone / notes leak through.
+      if (needsDeposit && resolved && selectedCatalogService) {
+        const priceBucket = (() => {
+          const p = resolved.price;
+          if (p <= 50) return "0-50";
+          if (p <= 100) return "51-100";
+          if (p <= 200) return "101-200";
+          if (p <= 350) return "201-350";
+          if (p <= 500) return "351-500";
+          return "500+";
+        })();
+        trackEvent("service_variation_deposit_used", {
+          category: "booking",
+          metadata: {
+            has_variation: !!resolved.variationId,
+            deposit_amount: resolved.depositAmount,
+            price_bucket: priceBucket,
+          },
+        });
       }
 
       // Deposit-required path: kick the client straight to Stripe.
@@ -766,6 +817,7 @@ export default function PublicBookingPage() {
                     onChange={e => {
                       const id = e.target.value;
                       setServiceId(id);
+                      setSelectedVariationId(""); // reset picker on service change
                       const svc = catalog.find(s => s.id === id);
                       // Keep serviceName in sync as the human-readable
                       // label submitted to the booking-request edge
@@ -805,16 +857,73 @@ export default function PublicBookingPage() {
                   >
                     <strong style={{ color: C.espresso }}>{selectedCatalogService.name}</strong>
                     <br />
-                    {selectedCatalogService.duration_hours}h · ${selectedCatalogService.base_price.toFixed(2)}
-                    {selectedCatalogService.deposit_required && selectedCatalogService.deposit_amount
-                      ? ` · ${`$${selectedCatalogService.deposit_amount.toFixed(2)} deposit required`}`
-                      : ""}
+                    {(resolved?.durationHours ?? selectedCatalogService.duration_hours)}h
+                    {" · $"}{(resolved?.price ?? selectedCatalogService.base_price).toFixed(2)}
+                    {resolved && resolved.depositRequired && resolved.depositAmount > 0
+                      ? ` · $${resolved.depositAmount.toFixed(2)} deposit due today`
+                      : selectedCatalogService.deposit_required && selectedCatalogService.deposit_amount && !hasVariations
+                        ? ` · $${Number(selectedCatalogService.deposit_amount).toFixed(2)} deposit required`
+                        : ""}
                     {selectedCatalogService.prep_instructions && (
                       <p style={{ marginTop: 8, color: C.muted, fontSize: 11 }}>
                         {selectedCatalogService.prep_instructions}
                       </p>
                     )}
+                    {resolved && resolved.depositRequired && resolved.depositAmount > 0 && resolved.balanceDue > 0 && (
+                      <p style={{ marginTop: 6, color: C.muted, fontSize: 11 }}>
+                        Remaining balance after deposit: ${resolved.balanceDue.toFixed(2)}
+                      </p>
+                    )}
                   </div>
+                )}
+                {/* Variation picker — only shown when the service has
+                    one or more variations. Each card shows its own
+                    price, duration, and deposit due today so the
+                    client can pick with all costs visible upfront. */}
+                {hasVariations && (
+                  <Field label="Variation">
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {variations.map(v => {
+                        const r = resolveVariationPricing(selectedCatalogService!, v.id);
+                        const picked = selectedVariationId === v.id;
+                        return (
+                          <button
+                            key={v.id}
+                            type="button"
+                            onClick={() => setSelectedVariationId(v.id)}
+                            aria-pressed={picked}
+                            style={{
+                              textAlign: "left",
+                              padding: 12,
+                              borderRadius: 12,
+                              background: picked ? C.cream : C.paper,
+                              border: `1.5px solid ${picked ? C.goldDeep : C.hairline}`,
+                              cursor: "pointer",
+                              font: "inherit",
+                              color: "inherit",
+                              appearance: "none",
+                              WebkitAppearance: "none",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                              <span style={{ fontWeight: 600, color: C.espresso, fontSize: 13 }}>
+                                {v.name || "Variation"}
+                              </span>
+                              <span style={{ fontWeight: 700, color: C.goldDeep, fontSize: 14, whiteSpace: "nowrap" }}>
+                                ${r.price.toFixed(2)}
+                              </span>
+                            </div>
+                            <p style={{ marginTop: 4, fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
+                              {r.durationHours}h
+                              {r.depositRequired && r.depositAmount > 0
+                                ? ` · $${r.depositAmount.toFixed(2)} deposit due today`
+                                : " · No deposit"}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </Field>
                 )}
               </>
             ) : services.length > 0 ? (
@@ -982,9 +1091,13 @@ export default function PublicBookingPage() {
               }}>
               {submitting
                 ? "Sending…"
-                : selectedCatalogService?.deposit_required && (selectedCatalogService.deposit_amount || 0) > 0
-                  ? `Pay deposit & request appointment · $${Number(selectedCatalogService.deposit_amount).toFixed(2)}`
-                  : "Request appointment"}
+                : resolved && resolved.depositRequired && resolved.depositAmount > 0
+                  ? `Pay deposit & request appointment · $${resolved.depositAmount.toFixed(2)}`
+                  : selectedCatalogService?.deposit_required
+                      && (selectedCatalogService.deposit_amount || 0) > 0
+                      && !hasVariations
+                    ? `Pay deposit & request appointment · $${Number(selectedCatalogService.deposit_amount).toFixed(2)}`
+                    : "Request appointment"}
             </button>
             <p style={{ fontSize: 11, color: C.muted, textAlign: "center", marginTop: 4 }}>
               You&apos;ll get a confirmation reply once your stylist reviews the request.

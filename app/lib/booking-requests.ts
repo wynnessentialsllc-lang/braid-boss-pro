@@ -59,6 +59,15 @@ export type BookingRequestRecord = {
   decline_reason: string | null;
   denied_reason: string | null;
   appointment_id: string | null;
+  // Per-variation snapshot, populated by public_submit_booking_request
+  // when the client picked a variation. Null for legacy rows + for
+  // services without variations. Survives services edits — the
+  // booking is locked to the price the client saw at submit time.
+  selected_variation_id: string | null;
+  selected_variation_name: string | null;
+  selected_variation_price: number | null;
+  selected_variation_duration_hours: number | null;
+  selected_variation_deposit_amount: number | null;
   created_at: string;
   updated_at: string;
 };

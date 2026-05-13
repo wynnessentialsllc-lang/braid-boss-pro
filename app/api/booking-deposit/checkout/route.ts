@@ -80,7 +80,7 @@ export async function POST(req: Request) {
   const { data: row, error: readErr } = await admin
     .from("booking_requests")
     .select(
-      "id, user_id, link_slug, client_name, client_email, service_id, service_name_snapshot, service_name, deposit_amount, deposit_required, approval_status, preferred_date, preferred_time, stripe_connect_account_id",
+      "id, user_id, link_slug, client_name, client_email, service_id, service_name_snapshot, service_name, deposit_amount, deposit_required, approval_status, preferred_date, preferred_time, stripe_connect_account_id, service_price, selected_variation_id, selected_variation_name, selected_variation_price, selected_variation_deposit_amount",
     )
     .eq("id", requestId)
     .maybeSingle();
@@ -137,8 +137,34 @@ export async function POST(req: Request) {
   }
 
   const baseUrl = baseUrlOf(req);
-  const cents = Math.round(Number(row.deposit_amount) * 100);
-  const productName = `Deposit · ${row.service_name_snapshot || row.service_name || "Booking"}`;
+  // Variation deposit wins when present and positive; otherwise fall
+  // back to the service-level deposit_amount stamped at submit time.
+  // The submit RPC already resolved variation → parent → none, so
+  // row.deposit_amount is normally already correct — this just keeps
+  // older rows working if the column population lags behind.
+  const variationDepositAmount = row.selected_variation_deposit_amount != null
+    ? Number(row.selected_variation_deposit_amount)
+    : 0;
+  const depositAmount = variationDepositAmount > 0
+    ? variationDepositAmount
+    : Number(row.deposit_amount);
+  const fullPrice = row.selected_variation_price != null
+    ? Number(row.selected_variation_price)
+    : (row.service_price != null ? Number(row.service_price) : depositAmount);
+  const balanceDue = Math.max(0, fullPrice - depositAmount);
+  const cents = Math.round(depositAmount * 100);
+  const productName = (() => {
+    const base = row.service_name_snapshot || row.service_name || "Booking";
+    if (row.selected_variation_name) {
+      // service_name already carries the " — variation" suffix from the
+      // submit RPC; service_name_snapshot is the bare parent. Compose
+      // a tidy receipt label either way.
+      return `Deposit · ${base}${
+        String(base).includes(row.selected_variation_name) ? "" : ` — ${row.selected_variation_name}`
+      }`;
+    }
+    return `Deposit · ${base}`;
+  })();
 
   // Optional platform fee in basis points. Defaults to 0 — no fee.
   const feeBps = (() => {
@@ -172,6 +198,15 @@ export async function POST(req: Request) {
   if (row.client_email) form.set("metadata[client_email]", row.client_email);
   if (row.preferred_date) form.set("metadata[appointment_date]", row.preferred_date);
   if (row.preferred_time) form.set("metadata[appointment_time]", row.preferred_time);
+  // Per-variation metadata — surfaces the picked flavor in the Stripe
+  // dashboard so reconciliation between Braid Boss Pro + Stripe is
+  // unambiguous when the same parent service has multiple price
+  // points. All four fields are safe to include (no client PII).
+  if (row.selected_variation_id) form.set("metadata[variation_id]", String(row.selected_variation_id));
+  if (row.selected_variation_name) form.set("metadata[variation_name]", String(row.selected_variation_name));
+  form.set("metadata[full_price]", fullPrice.toFixed(2));
+  form.set("metadata[deposit_amount]", depositAmount.toFixed(2));
+  form.set("metadata[balance_due]", balanceDue.toFixed(2));
   form.set("payment_intent_data[metadata][booking_request_id]", row.id);
   if (applicationFeeCents > 0) {
     form.set("payment_intent_data[application_fee_amount]", String(applicationFeeCents));

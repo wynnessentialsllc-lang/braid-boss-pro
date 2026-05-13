@@ -7639,11 +7639,6 @@ const ClientProfileSheet = ({
   // early-return so the second render (client flips from null to set)
   // doesn't change the hook count.
   const [tab, setTab] = useState<"upcoming" | "previous">("upcoming");
-  // Tap the "X cancellations on record" insight to drill into the
-  // actual cancelled rows for this client. Self-contained sub-sheet
-  // so it can't be reached from anywhere else; data already lives in
-  // `cancelledClientAppts` so this is pure presentation.
-  const [cancellationsOpen, setCancellationsOpen] = useState(false);
 
   if (!client) return null;
 
@@ -7722,7 +7717,6 @@ const ClientProfileSheet = ({
   );
 
   return (
-    <>
     <Sheet
       open={open}
       onClose={onClose}
@@ -7778,47 +7772,12 @@ const ClientProfileSheet = ({
             )}
             {insights.insights.length > 0 && (
               <ul className="mt-2 space-y-1" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                {insights.insights.map((line, i) => {
-                  // The cancellations insight is drillable — tap to open
-                  // a sheet with each cancelled appointment for context
-                  // (refund status, reason, original price).
-                  const isCancellationLine =
-                    /cancellations on record$/.test(line) && cancelledClientAppts.length > 0;
-                  if (isCancellationLine) {
-                    return (
-                      <li key={i} className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
-                        <button
-                          type="button"
-                          onClick={() => setCancellationsOpen(true)}
-                          className="w-full flex items-center gap-2 text-left active:scale-[0.99] transition rounded-md"
-                          style={{
-                            background: "transparent",
-                            border: 0,
-                            padding: 0,
-                            color: C.coffee,
-                            font: "inherit",
-                            cursor: "pointer",
-                            appearance: "none",
-                            WebkitAppearance: "none",
-                          }}
-                          aria-label={`View ${line}`}
-                        >
-                          <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
-                          <span className="flex-1" style={{ textDecoration: "underline", textDecorationColor: C.hairline, textUnderlineOffset: 3 }}>
-                            {line}
-                          </span>
-                          <ChevronRight size={12} style={{ color: C.muted, flexShrink: 0 }} />
-                        </button>
-                      </li>
-                    );
-                  }
-                  return (
-                    <li key={i} className="text-[12px] flex items-start gap-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
-                      <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
-                      <span>{line}</span>
-                    </li>
-                  );
-                })}
+                {insights.insights.map((line, i) => (
+                  <li key={i} className="text-[12px] flex items-start gap-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                    <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
+                    <span>{line}</span>
+                  </li>
+                ))}
               </ul>
             )}
             {(insights.isVip || insights.isRepeat) && (
@@ -8126,159 +8085,6 @@ const ClientProfileSheet = ({
         <div className="grid grid-cols-2 gap-3 pt-2">
           <Button variant="outline" onClick={onClose}>Close</Button>
           <Button variant="primary" icon={<Edit3 size={16} />} onClick={onEdit}>Edit profile</Button>
-        </div>
-      </div>
-    </Sheet>
-    <CancellationHistorySheet
-      open={cancellationsOpen}
-      onClose={() => setCancellationsOpen(false)}
-      clientName={client?.name || "Client"}
-      appts={cancelledClientAppts}
-      currency={currency}
-    />
-    </>
-  );
-};
-
-// Drill-in view for the "X cancellations on record" insight. Pure
-// presentation over rows already in `store.appointments` (status =
-// 'cancelled'); does not touch refund/Stripe logic — it just renders
-// whatever cancellation context was persisted at cancel time
-// (cancelledAt, cancellationReason, refundAmount).
-const CancellationHistorySheet = ({
-  open, onClose, clientName, appts, currency,
-}: {
-  open: boolean;
-  onClose: () => void;
-  clientName: string;
-  appts: any[];
-  currency: string;
-}) => {
-  const sorted = useMemo(
-    () => [...appts].sort((a, b) => {
-      // Most recent cancellation first; fall back to appt date.
-      const ax = String(a?.cancelledAt || a?.date || "");
-      const bx = String(b?.cancelledAt || b?.date || "");
-      return bx.localeCompare(ax);
-    }),
-    [appts],
-  );
-
-  const fmtCancelStamp = (iso?: string | null): string | null => {
-    if (!iso) return null;
-    try {
-      const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return null;
-      return d.toLocaleString(undefined, {
-        month: "short", day: "numeric", year: "numeric",
-        hour: "numeric", minute: "2-digit",
-      });
-    } catch { return null; }
-  };
-
-  return (
-    <Sheet open={open} onClose={onClose} title="Cancellation history">
-      <div className="space-y-4 pb-2">
-        <p className="text-[12px]" style={{ color: C.muted }}>
-          Cancelled appointments for {clientName}. Kept on the client's record so the booking history stays intact.
-        </p>
-
-        {sorted.length === 0 ? (
-          <Card className="p-6 text-center">
-            <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
-              No cancellations on record
-            </p>
-            <p className="text-[11px] mt-1" style={{ color: C.muted }}>
-              Nothing here means this client has never cancelled — a good sign.
-            </p>
-          </Card>
-        ) : (
-          <div className="space-y-2.5">
-            {sorted.map(a => {
-              const total = Number(a?.totalPrice) || 0;
-              const dep = Number(a?.depositPaid) || 0;
-              const refunded = Number(a?.refundAmount) || 0;
-              const cancelStamp = fmtCancelStamp(a?.cancelledAt);
-              // Deposit/refund status — derive only from what's on the
-              // row. We never recompute refunds here.
-              let depositLine: { label: string; tone: "muted" | "warning" | "success" } | null = null;
-              if (refunded > 0) {
-                depositLine = {
-                  label: `Refunded ${fmtMoney(refunded, currency)}`,
-                  tone: "success",
-                };
-              } else if (dep > 0) {
-                depositLine = {
-                  label: `Deposit ${fmtMoney(dep, currency)} · not refunded`,
-                  tone: "warning",
-                };
-              } else if (total > 0) {
-                depositLine = { label: "No deposit collected", tone: "muted" };
-              }
-              return (
-                <Card key={a?.id || Math.random()} className="p-3.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <Pill tone="neutral">Cancelled</Pill>
-                      </div>
-                      <p className="text-[14px] font-semibold truncate" style={{ color: C.espresso }}>
-                        {a?.style || "Service"}
-                      </p>
-                      <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
-                        {a?.date ? fmtDate(a.date) : "—"}{a?.time ? ` · ${fmtTime(a.time)}` : ""}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p style={{ fontFamily: FONT_DISPLAY, fontSize: 16, fontWeight: 600, color: C.goldDeep }}>
-                        {fmtMoney(total, currency)}
-                      </p>
-                      <p className="text-[10px]" style={{ color: C.muted }}>Original price</p>
-                    </div>
-                  </div>
-
-                  {(depositLine || cancelStamp || a?.cancellationReason) && (
-                    <div className="mt-2.5 pt-2.5 space-y-1.5" style={{ borderTop: `1px solid ${C.hairline}` }}>
-                      {depositLine && (
-                        <p
-                          className="text-[12px]"
-                          style={{
-                            color:
-                              depositLine.tone === "success" ? C.success
-                              : depositLine.tone === "warning" ? C.warning
-                              : C.muted,
-                          }}
-                        >
-                          {depositLine.label}
-                        </p>
-                      )}
-                      {cancelStamp && (
-                        <p className="text-[11px]" style={{ color: C.muted }}>
-                          Cancelled {cancelStamp}
-                        </p>
-                      )}
-                      {a?.cancellationReason && (
-                        <p
-                          className="text-[12px] rounded-md px-2.5 py-1.5"
-                          style={{
-                            color: C.coffee,
-                            background: C.ivory,
-                            border: `1px solid ${C.hairline}`,
-                          }}
-                        >
-                          “{a.cancellationReason}”
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </Card>
-              );
-            })}
-          </div>
-        )}
-
-        <div className="pt-2">
-          <Button variant="outline" onClick={onClose}>Close</Button>
         </div>
       </div>
     </Sheet>
@@ -13649,17 +13455,58 @@ const ServicesScreen = ({
     if (ok) setConfirmDelete(null);
   };
 
-  const updateAddOn = (id: string, field: keyof ServiceAddOn, value: string) => {
+  // Variation editor — each row corresponds to one entry in
+  // services.add_ons jsonb. `field` distinguishes name (text), legacy
+  // amount (currency), and the new per-variation overrides.
+  const updateAddOn = (id: string, field: keyof ServiceAddOn, value: any) => {
     setEditing(prev => prev ? {
       ...prev,
-      add_ons: (prev.add_ons || []).map(a => a.id === id
-        ? { ...a, [field]: field === "amount" ? parseMoney(value) : value }
-        : a),
+      add_ons: (prev.add_ons || []).map(a => {
+        if (a.id !== id) return a;
+        if (field === "name") {
+          return { ...a, name: String(value ?? "") };
+        }
+        if (field === "amount") {
+          return { ...a, amount: parseMoney(value) };
+        }
+        if (field === "variation_price"
+            || field === "variation_duration_hours"
+            || field === "variation_deposit_amount") {
+          // Empty string clears the override (inherits from parent).
+          if (value === "" || value == null) {
+            return { ...a, [field]: null } as ServiceAddOn;
+          }
+          const num = field === "variation_price" || field === "variation_deposit_amount"
+            ? parseMoney(value)
+            : Number(value);
+          return { ...a, [field]: Number.isFinite(num) ? num : null } as ServiceAddOn;
+        }
+        if (field === "variation_deposit_required") {
+          const next: ServiceAddOn = { ...a, variation_deposit_required: !!value };
+          // Toggling deposit off also clears the amount so the row
+          // doesn't carry a stale deposit when inherited.
+          if (!value) next.variation_deposit_amount = null;
+          else if (a.variation_deposit_amount == null) next.variation_deposit_amount = 0;
+          return next;
+        }
+        return a;
+      }),
     } : prev);
   };
   const addAddOn = () => setEditing(prev => prev ? {
     ...prev,
-    add_ons: [...(prev.add_ons || []), { id: `addon_${uid()}`, name: "", amount: 0 }],
+    add_ons: [
+      ...(prev.add_ons || []),
+      {
+        id: `addon_${uid()}`,
+        name: "",
+        amount: 0,
+        variation_price: null,
+        variation_duration_hours: null,
+        variation_deposit_required: false,
+        variation_deposit_amount: null,
+      },
+    ],
   } : prev);
   const removeAddOn = (id: string) => setEditing(prev => prev ? {
     ...prev,
@@ -13829,20 +13676,92 @@ const ServicesScreen = ({
 
             <Card className="p-3.5">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-semibold" style={{ color: C.espresso }}>Add-ons</p>
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Variations</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    Each variation can have its own price, duration, and deposit. Leave a field blank to inherit from the service above.
+                  </p>
+                </div>
                 <Button variant="outline" icon={<Plus size={14} />} onClick={addAddOn}>Add</Button>
               </div>
               {(editing.add_ons || []).length === 0 ? (
                 <p className="text-[11px]" style={{ color: C.muted }}>
-                  Optional. Edges, washing, beads — anything that bumps the price.
+                  Optional. Examples: "Standard install", "Human curly hair included", "Synthetic curly hair included".
                 </p>
               ) : (
-                <div className="space-y-2">
-                  {(editing.add_ons || []).map(a => (
-                    <div key={a.id} className="flex items-center gap-2">
-                      <div className="flex-1"><Input value={a.name} onChange={e => updateAddOn(a.id, "name", e.target.value)} placeholder="Add-on name" /></div>
-                      <div className="w-24"><MoneyInput value={a.amount} onChange={(v) => updateAddOn(a.id, "amount", v)} /></div>
-                      <button type="button" onClick={() => removeAddOn(a.id)} className="p-2 rounded-lg" style={{ color: C.danger }}><Trash2 size={18} /></button>
+                <div className="space-y-3">
+                  {(editing.add_ons || []).map((a, idx) => (
+                    <div
+                      key={a.id}
+                      className="rounded-xl p-3"
+                      style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="flex-1">
+                          <Input
+                            value={a.name}
+                            onChange={e => updateAddOn(a.id, "name", e.target.value)}
+                            placeholder={`Variation ${idx + 1} name`}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeAddOn(a.id)}
+                          className="p-2 rounded-lg"
+                          style={{ color: C.danger }}
+                          aria-label="Remove variation"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Field label="Price" hint="Blank = inherit">
+                          <MoneyInput
+                            value={a.variation_price ?? ""}
+                            onChange={(v) => updateAddOn(a.id, "variation_price", v)}
+                          />
+                        </Field>
+                        <Field label="Duration (hrs)" hint="Blank = inherit">
+                          <Input
+                            type="number"
+                            inputMode="decimal"
+                            step="0.25"
+                            min={0}
+                            value={a.variation_duration_hours ?? ""}
+                            onChange={e => updateAddOn(a.id, "variation_duration_hours", e.target.value)}
+                            placeholder="e.g. 10"
+                          />
+                        </Field>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between">
+                        <div>
+                          <p className="text-[12px] font-semibold" style={{ color: C.espresso }}>Deposit required</p>
+                          <p className="text-[10px]" style={{ color: C.muted }}>
+                            Overrides the service-level deposit for this variation.
+                          </p>
+                        </div>
+                        <Toggle
+                          checked={!!a.variation_deposit_required}
+                          onChange={(v) => updateAddOn(a.id, "variation_deposit_required", v)}
+                        />
+                      </div>
+                      {a.variation_deposit_required && (
+                        <Field label="Deposit amount">
+                          <MoneyInput
+                            value={a.variation_deposit_amount ?? ""}
+                            onChange={(v) => updateAddOn(a.id, "variation_deposit_amount", v)}
+                          />
+                        </Field>
+                      )}
+                      {/* Legacy: a free-form "amount" bump used by older
+                          add-on entries. Hidden unless populated — new
+                          variations should use variation_price instead. */}
+                      {Number(a.amount) > 0 && a.variation_price == null && (
+                        <p className="mt-2 text-[10px]" style={{ color: C.muted }}>
+                          Legacy add-on bump: +{fmtMoney(Number(a.amount) || 0, currency)}.
+                          Set a price above to convert this into a full variation.
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -15100,6 +15019,14 @@ const ApprovalQueueScreen = ({
       if (!client?.id) throw new Error("Couldn't resolve client");
 
       const apptId = req.appointment_id || `appt_${uid()}`;
+      // Variation snapshot — the submit RPC already rolled variation
+      // pricing into req.service_price / req.service_name / etc., so
+      // the headline price/style fields are correct out of the box.
+      // We additionally carry the raw variation snapshot onto the
+      // appointment so future analytics + UI can show which flavor
+      // was booked without having to re-read the live services row.
+      const totalPriceResolved = Number(req.service_price || 0) || 0;
+      const depositPaidResolved = req.deposit_paid ? (Number(req.deposit_amount || 0) || 0) : 0;
       const newAppt: any = {
         id: apptId,
         clientId: client.id,
@@ -15110,9 +15037,9 @@ const ApprovalQueueScreen = ({
         date: req.preferred_date || "",
         time: req.preferred_time || "",
         durationHours: Number(req.service_duration_hours || req.service_duration || 0) || null,
-        totalPrice: Number(req.service_price || 0) || 0,
-        depositPaid: Number(req.deposit_amount || 0) || 0,
-        balanceDue: Math.max(0, (Number(req.service_price || 0) || 0) - (Number(req.deposit_amount || 0) || 0)),
+        totalPrice: totalPriceResolved,
+        depositPaid: depositPaidResolved,
+        balanceDue: Math.max(0, totalPriceResolved - depositPaidResolved),
         status: "scheduled",
         kind: "appointment",
         serviceId: req.service_id || null,
@@ -15120,6 +15047,13 @@ const ApprovalQueueScreen = ({
         notes: req.notes || "",
         isAllDay: false,
         blocksAvailability: true,
+        // Variation snapshot (camelCase per the rest of the app
+        // entity shape). Null when no variation was picked.
+        variationId: req.selected_variation_id || null,
+        variationName: req.selected_variation_name || null,
+        variationPrice: req.selected_variation_price != null ? Number(req.selected_variation_price) : null,
+        variationDurationHours: req.selected_variation_duration_hours != null ? Number(req.selected_variation_duration_hours) : null,
+        variationDepositAmount: req.selected_variation_deposit_amount != null ? Number(req.selected_variation_deposit_amount) : null,
       };
       const saved = await store.upsertAppointment(newAppt);
       if (!saved) throw new Error("Couldn't create appointment");
