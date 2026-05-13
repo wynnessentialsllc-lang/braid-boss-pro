@@ -7639,6 +7639,11 @@ const ClientProfileSheet = ({
   // early-return so the second render (client flips from null to set)
   // doesn't change the hook count.
   const [tab, setTab] = useState<"upcoming" | "previous">("upcoming");
+  // Tap the "X cancellations on record" insight to drill into the
+  // actual cancelled rows for this client. Self-contained sub-sheet
+  // so it can't be reached from anywhere else; data already lives in
+  // `cancelledClientAppts` so this is pure presentation.
+  const [cancellationsOpen, setCancellationsOpen] = useState(false);
 
   if (!client) return null;
 
@@ -7717,6 +7722,7 @@ const ClientProfileSheet = ({
   );
 
   return (
+    <>
     <Sheet
       open={open}
       onClose={onClose}
@@ -7772,12 +7778,47 @@ const ClientProfileSheet = ({
             )}
             {insights.insights.length > 0 && (
               <ul className="mt-2 space-y-1" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                {insights.insights.map((line, i) => (
-                  <li key={i} className="text-[12px] flex items-start gap-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
-                    <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
-                    <span>{line}</span>
-                  </li>
-                ))}
+                {insights.insights.map((line, i) => {
+                  // The cancellations insight is drillable — tap to open
+                  // a sheet with each cancelled appointment for context
+                  // (refund status, reason, original price).
+                  const isCancellationLine =
+                    /cancellations on record$/.test(line) && cancelledClientAppts.length > 0;
+                  if (isCancellationLine) {
+                    return (
+                      <li key={i} className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                        <button
+                          type="button"
+                          onClick={() => setCancellationsOpen(true)}
+                          className="w-full flex items-center gap-2 text-left active:scale-[0.99] transition rounded-md"
+                          style={{
+                            background: "transparent",
+                            border: 0,
+                            padding: 0,
+                            color: C.coffee,
+                            font: "inherit",
+                            cursor: "pointer",
+                            appearance: "none",
+                            WebkitAppearance: "none",
+                          }}
+                          aria-label={`View ${line}`}
+                        >
+                          <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
+                          <span className="flex-1" style={{ textDecoration: "underline", textDecorationColor: C.hairline, textUnderlineOffset: 3 }}>
+                            {line}
+                          </span>
+                          <ChevronRight size={12} style={{ color: C.muted, flexShrink: 0 }} />
+                        </button>
+                      </li>
+                    );
+                  }
+                  return (
+                    <li key={i} className="text-[12px] flex items-start gap-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                      <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
+                      <span>{line}</span>
+                    </li>
+                  );
+                })}
               </ul>
             )}
             {(insights.isVip || insights.isRepeat) && (
@@ -8085,6 +8126,159 @@ const ClientProfileSheet = ({
         <div className="grid grid-cols-2 gap-3 pt-2">
           <Button variant="outline" onClick={onClose}>Close</Button>
           <Button variant="primary" icon={<Edit3 size={16} />} onClick={onEdit}>Edit profile</Button>
+        </div>
+      </div>
+    </Sheet>
+    <CancellationHistorySheet
+      open={cancellationsOpen}
+      onClose={() => setCancellationsOpen(false)}
+      clientName={client?.name || "Client"}
+      appts={cancelledClientAppts}
+      currency={currency}
+    />
+    </>
+  );
+};
+
+// Drill-in view for the "X cancellations on record" insight. Pure
+// presentation over rows already in `store.appointments` (status =
+// 'cancelled'); does not touch refund/Stripe logic — it just renders
+// whatever cancellation context was persisted at cancel time
+// (cancelledAt, cancellationReason, refundAmount).
+const CancellationHistorySheet = ({
+  open, onClose, clientName, appts, currency,
+}: {
+  open: boolean;
+  onClose: () => void;
+  clientName: string;
+  appts: any[];
+  currency: string;
+}) => {
+  const sorted = useMemo(
+    () => [...appts].sort((a, b) => {
+      // Most recent cancellation first; fall back to appt date.
+      const ax = String(a?.cancelledAt || a?.date || "");
+      const bx = String(b?.cancelledAt || b?.date || "");
+      return bx.localeCompare(ax);
+    }),
+    [appts],
+  );
+
+  const fmtCancelStamp = (iso?: string | null): string | null => {
+    if (!iso) return null;
+    try {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return null;
+      return d.toLocaleString(undefined, {
+        month: "short", day: "numeric", year: "numeric",
+        hour: "numeric", minute: "2-digit",
+      });
+    } catch { return null; }
+  };
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Cancellation history">
+      <div className="space-y-4 pb-2">
+        <p className="text-[12px]" style={{ color: C.muted }}>
+          Cancelled appointments for {clientName}. Kept on the client's record so the booking history stays intact.
+        </p>
+
+        {sorted.length === 0 ? (
+          <Card className="p-6 text-center">
+            <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+              No cancellations on record
+            </p>
+            <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+              Nothing here means this client has never cancelled — a good sign.
+            </p>
+          </Card>
+        ) : (
+          <div className="space-y-2.5">
+            {sorted.map(a => {
+              const total = Number(a?.totalPrice) || 0;
+              const dep = Number(a?.depositPaid) || 0;
+              const refunded = Number(a?.refundAmount) || 0;
+              const cancelStamp = fmtCancelStamp(a?.cancelledAt);
+              // Deposit/refund status — derive only from what's on the
+              // row. We never recompute refunds here.
+              let depositLine: { label: string; tone: "muted" | "warning" | "success" } | null = null;
+              if (refunded > 0) {
+                depositLine = {
+                  label: `Refunded ${fmtMoney(refunded, currency)}`,
+                  tone: "success",
+                };
+              } else if (dep > 0) {
+                depositLine = {
+                  label: `Deposit ${fmtMoney(dep, currency)} · not refunded`,
+                  tone: "warning",
+                };
+              } else if (total > 0) {
+                depositLine = { label: "No deposit collected", tone: "muted" };
+              }
+              return (
+                <Card key={a?.id || Math.random()} className="p-3.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <Pill tone="neutral">Cancelled</Pill>
+                      </div>
+                      <p className="text-[14px] font-semibold truncate" style={{ color: C.espresso }}>
+                        {a?.style || "Service"}
+                      </p>
+                      <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
+                        {a?.date ? fmtDate(a.date) : "—"}{a?.time ? ` · ${fmtTime(a.time)}` : ""}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p style={{ fontFamily: FONT_DISPLAY, fontSize: 16, fontWeight: 600, color: C.goldDeep }}>
+                        {fmtMoney(total, currency)}
+                      </p>
+                      <p className="text-[10px]" style={{ color: C.muted }}>Original price</p>
+                    </div>
+                  </div>
+
+                  {(depositLine || cancelStamp || a?.cancellationReason) && (
+                    <div className="mt-2.5 pt-2.5 space-y-1.5" style={{ borderTop: `1px solid ${C.hairline}` }}>
+                      {depositLine && (
+                        <p
+                          className="text-[12px]"
+                          style={{
+                            color:
+                              depositLine.tone === "success" ? C.success
+                              : depositLine.tone === "warning" ? C.warning
+                              : C.muted,
+                          }}
+                        >
+                          {depositLine.label}
+                        </p>
+                      )}
+                      {cancelStamp && (
+                        <p className="text-[11px]" style={{ color: C.muted }}>
+                          Cancelled {cancelStamp}
+                        </p>
+                      )}
+                      {a?.cancellationReason && (
+                        <p
+                          className="text-[12px] rounded-md px-2.5 py-1.5"
+                          style={{
+                            color: C.coffee,
+                            background: C.ivory,
+                            border: `1px solid ${C.hairline}`,
+                          }}
+                        >
+                          “{a.cancellationReason}”
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="pt-2">
+          <Button variant="outline" onClick={onClose}>Close</Button>
         </div>
       </div>
     </Sheet>
