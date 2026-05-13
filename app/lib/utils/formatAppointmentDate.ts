@@ -162,9 +162,13 @@ const buildUtcDate = (w: WallClock): Date =>
 
 const formatTimePart = (w: WallClock, locale: string): string => {
   if (w.hour === undefined || w.minute === undefined) return "";
+  // Conversational 12-hour time. Drops ":00" on the hour so a
+  // top-of-the-hour booking reads "9 AM" instead of "9:00 AM".
+  // Off-the-hour bookings keep their minutes ("9:30 AM").
+  const onTheHour = w.minute === 0;
   return new Intl.DateTimeFormat(locale, {
     hour: "numeric",
-    minute: "2-digit",
+    ...(onTheHour ? {} : { minute: "2-digit" }),
     hour12: true,
     timeZone: "UTC",
   }).format(buildUtcDate(w));
@@ -174,7 +178,7 @@ const formatTimePart = (w: WallClock, locale: string): string => {
  * Long-form appointment date.
  * @example
  *   formatAppointmentDate("2026-05-31", "09:00")
- *   // → "Sunday, May 31 at 9:00 AM"
+ *   // → "Sunday, May 31 at 9 AM"
  *
  *   formatAppointmentDate("2026-06-02")
  *   // → "Tuesday, June 2"
@@ -201,7 +205,7 @@ export const formatAppointmentDate = (
  * Compact appointment date (no weekday).
  * @example
  *   formatAppointmentDateShort("2026-05-31", "09:00")
- *   // → "May 31, 9:00 AM"
+ *   // → "May 31, 9 AM"
  */
 export const formatAppointmentDateShort = (
   date: DateLike,
@@ -223,7 +227,7 @@ export const formatAppointmentDateShort = (
 /**
  * 12-hour clock time only.
  * @example
- *   formatAppointmentTime("09:00")   // → "9:00 AM"
+ *   formatAppointmentTime("09:00")   // → "9 AM"
  *   formatAppointmentTime("14:30")   // → "2:30 PM"
  */
 export const formatAppointmentTime = (
