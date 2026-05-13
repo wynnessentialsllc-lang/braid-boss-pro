@@ -3136,38 +3136,6 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
     [appointments],
   );
 
-  // Smart-studio KPIs — derived from existing appointment + client
-  // data, no schema changes. "Top spending client" walks the book
-  // once; "Most booked" + "Returning %" reuse the existing
-  // calculateStylePerformance / calculateRetentionAnalytics helpers.
-  const todayISOForKpi = todayISO();
-  const styleStats = useMemo(
-    () => calculateStylePerformance(appointments),
-    [appointments],
-  );
-  const retention = useMemo(
-    () => calculateRetentionAnalytics(clients, appointments, todayISOForKpi),
-    [clients, appointments, todayISOForKpi],
-  );
-  const topClient = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const a of (appointments || []) as any[]) {
-      if (!a?.clientId) continue;
-      if (a.status === "cancelled") continue;
-      if (!(a.status === "completed" || a.paymentStatus === "paid")) continue;
-      totals.set(a.clientId, (totals.get(a.clientId) || 0) + calculateCollectedAmount(a));
-    }
-    let bestId: string | null = null;
-    let bestSpend = 0;
-    for (const [id, spend] of totals) {
-      if (spend > bestSpend) { bestId = id; bestSpend = spend; }
-    }
-    if (!bestId) return null;
-    const client = (clients || []).find((c: any) => c?.id === bestId) || null;
-    return { client, spend: bestSpend };
-  }, [appointments, clients]);
-  const mostBooked = styleStats[0] || null;
-
   const stats = useMemo(() => {
     const now = new Date();
     const wk = new Date(now); wk.setDate(now.getDate() - 7);
@@ -3279,35 +3247,6 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
           <KpiCard label="Month expected" value={fmtMoney(revenueStats.monthExpected, business.currency)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "gold" : "neutral"} onClick={() => openKpi("monthExpected")} />
           <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} onClick={() => openKpi("monthProfit")} />
           <KpiCard label="Year made" value={fmtMoney(revenueStats.yearMade, business.currency)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => setActive("money")} />
-
-          {/* Smart-studio KPIs */}
-          {mostBooked && (
-            <KpiCard
-              label="Most booked"
-              value={mostBooked.style.length > 14 ? `${mostBooked.style.slice(0, 14)}…` : mostBooked.style}
-              icon={<Sparkles size={16} />}
-              tone="gold"
-              onClick={() => setActive("schedule")}
-            />
-          )}
-          {topClient?.client && (
-            <KpiCard
-              label="Top client"
-              value={(topClient.client.name || "—").split(" ")[0]}
-              icon={<Users size={16} />}
-              tone="gold"
-              onClick={() => setActive("clients")}
-            />
-          )}
-          {retention.repeatBookingRatePct > 0 && (
-            <KpiCard
-              label="Returning"
-              value={`${retention.repeatBookingRatePct}%`}
-              icon={<TrendingUp size={16} />}
-              tone="success"
-              onClick={() => setActive("clients")}
-            />
-          )}
         </div>
 
         <KpiDetailSheet
