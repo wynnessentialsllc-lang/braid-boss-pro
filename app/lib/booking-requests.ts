@@ -118,6 +118,7 @@ export const useBookingApprovalQueue = (userId: string | null): {
   deny: (id: string, reason?: string) => Promise<BookingRequestRecord | null>;
   markPaid: (id: string, sessionId?: string) => Promise<BookingRequestRecord | null>;
   confirmApproval: (id: string, appointmentId: string) => Promise<BookingRequestRecord | null>;
+  generateAndSendContracts: (id: string, appointmentId?: string | null) => Promise<number>;
 } => {
   const [requests, setRequests] = useState<BookingRequestRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(!!userId);
@@ -198,6 +199,13 @@ export const useBookingApprovalQueue = (userId: string | null): {
       }
     }
 
+    try {
+      await generateAndSendContracts(row?.id || id, row?.appointment_id || null);
+    } catch {
+      // Approval already succeeded. Contract generation/sending can be
+      // retried from the contracts mini-card if the network flakes.
+    }
+
     await refresh();
     return row;
   };
@@ -246,9 +254,30 @@ export const useBookingApprovalQueue = (userId: string | null): {
       appointment_id_in: appointmentId,
     });
     if (err) { setError(err.message); return null; }
+    try {
+      await generateAndSendContracts(id, appointmentId);
+    } catch {
+      // Keep appointment approval non-blocking; status UI can retry.
+    }
     await refresh();
     return (data as BookingRequestRecord) || null;
   };
 
-  return { requests, loading, error, refresh, approve, decline, deny, markPaid, confirmApproval };
+  const generateAndSendContracts: ReturnType<typeof useBookingApprovalQueue>["generateAndSendContracts"] = async (id, appointmentId = null) => {
+    if (!userId) return 0;
+    const supabase = getSupabase();
+    const { error: genErr } = await supabase.rpc("generate_booking_contracts", {
+      booking_request_id_in: id,
+      appointment_id_in: appointmentId || null,
+    });
+    if (genErr) { setError(genErr.message); return 0; }
+    const { data, error: sendErr } = await supabase.rpc("enqueue_contract_signing_for_request", {
+      request_id_in: id,
+      app_base_url_in: typeof window !== "undefined" ? window.location.origin : null,
+    });
+    if (sendErr) { setError(sendErr.message); return 0; }
+    return Number((data as any)?.enqueued || 0);
+  };
+
+  return { requests, loading, error, refresh, approve, decline, deny, markPaid, confirmApproval, generateAndSendContracts };
 };

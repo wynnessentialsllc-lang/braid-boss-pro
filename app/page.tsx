@@ -14622,15 +14622,44 @@ const ToggleRow = ({ label, hint, checked, onChange }: {
 const ApprovalContractsBlock = ({
   userId, req,
 }: { userId: string | null; req: BookingRequestRecord }) => {
-  const { contracts, loading, generate } = useContractsForRequest(userId, req.id);
+  const { contracts, loading, generate, send } = useContractsForRequest(userId, req.id);
   const [busy, setBusy] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  if (loading && contracts.length === 0) return null;
-  if (contracts.length === 0) return null;
+  if (loading && contracts.length === 0) {
+    return (
+      <div className="px-3 py-2 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+        <p className="text-[12px] font-semibold" style={{ color: C.muted }}>Checking contract status…</p>
+      </div>
+    );
+  }
+
+  if (contracts.length === 0) {
+    return (
+      <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+        <p className="text-[12px] font-semibold" style={{ color: C.muted }}>No contract required</p>
+        {(req.approval_status === "approved" || req.approval_status === "confirmed") && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              await generate(req.appointment_id || null);
+              await send();
+              setBusy(false);
+            }}
+            className="text-[11px] underline"
+            style={{ color: C.muted }}
+          >
+            {busy ? "…" : "Check again"}
+          </button>
+        )}
+      </div>
+    );
+  }
 
   const signed = contracts.filter(c => c.status === "signed").length;
-  const pending = contracts.filter(c => c.status === "pending" || c.status === "viewed").length;
+  const pending = contracts.filter(c => c.status === "sent" || c.status === "pending_signature" || c.status === "pending" || c.status === "viewed").length;
   const declined = contracts.filter(c => c.status === "declined").length;
   const allSigned = signed === contracts.length;
 
@@ -14662,11 +14691,16 @@ const ApprovalContractsBlock = ({
         <button
           type="button"
           disabled={busy}
-          onClick={async () => { setBusy(true); await generate(); setBusy(false); }}
+          onClick={async () => {
+            setBusy(true);
+            await generate(req.appointment_id || null);
+            await send();
+            setBusy(false);
+          }}
           className="text-[11px] underline"
           style={{ color: C.muted }}
         >
-          {busy ? "…" : "Refresh"}
+          {busy ? "…" : "Resend"}
         </button>
       </div>
       <div className="space-y-1.5">

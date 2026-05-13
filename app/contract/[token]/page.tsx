@@ -1,6 +1,7 @@
 "use client";
 
-// /contract/[token] — public agreement signing page.
+// /contract/[token] — legacy alias for public agreement signing page.
+// Canonical route: /sign/contract/[token].
 //
 // Anonymous, mobile-first. Reads the contract via the security
 // definer RPC `get_public_contract_by_token` (which auto-marks the
@@ -26,10 +27,11 @@ type PublicContract = {
   id: string;
   title: string;
   body_snapshot: string;
-  status: "pending" | "viewed" | "signed" | "declined" | "expired" | "voided";
+  status: "sent" | "pending_signature" | "pending" | "viewed" | "signed" | "declined" | "expired" | "voided";
   client_name: string | null;
   client_email: string | null;
   signed_at: string | null;
+  signed_date: string | null;
   viewed_at: string | null;
   expires_at: string | null;
   require_signature: boolean;
@@ -62,6 +64,7 @@ export default function ContractSigningPage() {
   const [signedName, setSignedName] = useState("");
   const [signature, setSignature] = useState("");
   const [initials, setInitials] = useState("");
+  const [signedDate, setSignedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [agreeChecked, setAgreeChecked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -107,6 +110,7 @@ export default function ContractSigningPage() {
       signed_name_in: signedName.trim(),
       signature_text_in: signature.trim(),
       initials_in: initials.trim() || null,
+      signed_date_in: signedDate || new Date().toISOString().slice(0, 10),
       ip_address_in: null,
       user_agent_in: typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 256) : null,
     });
@@ -326,6 +330,13 @@ export default function ContractSigningPage() {
                   />
                 </Field>
               )}
+              <Field label="Date signed">
+                <Input
+                  type="date"
+                  value={signedDate}
+                  onChange={e => setSignedDate(e.target.value)}
+                />
+              </Field>
             </div>
 
             {showDecline && (

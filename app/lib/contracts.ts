@@ -39,7 +39,16 @@ export type ContractTemplateInput = Pick<
   | "attach_to_all_bookings"
 >;
 
-export type ContractStatus = "pending" | "viewed" | "signed" | "declined" | "expired" | "void";
+export type ContractStatus =
+  | "sent"
+  | "pending_signature"
+  | "pending"
+  | "viewed"
+  | "signed"
+  | "declined"
+  | "expired"
+  | "void"
+  | "voided";
 
 export type BookingContract = {
   id: string;
@@ -48,7 +57,11 @@ export type BookingContract = {
   booking_request_id: string;
   contract_template_id: string | null;
   title: string;
+  template_type: ContractTemplateType | null;
   body_snapshot: string;
+  service_name: string | null;
+  require_signature: boolean;
+  require_initials: boolean;
   client_name: string | null;
   client_email: string | null;
   client_phone: string | null;
@@ -56,6 +69,10 @@ export type BookingContract = {
   status: ContractStatus;
   viewed_at: string | null;
   signed_at: string | null;
+  signed_date: string | null;
+  signed_name: string | null;
+  signature_text: string | null;
+  initials: string | null;
   declined_at: string | null;
   expires_at: string | null;
   created_at: string;
@@ -102,21 +119,27 @@ export const TEMPLATE_TYPE_LABEL: Record<ContractTemplateType, string> = {
 };
 
 export const STATUS_LABEL: Record<ContractStatus, string> = {
+  sent: "Sent",
+  pending_signature: "Pending signature",
   pending: "Pending",
   viewed: "Viewed",
   signed: "Signed",
   declined: "Declined",
   expired: "Expired",
   void: "Void",
+  voided: "Void",
 };
 
 export const STATUS_TONE: Record<ContractStatus, "gold" | "success" | "danger" | "neutral" | "warning"> = {
+  sent: "gold",
+  pending_signature: "warning",
   pending: "gold",
   viewed: "warning",
   signed: "success",
   declined: "danger",
   expired: "neutral",
   void: "neutral",
+  voided: "neutral",
 };
 
 const STARTER_TEMPLATES: ContractTemplateInput[] = [
@@ -276,6 +299,11 @@ export const useContractTemplates = (
 
 export const contractSigningUrl = (token: string): string => {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return `${origin}/sign/contract/${token}`;
+};
+
+export const legacyContractSigningUrl = (token: string): string => {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
   return `${origin}/contract/${token}`;
 };
 
@@ -287,7 +315,8 @@ export const useContractsForRequest = (
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  generate: () => Promise<number>;
+  generate: (appointmentId?: string | null) => Promise<number>;
+  send: (appBaseUrl?: string | null) => Promise<number>;
 } => {
   const [contracts, setContracts] = useState<BookingContract[]>([]);
   const [loading, setLoading] = useState<boolean>(!!userId && !!bookingRequestId);
@@ -323,11 +352,12 @@ export const useContractsForRequest = (
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, bookingRequestId]);
 
-  const generate = async () => {
+  const generate = async (appointmentId?: string | null) => {
     if (!userId || !bookingRequestId) return 0;
     const supabase = getSupabase();
     const { data, error: err } = await supabase.rpc("generate_booking_contracts", {
       booking_request_id_in: bookingRequestId,
+      appointment_id_in: appointmentId || null,
     });
     if (err) {
       setError(err.message);
@@ -337,5 +367,20 @@ export const useContractsForRequest = (
     return Number(data) || 0;
   };
 
-  return { contracts, loading, error, refresh, generate };
+  const send = async (appBaseUrl?: string | null) => {
+    if (!userId || !bookingRequestId) return 0;
+    const supabase = getSupabase();
+    const { data, error: err } = await supabase.rpc("enqueue_contract_signing_for_request", {
+      request_id_in: bookingRequestId,
+      app_base_url_in: appBaseUrl || (typeof window !== "undefined" ? window.location.origin : null),
+    });
+    if (err) {
+      setError(err.message);
+      return 0;
+    }
+    await refresh();
+    return Number((data as any)?.enqueued || 0);
+  };
+
+  return { contracts, loading, error, refresh, generate, send };
 };

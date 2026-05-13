@@ -417,29 +417,14 @@ export default function PublicBookingPage() {
       }
       if (!submittedOk) throw new Error("Couldn't send your request.");
 
-      // Phase B12 — generate booking contracts attached to this
-      // service (or any template flagged attach_to_all_bookings).
-      // Idempotent server-side; safe if no templates apply or if the
-      // legacy edge-function path created the request (newRequestId
-      // will be null in that case and we just skip).
       if (newRequestId) {
-        try {
-          await supabase.rpc("generate_booking_contracts", {
-            booking_request_id_in: newRequestId,
-          });
-        } catch {
-          // Don't block submission if contract generation hiccups —
-          // the stylist can still resend signing links from Approvals.
-        }
-
         // Phase B12.1a — enqueue notifications via the universal
         // queue. The public booking page runs as anon, which can't
         // call queue_notification directly (security: would let
         // anyone spam emails). Instead we call the SECURITY DEFINER
-        // wrapper enqueue_public_booking_emails, scoped to the
-        // request id we just submitted; it looks up the row server-
-        // side and enqueues the right rows. Failures are
-        // best-effort and never block the submit.
+        // wrapper enqueue_public_booking_emails for the booking
+        // confirmation only. Contract generation/signing emails are
+        // intentionally delayed until owner approval.
         try {
           const base = typeof window !== "undefined" ? window.location.origin : null;
           await supabase.rpc("enqueue_public_booking_emails", {
