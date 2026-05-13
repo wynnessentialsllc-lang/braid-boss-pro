@@ -55,6 +55,8 @@ type LinkConfig = {
   phone?: string | null;
   policies?: string | null;
   accent_color?: string | null;
+  // Gallery — added by 20260608 migration. Array of { url, path, sort }.
+  gallery_photos?: Array<{ url: string; path?: string; sort?: number }> | null;
 };
 
 const SUPABASE_URL =
@@ -175,7 +177,7 @@ export default function PublicBookingPage() {
         const supabase = getSupabase();
         const { data, error } = await supabase
           .from("booking_links")
-          .select("slug, user_id, business_name, intro, services, active, logo_url, location_text, phone, policies, accent_color")
+          .select("slug, user_id, business_name, intro, services, active, logo_url, location_text, phone, policies, accent_color, gallery_photos")
           .eq("slug", slug)
           .maybeSingle();
         if (cancelled) return;
@@ -611,6 +613,67 @@ export default function PublicBookingPage() {
               {link.policies}
             </p>
           </details>
+        )}
+
+        {/* Stylist work gallery — horizontal scroll-snap carousel
+            rendered above the form. Cap of 8 photos is enforced both
+            in the upload helper and at the DB level via a CHECK
+            constraint on gallery_photos. Lazy-load every img so this
+            block never blocks first paint of the form. */}
+        {Array.isArray(link?.gallery_photos) && link!.gallery_photos!.length > 0 && (
+          <div style={{ marginTop: 18 }}>
+            <p style={{
+              fontSize: 11, fontWeight: 700, letterSpacing: "0.14em",
+              textTransform: "uppercase", color: C.coffee, marginBottom: 8,
+              textAlign: "center",
+            }}>
+              Recent work
+            </p>
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                overflowX: "auto",
+                overflowY: "hidden",
+                scrollSnapType: "x mandatory",
+                WebkitOverflowScrolling: "touch",
+                // Negative margin escapes the page's horizontal padding
+                // so the carousel can bleed to the screen edges; the
+                // inner padding restores breathing room around photos.
+                marginLeft: -20,
+                marginRight: -20,
+                paddingLeft: 20,
+                paddingRight: 20,
+                paddingBottom: 4,
+                scrollbarWidth: "none",
+              }}
+            >
+              {link!.gallery_photos!
+                .slice()
+                .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+                .slice(0, 8)
+                .map((p, i) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={p.url || i}
+                    src={p.url}
+                    alt={`${link?.business_name || "Studio"} — photo ${i + 1}`}
+                    loading="lazy"
+                    decoding="async"
+                    style={{
+                      flex: "0 0 auto",
+                      width: 200,
+                      height: 240,
+                      objectFit: "cover",
+                      borderRadius: 16,
+                      scrollSnapAlign: "center",
+                      border: `1px solid ${C.hairline}`,
+                      background: C.paper,
+                    }}
+                  />
+                ))}
+            </div>
+          </div>
         )}
 
         {linkLoading && (

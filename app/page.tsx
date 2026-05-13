@@ -207,6 +207,7 @@ import { buildCsv } from "./lib/csv";
 import ImportStudio, { IMPORT_TAGLINE } from "./components/ImportStudio";
 import { deriveClientInsights, formatLastBookedHint } from "./lib/client-insights";
 import { uploadBookingLogo, removeBookingLogo } from "./lib/booking-logo-storage";
+import { uploadGalleryPhoto, removeGalleryPhoto, GALLERY_LIMITS, type GalleryPhoto } from "./lib/booking-gallery-storage";
 import { openExternal } from "./lib/open-external";
 import {
   computeRebookingOpportunities,
@@ -2895,10 +2896,17 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   const [phone, setPhone] = useState<string>(link?.phone || "");
   const [policies, setPolicies] = useState<string>(link?.policies || "");
   const [accent, setAccent] = useState<string>(link?.accent_color || "#C9A961");
+  const [gallery, setGallery] = useState<GalleryPhoto[]>(
+    Array.isArray(link?.gallery_photos)
+      ? (link!.gallery_photos as any[]).map((p, i) => ({ url: p.url, path: p.path || "", sort: typeof p.sort === "number" ? p.sort : i }))
+      : []
+  );
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [galleryUploading, setGalleryUploading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
 
   // Re-hydrate when the link prop changes (e.g. after a save).
   useEffect(() => {
@@ -2910,6 +2918,11 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
     setPhone(link?.phone || "");
     setPolicies(link?.policies || "");
     setAccent(link?.accent_color || "#C9A961");
+    setGallery(
+      Array.isArray(link?.gallery_photos)
+        ? (link!.gallery_photos as any[]).map((p, i) => ({ url: p.url, path: p.path || "", sort: typeof p.sort === "number" ? p.sort : i }))
+        : []
+    );
     setErr(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot when the sheet opens
   }, [open, link?.slug]);
@@ -2928,6 +2941,15 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         phone: phone.trim() || null,
         policies: policies.trim() || null,
         accent_color: /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(accent) ? accent : null,
+        // Re-number sort on save so the persisted order matches what
+        // the stylist sees in the editor. CHECK constraint in the DB
+        // caps at 8 — we already enforce this in the UI but slice to
+        // be safe.
+        gallery_photos: gallery.slice(0, GALLERY_LIMITS.maxPhotos).map((p, i) => ({
+          url: p.url,
+          path: p.path,
+          sort: i,
+        })),
       };
       const { error } = await supabase
         .from("booking_links")
@@ -3033,6 +3055,104 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
             JPG / PNG / SVG up to 8 MB. We resize to 512px so the file stays small.
           </p>
         </div>
+
+        {/* Gallery — up to 8 photos. Each is compressed to 1024px on
+            the long edge before upload, so a stylist with the full
+            set uses ≈ 1.5 MB of storage. CHECK constraint in the DB
+            caps the array at 8 even if a buggy client tries more. */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[11px] font-bold uppercase" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+              Photo gallery ({gallery.length}/{GALLERY_LIMITS.maxPhotos})
+            </p>
+            {gallery.length < GALLERY_LIMITS.maxPhotos && (
+              <button
+                type="button"
+                onClick={() => galleryInputRef.current?.click()}
+                disabled={galleryUploading}
+                className="text-[11px] font-semibold"
+                style={{ color: C.goldDeep, background: "transparent", border: 0, padding: "4px 8px" }}
+              >
+                {galleryUploading ? "Uploading…" : "+ Add photo"}
+              </button>
+            )}
+          </div>
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (!f) return;
+              if (!userId) { setErr("Sign in required."); return; }
+              if (gallery.length >= GALLERY_LIMITS.maxPhotos) {
+                setErr(`Max ${GALLERY_LIMITS.maxPhotos} photos.`);
+                return;
+              }
+              setErr(null);
+              setGalleryUploading(true);
+              try {
+                const up = await uploadGalleryPhoto(userId, f);
+                setGallery((prev) => [...prev, { url: up.url, path: up.path, sort: prev.length }]);
+              } catch (ex: any) {
+                setErr(ex?.message || "Upload failed.");
+              } finally {
+                setGalleryUploading(false);
+              }
+            }}
+          />
+          {gallery.length === 0 ? (
+            <div
+              style={{
+                padding: "20px 12px", textAlign: "center",
+                background: C.cream, border: `1px dashed ${C.caramel}`,
+                borderRadius: 14, color: C.muted, fontSize: 12,
+              }}
+            >
+              Add up to {GALLERY_LIMITS.maxPhotos} photos to showcase your work.
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+              {gallery.map((p, i) => (
+                <div key={p.path || p.url || i} style={{ position: "relative", aspectRatio: "1 / 1", borderRadius: 10, overflow: "hidden", background: C.cream, border: `1px solid ${C.hairline}` }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={p.url}
+                    alt={`Gallery photo ${i + 1}`}
+                    loading="lazy"
+                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                  />
+                  <button
+                    type="button"
+                    aria-label="Remove photo"
+                    onClick={async () => {
+                      // Optimistically remove from UI; the actual
+                      // bucket delete is best-effort so a network
+                      // hiccup doesn't strand the photo here.
+                      setGallery((prev) => prev.filter((_, idx) => idx !== i));
+                      if (p.path) {
+                        try { await removeGalleryPhoto(p.path); } catch { /* silent */ }
+                      }
+                    }}
+                    style={{
+                      position: "absolute", top: 4, right: 4,
+                      width: 22, height: 22, borderRadius: 99,
+                      background: "rgba(42,24,16,0.78)", color: C.cream,
+                      border: "none", fontSize: 13, fontWeight: 700,
+                      lineHeight: 1, padding: 0, cursor: "pointer",
+                    }}
+                  >×</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] mt-2" style={{ color: C.muted }}>
+            Up to {GALLERY_LIMITS.maxInputMb} MB each — we resize to {GALLERY_LIMITS.maxDimension}px so loads stay fast.
+          </p>
+        </div>
+
         <Field label="Location" hint="Shown as a small chip under your studio name.">
           <Input value={locationText} onChange={(e) => setLocationText(e.target.value)} placeholder="Dallas, TX" />
         </Field>
@@ -12450,6 +12570,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
     phone?: string | null;
     policies?: string | null;
     accent_color?: string | null;
+    gallery_photos?: Array<{ url: string; path?: string; sort?: number }> | null;
   } | null>(null);
   const [bookingBusy, setBookingBusy] = useState(false);
   const [bookingCopied, setBookingCopied] = useState(false);
@@ -12473,7 +12594,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
       const [{ data: link }, { count }] = await Promise.all([
         supabase
           .from("booking_links")
-          .select("slug, active, intro, business_name, logo_url, location_text, phone, policies, accent_color")
+          .select("slug, active, intro, business_name, logo_url, location_text, phone, policies, accent_color, gallery_photos")
           .eq("user_id", userId)
           .order("created_at", { ascending: false })
           .limit(1)
