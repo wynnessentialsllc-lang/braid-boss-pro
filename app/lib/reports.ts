@@ -15,6 +15,7 @@ export type AppointmentLike = {
   status?: string;
   kind?: string;            // "appointment" | "personal" | "blocked"
   paymentStatus?: string | null;
+  paymentDate?: string | null;   // YYYY-MM-DD — when payment was recorded
   totalPrice?: number | string;
   depositPaid?: number | string;
   discountAmount?: number | string;
@@ -147,8 +148,19 @@ export const computeDashboardRevenue = (
     if (d === today) todayRevenue += t;
     if (d >= weekStart && d <= today) {
       weekRevenue += t;
-      weekDeposits += dep;
       weekAppointmentCount += 1;
+    }
+    // Deposits = money collected this week, not deposits attached to
+    // appointments scheduled this week. Use paymentDate when set (the
+    // canonical "money in the door" date); fall back to appointment
+    // date for legacy rows that pre-date the column. Future-dated
+    // appointments with a paymentDate in this week still count —
+    // that's the whole point of a deposit.
+    if (dep > 0) {
+      const collectedOn = (a.paymentDate || d) as string;
+      if (collectedOn && collectedOn >= weekStart && collectedOn <= today) {
+        weekDeposits += dep;
+      }
     }
     if (d >= thirtyDaysAgo && d <= today) {
       last30Total += t;
@@ -433,25 +445,32 @@ export const weekDepositBuckets = (
   reference: string = todayISO(),
 ): WeekDepositBuckets => {
   const ws = startOfWeekISO(reference);
+  const we = addDaysISO(ws, 6);
   const collected: AppointmentLike[] = [];
   const due: AppointmentLike[] = [];
   const missing: AppointmentLike[] = [];
   for (const a of (appointments || [])) {
     if (!isBillable(a)) continue;
-    if (!a.date || a.date < ws || a.date > reference) {
-      // Allow due/missing buckets to span the *week*, not just the
-      // past — extend forward to end of week.
-      const we = addDaysISO(ws, 6);
-      if (!a.date || a.date < ws || a.date > we) continue;
-    }
     const dep = num(a.depositPaid);
+
+    // Collected — deposit was actually paid this week. Bucket by
+    // paymentDate (the "money came in" date) when set; fall back to
+    // appointment date for legacy rows. A deposit paid this week for
+    // an appointment three weeks from now still counts as collected.
     if (dep > 0) {
-      collected.push(a);
-    } else if (a.date && a.date < reference) {
-      missing.push(a);
-    } else {
-      due.push(a);
+      const collectedOn = (a.paymentDate || a.date || "") as string;
+      if (collectedOn && collectedOn >= ws && collectedOn <= reference) {
+        collected.push(a);
+        continue;
+      }
     }
+
+    // Due / Missing — forward-looking buckets keyed to appointments
+    // scheduled within this week's range (ws..we).
+    if (!a.date || a.date < ws || a.date > we) continue;
+    if (dep > 0) continue; // already collected (paid earlier than this week)
+    if (a.date < reference) missing.push(a);
+    else                    due.push(a);
   }
   const sumDeposits = (xs: AppointmentLike[]) => xs.reduce((s, a) => s + num(a.depositPaid), 0);
   return {
