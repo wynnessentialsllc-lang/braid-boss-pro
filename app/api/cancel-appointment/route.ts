@@ -170,7 +170,7 @@ export async function POST(req: Request) {
 
   // Flip the row to cancelled + record refund metadata. Even if
   // refunds partially failed, the appointment is still cancelled.
-  const { error: rpcErr } = await admin.rpc("cancel_appointment", {
+  const { error: rpcErr } = await userClient.rpc("cancel_appointment", {
     appt_id_in: apptId,
     reason_in: reason,
     refund_amount_in: refundedAmount > 0 ? refundedAmount : null,

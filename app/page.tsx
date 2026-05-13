@@ -6717,11 +6717,11 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         </div>
         {form.id && (
           <Button variant="danger" icon={<Trash2 size={16} />} onClick={handleDelete} fullWidth>
-            {isPersonal ? "Delete this event" : isBlocked ? "Remove blocked time" : "Delete this appointment"}
+            {isPersonal ? "Delete this event" : isBlocked ? "Remove blocked time" : "Cancel appointment"}
           </Button>
         )}
         {form.seriesId && (
-          <Button variant="danger" onClick={handleDeleteSeries} fullWidth>Delete entire series</Button>
+          <Button variant="danger" onClick={handleDeleteSeries} fullWidth>Cancel entire series</Button>
         )}
       </div>
       <QuickRescheduleSheet
