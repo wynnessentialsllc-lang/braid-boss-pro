@@ -150,15 +150,17 @@ export const computeDashboardRevenue = (
       weekRevenue += t;
       weekAppointmentCount += 1;
     }
-    // Deposits = money collected this week, not deposits attached to
-    // appointments scheduled this week. Use paymentDate when set (the
-    // canonical "money in the door" date); fall back to appointment
-    // date for legacy rows that pre-date the column. Future-dated
-    // appointments with a paymentDate in this week still count —
-    // that's the whole point of a deposit.
-    if (dep > 0) {
-      const collectedOn = (a.paymentDate || d) as string;
-      if (collectedOn && collectedOn >= weekStart && collectedOn <= today) {
+    // Deposits = money collected at booking time (before the
+    // appointment happens). Definition:
+    //   1. paymentDate must be set, and
+    //   2. paymentDate < appointment date (paid in advance), and
+    //   3. paymentDate falls in this week (Sun..today).
+    // A "paid same-day" or after-service payment isn't a deposit —
+    // it's a balance / full payment, so we exclude it. This matches
+    // the stylist's mental model: "deposits = money collected
+    // upon booking."
+    if (dep > 0 && a.paymentDate && d && a.paymentDate < d) {
+      if (a.paymentDate >= weekStart && a.paymentDate <= today) {
         weekDeposits += dep;
       }
     }
@@ -453,13 +455,13 @@ export const weekDepositBuckets = (
     if (!isBillable(a)) continue;
     const dep = num(a.depositPaid);
 
-    // Collected — deposit was actually paid this week. Bucket by
-    // paymentDate (the "money came in" date) when set; fall back to
-    // appointment date for legacy rows. A deposit paid this week for
-    // an appointment three weeks from now still counts as collected.
-    if (dep > 0) {
-      const collectedOn = (a.paymentDate || a.date || "") as string;
-      if (collectedOn && collectedOn >= ws && collectedOn <= reference) {
+    // Collected — deposit paid BEFORE the appointment date AND in
+    // this week's window. Matches the stylist's definition of a
+    // deposit: "money I take upon booking." Same-day or after-service
+    // payments are full / balance payments, not deposits, so they
+    // don't roll into this bucket.
+    if (dep > 0 && a.paymentDate && a.date && a.paymentDate < a.date) {
+      if (a.paymentDate >= ws && a.paymentDate <= reference) {
         collected.push(a);
         continue;
       }
