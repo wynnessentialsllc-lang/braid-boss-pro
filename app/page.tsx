@@ -13544,9 +13544,13 @@ const ServicesScreen = ({
         id: `addon_${uid()}`,
         name: "",
         amount: 0,
+        // null = inherit from the parent service. The toggle starts
+        // visually off (!!null is false); flipping it explicitly
+        // sets true/false so the resolver knows the override is
+        // intentional.
         variation_price: null,
         variation_duration_hours: null,
-        variation_deposit_required: false,
+        variation_deposit_required: null,
         variation_deposit_amount: null,
       },
     ],

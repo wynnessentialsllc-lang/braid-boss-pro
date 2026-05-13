@@ -338,11 +338,37 @@ export const useServices = (
       base_price: Number(draft.base_price) || 0,
       deposit_required: !!draft.deposit_required,
       deposit_amount: draft.deposit_required ? Number(draft.deposit_amount) || 0 : null,
-      add_ons: (draft.add_ons || []).map(a => ({
-        id: a.id || `addon_${Math.random().toString(36).slice(2, 8)}`,
-        name: (a.name || "").trim(),
-        amount: Number(a.amount) || 0,
-      })),
+      // Variation snapshot. The legacy { id, name, amount } shape is
+      // preserved verbatim; the four optional override fields are
+      // round-tripped explicitly so price / duration / deposit
+      // overrides actually persist into services.add_ons jsonb.
+      // Blank inputs → null (inherit from parent). 0 is treated as
+      // an intentional override and saved as 0.
+      add_ons: (draft.add_ons || []).map(a => {
+        const out: Record<string, any> = {
+          id: a.id || `addon_${Math.random().toString(36).slice(2, 8)}`,
+          name: (a.name || "").trim(),
+          amount: Number(a.amount) || 0,
+        };
+        // Helper: distinguish "blank (inherit)" from "0 (override
+        // with zero)". null/undefined/"" all map to null. Anything
+        // numeric — including 0 — round-trips as a number.
+        const optNumber = (v: unknown): number | null => {
+          if (v === null || v === undefined || v === "") return null;
+          const n = typeof v === "number" ? v : Number(v);
+          return Number.isFinite(n) ? n : null;
+        };
+        out.variation_price = optNumber(a.variation_price);
+        out.variation_duration_hours = optNumber(a.variation_duration_hours);
+        out.variation_deposit_amount = optNumber(a.variation_deposit_amount);
+        // deposit_required is a tri-state: true / false / inherit.
+        // We persist explicit booleans; missing/undefined inherits.
+        out.variation_deposit_required =
+          typeof a.variation_deposit_required === "boolean"
+            ? a.variation_deposit_required
+            : null;
+        return out;
+      }),
       prep_instructions: draft.prep_instructions?.trim() || null,
       is_active: draft.is_active ?? true,
       buffer_before_minutes: Math.max(0, Math.min(240, Math.round(Number(draft.buffer_before_minutes) || 0))),
