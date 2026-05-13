@@ -916,8 +916,20 @@ export default function PublicBookingPage() {
                   ];
                   return (
                     <Field label="Choose an option">
-                      <div style={{ display: "grid", gap: 8 }}>
+                      <p style={{ margin: "0 0 8px", fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
+                        Tap any option to switch — your price, deposit, and balance update right away.
+                      </p>
+                      {/* radiogroup semantics so screen readers know
+                          these cards are mutually-exclusive choices,
+                          and the client can swap freely between them. */}
+                      <div role="radiogroup" aria-label="Service options" style={{ display: "grid", gap: 8 }}>
                         {options.map(opt => {
+                          // `picked` is purely derived from
+                          // selectedVariationId; tapping any card
+                          // — including the base — re-sets it. No
+                          // disabled state, no irreversible writes,
+                          // so the client can switch as many times
+                          // as they want before submitting.
                           const picked = selectedVariationId === opt.id;
                           const r = opt.resolved;
                           return (
@@ -925,18 +937,23 @@ export default function PublicBookingPage() {
                               key={opt.id || "__base__"}
                               type="button"
                               onClick={() => setSelectedVariationId(opt.id)}
+                              role="radio"
+                              aria-checked={picked}
                               aria-pressed={picked}
                               style={{
+                                position: "relative",
                                 textAlign: "left",
                                 padding: 12,
                                 borderRadius: 12,
                                 background: picked ? C.cream : C.paper,
                                 border: `1.5px solid ${picked ? C.goldDeep : C.hairline}`,
+                                boxShadow: picked ? `0 0 0 3px ${C.cream}` : "none",
                                 cursor: "pointer",
                                 font: "inherit",
                                 color: "inherit",
                                 appearance: "none",
                                 WebkitAppearance: "none",
+                                transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
                               }}
                             >
                               <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
@@ -961,6 +978,26 @@ export default function PublicBookingPage() {
                                   ? ` · Balance $${r.balanceDue.toFixed(2)}`
                                   : ""}
                               </p>
+                              {picked && (
+                                <span
+                                  aria-hidden
+                                  style={{
+                                    position: "absolute",
+                                    top: 10,
+                                    right: 10,
+                                    background: C.goldDeep,
+                                    color: C.cream,
+                                    fontSize: 9.5,
+                                    fontWeight: 700,
+                                    letterSpacing: "0.08em",
+                                    padding: "2px 6px",
+                                    borderRadius: 999,
+                                    textTransform: "uppercase",
+                                  }}
+                                >
+                                  Selected
+                                </span>
+                              )}
                             </button>
                           );
                         })}
