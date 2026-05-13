@@ -313,3 +313,81 @@ export const fetchPublicServices = async (
   }));
   return { ok: true, services };
 };
+
+export type PublicSlot = {
+  time: string;
+  label: string;
+  start_minute: number;
+};
+
+export type MonthDayStatus = "available" | "limited" | "booked" | "off";
+
+export type MonthDay = {
+  day: string;
+  slot_count: number;
+  status: MonthDayStatus;
+};
+
+export const fetchPublicAvailability = async ({
+  slug,
+  dateIso,
+  durationMinutes,
+  serviceId,
+  slotIntervalMinutes = 30,
+}: {
+  slug: string;
+  dateIso: string;
+  durationMinutes?: number | null;
+  serviceId?: string | null;
+  slotIntervalMinutes?: number | null;
+}): Promise<{ ok: true; slots: PublicSlot[] } | { ok: false; error: string }> => {
+  if (!slug || !dateIso) return { ok: false, error: "Missing booking details." };
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("public_list_availability", {
+    slug_in: slug,
+    date_in: dateIso,
+    duration_minutes_in: durationMinutes ?? null,
+    service_id_in: serviceId || null,
+    slot_interval_minutes_in: slotIntervalMinutes ?? 30,
+  });
+  if (error) return { ok: false, error: error.message };
+  const slots = ((data || []) as any[]).map(row => ({
+    time: String(row.slot_time || ""),
+    label: String(row.slot_label || row.slot_time || ""),
+    start_minute: Number(row.start_minute) || 0,
+  }));
+  return { ok: true, slots };
+};
+
+export const fetchPublicMonthAvailability = async ({
+  slug,
+  year,
+  month,
+  durationMinutes,
+  serviceId,
+}: {
+  slug: string;
+  year: number;
+  month: number;
+  durationMinutes?: number | null;
+  serviceId?: string | null;
+}): Promise<{ ok: true; days: MonthDay[] } | { ok: false; error: string }> => {
+  if (!slug || !year || !month) return { ok: false, error: "Missing calendar details." };
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("public_get_month_availability", {
+    slug_in: slug,
+    year_in: year,
+    month_in: month,
+    service_id_in: serviceId || null,
+    duration_minutes_in: durationMinutes ?? null,
+  });
+  if (error) return { ok: false, error: error.message };
+  const days = ((data || []) as any[]).map(row => ({
+    day: String(row.day_iso || ""),
+    slot_count: Number(row.slot_count) || 0,
+    status: (["available", "limited", "booked", "off"].includes(String(row.status))
+      ? String(row.status)
+      : "off") as MonthDayStatus,
+  }));
+  return { ok: true, days };
+};

@@ -191,6 +191,7 @@ import {
   type ContractTemplateInput,
   type ContractTemplateType,
   type BookingContract,
+  CONTRACT_TEMPLATES_EMPTY_COPY,
   TEMPLATE_TYPE_LABEL,
   STATUS_LABEL as CONTRACT_STATUS_LABEL,
   STATUS_TONE as CONTRACT_STATUS_TONE,
@@ -230,8 +231,6 @@ import {
   refreshSubscriptionHeartbeat,
   type PushCapability,
 } from "./lib/push";
-import { useContractTemplates, type ContractTemplate, CONTRACT_TEMPLATES_EMPTY_COPY } from "./lib/contracts";
-import { useServices, type Service, SERVICES_EMPTY_COPY } from "./lib/services";
 import {
   Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon,
   Plus, X, ChevronRight, ChevronLeft, ChevronDown, Search, Copy, Check, Trash2, Edit3,
@@ -4030,7 +4029,7 @@ const Studio = ({ store }) => {
   };
 
   const saveContract = async () => {
-    if (!contractForm.title?.trim() || !contractForm.content?.trim()) return;
+    if (!contractForm.title?.trim() || !contractForm.body?.trim()) return;
     const saved = await contracts.upsert(contractForm);
     if (!saved) return;
     await updateContractServiceAssignments(saved.id);
@@ -4076,7 +4075,7 @@ const Studio = ({ store }) => {
               <div className="flex justify-between items-start">
                 <div>
                   <h3 className="font-semibold" style={{ color: C.espresso }}>{c.title}</h3>
-                  <p className="text-sm mt-1" style={{ color: C.muted }}>{c.content.slice(0, 100)}...</p>
+                  <p className="text-sm mt-1" style={{ color: C.muted }}>{c.body.slice(0, 100)}...</p>
                   {!c.is_active && <span className="text-xs px-2 py-1 rounded" style={{ background: C.muted, color: C.paper }}>Inactive</span>}
                 </div>
                 <div className="flex gap-2">
@@ -4093,6 +4092,9 @@ const Studio = ({ store }) => {
         </div>
         <div className="mt-4 p-3 rounded-lg border" style={{ background: C.cream, borderColor: C.hairline }}>
           <h4 className="font-semibold mb-2" style={{ color: C.espresso }}>{editingContract ? 'Edit Contract' : 'New Contract'}</h4>
+          <button onClick={() => setShowNewContractModal(true)} className="px-4 py-2 rounded font-semibold" style={{ background: C.gold, color: C.espresso }}>
+            New Contract
+          </button>
           <input
             type="text"
             placeholder="Contract Title"
@@ -4103,8 +4105,8 @@ const Studio = ({ store }) => {
           />
           <textarea
             placeholder="Contract Content"
-            value={contractForm.content || ''}
-            onChange={e => setContractForm({ ...contractForm, content: e.target.value })}
+            value={contractForm.body || ''}
+            onChange={e => setContractForm({ ...contractForm, body: e.target.value })}
             className="w-full p-2 mb-2 rounded border"
             rows={6}
             style={{ borderColor: C.hairline, background: C.paper }}
@@ -14269,26 +14271,85 @@ const ContractsScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
   const userId: string | null = store.userId || null;
   const api = useContractTemplates(userId);
   const { templates, loading, error, refresh, upsert, remove, setActive, seedStarters } = api;
+  const servicesApi = store.servicesApi;
+  const services: Service[] = servicesApi?.services || [];
   const [editing, setEditing] = useState<Partial<ContractTemplateInput> & { id?: string } | null>(null);
+  const [serviceSearch, setServiceSearch] = useState("");
+  const [attachedServiceIds, setAttachedServiceIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [seedFlash, setSeedFlash] = useState<string | null>(null);
 
-  const closeEditor = () => setEditing(null);
+  const closeEditor = () => {
+    setEditing(null);
+    setServiceSearch("");
+    setAttachedServiceIds([]);
+  };
 
-  const startNew = () => setEditing({
-    title: "",
-    template_type: "custom" as ContractTemplateType,
-    body: "",
-    is_active: true,
-    require_signature: true,
-    require_initials: false,
-    attach_to_all_bookings: false,
-  });
+  const startNew = () => {
+    setEditing({
+      title: "",
+      template_type: "custom" as ContractTemplateType,
+      body: "",
+      is_active: true,
+      require_signature: true,
+      require_initials: false,
+      attach_to_all_bookings: false,
+    });
+    setServiceSearch("");
+    setAttachedServiceIds([]);
+  };
+
+  const startEdit = (template: ContractTemplate) => {
+    setEditing(template);
+    setServiceSearch("");
+    setAttachedServiceIds(
+      services
+        .filter(service => service.contract_template_id === template.id)
+        .map(service => service.id),
+    );
+  };
+
+  const filteredServices = useMemo(() => {
+    const query = serviceSearch.trim().toLowerCase();
+    return services
+      .filter(service => !query
+        || service.name.toLowerCase().includes(query)
+        || (service.description || "").toLowerCase().includes(query))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [services, serviceSearch]);
+
+  const attachedServices = useMemo(() => {
+    const selected = new Set(attachedServiceIds);
+    return services
+      .filter(service => selected.has(service.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [services, attachedServiceIds]);
+
+  const updateTemplateServiceAssignments = async (templateId: string) => {
+    if (!servicesApi) return true;
+    const selected = new Set(attachedServiceIds);
+    const dirtyServices = services.filter(service =>
+      service.contract_template_id === templateId || selected.has(service.id),
+    );
+    const results = await Promise.all(dirtyServices.map(service => {
+      const nextTemplateId = selected.has(service.id) ? templateId : null;
+      if (service.contract_template_id === nextTemplateId) return Promise.resolve(service);
+      return servicesApi.upsert({ ...service, contract_template_id: nextTemplateId });
+    }));
+    await servicesApi.refresh?.();
+    return results.every(Boolean);
+  };
 
   const handleSave = async () => {
     if (!editing) return;
     setBusy(true);
     const saved = await upsert(editing);
+    if (saved) {
+      const assignmentsSaved = await updateTemplateServiceAssignments(saved.id);
+      if (!assignmentsSaved) {
+        alert("Template saved, but one or more service attachments could not be updated.");
+      }
+    }
     setBusy(false);
     if (saved) closeEditor();
   };
@@ -14379,7 +14440,7 @@ const ContractsScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
             <div className="flex gap-2 pt-1">
               <button
                 type="button"
-                onClick={() => setEditing(t)}
+                onClick={() => startEdit(t)}
                 className="flex-1 py-2 rounded-lg text-[12px] font-semibold"
                 style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
               >
@@ -14442,6 +14503,68 @@ const ContractsScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
               />
             </Field>
             <Card className="p-3 space-y-3" style={{ background: C.cream }}>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>Attach to Services</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    Select services that should use this required contract. You can still choose a contract inside each service.
+                  </p>
+                </div>
+                <div
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl"
+                  style={{ background: C.paper, border: `1px solid ${C.hairline}` }}
+                >
+                  <Search size={15} style={{ color: C.muted }} />
+                  <input
+                    type="search"
+                    value={serviceSearch}
+                    onChange={e => setServiceSearch(e.target.value)}
+                    placeholder="Search services"
+                    className="w-full bg-transparent outline-none text-[13px]"
+                    style={{ color: C.espresso }}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {attachedServices.length > 0 ? attachedServices.map(service => (
+                    <Pill key={service.id} tone="gold">{service.name}</Pill>
+                  )) : (
+                    <span className="text-[11px]" style={{ color: C.muted }}>No services selected.</span>
+                  )}
+                </div>
+                <div
+                  className="max-h-56 overflow-y-auto rounded-xl"
+                  style={{ background: C.paper, border: `1px solid ${C.hairline}` }}
+                >
+                  {filteredServices.map(service => {
+                    const checked = attachedServiceIds.includes(service.id);
+                    return (
+                      <label
+                        key={service.id}
+                        className="flex items-center justify-between gap-3 px-3 py-2 border-b last:border-b-0"
+                        style={{ borderColor: C.hairline }}
+                      >
+                        <span className="min-w-0">
+                          <span className="block text-[12px] font-semibold truncate" style={{ color: C.espresso }}>{service.name}</span>
+                          {service.description && (
+                            <span className="block text-[11px] truncate" style={{ color: C.muted }}>{service.description}</span>
+                          )}
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setAttachedServiceIds(ids =>
+                            checked ? ids.filter(id => id !== service.id) : [...ids, service.id],
+                          )}
+                          className="h-4 w-4"
+                        />
+                      </label>
+                    );
+                  })}
+                  {filteredServices.length === 0 && (
+                    <p className="px-3 py-3 text-[12px]" style={{ color: C.muted }}>No services match that search.</p>
+                  )}
+                </div>
+              </div>
               <ToggleRow
                 label="Active"
                 hint="Inactive templates aren't attached to new bookings."
