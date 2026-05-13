@@ -10,10 +10,109 @@
 import { useEffect, useState } from "react";
 import { getSupabase } from "./supabase";
 
+// Service variations (legacy: "add-ons"). The jsonb column is still
+// `add_ons` for back-compat, but each entry can now carry its own
+// price, duration, and deposit so a single parent service can have
+// multiple bookable flavors (e.g. "with human curly hair" $355 / $75
+// deposit vs "standard install" $225 / $25 deposit).
+//
+// Legacy entries with only { id, name, amount } stay valid: the
+// resolver in `resolveVariationPricing` falls back to the parent's
+// base_price / duration / deposit when a per-variation field is null
+// or undefined, so existing services keep working unchanged.
 export type ServiceAddOn = {
   id: string;
   name: string;
   amount: number;
+  // Variation-level overrides. Null/undefined = inherit from the
+  // parent service.
+  variation_price?: number | null;
+  variation_duration_hours?: number | null;
+  variation_deposit_required?: boolean | null;
+  variation_deposit_amount?: number | null;
+};
+
+// Resolved per-variation pricing. When `addonId` is null/unknown we
+// return the parent service's defaults so the rest of the flow can
+// treat "no variation" identically to "variation that inherits
+// everything".
+export type ResolvedVariation = {
+  variationId: string | null;
+  variationName: string | null;
+  price: number;
+  durationHours: number;
+  depositRequired: boolean;
+  depositAmount: number;
+  balanceDue: number;
+};
+
+export const resolveVariationPricing = (
+  service: Pick<Service, "base_price" | "duration_hours" | "deposit_required" | "deposit_amount" | "add_ons">,
+  addonId: string | null | undefined,
+): ResolvedVariation => {
+  const basePrice = Number(service.base_price) || 0;
+  const baseDuration = Number(service.duration_hours) || 0;
+  const baseDepositRequired = !!service.deposit_required;
+  const baseDepositAmount = Number(service.deposit_amount ?? 0);
+
+  const variation = addonId
+    ? (service.add_ons || []).find(a => a.id === addonId) || null
+    : null;
+
+  if (!variation) {
+    const depositAmount = baseDepositRequired ? baseDepositAmount : 0;
+    return {
+      variationId: null,
+      variationName: null,
+      price: basePrice,
+      durationHours: baseDuration,
+      depositRequired: baseDepositRequired,
+      depositAmount,
+      balanceDue: Math.max(0, basePrice - depositAmount),
+    };
+  }
+
+  const vPrice = variation.variation_price;
+  const vDuration = variation.variation_duration_hours;
+  const vDepReq = variation.variation_deposit_required;
+  const vDepAmt = variation.variation_deposit_amount;
+
+  // Variation price falls back to base + legacy add-on amount so
+  // existing add-ons (price bumps) keep working.
+  const price = (vPrice != null && Number.isFinite(vPrice))
+    ? Number(vPrice)
+    : basePrice + (Number(variation.amount) || 0);
+
+  const durationHours = (vDuration != null && Number.isFinite(vDuration) && vDuration > 0)
+    ? Number(vDuration)
+    : baseDuration;
+
+  // Variation deposit overrides the parent's. When the variation
+  // toggle is explicitly off we honor that even if the parent
+  // requires one. When undefined we inherit the parent.
+  const depositRequired = (typeof vDepReq === "boolean")
+    ? vDepReq
+    : baseDepositRequired;
+  let depositAmount = 0;
+  if (depositRequired) {
+    if (vDepAmt != null && Number.isFinite(vDepAmt) && vDepAmt > 0) {
+      depositAmount = Number(vDepAmt);
+    } else {
+      depositAmount = baseDepositAmount;
+    }
+  }
+  // Never charge a deposit larger than the price itself.
+  depositAmount = Math.min(depositAmount, price);
+
+  return {
+    variationId: variation.id,
+    variationName: (variation.name || "").trim() || null,
+    price,
+    durationHours,
+    depositRequired: depositRequired && depositAmount > 0,
+    depositAmount,
+    balanceDue: Math.max(0, price - depositAmount),
+  };
 };
 
 export type Service = {
@@ -107,6 +206,34 @@ draft.deposit_amount > draft.base_price) {
     }
     if (!Number.isFinite(a.amount) || a.amount < 0) {
       errors.push({ field: "add_ons", message: `Add-on ${i + 1} amount can't be negative.` });
+      return;
+    }
+    if (a.variation_price != null && (!Number.isFinite(a.variation_price) || a.variation_price < 0)) {
+      errors.push({ field: "add_ons", message: `Variation ${i + 1} price can't be negative.` });
+      return;
+    }
+    if (a.variation_duration_hours != null
+        && (!Number.isFinite(a.variation_duration_hours) || a.variation_duration_hours <= 0 || a.variation_duration_hours > 48)) {
+      errors.push({ field: "add_ons", message: `Variation ${i + 1} duration must be between 0.25 and 48 hours.` });
+      return;
+    }
+    if (a.variation_deposit_amount != null
+        && (!Number.isFinite(a.variation_deposit_amount) || a.variation_deposit_amount < 0)) {
+      errors.push({ field: "add_ons", message: `Variation ${i + 1} deposit can't be negative.` });
+      return;
+    }
+    if (a.variation_deposit_required
+        && (a.variation_deposit_amount == null || a.variation_deposit_amount <= 0)) {
+      errors.push({ field: "add_ons", message: `Variation ${i + 1} needs a deposit amount when deposit is required.` });
+      return;
+    }
+    // Variation deposit can never exceed its own price (or the
+    // parent's base_price if the variation inherits).
+    const vEffPrice = a.variation_price != null
+      ? Number(a.variation_price)
+      : ((Number(draft.base_price) || 0) + (Number(a.amount) || 0));
+    if (a.variation_deposit_amount != null && Number(a.variation_deposit_amount) > vEffPrice) {
+      errors.push({ field: "add_ons", message: `Variation ${i + 1} deposit can't exceed its price.` });
       return;
     }
   });
