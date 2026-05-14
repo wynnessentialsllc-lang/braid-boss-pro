@@ -74,6 +74,13 @@ export default function ProductDetailPage() {
   // Checkout button state
   const [buyState, setBuyState] = useState<"idle" | "loading" | "error">("idle");
   const [buyError, setBuyError] = useState<string | null>(null);
+  // Selected variant id — null when the product has no variants
+  // (legacy or single-option), or when none has been picked yet.
+  // The Buy button stays disabled until a pick is made for any
+  // product that declares variants.
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
+  const hasVariants = (product?.variants?.length || 0) > 0;
+  const needsVariantPick = hasVariants && !selectedVariantId;
 
   useEffect(() => {
     if (profileState.status !== "ready") return;
@@ -115,6 +122,13 @@ export default function ProductDetailPage() {
     if (!product) return;
     if (buyState === "loading") return;
     if (soldOut) return;
+    if (needsVariantPick) {
+      // Defensive — the Buy button is already disabled when this
+      // guard is true, but a keyboard user could still fire onClick.
+      setBuyState("error");
+      setBuyError(`Pick ${product.variant_label || "an option"} first.`);
+      return;
+    }
     if (product.external_checkout_url) {
       // External shop link wins — the stylist explicitly redirected
       // this product elsewhere.
@@ -138,6 +152,11 @@ export default function ProductDetailPage() {
           handle,
           product_slug: product.slug,
           quantity: 1,
+          // Variant pick — only set when the product declares a
+          // variants list. The checkout API validates the id
+          // against the product's variants jsonb and surfaces the
+          // chosen variant in line_items + Stripe metadata.
+          variant_id: selectedVariantId,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -338,25 +357,78 @@ export default function ProductDetailPage() {
         )}
       </section>
 
+      {/* Variant picker — only renders for products that declare a
+          variants list. Single-tap chips: tapping a chip selects
+          that variant; selected variant carries through to the
+          Buy Now POST body. Picker reads as a horizontal scroll
+          chip row so a 6+ color set still fits on a phone. */}
+      {hasVariants && (
+        <section className="mt-5">
+          <p
+            className="text-[11px] font-bold uppercase tracking-widest mb-2"
+            style={{ color: C.muted, letterSpacing: "0.14em" }}
+          >
+            {product.variant_label || "Options"}
+          </p>
+          <div
+            role="radiogroup"
+            aria-label={product.variant_label || "Options"}
+            className="flex flex-wrap gap-2"
+          >
+            {product.variants.map((v) => {
+              const isActive = selectedVariantId === v.id;
+              return (
+                <button
+                  key={v.id}
+                  role="radio"
+                  aria-checked={isActive}
+                  type="button"
+                  onClick={() => setSelectedVariantId(v.id)}
+                  className="px-3.5 py-2 rounded-full text-[13px] font-semibold transition active:scale-[0.97]"
+                  style={{
+                    background: isActive ? GRADIENTS.primary : C.paper,
+                    color: isActive ? "#FFFFFF" : C.brandText,
+                    border: `1.5px solid ${isActive ? "transparent" : C.brandBorder}`,
+                    boxShadow: isActive ? SHADOWS.primaryGlow : "none",
+                  }}
+                >
+                  {v.name}
+                </button>
+              );
+            })}
+          </div>
+          {needsVariantPick && (
+            <p
+              className="text-[11px] mt-2"
+              style={{ color: C.muted }}
+            >
+              Pick {product.variant_label?.toLowerCase() || "an option"} to continue.
+            </p>
+          )}
+        </section>
+      )}
+
       {/* Buy button */}
       <section className="mt-5">
         <button
           type="button"
           onClick={startCheckout}
-          disabled={soldOut || buyState === "loading"}
+          disabled={soldOut || buyState === "loading" || needsVariantPick}
           className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-bold uppercase tracking-widest transition active:scale-[0.98]"
           style={{
-            background: soldOut ? C.brandBorder : GRADIENTS.primary,
-            color: soldOut ? C.muted : "#FFFFFF",
-            boxShadow: soldOut ? "none" : SHADOWS.primaryGlow,
+            background: (soldOut || needsVariantPick) ? C.brandBorder : GRADIENTS.primary,
+            color: (soldOut || needsVariantPick) ? C.muted : "#FFFFFF",
+            boxShadow: (soldOut || needsVariantPick) ? "none" : SHADOWS.primaryGlow,
             letterSpacing: "0.14em",
             border: 0,
-            cursor: soldOut ? "not-allowed" : "pointer",
+            cursor: (soldOut || needsVariantPick) ? "not-allowed" : "pointer",
             opacity: buyState === "loading" ? 0.7 : 1,
           }}
         >
           {soldOut
             ? "Sold out"
+            : needsVariantPick
+            ? `Pick ${product.variant_label?.toLowerCase() || "option"}`
             : buyState === "loading"
             ? "Opening checkout…"
             : product.external_checkout_url

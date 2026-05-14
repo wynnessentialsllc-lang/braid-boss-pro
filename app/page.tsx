@@ -131,6 +131,7 @@ import {
   PRODUCT_CATEGORIES,
   PRODUCT_CATEGORY_LABEL,
   slugifyProductTitle,
+  parseVariantsFromText,
   type PublicReview,
   type Product as StorefrontProduct,
   type ProductCategory,
@@ -18433,6 +18434,8 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
     local_pickup_available: boolean;
     external_checkout_url: string | null;
     requires_shipping: boolean;
+    variant_label: string | null;
+    variants: Array<{ id: string; name: string }>;
     active: boolean;
   }>;
   const [editing, setEditing] = useState<Draft | null>(null);
@@ -18463,7 +18466,7 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
         rightAction={
           <button
             type="button"
-            onClick={() => setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false })}
+            onClick={() => setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false })}
             className="p-2 rounded-full"
             style={{ background: C.gold, color: C.espresso, border: 0 }}
             aria-label="Add product"
@@ -18488,7 +18491,7 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
             </p>
             <div className="mt-4">
               <Button variant="primary" icon={<Plus size={16} />} fullWidth
-                onClick={() => setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false })}>
+                onClick={() => setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false })}>
                 Add your first product
               </Button>
             </div>
@@ -18505,6 +18508,8 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
               local_pickup_available: p.local_pickup_available,
               external_checkout_url: p.external_checkout_url,
               requires_shipping: p.requires_shipping,
+              variant_label: p.variant_label,
+              variants: p.variants || [],
               active: p.active,
             })}>
               <div className="flex items-start justify-between gap-3">
@@ -18656,6 +18661,30 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
                   primary: C.brandPrimary,
                   paper: C.paper,
                 }}
+              />
+            </Field>
+            {/* Variant picker config — single dimension per product
+                (Color, Size, Style, etc). Leave Option label blank
+                to disable the picker entirely. Variant names are
+                one per line; existing ids are preserved when the
+                name matches an existing variant so editing the
+                list doesn't churn ids referenced by past orders. */}
+            <Field label="Option label" hint="What's varying — e.g. Color, Size, Style. Leave blank for no options.">
+              <Input
+                value={editing.variant_label || ""}
+                onChange={e => setEditing({ ...editing, variant_label: e.target.value || null })}
+                placeholder="Color"
+              />
+            </Field>
+            <Field label="Options" hint="One option per line. Customers must pick one before checkout.">
+              <Textarea
+                value={(editing.variants || []).map(v => v.name).join("\n")}
+                onChange={e => setEditing({
+                  ...editing,
+                  variants: parseVariantsFromText(e.target.value, editing.variants || []),
+                })}
+                rows={4}
+                placeholder={"Black\nGold\nPink\nPurple"}
               />
             </Field>
             <Field label="External checkout URL (optional)" hint="When set, the Buy button redirects out instead of running Stripe checkout.">
