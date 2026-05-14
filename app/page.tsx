@@ -54,7 +54,6 @@ import {
 import { renderReceiptPdf } from "./lib/pdf-render";
 import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
 import WelcomeIntro from "./components/WelcomeIntro";
-import { LearnCard, InstallAppHeaderButton } from "./components/LearnCard";
 import { ProductImageUploader } from "./components/ProductImageUploader";
 import {
   PreviewStyleCard,
@@ -3745,27 +3744,20 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
           </button>
         }
         rightAction={
-          // Install-app pill + settings chip, in that order. The
-          // install pill self-hides when the PWA is already installed
-          // (standalone display-mode) or after the user accepts the
-          // prompt, so an installed user just sees the settings chip.
-          <div className="flex items-center gap-2">
-            <InstallAppHeaderButton />
-            <button
-              type="button"
-              onClick={openSettings}
-              className="rounded-full bbp-tap flex items-center justify-center"
-              style={{
-                width: 38, height: 38,
-                color: C.coffee,
-                background: C.paper,
-                border: `1px solid ${C.hairline}`,
-              }}
-              aria-label="Settings"
-            >
-              <SettingsIcon size={18} />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={openSettings}
+            className="rounded-full bbp-tap flex items-center justify-center"
+            style={{
+              width: 38, height: 38,
+              color: C.coffee,
+              background: C.paper,
+              border: `1px solid ${C.hairline}`,
+            }}
+            aria-label="Settings"
+          >
+            <SettingsIcon size={18} />
+          </button>
         }
       />
 
@@ -3778,13 +3770,6 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
           weekAppts={stats.weekAppts}
           currency={business.currency}
         />
-
-        {/* Onboarding / learn card — links to /features and
-            /getting-started, plus a one-tap Install App button.
-            Self-hides after dismiss; localStorage-backed so it
-            doesn't nag every session. */}
-        <LearnCard />
-
 
         {/* Hierarchy: money-critical cards get a dedicated headline
             row (today / week revenue, deposits this week, pending
@@ -11295,68 +11280,6 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                 </div>
               </Card>
             )}
-
-            {/* Learn group — surfaces the new marketing pages so
-                stylists can re-read the feature tour or the setup
-                guide right from Settings. Renders as a labeled
-                section break + two cards. */}
-            <p
-              className="text-[10px] font-bold uppercase tracking-widest mt-5 mb-2"
-              style={{ color: C.muted, letterSpacing: "0.14em" }}
-            >
-              Learn
-            </p>
-            <a href="/features" style={{ textDecoration: "none", display: "block" }}>
-              <Card className="p-4 active:scale-[0.99]">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0,
-                        boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <Sparkles size={15} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Features</p>
-                      <p className="text-[11px]" style={{ color: C.muted }}>
-                        Every tool in Braid Boss Pro, in one tour
-                      </p>
-                    </div>
-                  </div>
-                  <ChevronRight size={18} style={{ color: C.muted }} />
-                </div>
-              </Card>
-            </a>
-            <a href="/getting-started" style={{ textDecoration: "none", display: "block" }}>
-              <Card className="p-4 active:scale-[0.99] mt-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.secondary, color: "#FFFFFF", border: 0, flexShrink: 0,
-                        boxShadow: "0 4px 12px -4px rgba(255, 77, 109, 0.30)",
-                      }}
-                    >
-                      <Layers size={15} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Getting started</p>
-                      <p className="text-[11px]" style={{ color: C.muted }}>
-                        Set up + install the app in under 10 minutes
-                      </p>
-                    </div>
-                  </div>
-                  <ChevronRight size={18} style={{ color: C.muted }} />
-                </div>
-              </Card>
-            </a>
-
             <SectionTitle>Payments</SectionTitle>
             <Card
               className="p-4 active:scale-[0.99]"

@@ -689,6 +689,17 @@ const PREVIEWS: Array<{
 // Main component
 // =====================================================================
 
+// Shared style for the marketing-link row beneath the Sign In
+// button. Quiet uppercase chips in brand purple, no underline.
+const welcomeLinkStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 700,
+  color: P.brandPrimary,
+  textDecoration: "none",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+};
+
 const WelcomeIntro = ({
   onGetStarted,
   onSignIn,
@@ -1115,6 +1126,51 @@ const WelcomeIntro = ({
           >
             Sign In
           </button>
+
+          {/* Public marketing-page links. Quiet uppercase row,
+              brand purple — never competes with the primary
+              'Get Started' CTA above. Sign In already has its
+              own button so it's not duplicated here. */}
+          <nav
+            aria-label="Learn more"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 18,
+              marginTop: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <a
+              href="/features"
+              onClick={() => trackEvent("welcome_features_link", { category: "activation" })}
+              style={welcomeLinkStyle}
+            >
+              Features
+            </a>
+            <a
+              href="/getting-started"
+              onClick={() => trackEvent("welcome_getting_started_link", { category: "activation" })}
+              style={welcomeLinkStyle}
+            >
+              Getting started
+            </a>
+            <a
+              href="/pricing"
+              onClick={() => trackEvent("welcome_pricing_link", { category: "activation" })}
+              style={welcomeLinkStyle}
+            >
+              Pricing
+            </a>
+            <a
+              href="/faq"
+              onClick={() => trackEvent("welcome_faq_link", { category: "activation" })}
+              style={welcomeLinkStyle}
+            >
+              FAQ
+            </a>
+          </nav>
         </div>
       </div>
 

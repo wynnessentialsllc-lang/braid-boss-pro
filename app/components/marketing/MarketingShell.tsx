@@ -102,18 +102,21 @@ const MarketingHeader = () => (
         </span>
       </Link>
       <nav className="flex items-center" style={{ gap: 14 }}>
-        <Link
-          href="/features"
-          style={{ fontSize: 13, fontWeight: 600, color: C.coffee, textDecoration: "none" }}
-        >
+        <Link href="/features" style={marketingNavLink}>
           Features
         </Link>
         <Link
           href="/getting-started"
           className="hidden sm:inline-block"
-          style={{ fontSize: 13, fontWeight: 600, color: C.coffee, textDecoration: "none" }}
+          style={marketingNavLink}
         >
           Get started
+        </Link>
+        <Link href="/pricing" style={marketingNavLink}>
+          Pricing
+        </Link>
+        <Link href="/faq" className="hidden sm:inline-block" style={marketingNavLink}>
+          FAQ
         </Link>
         <Link
           href="/"
@@ -136,6 +139,13 @@ const MarketingHeader = () => (
     </div>
   </header>
 );
+
+const marketingNavLink: React.CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  color: "#3D3447",
+  textDecoration: "none",
+};
 
 const MarketingFooter = () => (
   <footer
@@ -174,6 +184,12 @@ const MarketingFooter = () => (
         </Link>
         <Link href="/getting-started" style={footerLink}>
           Get started
+        </Link>
+        <Link href="/pricing" style={footerLink}>
+          Pricing
+        </Link>
+        <Link href="/faq" style={footerLink}>
+          FAQ
         </Link>
         <Link href="/privacy" style={footerLink}>
           Privacy
