@@ -3769,9 +3769,16 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
           <div className="grid grid-cols-2 gap-3">
             <KpiCard
               label="Today revenue"
+              // Revenue / deposit cards now read as money-in
+              // (green) so the headline row has a clear visual
+              // story: green = money in, amber = money pending.
+              // Matches the Month Profit pill the user circled.
+              // The neutral-when-zero downshift is removed so the
+              // tile reads the same whether the day is empty or
+              // not — the value itself is the indicator.
               value={fmtMoney(revenueStats.todayRevenue, business.currency)}
               icon={<DollarSign size={16} />}
-              tone={revenueStats.todayRevenue > 0 ? "gold" : "neutral"}
+              tone="success"
               onClick={() => openKpi("today")}
               riseDelay={0}
             />
@@ -3783,11 +3790,15 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
               onClick={() => openKpi("week")}
               riseDelay={40}
             />
+            {/* Week revenue keeps the coral brand-secondary so the
+                row alternates green / coral / green / amber — the
+                user requested today + deposits land on green (like
+                Month Profit) without making the whole row mono. */}
             <KpiCard
               label="Deposits (week)"
               value={fmtMoney(revenueStats.weekDeposits, business.currency)}
               icon={<Check size={16} />}
-              tone={revenueStats.weekDeposits > 0 ? "success" : "neutral"}
+              tone="success"
               onClick={() => openKpi("deposits")}
               riseDelay={80}
             />
