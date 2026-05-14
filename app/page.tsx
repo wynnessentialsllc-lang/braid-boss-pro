@@ -123,6 +123,14 @@ import {
   slugReasonMessage,
 } from "./lib/publicSlug";
 import {
+  usePublicReviews,
+  useProducts,
+  fetchServiceRecommendations,
+  saveServiceRecommendations,
+  type PublicReview,
+  type Product as StorefrontProduct,
+} from "./lib/storefront";
+import {
   type DashboardRevenue,
   type RevenueGranularity,
   type RevenuePoint,
@@ -10301,7 +10309,7 @@ const ImportStudioDataSheet = ({ open, onClose, store, onViewClients, onViewServ
   </Sheet>
 );
 
-const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -10678,6 +10686,54 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Contracts</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
                         Agreements clients sign before booking is locked
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openReviews && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openReviews}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <Sparkles size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Client Love</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        Reviews + testimonials on your booking page
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openProducts && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openProducts}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <Layers size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Products</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        Bonnets, oils, retail recommended at booking
                       </p>
                     </div>
                   </div>
@@ -13873,6 +13929,11 @@ const ServicesScreen = ({
   // dodges the async race where categories load after the state was
   // already initialized.
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<Set<string>>(new Set());
+  // Recommended product ids for the service currently being edited.
+  // Loaded on edit-open, persisted on save via saveServiceRecommendations.
+  // New service drafts start with no recs picked.
+  const [editingRecsIds, setEditingRecsIds] = useState<string[]>([]);
+  const products: StorefrontProduct[] = store.productsApi?.products || [];
   const toggleCategoryExpand = (id: string) => {
     setCollapsedCategoryIds(prev => {
       const next = new Set(prev);
@@ -13897,7 +13958,11 @@ const ServicesScreen = ({
     setSaveError(null);
   }, [editing?.id, editing == null]);
 
-  const openNew = () => setEditing({
+  const openNew = () => {
+    // Clear any recs left behind by a prior edit so the new draft
+    // starts with no pinned products.
+    setEditingRecsIds([]);
+    setEditing({
     name: "",
     description: "",
     duration_hours: 4,
@@ -13915,9 +13980,23 @@ const ServicesScreen = ({
     featured: false,
     cover_image_url: null,
     before_after_image_url: null,
-  });
+    });
+  };
 
-  const openEdit = (s: Service) => setEditing({
+  // Alias kept for clarity at the call sites that used to call this
+  // through a separate wrapper; openNew now resets recs itself.
+  const startNew = openNew;
+
+  const openEdit = (s: Service) => {
+    // Fetch the existing recs for this service in the background.
+    // The picker UI tolerates an empty array while the fetch is in
+    // flight, so the editor opens immediately.
+    setEditingRecsIds([]);
+    (async () => {
+      const r = await fetchServiceRecommendations(s.id);
+      if (r.ok) setEditingRecsIds(r.productIds);
+    })();
+    setEditing({
     id: s.id,
     name: s.name,
     description: s.description,
@@ -13936,7 +14015,8 @@ const ServicesScreen = ({
     featured: !!s.featured,
     cover_image_url: s.cover_image_url ?? null,
     before_after_image_url: s.before_after_image_url ?? null,
-  });
+    });
+  };
 
   // Category CRUD handlers — kept local so the screen owns the
   // open/edit/close lifecycle without leaking into the catalog hook.
@@ -13988,6 +14068,12 @@ const ServicesScreen = ({
     }
     setBusy(true);
     const saved = await api.upsert(editing);
+    // Persist recommended products in a follow-up call. The service
+    // upsert is the source of truth — we only attempt recs when it
+    // succeeded AND we have an id to attach to.
+    if (saved?.id) {
+      try { await saveServiceRecommendations(saved.id, editingRecsIds); } catch { /* best-effort */ }
+    }
     setBusy(false);
     if (saved) {
       setEditing(null);
@@ -14277,7 +14363,7 @@ const ServicesScreen = ({
               {SERVICES_EMPTY_COPY}
             </p>
             <div className="mt-5">
-              <Button variant="primary" icon={<Plus size={16} />} onClick={openNew} fullWidth>
+              <Button variant="primary" icon={<Plus size={16} />} onClick={startNew} fullWidth>
                 Create your first service
               </Button>
             </div>
@@ -14462,6 +14548,52 @@ const ServicesScreen = ({
                   onChange={(v: boolean) => setEditing({ ...editing, featured: v })}
                 />
               </div>
+            </Card>
+
+            {/* Recommended products — shown on the public booking
+                page as "For Your Appointment" when this service is
+                picked. Add products in Settings → Products first;
+                this list reads the store's product catalog. */}
+            <Card className="p-3.5">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Recommended products</p>
+                  <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+                    Pick what to surface on the public page when a client picks this service. They&apos;ll appear in a &quot;For Your Appointment&quot; row.
+                  </p>
+                </div>
+              </div>
+              {products.length === 0 ? (
+                <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+                  No products yet — add some in Settings → Products to use this.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {products.map(p => {
+                    const picked = editingRecsIds.includes(p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        aria-pressed={picked}
+                        onClick={() => setEditingRecsIds(prev =>
+                          prev.includes(p.id) ? prev.filter(x => x !== p.id) : [...prev, p.id])}
+                        className="px-3 py-1.5 rounded-full text-[12px] font-semibold"
+                        style={{
+                          background: picked ? C.gold : "transparent",
+                          color: picked ? C.espresso : C.coffee,
+                          border: `1px solid ${picked ? C.goldDeep : C.hairline}`,
+                          cursor: "pointer",
+                          appearance: "none",
+                          WebkitAppearance: "none",
+                        }}
+                      >
+                        {p.title}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </Card>
 
             <div className="grid grid-cols-2 gap-3">
@@ -17601,6 +17733,345 @@ const UpgradeSheet = ({
   );
 };
 
+// ============================================================
+// REVIEWS MANAGER (Phase 3) — owner-side Client Love.
+// Minimal CRUD: list, add, edit, delete, feature/verify toggles.
+// ============================================================
+const ReviewsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const api = store.reviewsApi;
+  const reviews: PublicReview[] = api?.reviews || [];
+  type Draft = Partial<{
+    id: string;
+    reviewer_name: string;
+    review_text: string;
+    service_name: string | null;
+    image_url: string | null;
+    is_featured: boolean;
+    is_verified_booking: boolean;
+  }>;
+  const [editing, setEditing] = useState<Draft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    if (!editing || busy) return;
+    setBusy(true); setErr(null);
+    const saved = await api.upsert(editing);
+    setBusy(false);
+    if (!saved) { setErr(api?.error || "Couldn't save."); return; }
+    setEditing(null);
+  };
+  const handleDelete = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    await api.remove(id);
+    setBusy(false);
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Client Love"
+        subtitle="Reviews shown on your public booking page"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        rightAction={
+          <button
+            type="button"
+            onClick={() => setEditing({ reviewer_name: "", review_text: "", is_featured: false, is_verified_booking: true })}
+            className="p-2 rounded-full"
+            style={{ background: C.gold, color: C.espresso, border: 0 }}
+            aria-label="Add review"
+          >
+            <Plus size={20} />
+          </button>
+        }
+      />
+      <div className="px-5 pt-2 space-y-3">
+        {api?.error && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{api.error}</p>
+          </Card>
+        )}
+        {reviews.length === 0 ? (
+          <Card className="p-6 text-center">
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>
+              No reviews yet
+            </p>
+            <p className="text-[12px] mt-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+              Add a testimonial from a past client. Featured reviews show first on your booking page.
+            </p>
+            <div className="mt-4">
+              <Button variant="primary" icon={<Plus size={16} />} fullWidth
+                onClick={() => setEditing({ reviewer_name: "", review_text: "", is_featured: false, is_verified_booking: true })}>
+                Add your first review
+              </Button>
+            </div>
+          </Card>
+        ) : (
+          reviews.map(r => (
+            <Card key={r.id} className="p-4 active:scale-[0.99] cursor-pointer" onClick={() => setEditing({
+              id: r.id, reviewer_name: r.reviewer_name, review_text: r.review_text,
+              service_name: r.service_name, image_url: r.image_url,
+              is_featured: r.is_featured, is_verified_booking: r.is_verified_booking,
+            })}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                    <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>
+                      {r.reviewer_name}
+                    </p>
+                    {r.is_featured && <Pill tone="gold">Featured</Pill>}
+                    {r.is_verified_booking && <Pill tone="success">Verified</Pill>}
+                  </div>
+                  <p className="text-[12px] italic" style={{ color: C.coffee, lineHeight: 1.4 }}>
+                    "{r.review_text.length > 120 ? `${r.review_text.slice(0, 117)}…` : r.review_text}"
+                  </p>
+                  {r.service_name && (
+                    <p className="text-[11px] mt-1" style={{ color: C.muted }}>{r.service_name}</p>
+                  )}
+                </div>
+                <ChevronRight size={16} style={{ color: C.muted, marginTop: 2 }} />
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
+
+      <Sheet open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? "Edit review" : "New review"}>
+        {editing && (
+          <div className="space-y-3 pb-2">
+            <Field label="Reviewer first name">
+              <Input value={editing.reviewer_name || ""} onChange={e => setEditing({ ...editing, reviewer_name: e.target.value })} placeholder="Tasha" />
+            </Field>
+            <Field label="Review">
+              <Textarea
+                value={editing.review_text || ""}
+                onChange={e => setEditing({ ...editing, review_text: e.target.value })}
+                rows={4}
+                placeholder="Best knotless I've ever had…"
+              />
+            </Field>
+            <Field label="Service (optional)">
+              <Input value={editing.service_name || ""} onChange={e => setEditing({ ...editing, service_name: e.target.value || null })} placeholder="Boho Knotless" />
+            </Field>
+            <Field label="Image URL (optional)">
+              <Input type="url" inputMode="url" value={editing.image_url || ""} onChange={e => setEditing({ ...editing, image_url: e.target.value || null })} placeholder="https://…" />
+            </Field>
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Featured</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Pinned to the top of Client Love.</p>
+                </div>
+                <Toggle checked={!!editing.is_featured} onChange={(v: boolean) => setEditing({ ...editing, is_featured: v })} />
+              </div>
+            </Card>
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Verified booking</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Adds a "Verified" badge to the review card.</p>
+                </div>
+                <Toggle checked={!!editing.is_verified_booking} onChange={(v: boolean) => setEditing({ ...editing, is_verified_booking: v })} />
+              </div>
+            </Card>
+            {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <Button variant="primary" icon={<Save size={16} />} onClick={handleSave}>
+                {busy ? "Saving…" : "Save"}
+              </Button>
+              <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+            </div>
+            {editing.id && (
+              <Button variant="outline" icon={<Trash2 size={14} />} fullWidth onClick={() => { if (editing.id) { handleDelete(editing.id); setEditing(null); } }}>
+                Delete review
+              </Button>
+            )}
+          </div>
+        )}
+      </Sheet>
+    </div>
+  );
+};
+
+// ============================================================
+// PRODUCTS MANAGER (Phase 4) — lightweight retail catalog.
+// ============================================================
+const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const api = store.productsApi;
+  const items: StorefrontProduct[] = api?.products || [];
+  const currency = store.business?.currency || "USD";
+  type Draft = Partial<{
+    id: string;
+    title: string;
+    description: string | null;
+    image_url: string | null;
+    price: number | null;
+    is_featured: boolean;
+    local_pickup_available: boolean;
+    external_checkout_url: string | null;
+    active: boolean;
+  }>;
+  const [editing, setEditing] = useState<Draft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    if (!editing || busy) return;
+    setBusy(true); setErr(null);
+    const saved = await api.upsert(editing);
+    setBusy(false);
+    if (!saved) { setErr(api?.error || "Couldn't save."); return; }
+    setEditing(null);
+  };
+  const handleDelete = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    await api.remove(id);
+    setBusy(false);
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Products"
+        subtitle="Recommended retail for your booking page"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        rightAction={
+          <button
+            type="button"
+            onClick={() => setEditing({ title: "", price: null, active: true, is_featured: false, local_pickup_available: false })}
+            className="p-2 rounded-full"
+            style={{ background: C.gold, color: C.espresso, border: 0 }}
+            aria-label="Add product"
+          >
+            <Plus size={20} />
+          </button>
+        }
+      />
+      <div className="px-5 pt-2 space-y-3">
+        {api?.error && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{api.error}</p>
+          </Card>
+        )}
+        {items.length === 0 ? (
+          <Card className="p-6 text-center">
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>
+              No products yet
+            </p>
+            <p className="text-[12px] mt-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+              Add bonnets, oils, sprays — anything you recommend. They'll appear on your booking page.
+            </p>
+            <div className="mt-4">
+              <Button variant="primary" icon={<Plus size={16} />} fullWidth
+                onClick={() => setEditing({ title: "", price: null, active: true, is_featured: false, local_pickup_available: false })}>
+                Add your first product
+              </Button>
+            </div>
+          </Card>
+        ) : (
+          items.map(p => (
+            <Card key={p.id} className="p-4 active:scale-[0.99] cursor-pointer" onClick={() => setEditing({
+              id: p.id, title: p.title, description: p.description, image_url: p.image_url,
+              price: p.price, is_featured: p.is_featured,
+              local_pickup_available: p.local_pickup_available, external_checkout_url: p.external_checkout_url,
+              active: p.active,
+            })}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                    <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{p.title}</p>
+                    {!p.active && <Pill tone="neutral">Inactive</Pill>}
+                    {p.is_featured && <Pill tone="gold">Featured</Pill>}
+                  </div>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    {p.price != null ? fmtMoney(p.price, currency) : "Price on request"}
+                    {p.local_pickup_available ? " · Local pickup" : ""}
+                    {p.external_checkout_url ? " · External link" : ""}
+                  </p>
+                </div>
+                <ChevronRight size={16} style={{ color: C.muted, marginTop: 2 }} />
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
+
+      <Sheet open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? "Edit product" : "New product"}>
+        {editing && (
+          <div className="space-y-3 pb-2">
+            <Field label="Title">
+              <Input value={editing.title || ""} onChange={e => setEditing({ ...editing, title: e.target.value })} placeholder="Silk bonnet" />
+            </Field>
+            <Field label="Description (optional)">
+              <Textarea
+                value={editing.description || ""}
+                onChange={e => setEditing({ ...editing, description: e.target.value || null })}
+                rows={3}
+                placeholder="Helps preserve braids overnight."
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Price">
+                <MoneyInput
+                  value={editing.price ?? ""}
+                  onChange={(v) => setEditing({ ...editing, price: v === "" ? null : parseMoney(v) })}
+                />
+              </Field>
+              <Field label="Image URL (optional)">
+                <Input type="url" inputMode="url" value={editing.image_url || ""} onChange={e => setEditing({ ...editing, image_url: e.target.value || null })} placeholder="https://…" />
+              </Field>
+            </div>
+            <Field label="External checkout URL (optional)" hint="When set, the public card becomes a 'Shop now' link.">
+              <Input type="url" inputMode="url" value={editing.external_checkout_url || ""} onChange={e => setEditing({ ...editing, external_checkout_url: e.target.value || null })} placeholder="https://…" />
+            </Field>
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Featured</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Sorts first on the booking page.</p>
+                </div>
+                <Toggle checked={!!editing.is_featured} onChange={(v: boolean) => setEditing({ ...editing, is_featured: v })} />
+              </div>
+            </Card>
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Local pickup available</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Adds a "Local pickup" badge on the booking page.</p>
+                </div>
+                <Toggle checked={!!editing.local_pickup_available} onChange={(v: boolean) => setEditing({ ...editing, local_pickup_available: v })} />
+              </div>
+            </Card>
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Active</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Inactive products hide from the booking page.</p>
+                </div>
+                <Toggle checked={editing.active !== false} onChange={(v: boolean) => setEditing({ ...editing, active: v })} />
+              </div>
+            </Card>
+            {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <Button variant="primary" icon={<Save size={16} />} onClick={handleSave}>
+                {busy ? "Saving…" : "Save"}
+              </Button>
+              <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+            </div>
+            {editing.id && (
+              <Button variant="outline" icon={<Trash2 size={14} />} fullWidth onClick={() => { if (editing.id) { handleDelete(editing.id); setEditing(null); } }}>
+                Delete product
+              </Button>
+            )}
+          </div>
+        )}
+      </Sheet>
+    </div>
+  );
+};
+
 export default function App() {
   const auth = useAuth();
   // First-launch welcome screen — gates AuthGate until the user
@@ -17630,6 +18101,8 @@ export default function App() {
   const discountsApi = useDiscounts(auth.userId);
   const servicesApi = useServices(auth.userId);
   const serviceCategoriesApi = useServiceCategories(auth.userId);
+  const reviewsApi = usePublicReviews(auth.userId);
+  const productsApi = useProducts(auth.userId);
   const policiesApi = useBookingPolicy(auth.userId);
   const availabilityApi = useAvailability(auth.userId);
   const waitlistApi = useWaitlist(auth.userId);
@@ -17666,6 +18139,8 @@ export default function App() {
       discountsApi,
       servicesApi,
       serviceCategoriesApi,
+      reviewsApi,
+      productsApi,
       policiesApi,
       availabilityApi,
       waitlistApi,
@@ -17691,7 +18166,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, serviceCategoriesApi, policiesApi, availabilityApi, waitlistApi, approvalsApi]);
+  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi]);
 
   const sync = useCloudSync(auth.userId, store);
 
@@ -18003,6 +18478,8 @@ export default function App() {
               openIntelligence={() => setSecondary("intelligence")}
               openApprovals={() => setSecondary("approvals")}
               openContracts={() => setSecondary("contracts")}
+              openReviews={() => setSecondary("reviews")}
+              openProducts={() => setSecondary("products")}
             />
           )}
           {active === "calculator" && (
@@ -18047,7 +18524,7 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
@@ -18118,6 +18595,8 @@ export default function App() {
       {secondary === "services" && <ServicesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "reports" && <ReportsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "discounts" && <DiscountsScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "reviews" && <ReviewsScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "products" && <ProductsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "account" && (
         <AccountScreen
           email={auth.email}
