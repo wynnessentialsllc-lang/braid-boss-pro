@@ -910,6 +910,18 @@ export default function PublicBookingPage() {
         @media (prefers-reduced-motion: reduce) {
           .bbp-brand-wordmark { animation: none; }
         }
+        /* Visible scrollbar on the product rails so visitors know
+           there are more items to swipe through. Kept thin + brand-
+           tinted so it reads as polished UI, not OS chrome. Applied
+           only to .bbp-rail elements; other horizontal scrollers
+           (services, gallery) keep their hidden scrollbars. */
+        .bbp-rail { scrollbar-width: thin; scrollbar-color: rgba(124, 58, 237, 0.40) transparent; }
+        .bbp-rail::-webkit-scrollbar { height: 4px; }
+        .bbp-rail::-webkit-scrollbar-track { background: transparent; }
+        .bbp-rail::-webkit-scrollbar-thumb {
+          background: linear-gradient(90deg, #7C3AED, #FF4D6D);
+          border-radius: 99px;
+        }
       `}</style>
 
       {/* Storefront-style hero — full-width gradient (or banner
@@ -2336,14 +2348,14 @@ export default function PublicBookingPage() {
             <div
               role="list"
               aria-label="Recommended products"
+              className="bbp-rail"
               style={{
                 marginTop: 12,
                 display: "flex",
                 gap: 12,
                 overflowX: "auto",
                 WebkitOverflowScrolling: "touch",
-                paddingBottom: 4,
-                scrollbarWidth: "none",
+                paddingBottom: 10,
                 scrollSnapType: "x mandatory",
               }}
             >
@@ -2378,14 +2390,14 @@ export default function PublicBookingPage() {
             <div
               role="list"
               aria-label="Recommended for this service"
+              className="bbp-rail"
               style={{
                 marginTop: 12,
                 display: "flex",
                 gap: 12,
                 overflowX: "auto",
                 WebkitOverflowScrolling: "touch",
-                paddingBottom: 4,
-                scrollbarWidth: "none",
+                paddingBottom: 10,
                 scrollSnapType: "x mandatory",
               }}
             >
