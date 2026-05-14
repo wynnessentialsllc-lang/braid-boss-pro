@@ -9179,7 +9179,10 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
       return (
         <PreviewStyleCard style={{ marginBottom: 18 }} padding={20}>
           <SectionEyebrow>{rangeMeta.eyebrow}</SectionEyebrow>
-          <p style={{ margin: "4px 0 0", fontFamily: FONT_DISPLAY, fontSize: 34, fontWeight: 600, color: C.espresso, lineHeight: 1.05, letterSpacing: "-0.01em" }}>
+          {/* Income amount in brand-success green so the headline
+              earned number reads as "money in" immediately. Matches
+              the Lifetime spend card on the client profile. */}
+          <p style={{ margin: "4px 0 0", fontFamily: FONT_DISPLAY, fontSize: 34, fontWeight: 600, color: "#16A34A", lineHeight: 1.05, letterSpacing: "-0.01em" }}>
             {fmtMoney(income, business.currency)}
           </p>
           <p style={{ margin: "2px 0 14px", fontSize: 11, color: C.muted }}>{rangeMeta.sub}</p>
