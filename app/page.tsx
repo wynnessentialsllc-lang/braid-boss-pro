@@ -9316,13 +9316,23 @@ const ProductivityTab = ({ sessions, appointments, business, openTimerSessions }
 
   return (
     <div className="px-5">
-      {/* hourly hero */}
-      <Card className="p-5 mb-4" style={{ background: `linear-gradient(135deg, ${C.espresso}, ${C.coffee})`, color: C.cream }}>
-        <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.gold, letterSpacing: "0.16em" }}>Effective hourly</p>
-        <p className="text-5xl font-bold mb-1" style={{ fontFamily: FONT_DISPLAY, color: C.cream }}>
-          {fmtMoney(hourly, business.currency)}<span className="text-xl" style={{ color: "rgba(245,235,217,0.6)" }}>/hr</span>
+      {/* Effective-hourly hero — pink rose gradient to match the
+          dashboard hero and Quick Actions tiles. Soft coral halo
+          shadow; white text. */}
+      <Card
+        className="p-5 mb-4"
+        style={{
+          background: "linear-gradient(135deg, #FF6B9D 0%, #FF4D6D 55%, #E0354F 100%)",
+          color: "#FFFFFF",
+          border: "0",
+          boxShadow: "0 10px 28px -10px rgba(255, 77, 109, 0.45)",
+        }}
+      >
+        <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: "rgba(255, 255, 255, 0.92)", letterSpacing: "0.16em" }}>Effective hourly</p>
+        <p className="text-5xl font-bold mb-1" style={{ fontFamily: FONT_DISPLAY, color: "#FFFFFF" }}>
+          {fmtMoney(hourly, business.currency)}<span className="text-xl" style={{ color: "rgba(255, 255, 255, 0.65)" }}>/hr</span>
         </p>
-        <p className="text-xs" style={{ color: "rgba(245,235,217,0.7)" }}>
+        <p className="text-xs" style={{ color: "rgba(255, 255, 255, 0.78)" }}>
           {fmtMoney(totalEarned, business.currency)} earned over {hours.toFixed(1)}h · {sessions.length} session{sessions.length === 1 ? "" : "s"}
         </p>
       </Card>
