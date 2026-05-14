@@ -13504,6 +13504,18 @@ const ServicesScreen = ({
   const [confirmDeleteCategory, setConfirmDeleteCategory] = useState<ServiceCategory | null>(null);
   const [categoryBusy, setCategoryBusy] = useState(false);
   const [categoryError, setCategoryError] = useState<string | null>(null);
+  // Which categories are expanded inline in the manager. Clicking a
+  // category row toggles its services in-place; we keep a set so
+  // multiple can be open at once.
+  const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<string>>(new Set());
+  const toggleCategoryExpand = (id: string) => {
+    setExpandedCategoryIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
   const [busy, setBusy] = useState(false);
   // Inline save error. The editor is a sheet that covers the parent
   // services screen where api.error renders, so silent validation
@@ -13737,56 +13749,131 @@ const ServicesScreen = ({
           ) : (
             <div className="space-y-2 mt-1">
               {categories.map((c, idx) => {
-                const count = services.filter(s => s.category_id === c.id).length;
+                const inCategory = services.filter(s => s.category_id === c.id);
+                const count = inCategory.length;
+                const expanded = expandedCategoryIds.has(c.id);
                 return (
                   <div
                     key={c.id}
-                    className="rounded-xl p-2.5 flex items-center gap-2"
-                    style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}
+                    className="rounded-xl"
+                    style={{ background: C.ivory, border: `1px solid ${C.hairline}`, overflow: "hidden" }}
                   >
-                    <div className="flex flex-col gap-0.5 shrink-0">
+                    <div className="flex items-center gap-2 p-2.5">
+                      <div className="flex flex-col gap-0.5 shrink-0">
+                        <button
+                          type="button"
+                          aria-label="Move up"
+                          disabled={idx === 0}
+                          onClick={() => categoriesApi?.reorder(c.id, "up")}
+                          className="p-1 rounded"
+                          style={{ opacity: idx === 0 ? 0.3 : 1, color: C.coffee, background: "transparent", border: 0, cursor: idx === 0 ? "default" : "pointer" }}
+                        >
+                          <ChevronUp size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Move down"
+                          disabled={idx === categories.length - 1}
+                          onClick={() => categoriesApi?.reorder(c.id, "down")}
+                          className="p-1 rounded"
+                          style={{ opacity: idx === categories.length - 1 ? 0.3 : 1, color: C.coffee, background: "transparent", border: 0, cursor: idx === categories.length - 1 ? "default" : "pointer" }}
+                        >
+                          <ChevronDown size={14} />
+                        </button>
+                      </div>
                       <button
                         type="button"
-                        aria-label="Move up"
-                        disabled={idx === 0}
-                        onClick={() => categoriesApi?.reorder(c.id, "up")}
-                        className="p-1 rounded"
-                        style={{ opacity: idx === 0 ? 0.3 : 1, color: C.coffee, background: "transparent", border: 0, cursor: idx === 0 ? "default" : "pointer" }}
+                        onClick={() => toggleCategoryExpand(c.id)}
+                        aria-expanded={expanded}
+                        className="flex-1 min-w-0 text-left flex items-center gap-2"
+                        style={{ background: "transparent", border: 0, color: "inherit", font: "inherit", cursor: "pointer", padding: 0 }}
                       >
-                        <ChevronUp size={14} />
+                        <ChevronRight
+                          size={14}
+                          style={{
+                            color: C.muted,
+                            flexShrink: 0,
+                            transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+                            transition: "transform 160ms ease",
+                          }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{c.name}</p>
+                          <p className="text-[10.5px]" style={{ color: C.muted }}>
+                            {count} service{count === 1 ? "" : "s"}
+                            {c.description ? ` · ${c.description}` : ""}
+                          </p>
+                        </div>
                       </button>
                       <button
                         type="button"
-                        aria-label="Move down"
-                        disabled={idx === categories.length - 1}
-                        onClick={() => categoriesApi?.reorder(c.id, "down")}
-                        className="p-1 rounded"
-                        style={{ opacity: idx === categories.length - 1 ? 0.3 : 1, color: C.coffee, background: "transparent", border: 0, cursor: idx === categories.length - 1 ? "default" : "pointer" }}
+                        onClick={() => openEditCategory(c)}
+                        className="p-2 rounded-lg"
+                        style={{ color: C.coffee, background: "transparent", border: 0 }}
+                        aria-label="Edit category"
                       >
-                        <ChevronDown size={14} />
+                        <Edit3 size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteCategory(c)}
+                        className="p-2 rounded-lg"
+                        style={{ color: C.danger, background: "transparent", border: 0 }}
+                        aria-label="Delete category"
+                      >
+                        <Trash2 size={14} />
                       </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => openEditCategory(c)}
-                      className="flex-1 min-w-0 text-left"
-                      style={{ background: "transparent", border: 0, color: "inherit", font: "inherit", cursor: "pointer", padding: 0 }}
-                    >
-                      <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{c.name}</p>
-                      <p className="text-[10.5px]" style={{ color: C.muted }}>
-                        {count} service{count === 1 ? "" : "s"}
-                        {c.description ? ` · ${c.description}` : ""}
-                      </p>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDeleteCategory(c)}
-                      className="p-2 rounded-lg"
-                      style={{ color: C.danger, background: "transparent", border: 0 }}
-                      aria-label="Delete category"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    {expanded && (
+                      <div
+                        className="px-2.5 pb-2.5 space-y-2"
+                        style={{ borderTop: `1px solid ${C.hairline}`, paddingTop: 10 }}
+                      >
+                        {inCategory.length === 0 ? (
+                          <p className="text-[11px]" style={{ color: C.muted, paddingLeft: 22 }}>
+                            No services in this category yet. Edit a service to assign it here, or create a new one.
+                          </p>
+                        ) : (
+                          inCategory.map(s => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => openEdit(s)}
+                              className="w-full text-left rounded-lg p-2.5 active:scale-[0.99] transition"
+                              style={{
+                                background: C.paper,
+                                border: `1px solid ${C.hairline}`,
+                                color: "inherit",
+                                font: "inherit",
+                                cursor: "pointer",
+                                appearance: "none",
+                                WebkitAppearance: "none",
+                              }}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                                    <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>
+                                      {s.name}
+                                    </p>
+                                    {!s.is_active && <Pill tone="neutral">Inactive</Pill>}
+                                    {s.deposit_required && <Pill tone="gold">Deposit</Pill>}
+                                  </div>
+                                  <p className="text-[10.5px]" style={{ color: C.muted }}>
+                                    {formatServicePrice(s, currency)}
+                                    {s.add_ons.length > 0 ? ` · ${s.add_ons.length} variation${s.add_ons.length === 1 ? "" : "s"}` : ""}
+                                    {Array.isArray(s.extras) && s.extras.length > 0
+                                      ? ` · ${s.extras.length} add-on${s.extras.length === 1 ? "" : "s"}`
+                                      : ""}
+                                  </p>
+                                </div>
+                                <ChevronRight size={14} style={{ color: C.muted, marginTop: 2, flexShrink: 0 }} />
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -13825,23 +13912,20 @@ const ServicesScreen = ({
             </div>
           </Card>
         ) : (() => {
-          // Group services by category for display. Build the section
-          // order from the (already sort_order'd) categories list, with
-          // an "Other services" bucket at the end for uncategorized
-          // rows so existing services without a category stay visible.
-          const groups: Array<{ key: string; label: string; svcs: Service[] }> = categories.map(c => ({
-            key: c.id,
-            label: c.name,
-            svcs: services.filter(s => s.category_id === c.id),
-          }));
+          // When categories exist, the categorized services live
+          // INSIDE the expand-in-place category manager above — only
+          // surface uncategorized rows in this section so we don't
+          // render the same service twice. When no categories exist,
+          // fall back to a single flat "Services" group so the screen
+          // still works for stylists who haven't grouped anything yet.
           const uncategorized = services.filter(s => !s.category_id);
-          if (uncategorized.length > 0 || groups.length === 0) {
-            groups.push({
-              key: "__other__",
-              label: groups.length === 0 ? "Services" : "Other services",
-              svcs: uncategorized.length > 0 ? uncategorized : services,
-            });
-          }
+          const groups: Array<{ key: string; label: string; svcs: Service[] }> =
+            categories.length === 0
+              ? [{ key: "__all__", label: "Services", svcs: services }]
+              : uncategorized.length > 0
+                ? [{ key: "__other__", label: "Other services", svcs: uncategorized }]
+                : [];
+          if (groups.length === 0) return null;
           return (
             <>
               {groups.map(g => g.svcs.length === 0 ? null : (
