@@ -6562,8 +6562,16 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       seriesId = undefined;
     }
 
+    // Guard: when a deposit was entered but no payment date is set,
+    // stamp today. Without this the dashboard "Deposits (week)" KPI
+    // and the per-appointment receipt PDF both miss the payment
+    // (their filters require paymentDate). Only fills the gap — if
+    // the stylist already chose a date in the form we leave it.
+    const depositEntered = parseMoney(form.depositPaid) > 0;
+    const paymentDateAutoFill = depositEntered && !form.paymentDate ? todayISO() : form.paymentDate;
     const baseAppt = {
       ...form,
+      paymentDate: paymentDateAutoFill,
       clientId, clientName,
       seriesId,
       remindersEnabled,
