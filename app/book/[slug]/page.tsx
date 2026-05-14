@@ -917,7 +917,7 @@ export default function PublicBookingPage() {
         className="mx-auto"
         style={{ maxWidth: 480, padding: "0 20px", marginTop: -44, position: "relative" }}
       >
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
           <div
             style={{
               width: 88, height: 88, borderRadius: 18,
@@ -945,11 +945,23 @@ export default function PublicBookingPage() {
               />
             )}
           </div>
-          <div style={{ flex: 1, minWidth: 0, paddingBottom: 8 }}>
+          <div style={{ flex: 1, minWidth: 0, marginTop: 52 }}>
+            {/* marginTop pushes the name + handle below the
+                banner's bottom edge so the title sits on the
+                white surface, not floating into the pink. With
+                alignItems: flex-start on the parent flex row,
+                this margin is applied from the top of the row
+                (which sits 44px above the banner bottom because
+                of the outer marginTop:-44 overlap) — i.e. text
+                starts ~8px below the banner edge.
+                Color shifts to brandPrimary (purple) at a heavier
+                weight + larger size per the user's design pass —
+                makes the name read as the page's anchor heading
+                instead of a small caption next to the logo. */}
             <h1
               style={{
-                fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600,
-                color: C.brandText, lineHeight: 1.1, margin: 0,
+                fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 700,
+                color: C.brandPrimary, lineHeight: 1.1, margin: 0,
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }}
             >
@@ -958,7 +970,7 @@ export default function PublicBookingPage() {
             {displayHandle && (
               <p
                 style={{
-                  fontSize: 12, color: C.muted, marginTop: 2,
+                  fontSize: 12, color: C.muted, marginTop: 4,
                   whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                 }}
               >
