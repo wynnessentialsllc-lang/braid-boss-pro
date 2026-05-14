@@ -22,6 +22,7 @@ import {
   fmtMoney,
 } from "../../_components/StorefrontShell";
 import { useStylistProfile } from "../../_components/useStylistProfile";
+import { useCart } from "../../../../lib/cart";
 import {
   fetchPublicProduct,
   fetchPublicProducts,
@@ -45,6 +46,10 @@ export default function ProductDetailPage() {
   }, [params]);
 
   const profileState = useStylistProfile(handle);
+  const { addItem, openCart } = useCart();
+  // 'Added!' flash on the Add-to-cart button for confidence after
+  // tap. Resets after a short delay so subsequent taps still react.
+  const [addedFlash, setAddedFlash] = useState(false);
 
   const [product, setProduct] = useState<PublicProductDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -408,8 +413,55 @@ export default function ProductDetailPage() {
         </section>
       )}
 
-      {/* Buy button */}
+      {/* Buy / Add-to-cart row. Buy Now stays the primary action
+          (gradient + glow); Add to cart is the outline secondary
+          for visitors browsing multiple products before checkout.
+          Both share the variant-pick gate. */}
       <section className="mt-5">
+        <button
+          type="button"
+          onClick={() => {
+            if (soldOut || needsVariantPick || !product) return;
+            if (product.external_checkout_url) {
+              window.location.href = product.external_checkout_url;
+              return;
+            }
+            const variant = product.variants.find((v) => v.id === selectedVariantId);
+            addItem(
+              {
+                product_id: product.id,
+                product_slug: product.slug,
+                title: product.title,
+                image_url: product.image_url,
+                unit_amount: Number(product.price || 0),
+                inventory_count: product.inventory_count,
+                variant_id: variant?.id || null,
+                variant_label: variant ? product.variant_label : null,
+                variant_name: variant?.name || null,
+                requires_shipping: product.requires_shipping,
+              },
+              handle,
+            );
+            setAddedFlash(true);
+            window.setTimeout(() => setAddedFlash(false), 1500);
+          }}
+          disabled={soldOut || needsVariantPick || !!product.external_checkout_url}
+          className="w-full rounded-2xl px-4 py-3 text-[13px] font-bold uppercase tracking-widest transition active:scale-[0.98] mb-2"
+          style={{
+            background: "transparent",
+            color: (soldOut || needsVariantPick) ? C.mutedSoft : C.brandPrimary,
+            border: `1.5px solid ${(soldOut || needsVariantPick) ? C.brandBorder : C.brandPrimary}`,
+            letterSpacing: "0.14em",
+            cursor: (soldOut || needsVariantPick || !!product.external_checkout_url) ? "not-allowed" : "pointer",
+            opacity: addedFlash ? 0.7 : 1,
+          }}
+        >
+          {addedFlash
+            ? "Added to cart ✓"
+            : product.external_checkout_url
+            ? "External checkout only"
+            : "Add to cart"}
+        </button>
         <button
           type="button"
           onClick={startCheckout}

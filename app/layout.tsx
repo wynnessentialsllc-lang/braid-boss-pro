@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import PullToRefresh from "./components/PullToRefresh";
+import { CartProvider } from "./lib/cart";
+import { CartDrawer, CartFloatingBadge } from "./components/CartDrawer";
 
 // Viewport for both the PWA and the Capacitor iOS shell.
 // - viewportFit: "cover" lets `env(safe-area-inset-*)` produce real
@@ -52,7 +54,15 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <PullToRefresh />
-        {children}
+        {/* CartProvider wraps everything so the storefront + admin
+            can read/write the same cart state. The floating badge
+            and slide-up drawer self-hide when the cart is empty,
+            so non-shop screens see nothing. */}
+        <CartProvider>
+          {children}
+          <CartFloatingBadge />
+          <CartDrawer />
+        </CartProvider>
       </body>
     </html>
   );
