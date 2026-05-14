@@ -3657,12 +3657,16 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
               }
             }}
             className="p-2 rounded-full relative"
-            style={{ color: C.coffee, WebkitAppearance: "none" as any, appearance: "none" as any, background: "transparent", border: 0 }}
+            // Classic gold for the notification bell — the C.gold
+            // token now points at brandPrimary purple after the
+            // palette swap, so we use a literal warm gold hex here
+            // to preserve the intended visual.
+            style={{ color: "#F0A500", WebkitAppearance: "none" as any, appearance: "none" as any, background: "transparent", border: 0 }}
             aria-label="Notifications">
             <Bell size={20} />
             {notifBadgeCount > 0 && (
               <span className="absolute top-0 right-0 rounded-full text-[10px] font-bold flex items-center justify-center"
-                style={{ width: 16, height: 16, background: C.gold, color: C.espresso, border: `1.5px solid ${C.cream}` }}>
+                style={{ width: 16, height: 16, background: "#F0A500", color: "#FFFFFF", border: `1.5px solid ${C.cream}` }}>
                 {notifBadgeCount > 9 ? "9+" : notifBadgeCount}
               </span>
             )}
