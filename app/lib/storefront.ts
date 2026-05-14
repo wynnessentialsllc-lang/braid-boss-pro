@@ -172,6 +172,13 @@ export const PRODUCT_CATEGORY_LABEL: Record<ProductCategory, string> = {
 export type ProductVariant = {
   id: string;
   name: string;
+  // Phase 2b: per-variant overrides. All are optional — when null /
+  // undefined the storefront falls back to the product-level value.
+  inventory_count?: number | null;
+  low_stock_threshold?: number | null;
+  compare_at_price?: number | null;
+  price?: number | null;
+  image_url?: string | null;
 };
 
 export const newVariantId = (): string => {
@@ -180,10 +187,41 @@ export const newVariantId = (): string => {
   return Math.random().toString(36).slice(2, 10);
 };
 
+// Normalize a single variant from any input shape (DB row, RPC
+// payload, admin draft). Coerces numeric fields, strips blanks,
+// preserves ids when an existing variant matches by id.
+export const normalizeVariant = (v: any, fallbackName = ""): ProductVariant => {
+  const num = (raw: any): number | null => {
+    if (raw === null || raw === undefined || raw === "") return null;
+    const n = typeof raw === "number" ? raw : Number(raw);
+    return Number.isFinite(n) ? n : null;
+  };
+  const intish = (raw: any): number | null => {
+    const n = num(raw);
+    return n == null ? null : Math.max(0, Math.floor(n));
+  };
+  return {
+    id: String(v?.id || newVariantId()),
+    name: String(v?.name || fallbackName || "").trim(),
+    inventory_count: intish(v?.inventory_count),
+    low_stock_threshold: intish(v?.low_stock_threshold),
+    compare_at_price: (() => {
+      const n = num(v?.compare_at_price);
+      return n != null && n >= 0 ? n : null;
+    })(),
+    price: (() => {
+      const n = num(v?.price);
+      return n != null && n >= 0 ? n : null;
+    })(),
+    image_url: v?.image_url ? String(v.image_url).trim() || null : null,
+  };
+};
+
 // Parse a multi-line textarea into a ProductVariant[]. Each non-empty
-// line becomes one variant; ids carry over for any line that matches
-// an existing variant name so editing the textarea doesn't churn ids
-// (and break orders that already reference them).
+// line becomes one variant; ids + per-variant fields carry over for
+// any line that matches an existing variant name so editing the
+// textarea doesn't churn ids (and break orders that already
+// reference them) or wipe per-variant inventory.
 export const parseVariantsFromText = (
   raw: string,
   existing: ProductVariant[] = [],
@@ -199,9 +237,67 @@ export const parseVariantsFromText = (
     let id = prior?.id || newVariantId();
     while (seenIds.has(id)) id = newVariantId();
     seenIds.add(id);
-    out.push({ id, name });
+    out.push({
+      id,
+      name,
+      // Preserve per-variant fields from the existing list — the
+      // textarea only edits names; structured fields go through
+      // the per-row editor.
+      inventory_count: prior?.inventory_count ?? null,
+      low_stock_threshold: prior?.low_stock_threshold ?? null,
+      compare_at_price: prior?.compare_at_price ?? null,
+      price: prior?.price ?? null,
+      image_url: prior?.image_url ?? null,
+    });
   }
   return out;
+};
+
+// Resolve which inventory count to enforce for a (product, variant)
+// pair. When the variant has its own explicit count, that wins; else
+// fall back to the product-level inventory_count. null = untracked.
+export const effectiveInventory = (
+  productInventoryCount: number | null | undefined,
+  variant: ProductVariant | null | undefined,
+): number | null => {
+  if (variant && variant.inventory_count != null) return variant.inventory_count;
+  return productInventoryCount == null ? null : productInventoryCount;
+};
+
+// Resolve the low-stock threshold for a (product, variant) pair.
+// Defaults to 5 when neither side sets one — matches the pre-Phase-2b
+// storefront copy ('Only N left' fires at <= 5).
+export const effectiveLowStockThreshold = (
+  variant: ProductVariant | null | undefined,
+): number => {
+  if (variant && variant.low_stock_threshold != null) return variant.low_stock_threshold;
+  return 5;
+};
+
+// Resolve display price for a (product, variant) pair. Variant
+// overrides win when set.
+export const effectivePrice = (
+  productPrice: number | null | undefined,
+  variant: ProductVariant | null | undefined,
+): number | null => {
+  if (variant && variant.price != null) return variant.price;
+  return productPrice == null ? null : productPrice;
+};
+
+export const effectiveCompareAtPrice = (
+  productCompareAtPrice: number | null | undefined,
+  variant: ProductVariant | null | undefined,
+): number | null => {
+  if (variant && variant.compare_at_price != null) return variant.compare_at_price;
+  return productCompareAtPrice == null ? null : productCompareAtPrice;
+};
+
+export const effectiveImageUrl = (
+  productImageUrl: string | null | undefined,
+  variant: ProductVariant | null | undefined,
+): string | null => {
+  if (variant && variant.image_url) return variant.image_url;
+  return productImageUrl || null;
 };
 
 export type Product = {
@@ -283,10 +379,7 @@ export const useProducts = (userId: string | null): {
         ? (r.gallery_images as string[])
         : [],
       variants: Array.isArray(r.variants)
-        ? (r.variants as any[]).map(v => ({
-            id: String(v?.id || newVariantId()),
-            name: String(v?.name || "").trim(),
-          })).filter(v => v.name)
+        ? (r.variants as any[]).map(v => normalizeVariant(v)).filter(v => v.name)
         : [],
     })) as Product[];
     setProducts(rows);
@@ -357,10 +450,7 @@ export const useProducts = (userId: string | null): {
       variant_label: draft.variant_label?.trim() ? draft.variant_label.trim() : null,
       variants: Array.isArray(draft.variants)
         ? (draft.variants as ProductVariant[])
-            .map(v => ({
-              id: String(v?.id || newVariantId()),
-              name: String(v?.name || "").trim(),
-            }))
+            .map(v => normalizeVariant(v))
             .filter(v => v.name)
         : [],
       sort_order: Number.isFinite(draft.sort_order) ? Number(draft.sort_order) : 0,
@@ -437,10 +527,7 @@ const normalizePublicProduct = (p: any): PublicProduct => ({
   variant_label: p.variant_label ? String(p.variant_label) : null,
   variants: Array.isArray(p.variants)
     ? (p.variants as any[])
-        .map((v) => ({
-          id: String(v?.id || ""),
-          name: String(v?.name || "").trim(),
-        }))
+        .map((v) => normalizeVariant(v))
         .filter((v) => v.id && v.name)
     : [],
 });
