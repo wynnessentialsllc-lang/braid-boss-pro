@@ -75,21 +75,47 @@ export const useStylistProfile = (handle: string): UseStylistProfileState => {
       // Pull the extended storefront fields from booking_links —
       // the resolver already returns the core columns, but a handful
       // of the Phase-4 storefront columns aren't in its return type,
-      // so we fetch them in a second light query.
-      const { data: extra } = await supabase
-        .from("booking_links")
-        .select(
-          "banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business",
-        )
-        .eq("slug", row.slug)
-        .maybeSingle();
+      // so we fetch them in a second light query. We also read the
+      // stylist's profiles row so we can fall back to their account
+      // business_name / full_name when booking_links is blank, and
+      // surface the branded public_slug for the @handle display.
+      const [{ data: extra }, { data: prof }] = await Promise.all([
+        supabase
+          .from("booking_links")
+          .select(
+            "banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business",
+          )
+          .eq("slug", row.slug)
+          .maybeSingle(),
+        supabase
+          .from("profiles")
+          .select("business_name, full_name, public_slug")
+          .eq("id", row.user_id)
+          .maybeSingle(),
+      ]);
+      // Name resolution: booking_links wins (most specific), then
+      // profiles.business_name, then full_name, then a humanized
+      // version of the branded slug (or null). The page itself
+      // renders 'Welcome' as the final visual fallback.
+      const humanize = (s: string | null | undefined): string | null => {
+        if (!s) return null;
+        const cleaned = s.replace(/[-_]+/g, " ").trim();
+        if (!cleaned) return null;
+        return cleaned.replace(/\b\w/g, (c) => c.toUpperCase());
+      };
+      const brandedSlug = (row.branded_slug as string | null) || prof?.public_slug || null;
+      const resolvedName =
+        (row.business_name as string | null) ||
+        (prof?.business_name as string | null) ||
+        (prof?.full_name as string | null) ||
+        humanize(brandedSlug);
       setState({
         status: "ready",
         profile: {
           user_id: String(row.user_id),
           slug: String(row.slug),
-          branded_slug: row.branded_slug ?? null,
-          business_name: row.business_name ?? null,
+          branded_slug: brandedSlug,
+          business_name: resolvedName,
           intro: row.intro ?? null,
           logo_url: row.logo_url ?? null,
           banner_image_url: extra?.banner_image_url ?? null,

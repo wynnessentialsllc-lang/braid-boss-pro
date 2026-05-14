@@ -98,6 +98,7 @@ export default function StylistShopPage() {
   return (
     <StorefrontShell
       handle={handle}
+      displayHandle={profileState.profile.branded_slug}
       businessName={profileState.profile.business_name}
       bannerUrl={profileState.profile.banner_image_url}
       logoUrl={profileState.profile.logo_url}

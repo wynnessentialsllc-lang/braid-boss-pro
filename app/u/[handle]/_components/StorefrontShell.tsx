@@ -69,13 +69,15 @@ type Tab = "profile" | "shop";
 
 export const StorefrontShell = ({
   handle,
+  displayHandle,
   businessName,
   bannerUrl,
   logoUrl,
   active,
   children,
 }: {
-  handle: string;             // Without the leading "@" — e.g. "janestylist".
+  handle: string;             // URL handle — used to build internal links.
+  displayHandle?: string | null; // Branded handle to render under the title; falls back to `handle`.
   businessName: string | null;
   bannerUrl: string | null;
   logoUrl: string | null;
@@ -175,13 +177,17 @@ export const StorefrontShell = ({
                 lineHeight: 1.1,
               }}
             >
-              {businessName || "Stylist"}
+              {/* 'Welcome' is the very last fallback — when nothing
+                  is set on booking_links, profiles.business_name,
+                  full_name, or even a branded slug to humanize. The
+                  upstream hook covers the better fallbacks. */}
+              {businessName || "Welcome"}
             </h1>
             <p
               className="text-[12px] truncate"
               style={{ color: C.muted, marginTop: 2 }}
             >
-              @{handle}
+              @{displayHandle || handle}
             </p>
           </div>
         </div>
