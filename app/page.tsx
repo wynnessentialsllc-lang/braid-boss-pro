@@ -18786,6 +18786,7 @@ type OrderRow = {
   fulfillment_status: string;
   amount_total: number;
   currency: string;
+  stripe_payment_intent: string | null;
   customer_email: string | null;
   customer_name: string | null;
   customer_phone: string | null;
@@ -18824,7 +18825,10 @@ const ORDER_LABEL: Record<string, string> = {
   refunded: "Refunded",
   canceled: "Canceled",
   failed: "Failed",
+  ready_for_pickup: "Ready for pickup",
 };
+
+type OrderFilter = "all" | "pending" | "paid" | "fulfilled" | "refunded";
 
 const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const userId: string | null = store.userId;
@@ -18832,14 +18836,22 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<OrderFilter>("all");
+  const [showArchived, setShowArchived] = useState(false);
   const [openOrder, setOpenOrder] = useState<OrderRow | null>(null);
 
-  // Fulfillment form state when an order is open in the sheet.
   const [carrier, setCarrier] = useState("");
   const [trackingNumber, setTrackingNumber] = useState("");
   const [trackingUrl, setTrackingUrl] = useState("");
+  const [internalNotes, setInternalNotes] = useState("");
+  const [notesDirty, setNotesDirty] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  const [refundOpen, setRefundOpen] = useState(false);
+  const [refundAmount, setRefundAmount] = useState<string>("");
+  const [refundReason, setRefundReason] = useState("");
+  const [refundBusy, setRefundBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!userId) return;
@@ -18852,93 +18864,151 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(200);
-    if (err) {
-      setError(err.message);
-      setOrders([]);
-    } else {
-      setOrders((data || []) as OrderRow[]);
-    }
+    if (err) { setError(err.message); setOrders([]); }
+    else { setOrders((data || []) as OrderRow[]); }
     setLoading(false);
   }, [userId]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useEffect(() => { refresh(); }, [refresh]);
 
-  // Display status — pending takes precedence over fulfillment_status
-  // because an unpaid order shouldn't read as 'unfulfilled'.
   const displayStatus = (o: OrderRow): string => {
     if (o.status !== "paid") return o.status;
     if (o.fulfillment_status === "unfulfilled") return "paid";
     return o.fulfillment_status;
   };
 
-  const filtered = useMemo(() => {
+  const visible = useMemo(() => {
+    const archivedHidden = orders.filter(o => showArchived || !(o as any).archived_at);
+    const byFilter = archivedHidden.filter((o) => {
+      const s = displayStatus(o);
+      switch (filter) {
+        case "pending":   return s === "pending" || s === "failed";
+        case "paid":      return s === "paid";
+        case "fulfilled": return s === "fulfilled" || s === "shipped" || s === "ready_for_pickup";
+        case "refunded":  return s === "refunded" || s === "canceled";
+        case "all":
+        default:          return true;
+      }
+    });
     const q = search.trim().toLowerCase();
-    if (!q) return orders;
-    return orders.filter(
+    if (!q) return byFilter;
+    return byFilter.filter(
       (o) =>
         (o.customer_name || "").toLowerCase().includes(q) ||
         (o.customer_email || "").toLowerCase().includes(q) ||
         o.customer_token.toLowerCase().includes(q) ||
         (o.line_items || []).some((i: any) => String(i?.title || "").toLowerCase().includes(q)),
     );
-  }, [orders, search]);
+  }, [orders, search, filter, showArchived]);
+
+  const counts = useMemo(() => {
+    const base = orders.filter(o => showArchived || !(o as any).archived_at);
+    return {
+      all: base.length,
+      pending: base.filter(o => o.status === "pending" || o.status === "failed").length,
+      paid: base.filter(o => o.status === "paid" && o.fulfillment_status === "unfulfilled").length,
+      fulfilled: base.filter(o => ["fulfilled","shipped","ready_for_pickup"].includes(o.fulfillment_status)).length,
+      refunded: base.filter(o => ["refunded","canceled"].includes(o.fulfillment_status)).length,
+    };
+  }, [orders, showArchived]);
 
   const openDetail = (o: OrderRow) => {
     setOpenOrder(o);
     setCarrier(o.tracking_carrier || "");
     setTrackingNumber(o.tracking_number || "");
     setTrackingUrl(o.tracking_url || "");
+    setInternalNotes((o as any).internal_notes || "");
+    setNotesDirty(false);
     setActionMsg(null);
+  };
+
+  const reloadOpenOrder = async (id: string) => {
+    const { data } = await getSupabase()
+      .from("product_orders")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (data) openDetail(data as OrderRow);
+    await refresh();
   };
 
   const runAction = async (fn: () => Promise<{ ok: boolean; err?: string }>) => {
-    setActionBusy(true);
-    setActionMsg(null);
+    if (!openOrder) return;
+    setActionBusy(true); setActionMsg(null);
     const r = await fn();
     setActionBusy(false);
-    if (r.ok) {
-      setActionMsg({ kind: "ok", text: "Saved." });
-      await refresh();
-      // Re-read the open row after refresh.
-      const fresh = (await getSupabase()
-        .from("product_orders")
-        .select("*")
-        .eq("id", openOrder?.id || "")
-        .maybeSingle()).data as OrderRow | null;
-      if (fresh) openDetail(fresh);
-    } else {
-      setActionMsg({ kind: "error", text: r.err || "Couldn't update the order." });
-    }
+    if (r.ok) { setActionMsg({ kind: "ok", text: "Saved." }); await reloadOpenOrder(openOrder.id); }
+    else { setActionMsg({ kind: "error", text: r.err || "Couldn't update the order." }); }
   };
 
-  const markFulfilled = () =>
-    runAction(async () => {
-      if (!openOrder) return { ok: false };
-      const { error: err } = await getSupabase().rpc("mark_order_fulfilled", { order_id_in: openOrder.id });
-      return err ? { ok: false, err: err.message } : { ok: true };
+  const markFulfilled = () => runAction(async () => {
+    const { error: err } = await getSupabase().rpc("mark_order_fulfilled", { order_id_in: openOrder!.id });
+    return err ? { ok: false, err: err.message } : { ok: true };
+  });
+  const markShipped = () => runAction(async () => {
+    const { error: err } = await getSupabase().rpc("mark_order_shipped", {
+      order_id_in: openOrder!.id, carrier_in: carrier || null,
+      tracking_in: trackingNumber || null, url_in: trackingUrl || null,
     });
+    return err ? { ok: false, err: err.message } : { ok: true };
+  });
+  const markReadyForPickup = () => runAction(async () => {
+    const { error: err } = await getSupabase().rpc("mark_order_ready_for_pickup", { order_id_in: openOrder!.id });
+    return err ? { ok: false, err: err.message } : { ok: true };
+  });
+  const markCanceled = () => runAction(async () => {
+    if (!confirm("Cancel this order? This can't be undone.")) return { ok: false, err: "" };
+    const { error: err } = await getSupabase().rpc("mark_order_canceled", { order_id_in: openOrder!.id });
+    return err ? { ok: false, err: err.message } : { ok: true };
+  });
+  const toggleArchive = () => runAction(async () => {
+    const archived = !!(openOrder as any)?.archived_at;
+    const { error: err } = await getSupabase().rpc("set_order_archived", { order_id_in: openOrder!.id, archived_in: !archived });
+    return err ? { ok: false, err: err.message } : { ok: true };
+  });
+  const saveNotes = () => runAction(async () => {
+    const { error: err } = await getSupabase()
+      .from("product_orders")
+      .update({ internal_notes: internalNotes.trim() || null, updated_at: new Date().toISOString() })
+      .eq("id", openOrder!.id);
+    if (!err) setNotesDirty(false);
+    return err ? { ok: false, err: err.message } : { ok: true };
+  });
 
-  const markShipped = () =>
-    runAction(async () => {
-      if (!openOrder) return { ok: false };
-      const { error: err } = await getSupabase().rpc("mark_order_shipped", {
-        order_id_in: openOrder.id,
-        carrier_in: carrier || null,
-        tracking_in: trackingNumber || null,
-        url_in: trackingUrl || null,
+  const submitRefund = async () => {
+    if (!openOrder) return;
+    setRefundBusy(true); setActionMsg(null);
+    try {
+      const supabase = getSupabase();
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) {
+        setActionMsg({ kind: "error", text: "Sign-in expired — refresh and try again." });
+        setRefundBusy(false); return;
+      }
+      const res = await fetch("/api/product-checkout/refund", {
+        method: "POST",
+        headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          order_id: openOrder.id,
+          amount: refundAmount.trim() ? Number(refundAmount) : null,
+          reason: refundReason.trim() || null,
+        }),
       });
-      return err ? { ok: false, err: err.message } : { ok: true };
-    });
-
-  const markCanceled = () =>
-    runAction(async () => {
-      if (!openOrder) return { ok: false };
-      if (!confirm("Cancel this order? This can't be undone.")) return { ok: false, err: "" };
-      const { error: err } = await getSupabase().rpc("mark_order_canceled", { order_id_in: openOrder.id });
-      return err ? { ok: false, err: err.message } : { ok: true };
-    });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body?.ok) {
+        setActionMsg({ kind: "error", text: body?.error || "Refund failed." });
+      } else {
+        setRefundOpen(false); setRefundAmount(""); setRefundReason("");
+        setActionMsg({ kind: "ok", text: `Refunded ${fmtMoney(body.amount_refunded, openOrder.currency)}.` });
+        await reloadOpenOrder(openOrder.id);
+      }
+    } catch (e: any) {
+      setActionMsg({ kind: "error", text: e?.message || "Network error." });
+    } finally {
+      setRefundBusy(false);
+    }
+  };
 
   return (
     <div className="bbp-fade pb-32">
@@ -18948,39 +19018,65 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
         leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
       />
       <div className="px-5 pt-2 space-y-3">
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by customer, email, order ref, or product"
-        />
+        <div className="flex gap-2 overflow-x-auto -mx-5 px-5 pb-1" style={{ scrollbarWidth: "none" }}>
+          {(["all","pending","paid","fulfilled","refunded"] as OrderFilter[]).map((k) => {
+            const labels: Record<OrderFilter, string> = { all: "All", pending: "Pending", paid: "Paid", fulfilled: "Fulfilled", refunded: "Refunded" };
+            const active = filter === k;
+            return (
+              <button
+                key={k} type="button"
+                onClick={() => setFilter(k)}
+                className="shrink-0 px-3 py-1.5 rounded-full text-[12px] font-bold uppercase tracking-widest transition active:scale-[0.97]"
+                style={{
+                  background: active ? GRADIENTS.primary : "transparent",
+                  color: active ? "#FFFFFF" : C.muted,
+                  border: `1px solid ${active ? "transparent" : C.brandBorder}`,
+                  letterSpacing: "0.10em",
+                  boxShadow: active ? SHADOWS.primaryGlow : "none",
+                }}
+              >
+                {labels[k]} <span style={{ opacity: 0.7, marginLeft: 4 }}>{counts[k]}</span>
+              </button>
+            );
+          })}
+        </div>
+        <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by customer, email, order ref, product" />
+        <label className="flex items-center gap-2 text-[12px]" style={{ color: C.muted }}>
+          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+          Show archived
+        </label>
         {error && (
           <Card className="p-3" style={{ border: `1px solid ${C.danger}` }}>
             <p className="text-[12px]" style={{ color: C.danger }}>{error}</p>
           </Card>
         )}
         {loading ? (
+          <Card className="p-6 text-center"><p className="text-[13px]" style={{ color: C.muted }}>Loading…</p></Card>
+        ) : visible.length === 0 ? (
           <Card className="p-6 text-center">
-            <p className="text-[13px]" style={{ color: C.muted }}>Loading…</p>
-          </Card>
-        ) : filtered.length === 0 ? (
-          <Card className="p-6 text-center">
-            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>No orders yet</p>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>
+              {orders.length === 0 ? "No orders yet" : "No orders match"}
+            </p>
             <p className="text-[12px] mt-2" style={{ color: C.muted }}>
-              Customer orders from your storefront will appear here.
+              {orders.length === 0
+                ? "Customer orders from your storefront will appear here."
+                : "Try a different filter or clear the search."}
             </p>
           </Card>
         ) : (
-          filtered.map((o) => {
+          visible.map((o) => {
             const s = displayStatus(o);
             const tone = ORDER_TONE[s] || "neutral";
             const itemCount = (o.line_items || []).reduce((acc: number, i: any) => acc + (Number(i?.quantity) || 1), 0);
+            const archived = !!(o as any).archived_at;
             return (
-              <Card key={o.id} className="p-3.5 active:scale-[0.99] cursor-pointer" onClick={() => openDetail(o)}>
+              <Card key={o.id} className="p-3.5 active:scale-[0.99] cursor-pointer" style={{ opacity: archived ? 0.55 : 1 }} onClick={() => openDetail(o)}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                       <Pill tone={tone}>{ORDER_LABEL[s] || s}</Pill>
-                      {o.shipping_required && <Pill tone="neutral">Ship</Pill>}
+                      <Pill tone="neutral">{o.shipping_required ? "Ship" : "Pickup"}</Pill>
+                      {archived && <Pill tone="neutral">Archived</Pill>}
                     </div>
                     <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>
                       {o.customer_name || o.customer_email || "Customer"}
@@ -19001,14 +19097,18 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
         {openOrder && (() => {
           const s = displayStatus(openOrder);
           const tone = ORDER_TONE[s] || "neutral";
-          const isFinal = s === "canceled" || s === "refunded";
+          const isRefunded = openOrder.fulfillment_status === "refunded";
+          const isCanceled = openOrder.fulfillment_status === "canceled";
+          const isFinal = isRefunded || isCanceled;
+          const archived = !!(openOrder as any).archived_at;
           return (
             <div className="space-y-3 pb-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <Pill tone={tone}>{ORDER_LABEL[s] || s}</Pill>
-                {openOrder.shipping_required && <Pill tone="neutral">Ships</Pill>}
-                {!openOrder.shipping_required && <Pill tone="neutral">Pickup</Pill>}
+                <Pill tone="neutral">{openOrder.shipping_required ? "Ships" : "Pickup"}</Pill>
+                {archived && <Pill tone="neutral">Archived</Pill>}
               </div>
+
               <Card className="p-3.5">
                 <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Customer</p>
                 <p className="text-sm font-semibold mt-1" style={{ color: C.espresso }}>{openOrder.customer_name || "—"}</p>
@@ -19019,6 +19119,9 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
                   </p>
                 )}
                 <p className="text-[11px] mt-2" style={{ color: C.muted }}>Order ref: <span style={{ fontFamily: "monospace" }}>{openOrder.customer_token}</span></p>
+                {openOrder.stripe_payment_intent && (
+                  <p className="text-[11px]" style={{ color: C.muted }}>Stripe PI: <span style={{ fontFamily: "monospace" }}>{openOrder.stripe_payment_intent}</span></p>
+                )}
               </Card>
 
               <Card className="p-3.5">
@@ -19049,9 +19152,15 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
                   <span className="text-[12px] font-semibold" style={{ color: C.muted }}>Total</span>
                   <span className="text-[16px] font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{fmtMoney(Number(openOrder.amount_total || 0), openOrder.currency)}</span>
                 </div>
+                {openOrder.refund_amount != null && (
+                  <div className="flex justify-between mt-1">
+                    <span className="text-[11px]" style={{ color: C.danger }}>Refunded</span>
+                    <span className="text-[12px] font-semibold" style={{ color: C.danger }}>−{fmtMoney(Number(openOrder.refund_amount), openOrder.currency)}</span>
+                  </div>
+                )}
               </Card>
 
-              {!isFinal && openOrder.status === "paid" && (
+              {!isFinal && openOrder.status === "paid" && openOrder.shipping_required && (
                 <Card className="p-3.5 space-y-2">
                   <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Shipping</p>
                   <Input value={carrier} onChange={e => setCarrier(e.target.value)} placeholder="Carrier (USPS, UPS, FedEx)" />
@@ -19059,6 +19168,28 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
                   <Input value={trackingUrl} onChange={e => setTrackingUrl(e.target.value)} type="url" inputMode="url" placeholder="Tracking URL" />
                 </Card>
               )}
+
+              <Card className="p-3.5 space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Internal notes</p>
+                <Textarea rows={3} value={internalNotes} onChange={(e) => { setInternalNotes(e.target.value); setNotesDirty(true); }} placeholder="Private notes — only visible to you." />
+                {notesDirty && (
+                  <Button variant="outline" onClick={saveNotes}>{actionBusy ? "Saving…" : "Save notes"}</Button>
+                )}
+              </Card>
+
+              <Card className="p-3.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Timeline</p>
+                <div className="mt-2 space-y-1 text-[12px]">
+                  <TimelineRow when={openOrder.created_at} label="Order placed" />
+                  <TimelineRow when={openOrder.paid_at} label="Payment captured" />
+                  <TimelineRow when={(openOrder as any).ready_for_pickup_at} label="Ready for pickup" />
+                  <TimelineRow when={openOrder.fulfilled_at} label="Fulfilled" />
+                  <TimelineRow when={openOrder.shipped_at} label="Shipped" />
+                  <TimelineRow when={openOrder.refunded_at} label={`Refunded${openOrder.refund_amount != null ? " · " + fmtMoney(Number(openOrder.refund_amount), openOrder.currency) : ""}`} />
+                  <TimelineRow when={openOrder.canceled_at} label="Canceled" />
+                  <TimelineRow when={(openOrder as any).archived_at} label="Archived" />
+                </div>
+              </Card>
 
               {actionMsg && (
                 <p className="text-[12px] font-semibold" style={{ color: actionMsg.kind === "error" ? C.danger : C.success }}>
@@ -19068,29 +19199,35 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
 
               {openOrder.status === "paid" && !isFinal && (
                 <div className="grid grid-cols-2 gap-2 pt-1">
-                  {s !== "shipped" && s !== "fulfilled" && (
-                    <Button variant="primary" onClick={markFulfilled}>
-                      {actionBusy ? "Saving…" : "Mark fulfilled"}
-                    </Button>
+                  {openOrder.shipping_required ? (
+                    <>
+                      <Button variant="primary" onClick={markShipped}>{actionBusy ? "…" : "Mark shipped"}</Button>
+                      <Button variant="outline" onClick={markFulfilled}>{actionBusy ? "…" : "Mark fulfilled"}</Button>
+                    </>
+                  ) : (
+                    <Button variant="primary" onClick={markReadyForPickup}>{actionBusy ? "…" : "Ready for pickup"}</Button>
                   )}
-                  <Button variant="primary" onClick={markShipped}>
-                    {actionBusy ? "Saving…" : "Mark shipped"}
-                  </Button>
                 </div>
               )}
-              {openOrder.status !== "canceled" && !isFinal && (
-                <Button variant="outline" fullWidth onClick={markCanceled}>
-                  {actionBusy ? "…" : "Cancel order"}
+
+              {openOrder.status === "paid" && !isRefunded && !isCanceled && (
+                <Button variant="outline" fullWidth onClick={() => { setRefundOpen(true); setRefundAmount(""); setRefundReason(""); }}>
+                  Refund
                 </Button>
               )}
+
+              {!isFinal && (
+                <Button variant="outline" fullWidth onClick={markCanceled}>{actionBusy ? "…" : "Cancel order"}</Button>
+              )}
+
+              <Button variant="outline" fullWidth onClick={toggleArchive}>
+                {actionBusy ? "…" : archived ? "Unarchive" : "Archive"}
+              </Button>
+
               {openOrder.tracking_url && (
-                <a
-                  href={openOrder.tracking_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <a href={openOrder.tracking_url} target="_blank" rel="noopener noreferrer"
                   className="block text-center text-[12px] font-bold uppercase tracking-wider"
-                  style={{ color: C.brandPrimary, padding: 8, letterSpacing: "0.12em" }}
-                >
+                  style={{ color: C.brandPrimary, padding: 8, letterSpacing: "0.12em" }}>
                   Open tracking page
                 </a>
               )}
@@ -19098,9 +19235,42 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
           );
         })()}
       </Sheet>
+
+      <Sheet open={refundOpen} onClose={() => setRefundOpen(false)} title="Refund order">
+        {openOrder && (
+          <div className="space-y-3 pb-2">
+            <p className="text-[12px]" style={{ color: C.muted }}>
+              Total charged: <span style={{ color: C.espresso, fontWeight: 700 }}>{fmtMoney(Number(openOrder.amount_total || 0), openOrder.currency)}</span>
+            </p>
+            <Field label="Refund amount" hint="Leave blank for a full refund.">
+              <MoneyInput value={refundAmount} onChange={(v) => setRefundAmount(v)} />
+            </Field>
+            <Field label="Reason (optional)">
+              <Textarea rows={2} value={refundReason} onChange={(e) => setRefundReason(e.target.value)} placeholder="Notes for your records — not shared with the customer." />
+            </Field>
+            <Button variant="primary" fullWidth onClick={submitRefund}>
+              {refundBusy ? "Issuing refund…" : refundAmount.trim() ? `Refund ${fmtMoney(Number(refundAmount) || 0, openOrder.currency)}` : "Refund full amount"}
+            </Button>
+            <Button variant="outline" fullWidth onClick={() => setRefundOpen(false)}>Cancel</Button>
+          </div>
+        )}
+      </Sheet>
     </div>
   );
 };
+
+const TimelineRow = ({ when, label }: { when: string | null | undefined; label: string }) => {
+  if (!when) return null;
+  let formatted = when;
+  try { formatted = new Date(when).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }); } catch { /* leave raw */ }
+  return (
+    <div className="flex justify-between items-baseline gap-2">
+      <span style={{ color: C.coffee }}>{label}</span>
+      <span style={{ color: C.muted, fontSize: 11 }}>{formatted}</span>
+    </div>
+  );
+};
+
 
 // ============================================================
 //  SHIPPING SETTINGS — Shop sub-screen (Phase 2)
