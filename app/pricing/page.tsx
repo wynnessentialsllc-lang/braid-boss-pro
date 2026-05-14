@@ -71,7 +71,7 @@ export default function PricingPage() {
           </>
         }
         body="Braid Boss Pro is built specifically for braid stylists — bookings, deposits, contracts, retail storefronts, analytics, and modern creator-economy tools designed around how braiders actually run their chairs. Founding stylists lock in lifetime access at a single one-time payment before the platform transitions to monthly membership pricing."
-        primaryCta={{ label: "Claim founding access", href: "/" }}
+        primaryCta={{ label: "Claim founding access", href: "/founding-access" }}
         secondaryCta={{ label: "See the platform", href: "/features" }}
       />
 
@@ -106,7 +106,7 @@ export default function PricingPage() {
               "Every future platform upgrade included",
               "Priority access to new tools as they ship",
             ]}
-            cta={{ label: "Claim founding access", href: "/" }}
+            cta={{ label: "Claim founding access", href: "/founding-access" }}
           />
           <PricingCard
             tone="future"
@@ -123,7 +123,7 @@ export default function PricingPage() {
               "Stripe Connect direct charges",
               "Mobile dashboard + PWA install",
             ]}
-            cta={{ label: "Join founding access", href: "/" }}
+            cta={{ label: "Join founding access", href: "/founding-access" }}
           />
         </div>
 
@@ -189,7 +189,7 @@ export default function PricingPage() {
       <CtaFooter
         title="The window closes at 100 stylists."
         body="Create your founding account in under 10 minutes. Lock in lifetime access before the platform transitions to monthly membership pricing."
-        primaryCta={{ label: "Claim my founding spot", href: "/" }}
+        primaryCta={{ label: "Claim my founding spot", href: "/founding-access" }}
         secondaryCta={{ label: "Read the FAQ", href: "/faq" }}
       />
     </MarketingShell>
