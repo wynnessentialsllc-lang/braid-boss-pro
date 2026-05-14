@@ -118,6 +118,11 @@ import {
   useServiceCategories,
 } from "./lib/service-categories";
 import {
+  validateSlug,
+  normalizeSlug,
+  slugReasonMessage,
+} from "./lib/publicSlug";
+import {
   type DashboardRevenue,
   type RevenueGranularity,
   type RevenuePoint,
@@ -13078,6 +13083,19 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   const [bookingCustomizeOpen, setBookingCustomizeOpen] = useState(false);
   const [pendingRequests, setPendingRequests] = useState<number>(0);
 
+  // Branded slug — the editable, memorable form of the booking URL.
+  // savedBrandedSlug mirrors profiles.public_slug; brandedDraft is
+  // the typing buffer. We debounce the availability RPC so each
+  // keystroke doesn't hammer the server.
+  const [savedBrandedSlug, setSavedBrandedSlug] = useState<string | null>(null);
+  const [brandedDraft, setBrandedDraft] = useState<string>("");
+  const [brandedCheck, setBrandedCheck] = useState<{
+    state: "idle" | "checking" | "ok" | "bad";
+    reason?: string;
+  }>({ state: "idle" });
+  const [brandedBusy, setBrandedBusy] = useState(false);
+  const [brandedCopied, setBrandedCopied] = useState(false);
+
   // eslint-disable-next-line react-hooks/preserve-manual-memoization -- depends on window.location which the React Compiler can't statically memoize, intentional
   const bookingUrl = useMemo(() => {
     if (!bookingLink?.slug) return null;
@@ -13111,6 +13129,103 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
     })();
     return () => { cancelled = true; };
   }, [mode, userId]);
+
+  // Load the stylist's branded slug (profiles.public_slug). Lives
+  // alongside the auto-generated random slug; null means they
+  // haven't claimed a branded URL yet.
+  useEffect(() => {
+    if (mode !== "authed" || !userId) {
+      setSavedBrandedSlug(null);
+      setBrandedDraft("");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from("profiles")
+        .select("public_slug")
+        .eq("id", userId)
+        .maybeSingle();
+      if (cancelled) return;
+      const slug = (data as any)?.public_slug || null;
+      setSavedBrandedSlug(slug);
+      setBrandedDraft(slug || "");
+    })();
+    return () => { cancelled = true; };
+  }, [mode, userId]);
+
+  // Debounced availability check. Re-runs whenever the input
+  // changes; cancels via the cleanup so a stale response can't
+  // overwrite a newer one.
+  useEffect(() => {
+    setBrandedCheck({ state: "idle" });
+    const trimmed = brandedDraft.trim();
+    if (!trimmed) return;
+    if (trimmed === savedBrandedSlug) return; // already saved
+    const local = validateSlug(trimmed);
+    if (!local.ok) {
+      setBrandedCheck({ state: "bad", reason: local.reason });
+      return;
+    }
+    setBrandedCheck({ state: "checking" });
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .rpc("public_check_slug_available", { slug_in: trimmed });
+        if (cancelled) return;
+        const row = Array.isArray(data) ? data[0] : (data as any);
+        if (error || !row) {
+          setBrandedCheck({ state: "bad", reason: "auth_required" });
+          return;
+        }
+        setBrandedCheck({
+          state: row.ok ? "ok" : "bad",
+          reason: row.reason,
+        });
+      } catch {
+        if (!cancelled) setBrandedCheck({ state: "bad", reason: "auth_required" });
+      }
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [brandedDraft, savedBrandedSlug]);
+
+  const handleSaveBrandedSlug = async () => {
+    if (!userId || brandedBusy) return;
+    const trimmed = brandedDraft.trim();
+    setBrandedBusy(true);
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.rpc("set_my_public_slug", { slug_in: trimmed || null });
+      const row = Array.isArray(data) ? data[0] : (data as any);
+      if (error || !row?.ok) {
+        setBrandedCheck({ state: "bad", reason: row?.reason || "auth_required" });
+        return;
+      }
+      setSavedBrandedSlug(row.slug || null);
+      setBrandedDraft(row.slug || "");
+      setBrandedCheck({ state: "ok", reason: row.reason });
+    } finally {
+      setBrandedBusy(false);
+    }
+  };
+
+  const brandedUrl = useMemo(() => {
+    if (!savedBrandedSlug) return null;
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    return `${origin}/book/${savedBrandedSlug}`;
+  }, [savedBrandedSlug]);
+
+  const handleCopyBrandedUrl = async () => {
+    if (!brandedUrl) return;
+    try {
+      await navigator.clipboard.writeText(brandedUrl);
+      setBrandedCopied(true);
+      setTimeout(() => setBrandedCopied(false), 1600);
+    } catch { /* ignore */ }
+  };
 
   const generateSlug = () => {
     // 8 url-safe chars, ~48 bits — enough for V1 personal links.
@@ -13365,6 +13480,104 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
                     {bookingLink.active ? "Pause" : "Resume"}
                   </Button>
                 </div>
+
+                {/* Branded slug — replaces the random ID with a
+                    memorable URL like /book/sbw-braiding. The legacy
+                    URL above keeps working; the branded one is just
+                    the friendlier face of the same booking link. */}
+                <div
+                  className="mt-3 rounded-xl p-3"
+                  style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}
+                >
+                  <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+                    Branded link
+                  </p>
+                  <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+                    Use your business name in the URL. Old links keep working — visitors landing on the random URL are auto-redirected to the branded one.
+                  </p>
+                  <div
+                    className="mt-2 flex items-stretch rounded-lg overflow-hidden"
+                    style={{ background: C.paper, border: `1px solid ${C.hairline}` }}
+                  >
+                    <span
+                      className="px-2 py-2 text-[11px] font-mono"
+                      style={{ color: C.muted, background: C.cream, borderRight: `1px solid ${C.hairline}`, whiteSpace: "nowrap" }}
+                    >
+                      /book/
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="text"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      placeholder="sbw-braiding"
+                      value={brandedDraft}
+                      onChange={(e) => setBrandedDraft(normalizeSlug(e.target.value))}
+                      maxLength={40}
+                      className="flex-1 px-2 py-2 text-[12px] font-mono"
+                      style={{
+                        background: "transparent",
+                        color: C.espresso,
+                        border: 0,
+                        outline: "none",
+                        appearance: "none",
+                        WebkitAppearance: "none",
+                      }}
+                    />
+                  </div>
+                  {/* Live status — checking / available / errored.
+                      Hidden when the input matches the saved value
+                      and there's nothing to say. */}
+                  {brandedCheck.state !== "idle" && (
+                    <p
+                      className="text-[11px] mt-1.5"
+                      style={{
+                        color: brandedCheck.state === "ok"
+                          ? C.success
+                          : brandedCheck.state === "checking"
+                            ? C.muted
+                            : C.danger,
+                      }}
+                    >
+                      {brandedCheck.state === "checking"
+                        ? "Checking availability…"
+                        : slugReasonMessage(brandedCheck.reason || "")}
+                    </p>
+                  )}
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <Button
+                      variant="primary"
+                      disabled={
+                        brandedBusy
+                        || brandedCheck.state === "checking"
+                        || (brandedDraft.trim() === (savedBrandedSlug || ""))
+                        || (brandedDraft.trim().length > 0 && brandedCheck.state !== "ok")
+                      }
+                      onClick={handleSaveBrandedSlug}
+                    >
+                      {brandedBusy
+                        ? "Saving…"
+                        : brandedDraft.trim() === ""
+                          ? (savedBrandedSlug ? "Remove branded link" : "Save")
+                          : "Save"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      icon={<Copy size={14} />}
+                      disabled={!brandedUrl}
+                      onClick={handleCopyBrandedUrl}
+                    >
+                      {brandedCopied ? "Copied" : "Copy URL"}
+                    </Button>
+                  </div>
+                  {brandedUrl && (
+                    <p className="text-[11px] mt-2 break-all font-mono" style={{ color: C.coffee }}>
+                      {brandedUrl}
+                    </p>
+                  )}
+                </div>
+
                 <Button
                   variant="ghost"
                   icon={<Sparkles size={14} />}
