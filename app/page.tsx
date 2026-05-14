@@ -2483,7 +2483,7 @@ const RebookingOpportunitiesCard = ({
             <div key={op.client_id} className="rounded-xl p-3 flex items-start gap-3"
               style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
               <div className="rounded-full flex items-center justify-center shrink-0"
-                style={{ width: 36, height: 36, background: `linear-gradient(135deg, ${C.caramel}, ${C.coffee})`, color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 14, fontWeight: 600 }}>
+                style={{ width: 36, height: 36, background: `linear-gradient(135deg, ${C.brandPrimary}, ${C.brandPrimaryDeep})`, color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 14, fontWeight: 600 }}>
                 {initials(op.client_name)}
               </div>
               <div className="flex-1 min-w-0">
@@ -2639,7 +2639,7 @@ const RebookingScreen = ({
               <Card key={op.client_id} className="p-3.5">
                 <div className="flex items-start gap-3">
                   <div className="rounded-full flex items-center justify-center shrink-0"
-                    style={{ width: 40, height: 40, background: `linear-gradient(135deg, ${C.caramel}, ${C.coffee})`, color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 15, fontWeight: 600 }}>
+                    style={{ width: 40, height: 40, background: `linear-gradient(135deg, ${C.brandPrimary}, ${C.brandPrimaryDeep})`, color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 15, fontWeight: 600 }}>
                     {initials(op.client_name)}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -4149,7 +4149,7 @@ const RetentionInsights = ({ clients, appointments, today, business, openCommuni
                 {insights.candidates.map(({ client, metrics, reason }) => (
                   <div key={client.id} className="flex items-center gap-3">
                     <div className="rounded-full flex items-center justify-center shrink-0"
-                      style={{ width: 32, height: 32, background: `linear-gradient(135deg, ${C.caramel}, ${C.coffee})`, color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 13, fontWeight: 600 }}>
+                      style={{ width: 32, height: 32, background: `linear-gradient(135deg, ${C.brandPrimary}, ${C.brandPrimaryDeep})`, color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 13, fontWeight: 600 }}>
                       {initials(client.name)}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -7604,7 +7604,7 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
                   className="rounded-full flex items-center justify-center shrink-0"
                   style={{
                     width: 52, height: 52,
-                    background: `linear-gradient(135deg, ${C.caramel}, ${C.coffee})`,
+                    background: `linear-gradient(135deg, ${C.brandPrimary}, ${C.brandPrimaryDeep})`,
                     color: C.cream,
                     fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 600,
                   }}
