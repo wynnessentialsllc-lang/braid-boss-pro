@@ -8267,13 +8267,24 @@ const ClientProfileSheet = ({
           <StatTile label="Upcoming" value={String(upcomingCount)} hint={upcomingCount === 0 ? "Nothing scheduled" : "future bookings"} />
           <StatTile label="Last visit" value={lastVisit ? fmtDate(lastVisit) : "—"} />
           <StatTile label="First visit" value={firstVisit ? fmtDate(firstVisit) : "—"} />
-          <Card className="p-3.5 col-span-2" style={{ background: `linear-gradient(180deg, ${C.espresso}, ${C.coffee})`, border: `1px solid ${C.goldDeep}` }}>
-            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.gold, letterSpacing: "0.14em" }}>Lifetime spend</p>
-            <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600, color: C.cream, lineHeight: 1 }}>
+          {/* Lifetime spend — green to read as "money earned." Uses
+              the brand-success gradient and a soft green halo so the
+              card pops on the white client sheet without fighting
+              the rest of the page color story. */}
+          <Card
+            className="p-3.5 col-span-2"
+            style={{
+              background: "linear-gradient(135deg, #22C55E 0%, #16A34A 100%)",
+              border: "0",
+              boxShadow: "0 10px 28px -10px rgba(34, 197, 94, 0.45)",
+            }}
+          >
+            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: "rgba(255, 255, 255, 0.92)", letterSpacing: "0.14em" }}>Lifetime spend</p>
+            <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600, color: "#FFFFFF", lineHeight: 1 }}>
               {fmtMoney(lifetimeSpend, currency)}
             </p>
             {insights.averageTicket > 0 && (
-              <p className="mt-1 text-[11px]" style={{ color: C.mutedSoft }}>
+              <p className="mt-1 text-[11px]" style={{ color: "rgba(255, 255, 255, 0.78)" }}>
                 Avg ticket {fmtMoney(insights.averageTicket, currency)}
               </p>
             )}
