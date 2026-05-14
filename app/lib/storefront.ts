@@ -145,6 +145,7 @@ export const PRODUCT_CATEGORIES = [
   "bonnets",
   "accessories",
   "tools",
+  "maintenance",
   "digital",
   "other",
 ] as const;
@@ -158,6 +159,7 @@ export const PRODUCT_CATEGORY_LABEL: Record<ProductCategory, string> = {
   bonnets: "Bonnets",
   accessories: "Accessories",
   tools: "Tools",
+  maintenance: "Maintenance",
   digital: "Digital Products",
   other: "Other",
 };
