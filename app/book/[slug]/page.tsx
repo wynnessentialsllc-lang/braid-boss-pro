@@ -2204,7 +2204,7 @@ export default function PublicBookingPage() {
               }}
             >
               {products.map(p => (
-                <ProductCard key={p.id} product={p} accent={accent} />
+                <ProductCard key={p.id} product={p} accent={accent} handle={slug} />
               ))}
             </div>
           </div>
@@ -2246,7 +2246,7 @@ export default function PublicBookingPage() {
               }}
             >
               {serviceRecs.map(p => (
-                <ProductCard key={`rec_${p.id}`} product={p} accent={accent} />
+                <ProductCard key={`rec_${p.id}`} product={p} accent={accent} handle={slug} />
               ))}
             </div>
           </div>
@@ -2396,8 +2396,18 @@ const selectStyle: React.CSSProperties = { ...inputStyle, appearance: "none" };
 // Shared between the "Recommended Products" + "For Your Appointment"
 // rails. Image on top, title + price below, optional external
 // checkout link as a footer pill.
-const ProductCard = ({ product, accent }: { product: PublicProduct; accent: string }) => {
-  const hasCheckout = !!product.external_checkout_url;
+const ProductCard = ({ product, accent, handle }: { product: PublicProduct; accent: string; handle: string }) => {
+  // Routing rules:
+  //   1. external_checkout_url set → open the external store in a new
+  //      tab (stylist explicitly redirected the product elsewhere).
+  //   2. no external URL but the product has a slug → link to the
+  //      in-app storefront detail page at /@<handle>/products/<slug>,
+  //      which carries the Stripe Connect Buy Now flow.
+  //   3. no slug (legacy row) → render as a non-interactive preview.
+  // Either of (1) or (2) gives the visitor a way to actually buy.
+  const hasExternal = !!product.external_checkout_url;
+  const hasInternal = !!product.slug && !!handle;
+  const purchasable = hasExternal || hasInternal;
   const body = (
     <>
       {product.image_url ? (
@@ -2447,7 +2457,7 @@ const ProductCard = ({ product, accent }: { product: PublicProduct; accent: stri
             </span>
           )}
         </div>
-        {hasCheckout && (
+        {purchasable && (
           <span
             style={{
               marginTop: 6,
@@ -2456,7 +2466,7 @@ const ProductCard = ({ product, accent }: { product: PublicProduct; accent: stri
               borderRadius: 99, padding: "6px 10px", background: "#FFFFFF",
             }}
           >
-            Shop now
+            {hasExternal ? "Shop now" : "View & buy"}
           </span>
         )}
       </div>
@@ -2472,15 +2482,26 @@ const ProductCard = ({ product, accent }: { product: PublicProduct; accent: stri
     overflow: "hidden",
     color: "inherit",
     textDecoration: "none",
-    cursor: hasCheckout ? "pointer" : "default",
+    cursor: purchasable ? "pointer" : "default",
   };
-  return hasCheckout ? (
-    <a href={product.external_checkout_url!} target="_blank" rel="noopener noreferrer" style={sharedStyle}>
-      {body}
-    </a>
-  ) : (
-    <div style={sharedStyle}>{body}</div>
-  );
+  if (hasExternal) {
+    return (
+      <a href={product.external_checkout_url!} target="_blank" rel="noopener noreferrer" style={sharedStyle}>
+        {body}
+      </a>
+    );
+  }
+  if (hasInternal) {
+    return (
+      <a
+        href={`/@${encodeURIComponent(handle)}/products/${encodeURIComponent(product.slug)}`}
+        style={sharedStyle}
+      >
+        {body}
+      </a>
+    );
+  }
+  return <div style={sharedStyle}>{body}</div>;
 };
 
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
