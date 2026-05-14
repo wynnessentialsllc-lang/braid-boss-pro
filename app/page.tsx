@@ -13507,9 +13507,15 @@ const ServicesScreen = ({
   // Which categories are expanded inline in the manager. Clicking a
   // category row toggles its services in-place; we keep a set so
   // multiple can be open at once.
-  const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<string>>(new Set());
+  // Categories default to EXPANDED so the stylist sees their full
+  // service roster the moment the screen loads — no tap required.
+  // We invert the model: track which categories the user has
+  // explicitly collapsed. An empty set = everything open. This also
+  // dodges the async race where categories load after the state was
+  // already initialized.
+  const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<Set<string>>(new Set());
   const toggleCategoryExpand = (id: string) => {
-    setExpandedCategoryIds(prev => {
+    setCollapsedCategoryIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -13751,7 +13757,7 @@ const ServicesScreen = ({
               {categories.map((c, idx) => {
                 const inCategory = services.filter(s => s.category_id === c.id);
                 const count = inCategory.length;
-                const expanded = expandedCategoryIds.has(c.id);
+                const expanded = !collapsedCategoryIds.has(c.id);
                 return (
                   <div
                     key={c.id}
