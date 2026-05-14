@@ -3064,19 +3064,25 @@ const KpiDetailSheet = ({
               return (
                 <div
                   key={a.id}
-                  className="rounded-2xl mb-2 overflow-hidden flex"
+                  className="rounded-2xl mb-2 overflow-hidden flex items-stretch"
                   style={{ background: C.paper, border: `1px solid ${C.hairline}` }}
                 >
+                  {/* min-w-0 lets the flex-1 column shrink below
+                      its intrinsic content width — required for
+                      the truncate utility to actually clip long
+                      service titles (e.g. "Small/Medium Boho Bob -
+                      Human Hair Included") instead of pushing the
+                      right-hand Mark-paid column off the sheet. */}
                   <button
                     type="button"
                     onClick={() => onOpenAppointment(a)}
-                    className="text-left px-3.5 py-3 flex-1 active:scale-[0.99] transition"
+                    className="text-left px-3.5 py-3 flex-1 min-w-0 active:scale-[0.99] transition"
                     style={{ background: "transparent", border: 0, color: "inherit", font: "inherit", appearance: "none", WebkitAppearance: "none" }}
                   >
-                    <div style={{ pointerEvents: "none" }}>
+                    <div style={{ pointerEvents: "none", minWidth: 0 }}>
                       <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{a.clientName || "Walk-in"}</p>
                       <p className="text-[11px] mt-0.5 truncate" style={{ color: C.muted }}>{a.style || "Service"} · {a.date ? fmtDate(a.date) : "—"}</p>
-                      <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+                      <p className="text-[11px] mt-1 truncate" style={{ color: C.muted }}>
                         Total {fmtMoney(Number(a.totalPrice) || 0, currency)} · Deposit {fmtMoney(Number(a.depositPaid) || 0, currency)}
                       </p>
                     </div>
