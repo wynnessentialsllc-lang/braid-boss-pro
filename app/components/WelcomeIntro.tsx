@@ -51,6 +51,26 @@ const P = {
   hairlineSoft: "rgba(74, 44, 26, 0.06)",
   success: "#5C7C4A",
   successSoft: "rgba(92, 124, 74, 0.12)",
+  // 2026 refresh tokens — used for the new gradient hero, the
+  // primary "Get Started" CTA, and the colorful feature icon chips.
+  brandPrimary: "#7C3AED",
+  brandSecondary: "#FF4D6D",
+  brandText: "#15111A",
+  brandMuted: "#6F6477",
+  brandBorder: "#ECE7F2",
+  brandSurface: "#FFFDF8",
+  brandSparkle: "#C6FF00",
+} as const;
+
+const GRADIENTS = {
+  primary:   "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)",
+  secondary: "linear-gradient(135deg, #FF4D6D 0%, #FF7A45 100%)",
+  // The hero halo behind the page title — soft, low-saturation, so
+  // the white surface still owns the canvas.
+  heroHalo:  "radial-gradient(circle, rgba(124, 58, 237, 0.22) 0%, rgba(255, 77, 109, 0.10) 50%, rgba(124, 58, 237, 0) 75%)",
+} as const;
+const SHADOWS = {
+  primaryGlow: "0 10px 28px -10px rgba(124, 58, 237, 0.45), 0 4px 12px -4px rgba(255, 77, 109, 0.30)",
 } as const;
 
 const FONT_DISPLAY =
@@ -781,11 +801,13 @@ const WelcomeIntro = ({
           position: "absolute",
           top: 180,
           left: "50%",
-          width: 320,
-          height: 320,
-          background:
-            "radial-gradient(circle, rgba(201,169,97,0.32) 0%, rgba(201,169,97,0) 65%)",
-          filter: "blur(2px)",
+          width: 360,
+          height: 360,
+          // 2026 refresh: the gold halo behind the title becomes
+          // the new purple→coral brand halo. Same calm intensity
+          // so the page still reads white-first.
+          background: GRADIENTS.heroHalo,
+          filter: "blur(8px)",
           pointerEvents: "none",
           animation: reduced ? "none" : "bbp-glow 6s ease-in-out infinite",
           zIndex: 0,
@@ -897,7 +919,20 @@ const WelcomeIntro = ({
             gap: 10,
           }}
         >
-          {FEATURES.map((f, i) => (
+          {FEATURES.map((f, i) => {
+            // Feature-icon chip palette — each row gets a slightly
+            // different gradient so the column reads as polished
+            // app-store onboarding instead of one repeated color.
+            // Order intentional: purple → coral → orange → green.
+            const chipGradients = [
+              "linear-gradient(135deg, #7C3AED 0%, #B14BE0 100%)",   // purple
+              "linear-gradient(135deg, #FF4D6D 0%, #FF7A45 100%)",   // coral
+              "linear-gradient(135deg, #FBBF24 0%, #F59E0B 100%)",   // amber
+              "linear-gradient(135deg, #22C55E 0%, #16A34A 100%)",   // green
+              "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)",   // brand
+            ];
+            const chipGradient = chipGradients[i % chipGradients.length];
+            return (
             <li
               key={f.title}
               className="bbp-intro-anim"
@@ -906,10 +941,10 @@ const WelcomeIntro = ({
                 alignItems: "flex-start",
                 gap: 12,
                 background: P.paper,
-                border: `1px solid ${P.hairline}`,
+                border: `1px solid ${P.brandBorder}`,
                 borderRadius: 14,
                 padding: "13px 14px",
-                boxShadow: "0 1px 3px rgba(42,24,16,0.04)",
+                boxShadow: "0 4px 14px rgba(21, 17, 26, 0.05)",
                 animation: reduced
                   ? "none"
                   : `bbp-fade-up 560ms ${380 + i * 110}ms both`,
@@ -922,11 +957,12 @@ const WelcomeIntro = ({
                   width: 36,
                   height: 36,
                   borderRadius: 10,
-                  background: P.ivory,
+                  background: chipGradient,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  color: P.goldDeep,
+                  color: "#FFFFFF",
+                  boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
                 }}
               >
                 {f.icon}
@@ -955,7 +991,8 @@ const WelcomeIntro = ({
                 </p>
               </div>
             </li>
-          ))}
+          );
+          })}
         </ul>
 
         {/* CTAs — placed above the preview carousel so they're
@@ -989,21 +1026,25 @@ const WelcomeIntro = ({
             <button
               type="button"
               onClick={() => { trackEvent("get_started_click", { category: "activation" }); onGetStarted(); }}
+              // 2026 refresh: Get Started swaps the espresso pill for
+              // the platform's brand gradient + glow. Same shape so
+              // the press/hover handlers below keep working.
               style={{
                 appearance: "none",
                 border: "none",
                 borderRadius: 999,
                 padding: "16px 22px",
-                background: P.espresso,
-                color: P.cream,
+                background: GRADIENTS.primary,
+                backgroundColor: P.brandPrimary,
+                color: "#FFFFFF",
                 fontSize: 15,
-                fontWeight: 600,
+                fontWeight: 700,
                 letterSpacing: "0.02em",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
                 gap: 8,
-                boxShadow: "0 10px 22px rgba(42,24,16,0.18)",
+                boxShadow: SHADOWS.primaryGlow,
                 cursor: "pointer",
                 transitionProperty: "transform, box-shadow",
                 transitionDuration: "180ms",
@@ -1015,27 +1056,27 @@ const WelcomeIntro = ({
               onMouseDown={(e) => {
                 const el = e.currentTarget as HTMLButtonElement;
                 el.style.transform = "scale(0.985)";
-                el.style.boxShadow = "0 6px 14px rgba(42,24,16,0.22)";
+                el.style.boxShadow = "0 6px 14px rgba(124, 58, 237, 0.32)";
               }}
               onMouseUp={(e) => {
                 const el = e.currentTarget as HTMLButtonElement;
                 el.style.transform = "";
-                el.style.boxShadow = "0 10px 22px rgba(42,24,16,0.18)";
+                el.style.boxShadow = SHADOWS.primaryGlow;
               }}
               onMouseLeave={(e) => {
                 const el = e.currentTarget as HTMLButtonElement;
                 el.style.transform = "";
-                el.style.boxShadow = "0 10px 22px rgba(42,24,16,0.18)";
+                el.style.boxShadow = SHADOWS.primaryGlow;
               }}
               onTouchStart={(e) => {
                 const el = e.currentTarget as HTMLButtonElement;
                 el.style.transform = "scale(0.985)";
-                el.style.boxShadow = "0 6px 14px rgba(42,24,16,0.22)";
+                el.style.boxShadow = "0 6px 14px rgba(124, 58, 237, 0.32)";
               }}
               onTouchEnd={(e) => {
                 const el = e.currentTarget as HTMLButtonElement;
                 el.style.transform = "";
-                el.style.boxShadow = "0 10px 22px rgba(42,24,16,0.18)";
+                el.style.boxShadow = SHADOWS.primaryGlow;
               }}
             >
               Get Started <ArrowRight size={16} />
