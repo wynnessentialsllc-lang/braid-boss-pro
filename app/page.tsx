@@ -17549,7 +17549,28 @@ export default function App() {
               openAppointmentRecord={(a) => { setActive("schedule"); setApptPrefill(a); }} />
           )}
           {active === "studio" && (
-            <Studio store={store} />
+            // The Studio tab now opens the full Settings hub instead
+            // of the contracts-and-services workspace it used to point
+            // at. Settings already routes through to contracts /
+            // services / discounts / availability / etc. via its
+            // openX props, so this is a single redirect — every
+            // surface remains reachable, just one tap deeper.
+            <SettingsScreen
+              store={store}
+              onBack={() => setActive("dashboard")}
+              openReminderSettings={() => setSecondary("reminderSettings")}
+              openCommunicationLog={() => setSecondary("communicationLog")}
+              openAccount={() => setSecondary("account")}
+              openDiscounts={() => setSecondary("discounts")}
+              openServices={() => setSecondary("services")}
+              openReports={() => setSecondary("reports")}
+              openPolicies={() => setSecondary("bookingPolicies")}
+              openAvailability={() => setSecondary("availability")}
+              openWaitlist={() => setSecondary("waitlist")}
+              openIntelligence={() => setSecondary("intelligence")}
+              openApprovals={() => setSecondary("approvals")}
+              openContracts={() => setSecondary("contracts")}
+            />
           )}
           {active === "calculator" && (
             <Calculator store={store}
