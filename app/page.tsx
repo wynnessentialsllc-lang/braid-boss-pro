@@ -18439,16 +18439,25 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
     active: boolean;
   }>;
   const [editing, setEditing] = useState<Draft | null>(null);
+  // Raw textarea content for the variants list. Decoupled from
+  // editing.variants because parseVariantsFromText() filters empty
+  // lines — round-tripping the textarea through it on every keystroke
+  // ate the trailing "\n" after the user typed a variant name, so
+  // pressing Enter couldn't open a fresh line. The string is parsed
+  // into variant objects once at save time.
+  const [variantsRaw, setVariantsRaw] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const handleSave = async () => {
     if (!editing || busy) return;
     setBusy(true); setErr(null);
-    const saved = await api.upsert(editing);
+    const parsedVariants = parseVariantsFromText(variantsRaw, editing.variants || []);
+    const saved = await api.upsert({ ...editing, variants: parsedVariants });
     setBusy(false);
     if (!saved) { setErr(api?.error || "Couldn't save."); return; }
     setEditing(null);
+    setVariantsRaw("");
   };
   const handleDelete = async (id: string) => {
     if (busy) return;
@@ -18466,7 +18475,7 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
         rightAction={
           <button
             type="button"
-            onClick={() => setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false })}
+            onClick={() => { setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false }); setVariantsRaw(""); }}
             className="p-2 rounded-full"
             style={{ background: C.gold, color: C.espresso, border: 0 }}
             aria-label="Add product"
@@ -18491,27 +18500,33 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
             </p>
             <div className="mt-4">
               <Button variant="primary" icon={<Plus size={16} />} fullWidth
-                onClick={() => setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false })}>
+                onClick={() => { setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false }); setVariantsRaw(""); }}>
                 Add your first product
               </Button>
             </div>
           </Card>
         ) : (
           items.map(p => (
-            <Card key={p.id} className="p-4 active:scale-[0.99] cursor-pointer" onClick={() => setEditing({
-              id: p.id, title: p.title, slug: p.slug,
-              description: p.description, image_url: p.image_url,
-              gallery_images: p.gallery_images || [],
-              price: p.price, compare_at_price: p.compare_at_price,
-              inventory_count: p.inventory_count, category: p.category,
-              is_featured: p.is_featured,
-              local_pickup_available: p.local_pickup_available,
-              external_checkout_url: p.external_checkout_url,
-              requires_shipping: p.requires_shipping,
-              variant_label: p.variant_label,
-              variants: p.variants || [],
-              active: p.active,
-            })}>
+            <Card key={p.id} className="p-4 active:scale-[0.99] cursor-pointer" onClick={() => {
+              setEditing({
+                id: p.id, title: p.title, slug: p.slug,
+                description: p.description, image_url: p.image_url,
+                gallery_images: p.gallery_images || [],
+                price: p.price, compare_at_price: p.compare_at_price,
+                inventory_count: p.inventory_count, category: p.category,
+                is_featured: p.is_featured,
+                local_pickup_available: p.local_pickup_available,
+                external_checkout_url: p.external_checkout_url,
+                requires_shipping: p.requires_shipping,
+                variant_label: p.variant_label,
+                variants: p.variants || [],
+                active: p.active,
+              });
+              // Seed the textarea with the existing variant names so
+              // editing keeps them visible; new picks tack on as the
+              // user types more lines.
+              setVariantsRaw((p.variants || []).map(v => v.name).join("\n"));
+            }}>
               <div className="flex items-start justify-between gap-3">
                 <div className="rounded-xl overflow-hidden shrink-0" style={{ width: 48, height: 48, background: C.brandBorder }}>
                   {p.image_url ? (
@@ -18546,7 +18561,7 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
         )}
       </div>
 
-      <Sheet open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? "Edit product" : "New product"}>
+      <Sheet open={!!editing} onClose={() => { setEditing(null); setVariantsRaw(""); }} title={editing?.id ? "Edit product" : "New product"}>
         {editing && (
           <div className="space-y-3 pb-2">
             <Field label="Title">
@@ -18678,11 +18693,8 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
             </Field>
             <Field label="Options" hint="One option per line. Customers must pick one before checkout.">
               <Textarea
-                value={(editing.variants || []).map(v => v.name).join("\n")}
-                onChange={e => setEditing({
-                  ...editing,
-                  variants: parseVariantsFromText(e.target.value, editing.variants || []),
-                })}
+                value={variantsRaw}
+                onChange={e => setVariantsRaw(e.target.value)}
                 rows={4}
                 placeholder={"Black\nGold\nPink\nPurple"}
               />
@@ -18731,10 +18743,10 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
               <Button variant="primary" icon={<Save size={16} />} onClick={handleSave}>
                 {busy ? "Saving…" : "Save"}
               </Button>
-              <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+              <Button variant="outline" onClick={() => { setEditing(null); setVariantsRaw(""); }}>Cancel</Button>
             </div>
             {editing.id && (
-              <Button variant="outline" icon={<Trash2 size={14} />} fullWidth onClick={() => { if (editing.id) { handleDelete(editing.id); setEditing(null); } }}>
+              <Button variant="outline" icon={<Trash2 size={14} />} fullWidth onClick={() => { if (editing.id) { handleDelete(editing.id); setEditing(null); setVariantsRaw(""); } }}>
                 Delete product
               </Button>
             )}
