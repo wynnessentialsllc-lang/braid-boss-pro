@@ -1150,11 +1150,11 @@ const WelcomeIntro = ({
               Features
             </a>
             <a
-              href="/getting-started"
-              onClick={() => trackEvent("welcome_getting_started_link", { category: "activation" })}
+              href="/how-it-works"
+              onClick={() => trackEvent("welcome_how_it_works_link", { category: "activation" })}
               style={welcomeLinkStyle}
             >
-              Getting started
+              How it works
             </a>
             <a
               href="/pricing"

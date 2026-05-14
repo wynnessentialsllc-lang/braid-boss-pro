@@ -46,27 +46,35 @@ type Faq = { q: string; a: string };
 
 const FAQS_FOUNDING: Faq[] = [
   {
-    q: "What is Founding Stylist lifetime access?",
-    a: "The first 100 stylists who sign up for Braid Boss Pro get lifetime access to the full booking + commerce app — no monthly fee, ever. After the first 100 spots are claimed, future stylists move to a monthly subscription. Founding stylists are grandfathered in at $0 forever.",
+    q: "What is Founding Stylist access?",
+    a: "Founding Stylist access is a one-time payment that unlocks lifetime access to Braid Boss Pro — the business operating system for braiders. The first 100 stylists who sign up lock in lifetime platform access at the founding rate. After the first 100 spots are claimed, Braid Boss Pro transitions to monthly membership pricing.",
+  },
+  {
+    q: "How much does Founding Stylist access cost?",
+    a: "Founding Stylist access is a single one-time payment of $9.99 — no monthly fee, ever. After the first 100 spots are claimed, the platform moves to monthly subscription pricing. Founding stylists are grandfathered in at their one-time rate forever.",
   },
   {
     q: "How do I claim founding stylist access?",
-    a: "Create your account at braidbosspro.app. As long as fewer than 100 stylists have signed up, you're automatically a founding member — there's no separate flow, no waitlist, no application.",
+    a: "Create your account at braidbosspro.app. As long as fewer than 100 stylists have signed up, your one-time payment locks in lifetime founding access — there's no separate waitlist or application.",
   },
   {
     q: "What happens when the first 100 spots are gone?",
-    a: "We turn on monthly subscription pricing for new sign-ups. Founding stylists keep their account exactly as it was — full feature access, no monthly bill, no risk of being downgraded.",
+    a: "Braid Boss Pro transitions to a monthly membership pricing structure for new sign-ups. Founding stylists keep their account exactly as it was — full platform access, no monthly bill, grandfathered in forever.",
+  },
+  {
+    q: "Do founding stylists get future platform upgrades?",
+    a: "Yes. Every future feature, integration, automation, and platform upgrade is included for founding stylists at no additional cost. Founding stylists also receive priority access to new tools as they ship.",
   },
 ];
 
 const FAQS_PRODUCT: Faq[] = [
   {
-    q: "Is Braid Boss Pro really free for founding stylists?",
-    a: "Yes. There is no monthly fee for founding stylists — ever. The only money you pay is Stripe's processing fee on charges (about 2.9% + 30¢ per transaction), and that goes to Stripe, not to us.",
+    q: "Why is Braid Boss Pro built specifically for braiders?",
+    a: "Generic salon software wasn't built around how braiders work — variations, hair-included pricing, deposit policies for long appointments, retail storefronts for hair products and edge control. Braid Boss Pro is the business operating system for braid stylists, with workflows + tools designed around the braid chair.",
   },
   {
     q: "Do I need an app-store download?",
-    a: "No. Braid Boss Pro is a Progressive Web App (PWA). Open braidbosspro.app in your phone's browser and install it to your home screen — iPhone Safari and Android Chrome both support it natively. Step 6 of the Getting Started guide walks you through the install on both phones.",
+    a: "No. Braid Boss Pro is a Progressive Web App (PWA). Open braidbosspro.app in your phone's browser and install it to your home screen — iPhone Safari and Android Chrome both support it natively. Step 6 of the How It Works guide walks you through the install on both phones.",
   },
   {
     q: "Will it work on both iPhone and Android?",
@@ -94,11 +102,11 @@ const FAQS_PRODUCT: Faq[] = [
   },
   {
     q: "What features are included?",
-    a: "Every account gets: branded booking link (/@yourhandle), real-time calendar, deposit collection, Stripe Connect payments, contracts + e-sign, pricing calculator + saved quotes, client management, retail storefront with product variants + inventory, order tracking, reminder automation, mobile dashboard, and PWA install. Founding stylists get all current and future features at $0/month.",
+    a: "Every account gets: branded booking link (/@yourhandle), real-time calendar, deposit collection, Stripe Connect payments, contracts + e-sign, pricing calculator + saved quotes, client management, retail storefront with product variants + inventory, order tracking, reminder automation, mobile dashboard, and PWA install. Founding stylists lock in lifetime access to every current and future platform upgrade with a one-time payment.",
   },
   {
     q: "How long does setup take?",
-    a: "Under 10 minutes from sign-up to a shareable booking link. The Getting Started page walks you through the five-step setup checklist — add services, set availability, connect Stripe, share your link, install on your phone.",
+    a: "Under 10 minutes from sign-up to a shareable booking link. The How It Works page walks you through the five-step setup checklist — add services, set availability, connect Stripe, share your link, install on your phone.",
   },
 ];
 
@@ -177,10 +185,10 @@ export default function FaqPage() {
       </Section>
 
       <CtaFooter
-        title="Still curious? See it run."
-        body="Create your founding stylist account in under 10 minutes. No card required — Stripe Connect happens after you've added services."
-        primaryCta={{ label: "Claim founding access", href: "/" }}
-        secondaryCta={{ label: "Read features", href: "/features" }}
+        title="The first 100 spots. One-time payment. Lifetime access."
+        body="Founding stylists lock in lifetime access at a single one-time payment before Braid Boss Pro transitions to monthly membership pricing."
+        primaryCta={{ label: "Claim founding access", href: "/pricing" }}
+        secondaryCta={{ label: "See features", href: "/features" }}
       />
     </MarketingShell>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-// Reusable numbered step card — used by /getting-started and any
+// Reusable numbered step card — used by /how-it-works and any
 // future onboarding-style page. Number bubble sits on a brand
 // gradient; title + body to the right. Hover lifts.
 

@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import {
-  Sparkles,
+  ArrowRight,
   Check,
   Crown,
-  ArrowRight,
   ShieldCheck,
+  Sparkles,
   Zap,
 } from "lucide-react";
 import {
@@ -16,42 +16,47 @@ import {
 import { C, FONT_DISPLAY, GRADIENTS, SHADOWS } from "../components/marketing/tokens";
 
 export const metadata: Metadata = {
-  title: "Pricing · Braid Boss Pro — Founding Stylist Lifetime Access",
+  title: "Founding Access · Braid Boss Pro — the business OS for braiders",
   description:
-    "Free to start. First 100 founding stylists get lifetime access to the full booking app — booking links, deposits, storefronts, contracts, analytics. Future users move to monthly subscription pricing.",
+    "Lock in lifetime access to Braid Boss Pro — the business operating system for braiders — with a one-time Founding Stylist payment. After the first 100 stylists, the platform transitions to monthly membership pricing.",
   alternates: { canonical: "/pricing" },
   keywords: [
-    "braider booking app pricing",
-    "booking app for braiders cost",
-    "braid business software pricing",
-    "hairstylist booking app price",
-    "braider scheduling app subscription",
-    "booking system for braiders pricing",
+    "braid business software",
+    "braid business management app",
+    "booking app for braiders",
+    "braider booking software",
+    "braider scheduling app",
+    "business tools for braiders",
+    "braid pricing software",
+    "creator economy braid platform",
+    "founding stylist access",
   ],
   openGraph: {
-    title: "Pricing · Braid Boss Pro — Founding Stylist Lifetime Access",
+    title: "Founding Access · Braid Boss Pro",
     description:
-      "Free to start. First 100 founding stylists get lifetime access. Future users move to monthly subscription pricing.",
+      "One-time Founding Stylist payment. Lifetime access to the business operating system for braiders. After the first 100 stylists, the platform moves to monthly membership pricing.",
     url: "/pricing",
     siteName: "Braid Boss Pro",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Pricing · Braid Boss Pro",
+    title: "Founding Access · Braid Boss Pro",
     description:
-      "First 100 founding stylists get lifetime access to the full booking app.",
+      "One-time Founding Stylist payment. Lifetime access to the business operating system for braiders.",
   },
 };
+
+const FOUNDING_PRICE_DOLLARS = 9.99;
 
 export default function PricingPage() {
   return (
     <MarketingShell>
       <MarketingHero
-        eyebrow="Founding Stylist Pricing"
+        eyebrow="Founding Access · First 100 stylists"
         title={
           <>
-            Lock in lifetime access.{" "}
+            The business operating system{" "}
             <em
               style={{
                 fontStyle: "italic",
@@ -61,17 +66,17 @@ export default function PricingPage() {
                 backgroundClip: "text",
               }}
             >
-              Forever.
+              for braiders.
             </em>
           </>
         }
-        body="The first 100 stylists to sign up get lifetime access to the full Braid Boss Pro booking + commerce app — no monthly fee, ever. After that, future stylists move to monthly subscription pricing."
+        body="Braid Boss Pro is built specifically for braid stylists — bookings, deposits, contracts, retail storefronts, analytics, and modern creator-economy tools designed around how braiders actually run their chairs. Founding stylists lock in lifetime access at a single one-time payment before the platform transitions to monthly membership pricing."
         primaryCta={{ label: "Claim founding access", href: "/" }}
-        secondaryCta={{ label: "See features", href: "/features" }}
+        secondaryCta={{ label: "See the platform", href: "/features" }}
       />
 
       {/* Pricing tiers */}
-      <Section eyebrow="The offer" title="Two tiers. One window.">
+      <Section eyebrow="Founding stylist offer" title="One-time payment. Lifetime access.">
         <div
           style={{
             display: "grid",
@@ -82,40 +87,43 @@ export default function PricingPage() {
         >
           <PricingCard
             tone="founding"
-            badge="Founding Stylist · First 100"
-            title="Lifetime access"
-            price="$0"
-            cadence="forever"
-            description="The same full booking + commerce app every future subscriber will pay monthly for — yours for life, no recurring fee."
+            badge="First 100 Users"
+            title="Founding Stylist Access"
+            subtitle="One-Time Payment · Lifetime Access"
+            price={`$${FOUNDING_PRICE_DOLLARS.toFixed(2)}`}
+            cadence="one-time"
+            description="Lock in lifetime access before Braid Boss Pro transitions to monthly membership pricing. Founding stylists receive early-access pricing, grandfathered platform access, and priority access to future platform upgrades and tools."
             features={[
-              "Booking links + branded /@handle URL",
-              "Stripe Connect direct charges",
-              "Deposits, balances, cancellations",
-              "Contracts + e-sign",
+              "Lifetime platform access — no monthly bill, ever",
+              "Branded booking link with your own /@handle",
+              "Stripe Connect direct charges + deposits",
+              "Contracts + e-sign at booking",
               "Pricing calculator + saved quotes",
-              "Retail storefront + product variants",
-              "Order management + tracking",
-              "Reminder automation",
-              "Mobile dashboard + PWA install",
-              "All future feature updates included",
+              "Retail storefront with variants + inventory",
+              "Order management + customer tracking",
+              "Reminder + email automation",
+              "Mobile dashboard with PWA install",
+              "Every future platform upgrade included",
+              "Priority access to new tools as they ship",
             ]}
-            cta={{ label: "Claim my spot", href: "/" }}
+            cta={{ label: "Claim founding access", href: "/" }}
           />
           <PricingCard
-            tone="subscriber"
+            tone="future"
             badge="After the first 100"
-            title="Monthly subscription"
+            title="Future Membership Pricing"
+            subtitle="Monthly Subscription"
             price="$TBA"
             cadence="per month"
-            description="Future stylists subscribe to keep the same toolset active. Founding stylists are grandfathered in at $0 forever."
+            description="After the first 100 founding users, Braid Boss Pro will move to a monthly pricing structure as the platform expands with advanced booking, storefront, automation, analytics, and business tools. Founding stylists are grandfathered in at their one-time rate forever."
             features={[
-              "Same complete feature set",
+              "Same complete feature set as Founding Access",
               "Cancel anytime",
-              "All future updates included",
+              "Every platform upgrade included",
               "Stripe Connect direct charges",
-              "Live customer support",
+              "Mobile dashboard + PWA install",
             ]}
-            cta={{ label: "Join the waitlist", href: "/" }}
+            cta={{ label: "Join founding access", href: "/" }}
           />
         </div>
 
@@ -134,18 +142,18 @@ export default function PricingPage() {
           }}
         >
           <strong style={{ color: C.brandPrimary }}>Note:</strong>{" "}
-          Stripe processing fees are separate (~2.9% + 30¢ per charge) and go
-          to Stripe — not to Braid Boss Pro. We never custody your funds; every
+          Stripe processing fees (~2.9% + 30¢ per charge) are separate and
+          paid to Stripe. Braid Boss Pro never custodies your funds — every
           deposit, balance, and product sale lands directly in your Stripe
-          account.
+          account the same day.
         </div>
       </Section>
 
       {/* Why founding access */}
       <Section
         eyebrow="Why founding access?"
-        title="We're building this with you."
-        intro="Founding stylists shape the roadmap. You get the early-builder pricing forever; we get the feedback that makes Braid Boss Pro the best tool for braiders."
+        title="Built with the first 100 stylists."
+        intro="Founding stylists shape the roadmap and lock in pricing before the platform scales. You get the early-builder rate forever — we get the feedback that makes Braid Boss Pro the operating system braiders actually want."
         background="#FBFAFD"
       >
         <div
@@ -157,25 +165,30 @@ export default function PricingPage() {
         >
           <Benefit
             icon={<Crown size={20} />}
-            title="Lifetime access"
-            body="No monthly fee, ever. As long as the app runs, you're in."
+            title="Early-access pricing"
+            body="A one-time payment unlocks the full platform — no monthly fee for founding stylists, ever."
           />
           <Benefit
             icon={<Zap size={20} />}
-            title="Early roadmap input"
-            body="Direct line to the team. Your feedback ships first."
+            title="Priority roadmap access"
+            body="Founding feedback ships first. New tools land on your dashboard ahead of monthly subscribers."
           />
           <Benefit
             icon={<ShieldCheck size={20} />}
             title="Grandfathered forever"
-            body="When monthly pricing turns on for new stylists, you stay at $0."
+            body="When monthly pricing turns on for the rest of the market, your founding rate stays locked in."
+          />
+          <Benefit
+            icon={<Sparkles size={20} />}
+            title="Braid-specific by design"
+            body="Variations, hair-included pricing, deposit policies, retail storefronts — built for how braiders work, not generic salon software."
           />
         </div>
       </Section>
 
       <CtaFooter
-        title="Only 100 founding spots. They don't come back."
-        body="Create your account in under 10 minutes and lock in lifetime access before the seats fill."
+        title="The window closes at 100 stylists."
+        body="Create your founding account in under 10 minutes. Lock in lifetime access before the platform transitions to monthly membership pricing."
         primaryCta={{ label: "Claim my founding spot", href: "/" }}
         secondaryCta={{ label: "Read the FAQ", href: "/faq" }}
       />
@@ -183,21 +196,23 @@ export default function PricingPage() {
   );
 }
 
-// ---- Pricing card --------------------------------------------------------
+// ---- Pricing card ----------------------------------------------------------
 
 const PricingCard = ({
   tone,
   badge,
   title,
+  subtitle,
   price,
   cadence,
   description,
   features,
   cta,
 }: {
-  tone: "founding" | "subscriber";
+  tone: "founding" | "future";
   badge: string;
   title: string;
+  subtitle: string;
   price: string;
   cadence: string;
   description: string;
@@ -278,7 +293,19 @@ const PricingCard = ({
         >
           {title}
         </h3>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 10 }}>
+        <p
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            color: isFounding ? C.brandPrimary : C.muted,
+            margin: "6px 0 0",
+          }}
+        >
+          {subtitle}
+        </p>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 12 }}>
           <span
             style={{
               fontFamily: FONT_DISPLAY,
@@ -298,11 +325,28 @@ const PricingCard = ({
         </p>
       </div>
 
-      <ul style={{ listStyle: "none", padding: 0, margin: "6px 0 0", display: "flex", flexDirection: "column", gap: 8, position: "relative" }}>
+      <ul
+        style={{
+          listStyle: "none",
+          padding: 0,
+          margin: "6px 0 0",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          position: "relative",
+        }}
+      >
         {features.map((f) => (
           <li
             key={f}
-            style={{ display: "flex", alignItems: "flex-start", gap: 8, color: C.coffee, fontSize: 13.5, lineHeight: 1.5 }}
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 8,
+              color: C.coffee,
+              fontSize: 13.5,
+              lineHeight: 1.5,
+            }}
           >
             <span
               aria-hidden

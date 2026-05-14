@@ -22,34 +22,44 @@ import { StepCard, PhoneMockup } from "../components/marketing/StepCard";
 import { C, FONT_DISPLAY, GRADIENTS, SHADOWS } from "../components/marketing/tokens";
 
 export const metadata: Metadata = {
-  title: "Getting Started · Braid Boss Pro",
+  title: "How It Works · Braid Boss Pro — the business OS for braiders",
   description:
-    "Set up your braid business in under 10 minutes. Add services, connect Stripe, share your booking link, and install Braid Boss Pro as an app on your phone.",
-  alternates: { canonical: "/getting-started" },
+    "How Braid Boss Pro works — the business operating system for braiders. Bookings, deposits, Stripe Connect, retail storefronts, PWA install on iPhone + Android. Set up in under 10 minutes.",
+  alternates: { canonical: "/how-it-works" },
+  keywords: [
+    "braid business software",
+    "braid business management app",
+    "booking app for braiders",
+    "braider booking software",
+    "braider scheduling app",
+    "braid Stripe Connect setup",
+    "braid storefront app",
+    "PWA install braider app",
+  ],
   openGraph: {
-    title: "Getting Started · Braid Boss Pro",
+    title: "How It Works · Braid Boss Pro",
     description:
-      "Set up your braid business in under 10 minutes. Add services, connect Stripe, share your booking link, install on your phone.",
-    url: "/getting-started",
+      "How the business OS for braiders works — bookings, deposits, Stripe Connect, retail storefronts, and PWA install on iPhone + Android.",
+    url: "/how-it-works",
     siteName: "Braid Boss Pro",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Getting Started · Braid Boss Pro",
+    title: "How It Works · Braid Boss Pro",
     description:
-      "Set up your braid business in under 10 minutes. Add services, connect Stripe, share your booking link, install on your phone.",
+      "How the business OS for braiders works — bookings, deposits, Stripe Connect, retail storefronts.",
   },
 };
 
-export default function GettingStartedPage() {
+export default function HowItWorksPage() {
   return (
     <MarketingShell>
       <MarketingHero
-        eyebrow="Setup in under 10 minutes"
+        eyebrow="How Braid Boss Pro works"
         title={
           <>
-            Your braid business{" "}
+            From sign-up to deposits{" "}
             <em
               style={{
                 fontStyle: "italic",
@@ -59,13 +69,13 @@ export default function GettingStartedPage() {
                 backgroundClip: "text",
               }}
             >
-              up + running.
+              in under 10 minutes.
             </em>
           </>
         }
-        body="Eight steps from sign-up to your first deposit. Bookmark this page — every step has a deep link to the right screen in the app."
-        primaryCta={{ label: "Create my account", href: "/" }}
-        secondaryCta={{ label: "See features", href: "/features" }}
+        body="Braid Boss Pro is the business operating system for braiders — branded booking links, deposits, contracts, retail storefronts, and a mobile dashboard built around how braid stylists run their chairs. This is the path from a new account to a shareable booking link."
+        primaryCta={{ label: "Claim founding access", href: "/pricing" }}
+        secondaryCta={{ label: "See the platform", href: "/features" }}
       />
 
       {/* Steps 1-5 */}
@@ -82,8 +92,8 @@ export default function GettingStartedPage() {
             body={
               <>
                 Sign up with your email — the dashboard opens to a guided
-                walkthrough. Your account is free; you only pay platform fees on
-                bookings + retail orders.
+                walkthrough. Founding stylists lock in lifetime access with a
+                one-time payment at sign-up.
               </>
             }
             cta={{ label: "Sign up", href: "/" }}
@@ -294,9 +304,9 @@ export default function GettingStartedPage() {
       </Section>
 
       <CtaFooter
-        title="Ten minutes to live. A career to build."
-        body="Create your account, follow the checklist, and have your booking link in your bio before lunch."
-        primaryCta={{ label: "Create my account", href: "/" }}
+        title="Ten minutes to live. A founding spot to claim."
+        body="The first 100 stylists lock in lifetime access at a one-time founding payment. After that, Braid Boss Pro moves to monthly membership pricing."
+        primaryCta={{ label: "Claim founding access", href: "/pricing" }}
         secondaryCta={{ label: "Browse features", href: "/features" }}
       />
     </MarketingShell>
