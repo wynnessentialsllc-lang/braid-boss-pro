@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
 import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LABEL } from "../../lib/waitlist";
 import { emitAnalyticsEvent } from "../../lib/analytics-events";
@@ -74,7 +74,14 @@ const FUNCTIONS_URL = (() => {
 
 export default function PublicBookingPage() {
   const params = useParams();
-  const slug = useMemo(() => {
+  const router = useRouter();
+  // Raw URL segment — could be either a legacy random booking_links.slug
+  // OR a branded profiles.public_slug. The resolver below normalizes
+  // this to the canonical random slug (`link.slug`) which the rest of
+  // the page uses for every downstream RPC. That way availability /
+  // services / submit endpoints don't need to know about branded slugs
+  // — the resolver is the only entry point that does the lookup.
+  const urlSlug = useMemo(() => {
     const raw = params?.slug;
     return Array.isArray(raw) ? raw[0] : raw || "";
   }, [params]);
@@ -82,6 +89,28 @@ export default function PublicBookingPage() {
   const [link, setLink] = useState<LinkConfig | null>(null);
   const [linkLoading, setLinkLoading] = useState(true);
   const [linkError, setLinkError] = useState<string | null>(null);
+  // Canonical slug — `link.slug` once resolved, urlSlug as a fallback
+  // during the first paint. Every downstream effect / RPC reads this
+  // so a branded URL feeds the existing per-link queries without
+  // requiring those RPCs to know about branded slugs.
+  const slug = link?.slug || urlSlug;
+
+  // Personalize the browser tab + share title so a branded URL reads
+  // like the stylist's brand instead of the generic shell. Document
+  // title is the lightest-touch SEO signal we have on this client
+  // route — keep it cheap and reset to the shell title on unmount.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const businessName = link?.business_name?.trim();
+    if (businessName) {
+      document.title = `${businessName} | Book Appointment | Braid Boss Pro`;
+    } else {
+      document.title = "Book Appointment | Braid Boss Pro";
+    }
+    return () => {
+      document.title = "Braid Boss Pro";
+    };
+  }, [link?.business_name]);
   // Tap-to-expand lightbox for the stylist's photo gallery. Stores
   // the active index into the sorted gallery_photos array so prev /
   // next swipes stay in order.
@@ -234,38 +263,71 @@ export default function PublicBookingPage() {
   };
 
   useEffect(() => {
-    if (!slug) return;
+    if (!urlSlug) return;
     let cancelled = false;
     (async () => {
       try {
         const supabase = getSupabase();
-        const { data, error } = await supabase
-          .from("booking_links")
-          .select("slug, user_id, business_name, intro, services, active, logo_url, location_text, phone, policies, accent_color, gallery_photos")
-          .eq("slug", slug)
-          .maybeSingle();
+        // Branded slug support: the resolver RPC matches either the
+        // legacy random booking_links.slug OR a profiles.public_slug
+        // and returns the canonical booking_link row plus a flag for
+        // whether a branded slug exists. Old random URLs keep working
+        // unchanged; new branded URLs route to the same row.
+        const { data: rows, error } = await supabase
+          .rpc("public_resolve_booking_slug", { slug_in: urlSlug });
         if (cancelled) return;
-        if (error || !data) {
+        const row = Array.isArray(rows) ? rows[0] : (rows as any);
+        if (error || !row || !row.link_id) {
           setLinkError("This booking link isn't available.");
-        } else if (!data.active) {
+        } else if (!row.active) {
           setLinkError("This booking link is currently paused.");
         } else {
+          // If the visitor landed on the legacy random slug AND the
+          // stylist has a branded slug, swap the URL in-place so the
+          // address bar reads the friendly link and any subsequent
+          // share-from-here uses the branded form. router.replace
+          // (not push) avoids polluting browser history.
+          if (
+            row.matched_via === "legacy_random"
+            && row.branded_slug
+            && row.branded_slug !== urlSlug
+          ) {
+            try { router.replace(`/book/${row.branded_slug}`); } catch { /* SSR no-op */ }
+          }
           // Personalization fallback: if the booking_links row
           // doesn't carry a business_name, ask the RPC for the
           // best display name (settings → profiles → other links).
           // Keeps the public booking page personalized even when
           // the stylist never explicitly named this link.
-          let displayName = (data as LinkConfig).business_name;
+          let displayName = row.business_name as string | null;
           if (!displayName || !String(displayName).trim()) {
             try {
               const { data: studio } = await supabase
-                .rpc("public_get_studio_name", { user_id_in: (data as any).user_id });
+                .rpc("public_get_studio_name", { user_id_in: row.user_id });
               if (typeof studio === "string" && studio.trim()) {
                 displayName = studio.trim();
               }
             } catch { /* leave as null; UI falls back to "Braid Boss Pro" */ }
           }
-          setLink({ ...(data as LinkConfig), business_name: displayName });
+          // The rest of the page already keys off booking_links.slug
+          // (services / availability RPCs, the submit RPC, etc.), so
+          // expose row.slug as link.slug — never the URL slug, which
+          // might be the branded form.
+          const config: LinkConfig = {
+            slug: row.slug,
+            user_id: row.user_id,
+            business_name: displayName,
+            intro: row.intro,
+            services: row.services,
+            active: row.active,
+            logo_url: row.logo_url,
+            location_text: row.location_text,
+            phone: row.phone,
+            policies: row.policies,
+            accent_color: row.accent_color,
+            gallery_photos: row.gallery_photos,
+          };
+          setLink(config);
         }
       } catch {
         if (!cancelled) setLinkError("Couldn't load this booking link.");
@@ -274,7 +336,7 @@ export default function PublicBookingPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [slug]);
+  }, [urlSlug]);
 
   // Pull the catalog once the slug is known. The RPC is callable
   // anonymously and returns only is_active = true rows.
