@@ -164,6 +164,46 @@ export const PRODUCT_CATEGORY_LABEL: Record<ProductCategory, string> = {
   other: "Other",
 };
 
+// Single-dimension product variant — one row of the variant
+// picker on the storefront (e.g. Color: Black / Pink / Purple).
+// Each row gets a short randomized id at create time so the
+// storefront + checkout can reference it without name collisions
+// (two variants with the same name stay distinguishable).
+export type ProductVariant = {
+  id: string;
+  name: string;
+};
+
+export const newVariantId = (): string => {
+  // 8 char base36 random — collision risk inside a single product's
+  // variant list is negligible (~36^8 = 2.8e12 namespace).
+  return Math.random().toString(36).slice(2, 10);
+};
+
+// Parse a multi-line textarea into a ProductVariant[]. Each non-empty
+// line becomes one variant; ids carry over for any line that matches
+// an existing variant name so editing the textarea doesn't churn ids
+// (and break orders that already reference them).
+export const parseVariantsFromText = (
+  raw: string,
+  existing: ProductVariant[] = [],
+): ProductVariant[] => {
+  const seenByName = new Map(existing.map((v) => [v.name.toLowerCase(), v]));
+  const seenIds = new Set<string>();
+  const out: ProductVariant[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const name = line.trim();
+    if (!name) continue;
+    if (out.some((v) => v.name.toLowerCase() === name.toLowerCase())) continue;
+    const prior = seenByName.get(name.toLowerCase());
+    let id = prior?.id || newVariantId();
+    while (seenIds.has(id)) id = newVariantId();
+    seenIds.add(id);
+    out.push({ id, name });
+  }
+  return out;
+};
+
 export type Product = {
   id: string;
   user_id: string;
@@ -180,6 +220,8 @@ export type Product = {
   local_pickup_available: boolean;
   external_checkout_url: string | null;
   requires_shipping: boolean;
+  variant_label: string | null;
+  variants: ProductVariant[];
   stripe_price_id: string | null;
   sort_order: number;
   active: boolean;
@@ -190,6 +232,7 @@ export type Product = {
 export type ProductInput = Pick<
   Product,
   "title" | "slug" | "description" | "image_url" | "gallery_images"
+  | "variant_label" | "variants"
   | "price" | "compare_at_price" | "inventory_count" | "category"
   | "is_featured" | "local_pickup_available" | "external_checkout_url"
   | "requires_shipping" | "sort_order" | "active"
@@ -238,6 +281,12 @@ export const useProducts = (userId: string | null): {
       ...r,
       gallery_images: Array.isArray(r.gallery_images)
         ? (r.gallery_images as string[])
+        : [],
+      variants: Array.isArray(r.variants)
+        ? (r.variants as any[]).map(v => ({
+            id: String(v?.id || newVariantId()),
+            name: String(v?.name || "").trim(),
+          })).filter(v => v.name)
         : [],
     })) as Product[];
     setProducts(rows);
@@ -301,6 +350,19 @@ export const useProducts = (userId: string | null): {
       local_pickup_available: !!draft.local_pickup_available,
       external_checkout_url: draft.external_checkout_url?.trim() || null,
       requires_shipping: !!draft.requires_shipping,
+      // Variant fields. variant_label is the picker title (e.g.
+      // 'Color', 'Size'); variants is the list of options. When
+      // variants is empty the storefront skips the picker
+      // altogether — backwards compatible with pre-variant products.
+      variant_label: draft.variant_label?.trim() ? draft.variant_label.trim() : null,
+      variants: Array.isArray(draft.variants)
+        ? (draft.variants as ProductVariant[])
+            .map(v => ({
+              id: String(v?.id || newVariantId()),
+              name: String(v?.name || "").trim(),
+            }))
+            .filter(v => v.name)
+        : [],
       sort_order: Number.isFinite(draft.sort_order) ? Number(draft.sort_order) : 0,
       active: draft.active === false ? false : true,
     };
@@ -353,6 +415,8 @@ export type PublicProduct = {
   local_pickup_available: boolean;
   external_checkout_url: string | null;
   requires_shipping: boolean;
+  variant_label: string | null;
+  variants: ProductVariant[];
 };
 
 const normalizePublicProduct = (p: any): PublicProduct => ({
@@ -370,6 +434,15 @@ const normalizePublicProduct = (p: any): PublicProduct => ({
   local_pickup_available: !!p.local_pickup_available,
   external_checkout_url: p.external_checkout_url ?? null,
   requires_shipping: !!p.requires_shipping,
+  variant_label: p.variant_label ? String(p.variant_label) : null,
+  variants: Array.isArray(p.variants)
+    ? (p.variants as any[])
+        .map((v) => ({
+          id: String(v?.id || ""),
+          name: String(v?.name || "").trim(),
+        }))
+        .filter((v) => v.id && v.name)
+    : [],
 });
 
 export const fetchPublicProducts = async (
@@ -491,6 +564,8 @@ export const fetchPublicServiceRecommendations = async (
     local_pickup_available: !!p.local_pickup_available,
     external_checkout_url: p.external_checkout_url ?? null,
     requires_shipping: false,
+    variant_label: null,
+    variants: [],
   }));
   return { ok: true, products };
 };

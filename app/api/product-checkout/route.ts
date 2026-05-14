@@ -44,7 +44,7 @@ const baseUrlOf = (req: Request): string => {
 };
 
 export async function POST(req: Request) {
-  let body: { handle?: string; product_slug?: string; quantity?: number };
+  let body: { handle?: string; product_slug?: string; quantity?: number; variant_id?: string | null };
   try {
     body = await req.json();
   } catch {
@@ -56,6 +56,12 @@ export async function POST(req: Request) {
   // to 1 so a malformed client never charges a nonsense amount.
   const rawQty = Number(body?.quantity);
   const quantity = Number.isFinite(rawQty) && rawQty >= 1 ? Math.min(99, Math.floor(rawQty)) : 1;
+  // Optional variant pick. Validated against the product's variants
+  // jsonb after the RPC fetch — never trust client-supplied ids.
+  const requestedVariantId =
+    typeof body?.variant_id === "string" && body.variant_id.trim()
+      ? body.variant_id.trim()
+      : null;
 
   if (!handle) return fail(400, "Missing stylist handle.");
   if (!productSlug) return fail(400, "Missing product slug.");
@@ -124,6 +130,26 @@ export async function POST(req: Request) {
   })();
   const applicationFeeCents = feeBps > 0 ? Math.floor((subtotalCents * feeBps) / 10_000) : 0;
 
+  // Variant resolution. The product_get_product RPC returns the full
+  // variants array; we validate the requested id against it. A
+  // mismatched id is rejected so a tampered client can't bypass the
+  // 'must-pick' guard; a product with variants but no requested id
+  // is also rejected.
+  const productVariants = Array.isArray(product.variants) ? (product.variants as any[]) : [];
+  let resolvedVariant: { id: string; name: string } | null = null;
+  if (productVariants.length > 0) {
+    if (!requestedVariantId) {
+      return fail(400, `Please pick a ${product.variant_label || "variant"} for this product.`);
+    }
+    const match = productVariants.find(
+      (v) => v && typeof v.id === "string" && v.id === requestedVariantId,
+    );
+    if (!match) {
+      return fail(400, "That variant is no longer available.");
+    }
+    resolvedVariant = { id: String(match.id), name: String(match.name || "").trim() };
+  }
+
   // Pre-insert the order row. We need an id for the metadata, and
   // having the row in 'pending' state means a webhook arriving
   // ahead of the persisted-session-id update can still find us.
@@ -134,6 +160,12 @@ export async function POST(req: Request) {
     unit_amount: price,
     quantity,
     requires_shipping: !!product.requires_shipping,
+    // Variant data — null when the product had none. Persisted on
+    // the order row so the stylist can see what was picked even
+    // after the product's variants list changes.
+    variant_label: resolvedVariant ? (product.variant_label || null) : null,
+    variant_id: resolvedVariant?.id || null,
+    variant_name: resolvedVariant?.name || null,
   };
   const { data: order, error: orderErr } = await admin
     .from("product_orders")
@@ -165,7 +197,13 @@ export async function POST(req: Request) {
   form.set("line_items[0][quantity]", String(quantity));
   form.set("line_items[0][price_data][currency]", "usd");
   form.set("line_items[0][price_data][unit_amount]", String(unitAmountCents));
-  form.set("line_items[0][price_data][product_data][name]", product.title);
+  // Append the variant to the Stripe line-item name so the
+  // customer's receipt + the Stripe dashboard receipt unambiguously
+  // show what they picked (e.g. 'Soft Life Bonnet · Black').
+  const stripeLineName = resolvedVariant
+    ? `${product.title} · ${resolvedVariant.name}`
+    : product.title;
+  form.set("line_items[0][price_data][product_data][name]", stripeLineName);
   if (product.image_url) {
     form.set("line_items[0][price_data][product_data][images][]", product.image_url);
   }
@@ -190,6 +228,11 @@ export async function POST(req: Request) {
   form.set("metadata[product_slug]", product.slug);
   form.set("metadata[handle]", handle);
   form.set("metadata[quantity]", String(quantity));
+  if (resolvedVariant) {
+    form.set("metadata[variant_label]", String(product.variant_label || "Option"));
+    form.set("metadata[variant_id]", resolvedVariant.id);
+    form.set("metadata[variant_name]", resolvedVariant.name);
+  }
   form.set("payment_intent_data[metadata][product_order_id]", String(order.id));
   if (applicationFeeCents > 0) {
     form.set("payment_intent_data[application_fee_amount]", String(applicationFeeCents));
