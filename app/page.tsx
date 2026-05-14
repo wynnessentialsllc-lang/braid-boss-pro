@@ -13176,7 +13176,7 @@ const SyncStatusCard = ({ mode, sync }: {
 
 const SyncStatusPill = ({ display }: { display: SyncDisplay }) => (
   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
-    style={{ background: "rgba(255, 255, 255, 0.6)", color: display.tone, border: `1px solid ${display.tone}33`, letterSpacing: "0.08em" }}>
+    style={{ background: C.ivory, color: display.tone, border: `1px solid ${display.tone}33`, letterSpacing: "0.08em" }}>
     <span className="inline-block rounded-full" style={{ width: 6, height: 6, background: display.tone }} />
     {display.label}
   </span>
