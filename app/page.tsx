@@ -2134,8 +2134,8 @@ const Header = ({ title, subtitle, leftAction, rightAction }: {
             <h1
               className="font-bold uppercase"
               style={{
-                fontSize: 22,
-                letterSpacing: "0.22em",
+                fontSize: 18,
+                letterSpacing: "0.10em",
                 color: C.brandPrimary,
                 lineHeight: 1.15,
               }}
