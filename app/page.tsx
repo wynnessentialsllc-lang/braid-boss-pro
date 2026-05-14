@@ -331,6 +331,20 @@ const GlobalStyle = () => (
     @keyframes bbpFade { from { opacity:0; transform: translateY(8px);} to { opacity:1; transform: translateY(0);} }
     @keyframes bbpSheet { from { transform: translateY(100%);} to { transform: translateY(0);} }
     @keyframes bbpPulseGold { 0%, 100% { box-shadow: 0 0 0 0 rgba(201, 169, 97, 0.5);} 50% { box-shadow: 0 0 0 12px rgba(201, 169, 97, 0);} }
+    /* 2026 skeleton shimmer — animates a soft band across the
+       placeholder box so loading reads as active polish, not a
+       freeze. Honors prefers-reduced-motion so users opting out
+       see a flat tinted box instead of the slide. */
+    @keyframes bbpShimmer { 0% { background-position: 200% 0;} 100% { background-position: -200% 0;} }
+    .bbp-skeleton {
+      background: linear-gradient(90deg, rgba(236, 231, 242, 0.55) 0%, rgba(236, 231, 242, 0.95) 50%, rgba(236, 231, 242, 0.55) 100%);
+      background-size: 200% 100%;
+      animation: bbpShimmer 1.4s ease-in-out infinite;
+      border-radius: 8px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .bbp-skeleton { animation: none; background: rgba(236, 231, 242, 0.85); }
+    }
     .bbp-fade { animation: bbpFade 0.35s cubic-bezier(.2,.8,.2,1) both; }
     .bbp-sheet { animation: bbpSheet 0.32s cubic-bezier(.2,.8,.2,1) both; }
     .bbp-pulse-gold { animation: bbpPulseGold 2s ease-in-out infinite; }
@@ -1809,6 +1823,72 @@ const SectionTitle = ({ children, action }: {
     <h3 className="text-[13px] font-bold tracking-widest uppercase" style={{ color: C.muted, letterSpacing: "0.14em" }}>{children}</h3>
     {action && (React.isValidElement(action) ? action : (
       <Button variant="outline" size="sm" onClick={(action as any).onClick}>{(action as any).label}</Button>
+    ))}
+  </div>
+);
+
+// 2026 skeleton primitives. The bbp-skeleton class lives in the
+// global <style> block at the top of this module and reads the
+// brandBorder token for its tint. Skeleton renders a single bar;
+// SkeletonCard renders a card-shaped composition (avatar circle +
+// two text lines) that mirrors the most common list-item layout
+// across the app so a row of placeholders reads as the real cards
+// about to land.
+const Skeleton = ({
+  width = "100%",
+  height = 12,
+  radius = 8,
+  className = "",
+  style,
+}: {
+  width?: number | string;
+  height?: number;
+  radius?: number;
+  className?: string;
+  style?: React.CSSProperties;
+}) => (
+  <span
+    aria-hidden
+    className={`bbp-skeleton ${className}`}
+    style={{
+      display: "inline-block",
+      width,
+      height,
+      borderRadius: radius,
+      ...style,
+    }}
+  />
+);
+
+const SkeletonCard = ({ lines = 2 }: { lines?: number }) => (
+  <div
+    role="status"
+    aria-busy="true"
+    aria-label="Loading"
+    className="rounded-2xl p-4"
+    style={{
+      background: C.paper,
+      border: `1px solid ${C.brandBorder}`,
+      boxShadow: SHADOWS.card,
+      display: "flex",
+      gap: 12,
+      alignItems: "flex-start",
+    }}
+  >
+    <Skeleton width={40} height={40} radius={999} style={{ flexShrink: 0 }} />
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8, paddingTop: 4 }}>
+      <Skeleton width="55%" height={12} />
+      {Array.from({ length: Math.max(1, lines - 1) }).map((_, i) => (
+        <Skeleton key={i} width={i % 2 === 0 ? "88%" : "70%"} height={10} />
+      ))}
+    </div>
+  </div>
+);
+
+const SkeletonList = ({ count = 3, lines = 2 }: { count?: number; lines?: number }) => (
+  <div className="space-y-2">
+    {Array.from({ length: count }).map((_, i) => (
+      <SkeletonCard key={i} lines={lines} />
     ))}
   </div>
 );
@@ -11217,7 +11297,7 @@ const BookingRequestsScreen = ({ userId, onBack, onApprove }: {
         </div>
 
         {loading ? (
-          <p className="text-center text-xs py-6" style={{ color: C.muted }}>Loading…</p>
+          <SkeletonList count={4} lines={2} />
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={<CalendarPlus size={28} style={{ color: C.gold }} />}
@@ -14503,9 +14583,9 @@ const ServicesScreen = ({
         </Card>
 
         {api?.loading && services.length === 0 ? (
-          <Card className="p-4">
-            <p className="text-[12px]" style={{ color: C.muted }}>Loading services…</p>
-          </Card>
+          /* Three placeholder cards so the page feels like it's
+             rendering content rather than waiting on text. */
+          <SkeletonList count={3} lines={2} />
         ) : services.length === 0 ? (
           <Card className="p-6 text-center" style={{
             background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
