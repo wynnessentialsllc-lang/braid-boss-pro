@@ -18410,7 +18410,7 @@ const ReviewsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
 // ============================================================
 // PRODUCTS MANAGER (Phase 4) — lightweight retail catalog.
 // ============================================================
-const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings }: { store: any; onBack: () => void; openOrders?: () => void; openShippingSettings?: () => void }) => {
   const api = store.productsApi;
   const items: StorefrontProduct[] = api?.products || [];
   const currency = store.business?.currency || "USD";
@@ -18485,6 +18485,25 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
         }
       />
       <div className="px-5 pt-2 space-y-3">
+        {/* Shop sub-nav: Orders + Shipping live above the product
+            list so the stylist sees their commerce surface at a
+            glance. Tapping either routes to a dedicated screen. */}
+        {(openOrders || openShippingSettings) && (
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            {openOrders && (
+              <Card className="p-3 active:scale-[0.99] cursor-pointer" onClick={openOrders}>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.brandPrimary, letterSpacing: "0.14em" }}>Orders</p>
+                <p className="text-[13px] font-semibold mt-1" style={{ color: C.espresso }}>Manage + fulfill</p>
+              </Card>
+            )}
+            {openShippingSettings && (
+              <Card className="p-3 active:scale-[0.99] cursor-pointer" onClick={openShippingSettings}>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.brandPrimary, letterSpacing: "0.14em" }}>Shipping</p>
+                <p className="text-[13px] font-semibold mt-1" style={{ color: C.espresso }}>Pickup & turnaround</p>
+              </Card>
+            )}
+          </div>
+        )}
         {api?.error && (
           <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
             <p className="text-[12px]" style={{ color: C.danger }}>{api.error}</p>
@@ -18753,6 +18772,425 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
           </div>
         )}
       </Sheet>
+    </div>
+  );
+};
+
+// ============================================================
+//  ORDERS — Shop sub-screen (Phase 2)
+// ============================================================
+type OrderRow = {
+  id: string;
+  customer_token: string;
+  status: string;
+  fulfillment_status: string;
+  amount_total: number;
+  currency: string;
+  customer_email: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  shipping_required: boolean;
+  shipping_address: any;
+  line_items: any[];
+  tracking_carrier: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
+  shipping_notes: string | null;
+  paid_at: string | null;
+  fulfilled_at: string | null;
+  shipped_at: string | null;
+  refunded_at: string | null;
+  canceled_at: string | null;
+  refund_amount: number | null;
+  stripe_refund_id: string | null;
+  created_at: string;
+};
+
+const ORDER_TONE: Record<string, "neutral" | "gold" | "success" | "warning" | "danger" | "dark"> = {
+  pending: "warning",
+  paid: "success",
+  fulfilled: "success",
+  shipped: "gold",
+  refunded: "neutral",
+  canceled: "danger",
+  failed: "danger",
+};
+
+const ORDER_LABEL: Record<string, string> = {
+  pending: "Pending",
+  paid: "Paid",
+  fulfilled: "Fulfilled",
+  shipped: "Shipped",
+  refunded: "Refunded",
+  canceled: "Canceled",
+  failed: "Failed",
+};
+
+const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [openOrder, setOpenOrder] = useState<OrderRow | null>(null);
+
+  // Fulfillment form state when an order is open in the sheet.
+  const [carrier, setCarrier] = useState("");
+  const [trackingNumber, setTrackingNumber] = useState("");
+  const [trackingUrl, setTrackingUrl] = useState("");
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionMsg, setActionMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!userId) return;
+    setLoading(true);
+    setError(null);
+    const supabase = getSupabase();
+    const { data, error: err } = await supabase
+      .from("product_orders")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (err) {
+      setError(err.message);
+      setOrders([]);
+    } else {
+      setOrders((data || []) as OrderRow[]);
+    }
+    setLoading(false);
+  }, [userId]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // Display status — pending takes precedence over fulfillment_status
+  // because an unpaid order shouldn't read as 'unfulfilled'.
+  const displayStatus = (o: OrderRow): string => {
+    if (o.status !== "paid") return o.status;
+    if (o.fulfillment_status === "unfulfilled") return "paid";
+    return o.fulfillment_status;
+  };
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return orders;
+    return orders.filter(
+      (o) =>
+        (o.customer_name || "").toLowerCase().includes(q) ||
+        (o.customer_email || "").toLowerCase().includes(q) ||
+        o.customer_token.toLowerCase().includes(q) ||
+        (o.line_items || []).some((i: any) => String(i?.title || "").toLowerCase().includes(q)),
+    );
+  }, [orders, search]);
+
+  const openDetail = (o: OrderRow) => {
+    setOpenOrder(o);
+    setCarrier(o.tracking_carrier || "");
+    setTrackingNumber(o.tracking_number || "");
+    setTrackingUrl(o.tracking_url || "");
+    setActionMsg(null);
+  };
+
+  const runAction = async (fn: () => Promise<{ ok: boolean; err?: string }>) => {
+    setActionBusy(true);
+    setActionMsg(null);
+    const r = await fn();
+    setActionBusy(false);
+    if (r.ok) {
+      setActionMsg({ kind: "ok", text: "Saved." });
+      await refresh();
+      // Re-read the open row after refresh.
+      const fresh = (await getSupabase()
+        .from("product_orders")
+        .select("*")
+        .eq("id", openOrder?.id || "")
+        .maybeSingle()).data as OrderRow | null;
+      if (fresh) openDetail(fresh);
+    } else {
+      setActionMsg({ kind: "error", text: r.err || "Couldn't update the order." });
+    }
+  };
+
+  const markFulfilled = () =>
+    runAction(async () => {
+      if (!openOrder) return { ok: false };
+      const { error: err } = await getSupabase().rpc("mark_order_fulfilled", { order_id_in: openOrder.id });
+      return err ? { ok: false, err: err.message } : { ok: true };
+    });
+
+  const markShipped = () =>
+    runAction(async () => {
+      if (!openOrder) return { ok: false };
+      const { error: err } = await getSupabase().rpc("mark_order_shipped", {
+        order_id_in: openOrder.id,
+        carrier_in: carrier || null,
+        tracking_in: trackingNumber || null,
+        url_in: trackingUrl || null,
+      });
+      return err ? { ok: false, err: err.message } : { ok: true };
+    });
+
+  const markCanceled = () =>
+    runAction(async () => {
+      if (!openOrder) return { ok: false };
+      if (!confirm("Cancel this order? This can't be undone.")) return { ok: false, err: "" };
+      const { error: err } = await getSupabase().rpc("mark_order_canceled", { order_id_in: openOrder.id });
+      return err ? { ok: false, err: err.message } : { ok: true };
+    });
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Orders"
+        subtitle="Manage + fulfill retail orders"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-3">
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by customer, email, order ref, or product"
+        />
+        {error && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}` }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{error}</p>
+          </Card>
+        )}
+        {loading ? (
+          <Card className="p-6 text-center">
+            <p className="text-[13px]" style={{ color: C.muted }}>Loading…</p>
+          </Card>
+        ) : filtered.length === 0 ? (
+          <Card className="p-6 text-center">
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>No orders yet</p>
+            <p className="text-[12px] mt-2" style={{ color: C.muted }}>
+              Customer orders from your storefront will appear here.
+            </p>
+          </Card>
+        ) : (
+          filtered.map((o) => {
+            const s = displayStatus(o);
+            const tone = ORDER_TONE[s] || "neutral";
+            const itemCount = (o.line_items || []).reduce((acc: number, i: any) => acc + (Number(i?.quantity) || 1), 0);
+            return (
+              <Card key={o.id} className="p-3.5 active:scale-[0.99] cursor-pointer" onClick={() => openDetail(o)}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                      <Pill tone={tone}>{ORDER_LABEL[s] || s}</Pill>
+                      {o.shipping_required && <Pill tone="neutral">Ship</Pill>}
+                    </div>
+                    <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>
+                      {o.customer_name || o.customer_email || "Customer"}
+                    </p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      {itemCount} item{itemCount === 1 ? "" : "s"} · {fmtMoney(Number(o.amount_total || 0), o.currency || "USD")} · {fmtDate(o.created_at?.slice(0, 10) || "")}
+                    </p>
+                  </div>
+                  <ChevronRight size={16} style={{ color: C.muted, marginTop: 2 }} />
+                </div>
+              </Card>
+            );
+          })
+        )}
+      </div>
+
+      <Sheet open={!!openOrder} onClose={() => setOpenOrder(null)} title={openOrder ? `Order · ${(openOrder.customer_name || "Customer").slice(0, 20)}` : "Order"}>
+        {openOrder && (() => {
+          const s = displayStatus(openOrder);
+          const tone = ORDER_TONE[s] || "neutral";
+          const isFinal = s === "canceled" || s === "refunded";
+          return (
+            <div className="space-y-3 pb-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Pill tone={tone}>{ORDER_LABEL[s] || s}</Pill>
+                {openOrder.shipping_required && <Pill tone="neutral">Ships</Pill>}
+                {!openOrder.shipping_required && <Pill tone="neutral">Pickup</Pill>}
+              </div>
+              <Card className="p-3.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Customer</p>
+                <p className="text-sm font-semibold mt-1" style={{ color: C.espresso }}>{openOrder.customer_name || "—"}</p>
+                {openOrder.customer_email && <p className="text-[12px]" style={{ color: C.muted }}>{openOrder.customer_email}</p>}
+                {openOrder.shipping_address && (
+                  <p className="text-[12px] mt-2" style={{ color: C.coffee, lineHeight: 1.4 }}>
+                    {[openOrder.shipping_address?.line1, openOrder.shipping_address?.line2, [openOrder.shipping_address?.city, openOrder.shipping_address?.state, openOrder.shipping_address?.postal_code].filter(Boolean).join(", ")].filter(Boolean).join(" · ")}
+                  </p>
+                )}
+                <p className="text-[11px] mt-2" style={{ color: C.muted }}>Order ref: <span style={{ fontFamily: "monospace" }}>{openOrder.customer_token}</span></p>
+              </Card>
+
+              <Card className="p-3.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Items</p>
+                <div className="mt-2 space-y-2">
+                  {(openOrder.line_items || []).map((i: any, idx: number) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <div style={{ width: 40, height: 40, borderRadius: 8, overflow: "hidden", background: C.brandBorder, flexShrink: 0 }}>
+                        {i?.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={i.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        ) : (
+                          <div style={{ width: "100%", height: "100%", background: GRADIENTS.primary }} />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{i?.title || "Product"}</p>
+                        <p className="text-[11px]" style={{ color: C.muted }}>
+                          {i?.variant_name ? `${i?.variant_label || "Option"}: ${i.variant_name} · ` : ""}
+                          Qty {i?.quantity || 1} · {fmtMoney(Number(i?.unit_amount || 0), openOrder.currency)}
+                        </p>
+                      </div>
+                      <p className="text-[12px] font-semibold" style={{ color: C.espresso }}>{fmtMoney(Number(i?.unit_amount || 0) * Number(i?.quantity || 1), openOrder.currency)}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex justify-between mt-3 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
+                  <span className="text-[12px] font-semibold" style={{ color: C.muted }}>Total</span>
+                  <span className="text-[16px] font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{fmtMoney(Number(openOrder.amount_total || 0), openOrder.currency)}</span>
+                </div>
+              </Card>
+
+              {!isFinal && openOrder.status === "paid" && (
+                <Card className="p-3.5 space-y-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Shipping</p>
+                  <Input value={carrier} onChange={e => setCarrier(e.target.value)} placeholder="Carrier (USPS, UPS, FedEx)" />
+                  <Input value={trackingNumber} onChange={e => setTrackingNumber(e.target.value)} placeholder="Tracking number" />
+                  <Input value={trackingUrl} onChange={e => setTrackingUrl(e.target.value)} type="url" inputMode="url" placeholder="Tracking URL" />
+                </Card>
+              )}
+
+              {actionMsg && (
+                <p className="text-[12px] font-semibold" style={{ color: actionMsg.kind === "error" ? C.danger : C.success }}>
+                  {actionMsg.text}
+                </p>
+              )}
+
+              {openOrder.status === "paid" && !isFinal && (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  {s !== "shipped" && s !== "fulfilled" && (
+                    <Button variant="primary" onClick={markFulfilled}>
+                      {actionBusy ? "Saving…" : "Mark fulfilled"}
+                    </Button>
+                  )}
+                  <Button variant="primary" onClick={markShipped}>
+                    {actionBusy ? "Saving…" : "Mark shipped"}
+                  </Button>
+                </div>
+              )}
+              {openOrder.status !== "canceled" && !isFinal && (
+                <Button variant="outline" fullWidth onClick={markCanceled}>
+                  {actionBusy ? "…" : "Cancel order"}
+                </Button>
+              )}
+              {openOrder.tracking_url && (
+                <a
+                  href={openOrder.tracking_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-center text-[12px] font-bold uppercase tracking-wider"
+                  style={{ color: C.brandPrimary, padding: 8, letterSpacing: "0.12em" }}
+                >
+                  Open tracking page
+                </a>
+              )}
+            </div>
+          );
+        })()}
+      </Sheet>
+    </div>
+  );
+};
+
+// ============================================================
+//  SHIPPING SETTINGS — Shop sub-screen (Phase 2)
+// ============================================================
+const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const [loading, setLoading] = useState(true);
+  const [pickupInstructions, setPickupInstructions] = useState("");
+  const [shippingNotes, setShippingNotes] = useState("");
+  const [turnaroundMin, setTurnaroundMin] = useState<string>("");
+  const [turnaroundMax, setTurnaroundMax] = useState<string>("");
+  const [defaultCarrier, setDefaultCarrier] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await getSupabase()
+        .from("shop_settings")
+        .select("*")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (data) {
+        setPickupInstructions(data.pickup_instructions || "");
+        setShippingNotes(data.shipping_notes || "");
+        setTurnaroundMin(data.turnaround_days_min == null ? "" : String(data.turnaround_days_min));
+        setTurnaroundMax(data.turnaround_days_max == null ? "" : String(data.turnaround_days_max));
+        setDefaultCarrier(data.default_carrier || "");
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const save = async () => {
+    if (!userId) return;
+    setBusy(true);
+    setMsg(null);
+    const payload = {
+      user_id: userId,
+      pickup_instructions: pickupInstructions.trim() || null,
+      shipping_notes: shippingNotes.trim() || null,
+      turnaround_days_min: turnaroundMin.trim() === "" ? null : Math.max(0, Math.floor(Number(turnaroundMin) || 0)),
+      turnaround_days_max: turnaroundMax.trim() === "" ? null : Math.max(0, Math.floor(Number(turnaroundMax) || 0)),
+      default_carrier: defaultCarrier.trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+    const { error: err } = await getSupabase().from("shop_settings").upsert(payload, { onConflict: "user_id" });
+    setBusy(false);
+    if (err) setMsg({ kind: "error", text: err.message });
+    else setMsg({ kind: "ok", text: "Saved." });
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header title="Shipping & pickup" subtitle="Public notes shown on order tracking" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
+      <div className="px-5 pt-2 space-y-3">
+        {loading ? (
+          <Card className="p-6 text-center"><p className="text-[13px]" style={{ color: C.muted }}>Loading…</p></Card>
+        ) : (
+          <>
+            <Field label="Pickup instructions" hint="Shown when a product is set to local pickup.">
+              <Textarea rows={3} value={pickupInstructions} onChange={e => setPickupInstructions(e.target.value)} placeholder="Pickup is available Tuesday–Saturday between 10am and 6pm…" />
+            </Field>
+            <Field label="Shipping notes" hint="Shown on the customer's order tracking page.">
+              <Textarea rows={3} value={shippingNotes} onChange={e => setShippingNotes(e.target.value)} placeholder="Orders ship Monday and Thursday via USPS Priority…" />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Turnaround (min days)">
+                <Input value={turnaroundMin} onChange={e => setTurnaroundMin(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" placeholder="1" />
+              </Field>
+              <Field label="Turnaround (max days)">
+                <Input value={turnaroundMax} onChange={e => setTurnaroundMax(e.target.value.replace(/[^0-9]/g, ""))} inputMode="numeric" placeholder="3" />
+              </Field>
+            </div>
+            <Field label="Default carrier" hint="Pre-fills the Mark-shipped form on new orders.">
+              <Input value={defaultCarrier} onChange={e => setDefaultCarrier(e.target.value)} placeholder="USPS" />
+            </Field>
+            {msg && (
+              <p className="text-[12px] font-semibold" style={{ color: msg.kind === "error" ? C.danger : C.success }}>{msg.text}</p>
+            )}
+            <Button variant="primary" fullWidth onClick={save} icon={<Save size={16} />}>
+              {busy ? "Saving…" : "Save"}
+            </Button>
+          </>
+        )}
+      </div>
     </div>
   );
 };
@@ -19281,7 +19719,16 @@ export default function App() {
       {secondary === "reports" && <ReportsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "discounts" && <DiscountsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "reviews" && <ReviewsScreen store={store} onBack={() => setSecondary("settings")} />}
-      {secondary === "products" && <ProductsScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "products" && (
+        <ProductsScreen
+          store={store}
+          onBack={() => setSecondary("settings")}
+          openOrders={() => setSecondary("orders")}
+          openShippingSettings={() => setSecondary("shippingSettings")}
+        />
+      )}
+      {secondary === "orders" && <OrdersScreen store={store} onBack={() => setSecondary("products")} />}
+      {secondary === "shippingSettings" && <ShippingSettingsScreen store={store} onBack={() => setSecondary("products")} />}
       {secondary === "account" && (
         <AccountScreen
           email={auth.email}

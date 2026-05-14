@@ -1,21 +1,18 @@
-// Storefront Commerce Phase 1 — Stripe Checkout Session for a single
-// product. Mirrors app/api/booking-deposit/checkout/route.ts: direct
-// charges on the stylist's connected account, optional platform
-// application fee in basis points, ad-hoc line items (no Stripe
-// Product/Price stored), and a product_orders row written before
-// the session is returned so the webhook can mark it paid by
-// stripe_session_id.
+// Create a Stripe Checkout Session for a storefront cart.
 //
-// Inputs:
-//   body.handle          — stylist URL handle (the bit after /@)
-//   body.product_slug    — the per-stylist unique product slug
-//   body.quantity        — defaults to 1; capped at 99 for safety
+// Accepts two payload shapes for backwards compatibility:
 //
-// On success: { url } — the Checkout Session URL. Browser redirects.
+//   • single item  — { handle, product_slug, quantity, variant_id }
+//     (legacy single-product Buy Now path; pre-Phase-2 cart)
 //
-// All charges land directly in the stylist's Stripe balance via the
-// Stripe-Account header; the platform takes PLATFORM_FEE_BPS bps as
-// an application fee when set.
+//   • cart         — { handle, items: [{ product_slug, quantity, variant_id }] }
+//     (Phase 2 multi-item path; up to 30 items per checkout)
+//
+// Server validates every line against the public RPC: each product
+// must be active, priced, in stock for the requested quantity, and
+// the variant (when the product declares variants) must resolve.
+// Bad lines are rejected with a 4xx rather than charging the customer
+// a partial cart.
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -24,6 +21,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const STRIPE_API = "https://api.stripe.com/v1";
+const MAX_LINES = 30;
 
 const env = (k: string): string => {
   const v = process.env[k];
@@ -43,28 +41,56 @@ const baseUrlOf = (req: Request): string => {
   }
 };
 
+type ResolvedLine = {
+  product_id: string;
+  product_slug: string;
+  title: string;
+  image_url: string | null;
+  unit_amount_dollars: number;
+  unit_amount_cents: number;
+  quantity: number;
+  requires_shipping: boolean;
+  variant_label: string | null;
+  variant_id: string | null;
+  variant_name: string | null;
+};
+
 export async function POST(req: Request) {
-  let body: { handle?: string; product_slug?: string; quantity?: number; variant_id?: string | null };
+  let body: {
+    handle?: string;
+    product_slug?: string;
+    quantity?: number;
+    variant_id?: string | null;
+    items?: Array<{ product_slug?: string; quantity?: number; variant_id?: string | null }>;
+  };
   try {
     body = await req.json();
   } catch {
     return fail(400, "Invalid JSON body.");
   }
   const handle = (body?.handle || "").trim().replace(/^@/, "");
-  const productSlug = (body?.product_slug || "").trim();
-  // Clamp quantity to 1..99. Negative / zero / non-finite all collapse
-  // to 1 so a malformed client never charges a nonsense amount.
-  const rawQty = Number(body?.quantity);
-  const quantity = Number.isFinite(rawQty) && rawQty >= 1 ? Math.min(99, Math.floor(rawQty)) : 1;
-  // Optional variant pick. Validated against the product's variants
-  // jsonb after the RPC fetch — never trust client-supplied ids.
-  const requestedVariantId =
-    typeof body?.variant_id === "string" && body.variant_id.trim()
-      ? body.variant_id.trim()
-      : null;
-
   if (!handle) return fail(400, "Missing stylist handle.");
-  if (!productSlug) return fail(400, "Missing product slug.");
+
+  // Normalize to a uniform list of {product_slug, quantity, variant_id}.
+  // Legacy single-item payloads are wrapped to length 1.
+  const inputItems: Array<{ product_slug: string; quantity: number; variant_id: string | null }> = [];
+  if (Array.isArray(body.items) && body.items.length > 0) {
+    for (const raw of body.items) {
+      const slug = String(raw?.product_slug || "").trim();
+      if (!slug) continue;
+      const q = Math.max(1, Math.min(99, Math.floor(Number(raw?.quantity || 1))));
+      const vid = typeof raw?.variant_id === "string" && raw.variant_id.trim() ? raw.variant_id.trim() : null;
+      inputItems.push({ product_slug: slug, quantity: q, variant_id: vid });
+    }
+  } else {
+    const slug = String(body?.product_slug || "").trim();
+    if (!slug) return fail(400, "Missing product slug.");
+    const q = Math.max(1, Math.min(99, Math.floor(Number(body?.quantity || 1))));
+    const vid = typeof body?.variant_id === "string" && body.variant_id.trim() ? body.variant_id.trim() : null;
+    inputItems.push({ product_slug: slug, quantity: q, variant_id: vid });
+  }
+  if (inputItems.length === 0) return fail(400, "Cart is empty.");
+  if (inputItems.length > MAX_LINES) return fail(400, `Cart exceeds ${MAX_LINES} items.`);
 
   let stripeSecret: string;
   let supabaseUrl: string;
@@ -81,47 +107,82 @@ export async function POST(req: Request) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  // Resolve the product. The SECURITY DEFINER RPC handles handle →
-  // user_id lookup AND joins in stripe_connect_account_id /
-  // charges_enabled, so we don't need a second profiles read.
-  const { data: rpcRows, error: rpcErr } = await admin.rpc(
-    "public_get_product",
-    { slug_in: handle, product_slug_in: productSlug },
-  );
-  if (rpcErr) return fail(500, rpcErr.message);
-  const product = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
-  if (!product) return fail(404, "Product not found.");
-
-  const acctId: string | null = product.stylist_account_id || null;
-  if (!acctId) return fail(409, "Stylist hasn't connected Stripe yet.");
-  if (!product.stylist_charges_enabled) {
-    return fail(409, "Stylist's Stripe account isn't ready to take charges.");
-  }
-  if (product.external_checkout_url) {
-    return fail(
-      409,
-      "This product is sold through an external storefront — open the product page link instead.",
-    );
+  // Resolve each line through the public RPC. We collapse duplicate
+  // slug+variant pairs by summing quantities so the cart never
+  // double-validates inventory for the same SKU.
+  const resolved: ResolvedLine[] = [];
+  let stylistUserId: string | null = null;
+  let stylistAccountId: string | null = null;
+  let chargesEnabled = false;
+  const collapseKey = (slug: string, vid: string | null) => `${slug}::${vid || ""}`;
+  const merged = new Map<string, { product_slug: string; variant_id: string | null; quantity: number }>();
+  for (const item of inputItems) {
+    const k = collapseKey(item.product_slug, item.variant_id);
+    const prior = merged.get(k);
+    if (prior) prior.quantity = Math.min(99, prior.quantity + item.quantity);
+    else merged.set(k, { ...item });
   }
 
-  const price = product.price == null ? null : Number(product.price);
-  if (price == null || !Number.isFinite(price) || price < 0) {
-    return fail(400, "This product doesn't have a price set.");
+  for (const item of merged.values()) {
+    const { data: rows, error: rpcErr } = await admin.rpc("public_get_product", {
+      slug_in: handle,
+      product_slug_in: item.product_slug,
+    });
+    if (rpcErr) return fail(500, rpcErr.message);
+    const product = Array.isArray(rows) ? rows[0] : rows;
+    if (!product) return fail(404, `Product not found: ${item.product_slug}`);
+
+    if (!stylistUserId) stylistUserId = String(product.user_id);
+    else if (String(product.user_id) !== stylistUserId) {
+      return fail(400, "Cart mixes products from different stylists. Reset and try again.");
+    }
+    stylistAccountId = product.stylist_account_id || stylistAccountId;
+    chargesEnabled = !!product.stylist_charges_enabled;
+
+    if (product.external_checkout_url) {
+      return fail(409, `'${product.title}' is sold via an external store — remove it from the cart and visit the product page.`);
+    }
+    const priceDollars = product.price == null ? null : Number(product.price);
+    if (priceDollars == null || !Number.isFinite(priceDollars) || priceDollars < 0) {
+      return fail(400, `'${product.title}' doesn't have a price set.`);
+    }
+    if (product.inventory_count != null && Number(product.inventory_count) < item.quantity) {
+      return fail(409, `'${product.title}' only has ${product.inventory_count} in stock.`);
+    }
+    // Variant validation: required when product declares variants.
+    const variants = Array.isArray(product.variants) ? (product.variants as any[]) : [];
+    let resolvedVariant: { id: string; name: string } | null = null;
+    if (variants.length > 0) {
+      if (!item.variant_id) {
+        return fail(400, `Pick a ${product.variant_label || "variant"} for '${product.title}'.`);
+      }
+      const match = variants.find((v) => v && String(v.id) === item.variant_id);
+      if (!match) return fail(400, `That variant is no longer available for '${product.title}'.`);
+      resolvedVariant = { id: String(match.id), name: String(match.name || "").trim() };
+    }
+
+    resolved.push({
+      product_id: String(product.id),
+      product_slug: String(product.slug),
+      title: String(product.title),
+      image_url: product.image_url ?? null,
+      unit_amount_dollars: priceDollars,
+      unit_amount_cents: Math.round(priceDollars * 100),
+      quantity: item.quantity,
+      requires_shipping: !!product.requires_shipping,
+      variant_label: resolvedVariant ? (product.variant_label || null) : null,
+      variant_id: resolvedVariant?.id || null,
+      variant_name: resolvedVariant?.name || null,
+    });
   }
 
-  // Stock guard. inventory_count = null → untracked; else require >=
-  // quantity. We do this here (not just in the RPC) so the user gets
-  // a friendly error rather than a Stripe 4xx after redirect.
-  if (
-    product.inventory_count != null &&
-    Number(product.inventory_count) < quantity
-  ) {
-    return fail(409, "Not enough stock to fulfill that quantity.");
-  }
+  if (!stylistUserId) return fail(500, "Couldn't resolve stylist.");
+  if (!stylistAccountId) return fail(409, "Stylist hasn't connected Stripe yet.");
+  if (!chargesEnabled) return fail(409, "Stylist's Stripe account isn't ready to take charges.");
 
-  const unitAmountCents = Math.round(price * 100);
-  const subtotalCents = unitAmountCents * quantity;
-  const baseUrl = baseUrlOf(req);
+  const requiresShipping = resolved.some((r) => r.requires_shipping);
+  const subtotalCents = resolved.reduce((s, r) => s + r.unit_amount_cents * r.quantity, 0);
+  const subtotalDollars = subtotalCents / 100;
 
   const feeBps = (() => {
     const raw = Number(process.env.PLATFORM_FEE_BPS || 0);
@@ -130,109 +191,71 @@ export async function POST(req: Request) {
   })();
   const applicationFeeCents = feeBps > 0 ? Math.floor((subtotalCents * feeBps) / 10_000) : 0;
 
-  // Variant resolution. The product_get_product RPC returns the full
-  // variants array; we validate the requested id against it. A
-  // mismatched id is rejected so a tampered client can't bypass the
-  // 'must-pick' guard; a product with variants but no requested id
-  // is also rejected.
-  const productVariants = Array.isArray(product.variants) ? (product.variants as any[]) : [];
-  let resolvedVariant: { id: string; name: string } | null = null;
-  if (productVariants.length > 0) {
-    if (!requestedVariantId) {
-      return fail(400, `Please pick a ${product.variant_label || "variant"} for this product.`);
-    }
-    const match = productVariants.find(
-      (v) => v && typeof v.id === "string" && v.id === requestedVariantId,
-    );
-    if (!match) {
-      return fail(400, "That variant is no longer available.");
-    }
-    resolvedVariant = { id: String(match.id), name: String(match.name || "").trim() };
-  }
+  // Pre-insert the order row. customer_token auto-fills from the
+  // column default. line_items captures the resolved cart shape so
+  // the webhook + tracking page can read it without re-resolving.
+  const lineItemsJson = resolved.map((r) => ({
+    product_id: r.product_id,
+    product_slug: r.product_slug,
+    title: r.title,
+    unit_amount: r.unit_amount_dollars,
+    quantity: r.quantity,
+    requires_shipping: r.requires_shipping,
+    image_url: r.image_url,
+    variant_label: r.variant_label,
+    variant_id: r.variant_id,
+    variant_name: r.variant_name,
+  }));
 
-  // Pre-insert the order row. We need an id for the metadata, and
-  // having the row in 'pending' state means a webhook arriving
-  // ahead of the persisted-session-id update can still find us.
-  const lineItem = {
-    product_id: String(product.id),
-    product_slug: product.slug,
-    title: product.title,
-    unit_amount: price,
-    quantity,
-    requires_shipping: !!product.requires_shipping,
-    // Variant data — null when the product had none. Persisted on
-    // the order row so the stylist can see what was picked even
-    // after the product's variants list changes.
-    variant_label: resolvedVariant ? (product.variant_label || null) : null,
-    variant_id: resolvedVariant?.id || null,
-    variant_name: resolvedVariant?.name || null,
-  };
   const { data: order, error: orderErr } = await admin
     .from("product_orders")
     .insert({
-      user_id: product.user_id,
-      stripe_account_id: acctId,
-      amount_total: (subtotalCents / 100).toFixed(2),
+      user_id: stylistUserId,
+      stripe_account_id: stylistAccountId,
+      amount_total: subtotalDollars.toFixed(2),
       application_fee: applicationFeeCents > 0 ? (applicationFeeCents / 100).toFixed(2) : null,
       currency: "usd",
-      shipping_required: !!product.requires_shipping,
-      line_items: [lineItem],
-      metadata: {
-        handle,
-        product_slug: product.slug,
-      },
+      shipping_required: requiresShipping,
+      line_items: lineItemsJson,
+      metadata: { handle, item_count: resolved.length },
     })
-    .select("id")
+    .select("id, customer_token")
     .maybeSingle();
   if (orderErr || !order?.id) {
     return fail(500, orderErr?.message || "Couldn't create the order row.");
   }
 
-  // Build the Checkout Session payload. URLSearchParams form-encode
-  // matches what the booking-deposit route does so the Stripe-Account
-  // header semantics are identical.
+  // Build the Stripe Checkout Session payload. Each resolved line
+  // becomes a line_items[i] block; ad-hoc price_data per line (no
+  // Stripe Product objects).
+  const baseUrl = baseUrlOf(req);
   const form = new URLSearchParams();
   form.set("mode", "payment");
   form.set("payment_method_types[]", "card");
-  form.set("line_items[0][quantity]", String(quantity));
-  form.set("line_items[0][price_data][currency]", "usd");
-  form.set("line_items[0][price_data][unit_amount]", String(unitAmountCents));
-  // Append the variant to the Stripe line-item name so the
-  // customer's receipt + the Stripe dashboard receipt unambiguously
-  // show what they picked (e.g. 'Soft Life Bonnet · Black').
-  const stripeLineName = resolvedVariant
-    ? `${product.title} · ${resolvedVariant.name}`
-    : product.title;
-  form.set("line_items[0][price_data][product_data][name]", stripeLineName);
-  if (product.image_url) {
-    form.set("line_items[0][price_data][product_data][images][]", product.image_url);
-  }
+  resolved.forEach((r, i) => {
+    const name = r.variant_name ? `${r.title} · ${r.variant_name}` : r.title;
+    form.set(`line_items[${i}][quantity]`, String(r.quantity));
+    form.set(`line_items[${i}][price_data][currency]`, "usd");
+    form.set(`line_items[${i}][price_data][unit_amount]`, String(r.unit_amount_cents));
+    form.set(`line_items[${i}][price_data][product_data][name]`, name);
+    if (r.image_url) {
+      form.set(`line_items[${i}][price_data][product_data][images][]`, r.image_url);
+    }
+  });
   form.set(
     "success_url",
-    `${baseUrl}/shop/success?session_id={CHECKOUT_SESSION_ID}&handle=${encodeURIComponent(handle)}`,
+    `${baseUrl}/orders/${encodeURIComponent(order.customer_token)}?session_id={CHECKOUT_SESSION_ID}`,
   );
-  form.set(
-    "cancel_url",
-    `${baseUrl}/@${encodeURIComponent(handle)}/products/${encodeURIComponent(product.slug)}?cancelled=1`,
-  );
-  if (product.requires_shipping) {
+  form.set("cancel_url", `${baseUrl}/@${encodeURIComponent(handle)}/shop?cancelled=1`);
+  if (requiresShipping) {
     form.set("shipping_address_collection[allowed_countries][]", "US");
     form.set("phone_number_collection[enabled]", "true");
   }
-  // Metadata — everything the webhook needs to look the order up
-  // and the dashboard needs to display human-readable context.
   form.set("metadata[product_order_id]", String(order.id));
-  form.set("metadata[stylist_user_id]", String(product.user_id));
-  form.set("metadata[stylist_account_id]", acctId);
-  form.set("metadata[product_id]", String(product.id));
-  form.set("metadata[product_slug]", product.slug);
+  form.set("metadata[stylist_user_id]", String(stylistUserId));
+  form.set("metadata[stylist_account_id]", stylistAccountId);
   form.set("metadata[handle]", handle);
-  form.set("metadata[quantity]", String(quantity));
-  if (resolvedVariant) {
-    form.set("metadata[variant_label]", String(product.variant_label || "Option"));
-    form.set("metadata[variant_id]", resolvedVariant.id);
-    form.set("metadata[variant_name]", resolvedVariant.name);
-  }
+  form.set("metadata[item_count]", String(resolved.length));
   form.set("payment_intent_data[metadata][product_order_id]", String(order.id));
   if (applicationFeeCents > 0) {
     form.set("payment_intent_data[application_fee_amount]", String(applicationFeeCents));
@@ -243,7 +266,7 @@ export async function POST(req: Request) {
     headers: {
       Authorization: `Bearer ${stripeSecret}`,
       "Stripe-Version": "2024-06-20",
-      "Stripe-Account": acctId,
+      "Stripe-Account": stylistAccountId,
       "content-type": "application/x-www-form-urlencoded",
     },
     body: form.toString(),
@@ -251,8 +274,6 @@ export async function POST(req: Request) {
   });
   if (!stripeRes.ok) {
     const text = await stripeRes.text().catch(() => "");
-    // Mark the order failed so we don't accumulate stuck pending rows
-    // when Stripe rejects the session up front.
     await admin
       .from("product_orders")
       .update({ status: "failed", updated_at: new Date().toISOString() })
@@ -265,13 +286,13 @@ export async function POST(req: Request) {
     return fail(502, "Stripe returned an unusable session.");
   }
 
-  // Stamp the session id so the webhook can route paid events to
-  // this row. The handle / product_slug are already in metadata for
-  // observability.
   await admin
     .from("product_orders")
     .update({ stripe_session_id: session.id, updated_at: new Date().toISOString() })
     .eq("id", order.id);
 
-  return NextResponse.json({ url: session.url });
+  return NextResponse.json({
+    url: session.url,
+    order_token: order.customer_token,
+  });
 }
