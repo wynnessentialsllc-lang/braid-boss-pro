@@ -5070,9 +5070,38 @@ const DayCalendarView = ({
           <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>All day</p>
           <p className="text-sm font-semibold mt-0.5" style={{ color: dayStatusToneFg }}>{dayStatus.label}</p>
         </div>
-        <span className="text-[11px] font-semibold" style={{ color: C.muted }}>
-          {appts.length} {appts.length === 1 ? "booking" : "bookings"}
-        </span>
+        {/* Split the count so personal/blocked rows never read as
+            client bookings. Hidden labels stay out of the way when
+            there's nothing of that kind. */}
+        <div className="text-right" style={{ minWidth: 0 }}>
+          {(() => {
+            const billable = appts.filter((a: any) =>
+              a && (!a.kind || a.kind === "appointment")
+              && a.status !== "cancelled" && a.status !== "canceled",
+            );
+            const blocks = appts.filter((a: any) =>
+              a && (a.kind === "personal" || a.kind === "blocked")
+              && a.status !== "cancelled" && a.status !== "canceled",
+            );
+            if (billable.length === 0 && blocks.length === 0) {
+              return (
+                <span className="text-[11px] font-semibold" style={{ color: C.muted }}>0 bookings</span>
+              );
+            }
+            return (
+              <>
+                <p className="text-[11px] font-semibold" style={{ color: C.muted }}>
+                  {billable.length} {billable.length === 1 ? "booking" : "bookings"}
+                </p>
+                {blocks.length > 0 && (
+                  <p className="text-[10.5px]" style={{ color: C.muted, marginTop: 1 }}>
+                    {blocks.length} {blocks.length === 1 ? "block" : "blocks"}
+                  </p>
+                )}
+              </>
+            );
+          })()}
+        </div>
       </Card>
 
       {appts.length === 0 ? (
