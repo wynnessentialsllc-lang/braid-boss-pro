@@ -92,6 +92,10 @@ type LinkConfig = {
   tiktok_url?: string | null;
   website_url?: string | null;
   years_in_business?: number | null;
+  // Branded share handle (profiles.public_slug) — surfaces in the
+  // /@handle storefront header as the @ display below the title.
+  // Falls back to the canonical slug when not set.
+  branded_slug?: string | null;
 };
 
 const SUPABASE_URL =
@@ -412,6 +416,7 @@ export default function PublicBookingPage() {
             tiktok_url: row.tiktok_url ?? null,
             website_url: row.website_url ?? null,
             years_in_business: row.years_in_business ?? null,
+            branded_slug: (row.branded_slug as string | null) ?? null,
           };
           setLink(config);
         }
@@ -871,6 +876,10 @@ export default function PublicBookingPage() {
   // production, so dropping it into inline `style` is fine.
   const accent = link?.accent_color || C.gold;
 
+  // Display handle for the @ line under the title in the new
+  // storefront-style header. Prefers the branded slug; falls back
+  // to whatever URL the visitor arrived on.
+  const displayHandle = (link?.branded_slug || slug || "").replace(/^@/, "");
   return (
     <div style={{ minHeight: "100dvh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso }}>
       <style>{`
@@ -879,67 +888,138 @@ export default function PublicBookingPage() {
         body { margin: 0; }
         input, textarea, select, button { font-family: inherit; }
       `}</style>
+
+      {/* Storefront-style hero — full-width gradient (or banner
+          image) banner with the logo overlapping the bottom-left
+          edge, the business name + @handle to the right, and a
+          Profile / Shop tab nav underneath. Mirrors the visual
+          shape of /@handle/shop so visitors see one consistent
+          shell across booking + storefront. */}
+      <div
+        style={{
+          height: 156,
+          background: link?.banner_image_url
+            ? `url(${link.banner_image_url}) center / cover no-repeat`
+            : "linear-gradient(160deg, #7C3AED 0%, #B14BE0 45%, #FF4D6D 100%)",
+          position: "relative",
+        }}
+      >
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.18) 100%)",
+          }}
+        />
+      </div>
+      <div
+        className="mx-auto"
+        style={{ maxWidth: 480, padding: "0 20px", marginTop: -44, position: "relative" }}
+      >
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+          <div
+            style={{
+              width: 88, height: 88, borderRadius: 18,
+              background: C.paper,
+              border: `4px solid ${C.cream}`,
+              boxShadow: "0 12px 32px -12px rgba(21, 17, 26, 0.18)",
+              flexShrink: 0,
+              overflow: "hidden",
+            }}
+          >
+            {link?.logo_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={link.logo_url}
+                alt={link.business_name || "Studio logo"}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+            ) : (
+              <div
+                aria-hidden
+                style={{
+                  width: "100%", height: "100%",
+                  background: "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)",
+                }}
+              />
+            )}
+          </div>
+          <div style={{ flex: 1, minWidth: 0, paddingBottom: 8 }}>
+            <h1
+              style={{
+                fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600,
+                color: C.brandText, lineHeight: 1.1, margin: 0,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }}
+            >
+              {link?.business_name || "Welcome"}
+            </h1>
+            {displayHandle && (
+              <p
+                style={{
+                  fontSize: 12, color: C.muted, marginTop: 2,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                }}
+              >
+                @{displayHandle}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Profile / Shop tab nav. Profile is the active page —
+            tapping it is a no-op. Shop links to the storefront
+            grid using the canonical slug; the /@handle resolver
+            accepts either branded or random slugs. */}
+        <nav
+          style={{
+            marginTop: 20, display: "flex", gap: 8,
+            borderBottom: `1px solid ${C.brandBorder}`,
+          }}
+        >
+          {(["profile", "shop"] as const).map((tab) => {
+            const isActive = tab === "profile";
+            const onClick = () => {
+              if (isActive) return;
+              router.push(`/@${encodeURIComponent(displayHandle || slug)}/shop`);
+            };
+            return (
+              <button
+                key={tab}
+                type="button"
+                onClick={onClick}
+                style={{
+                  padding: "12px",
+                  background: "transparent",
+                  border: 0,
+                  color: isActive ? C.brandPrimary : C.muted,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                  borderBottom: `2px solid ${isActive ? C.brandPrimary : "transparent"}`,
+                  marginBottom: -1,
+                  cursor: isActive ? "default" : "pointer",
+                }}
+              >
+                {tab === "profile" ? "Profile" : "Shop"}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
       <div
         className="mx-auto"
         style={{
           maxWidth: 480,
-          padding: "32px 20px",
-          // Generous bottom padding so the last button clears the
-          // sticky CTA bar and the iPhone Safari home indicator.
+          padding: "20px 20px",
           paddingBottom: "calc(120px + env(safe-area-inset-bottom, 0px))",
         }}
       >
-        {/* Banner image — wide hero rendered only when set. Soft
-            inset shadow + overflow:hidden so the radius reads even
-            when the source image is bright at the edges. Lazy load
-            so it never blocks first paint of the form. */}
-        {link?.banner_image_url && (
-          <div
-            style={{
-              position: "relative",
-              width: "100%",
-              aspectRatio: "16 / 6",
-              borderRadius: 18,
-              overflow: "hidden",
-              marginBottom: 18,
-              background: C.paper,
-              border: `1px solid ${C.hairline}`,
-              boxShadow: "0 6px 20px rgba(21, 17, 26, 0.06)",
-            }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={link.banner_image_url}
-              alt={link.business_name ? `${link.business_name} banner` : "Studio banner"}
-              loading="lazy"
-              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-            />
-          </div>
-        )}
-        {/* Logo — rendered only when the stylist set logo_url. Uses
-            a plain <img> so any public CDN URL works without
-            configuring next/image domains. */}
-        {link?.logo_url && (
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={link.logo_url}
-              alt={link.business_name || "Studio logo"}
-              style={{
-                maxHeight: 96,
-                maxWidth: 200,
-                objectFit: "contain",
-                borderRadius: 16,
-              }}
-            />
-          </div>
-        )}
         <p style={{ textAlign: "center", letterSpacing: "0.22em", textTransform: "uppercase", fontSize: 10, fontWeight: 700, color: accent }}>
           Book your appointment
         </p>
-        <h1 style={{ fontFamily: FONT_DISPLAY, fontSize: 36, fontWeight: 600, color: C.espresso, textAlign: "center", lineHeight: 1.1, marginTop: 8 }}>
-          {link?.business_name || "Braid Boss Pro"}
-        </h1>
         {/* Contact pills row — location + phone surface as small
             chips beneath the headline. Phone is tappable (tel: on
             mobile). */}
