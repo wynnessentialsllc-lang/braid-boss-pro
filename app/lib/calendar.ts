@@ -217,7 +217,26 @@ export const computeDayStatus = (
     return { status: "off", label: avail.label || "Off" };
   }
 
-  // 2. A "blocked" calendar entry covering the full working day also
+  // 2a. All-day personal block — short-circuit. AppointmentSheet
+  // clears durationHours when the all-day toggle flips on, so the
+  // duration-summing fallback below (2b) never catches it. Treat any
+  // active all-day row (personal OR blocked) whose blocksAvailability
+  // isn't explicitly false as a closed day. Mirrors the public
+  // availability RPC's all-day short-circuit so the in-app schedule
+  // and /book/<slug> agree.
+  const allDayBlock = apptsForDay.find(a =>
+    a
+    && (a.kind === "personal" || a.kind === "blocked")
+    && a.isAllDay === true
+    && a.blocksAvailability !== false
+    && a.status !== "cancelled"
+    && a.status !== "canceled",
+  );
+  if (allDayBlock) {
+    return { status: "off", label: "Unavailable all day" };
+  }
+
+  // 2b. A "blocked" calendar entry covering the full working day also
   //    counts as Off (legacy behavior — pre-availability users still
   //    use blocked-time entries to mark a day closed).
   const blockedHours = apptsForDay
