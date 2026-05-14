@@ -127,8 +127,12 @@ import {
   useProducts,
   fetchServiceRecommendations,
   saveServiceRecommendations,
+  PRODUCT_CATEGORIES,
+  PRODUCT_CATEGORY_LABEL,
+  slugifyProductTitle,
   type PublicReview,
   type Product as StorefrontProduct,
+  type ProductCategory,
 } from "./lib/storefront";
 import {
   type DashboardRevenue,
@@ -11238,9 +11242,9 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                       <Layers size={15} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Products</p>
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Shop</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
-                        Bonnets, oils, retail recommended at booking
+                        Products, pricing, inventory & storefront checkout
                       </p>
                     </div>
                   </div>
@@ -18408,15 +18412,26 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
   const api = store.productsApi;
   const items: StorefrontProduct[] = api?.products || [];
   const currency = store.business?.currency || "USD";
+  // Draft mirrors the Phase-1 product shape: slug + compare-at + inventory
+  // + category + gallery + requires-shipping all live in the editor so a
+  // single Shop screen covers every storefront column the public route
+  // surfaces. Image URLs (featured + gallery) are typed in directly in
+  // this phase; Supabase Storage upload comes in Phase 2.
   type Draft = Partial<{
     id: string;
     title: string;
+    slug: string;
     description: string | null;
     image_url: string | null;
+    gallery_images: string[];
     price: number | null;
+    compare_at_price: number | null;
+    inventory_count: number | null;
+    category: ProductCategory | null;
     is_featured: boolean;
     local_pickup_available: boolean;
     external_checkout_url: string | null;
+    requires_shipping: boolean;
     active: boolean;
   }>;
   const [editing, setEditing] = useState<Draft | null>(null);
@@ -18441,13 +18456,13 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
   return (
     <div className="bbp-fade pb-32">
       <Header
-        title="Products"
-        subtitle="Recommended retail for your booking page"
+        title="Shop"
+        subtitle="Products, pricing, inventory & storefront checkout"
         leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
         rightAction={
           <button
             type="button"
-            onClick={() => setEditing({ title: "", price: null, active: true, is_featured: false, local_pickup_available: false })}
+            onClick={() => setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false })}
             className="p-2 rounded-full"
             style={{ background: C.gold, color: C.espresso, border: 0 }}
             aria-label="Add product"
@@ -18472,7 +18487,7 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
             </p>
             <div className="mt-4">
               <Button variant="primary" icon={<Plus size={16} />} fullWidth
-                onClick={() => setEditing({ title: "", price: null, active: true, is_featured: false, local_pickup_available: false })}>
+                onClick={() => setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false })}>
                 Add your first product
               </Button>
             </div>
@@ -18480,20 +18495,40 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
         ) : (
           items.map(p => (
             <Card key={p.id} className="p-4 active:scale-[0.99] cursor-pointer" onClick={() => setEditing({
-              id: p.id, title: p.title, description: p.description, image_url: p.image_url,
-              price: p.price, is_featured: p.is_featured,
-              local_pickup_available: p.local_pickup_available, external_checkout_url: p.external_checkout_url,
+              id: p.id, title: p.title, slug: p.slug,
+              description: p.description, image_url: p.image_url,
+              gallery_images: p.gallery_images || [],
+              price: p.price, compare_at_price: p.compare_at_price,
+              inventory_count: p.inventory_count, category: p.category,
+              is_featured: p.is_featured,
+              local_pickup_available: p.local_pickup_available,
+              external_checkout_url: p.external_checkout_url,
+              requires_shipping: p.requires_shipping,
               active: p.active,
             })}>
               <div className="flex items-start justify-between gap-3">
+                <div className="rounded-xl overflow-hidden shrink-0" style={{ width: 48, height: 48, background: C.brandBorder }}>
+                  {p.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={p.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : (
+                    <div style={{ width: "100%", height: "100%", background: GRADIENTS.primary }} />
+                  )}
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap mb-1">
                     <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{p.title}</p>
                     {!p.active && <Pill tone="neutral">Inactive</Pill>}
                     {p.is_featured && <Pill tone="gold">Featured</Pill>}
+                    {p.inventory_count != null && p.inventory_count <= 0 && <Pill tone="danger">Sold out</Pill>}
+                    {p.inventory_count != null && p.inventory_count > 0 && p.inventory_count <= 5 && (
+                      <Pill tone="warning">{p.inventory_count} left</Pill>
+                    )}
                   </div>
                   <p className="text-[11px]" style={{ color: C.muted }}>
+                    {p.category ? PRODUCT_CATEGORY_LABEL[p.category] + " · " : ""}
                     {p.price != null ? fmtMoney(p.price, currency) : "Price on request"}
+                    {p.compare_at_price != null && p.price != null && p.compare_at_price > p.price ? ` (was ${fmtMoney(p.compare_at_price, currency)})` : ""}
                     {p.local_pickup_available ? " · Local pickup" : ""}
                     {p.external_checkout_url ? " · External link" : ""}
                   </p>
@@ -18509,7 +18544,46 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
         {editing && (
           <div className="space-y-3 pb-2">
             <Field label="Title">
-              <Input value={editing.title || ""} onChange={e => setEditing({ ...editing, title: e.target.value })} placeholder="Silk bonnet" />
+              <Input
+                value={editing.title || ""}
+                onChange={e => setEditing({ ...editing, title: e.target.value })}
+                onBlur={() => {
+                  // Auto-derive the slug when the field is empty so the
+                  // most common case (stylist types a title, ignores the
+                  // slug) just works. Edits to the slug field after auto-
+                  // population are never overwritten.
+                  if (!editing.slug && editing.title) {
+                    setEditing({ ...editing, slug: slugifyProductTitle(editing.title) });
+                  }
+                }}
+                placeholder="Silk bonnet"
+              />
+            </Field>
+            <Field label="URL slug" hint="Shown in the public product URL — letters, numbers, dashes.">
+              <Input
+                value={editing.slug || ""}
+                onChange={e => setEditing({ ...editing, slug: e.target.value })}
+                onBlur={e => {
+                  // Normalize the slug shape on blur so a stylist who
+                  // typed "Silk Bonnet" sees "silk-bonnet" before save.
+                  const v = e.target.value;
+                  if (v) setEditing({ ...editing, slug: slugifyProductTitle(v) });
+                }}
+                placeholder="silk-bonnet"
+              />
+            </Field>
+            <Field label="Category">
+              <select
+                value={editing.category || ""}
+                onChange={e => setEditing({ ...editing, category: (e.target.value || null) as ProductCategory | null })}
+                className="w-full px-3 py-2 rounded-lg border text-sm"
+                style={{ borderColor: C.hairline, background: C.paper, color: C.espresso }}
+              >
+                <option value="">Pick a category…</option>
+                {PRODUCT_CATEGORIES.map(c => (
+                  <option key={c} value={c}>{PRODUCT_CATEGORY_LABEL[c]}</option>
+                ))}
+              </select>
             </Field>
             <Field label="Description (optional)">
               <Textarea
@@ -18526,18 +18600,51 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
                   onChange={(v) => setEditing({ ...editing, price: v === "" ? null : parseMoney(v) })}
                 />
               </Field>
-              <Field label="Image URL (optional)">
-                <Input type="url" inputMode="url" value={editing.image_url || ""} onChange={e => setEditing({ ...editing, image_url: e.target.value || null })} placeholder="https://…" />
+              <Field label="Compare-at" hint="Original price; shown as strikethrough.">
+                <MoneyInput
+                  value={editing.compare_at_price ?? ""}
+                  onChange={(v) => setEditing({ ...editing, compare_at_price: v === "" ? null : parseMoney(v) })}
+                />
               </Field>
             </div>
-            <Field label="External checkout URL (optional)" hint="When set, the public card becomes a 'Shop now' link.">
+            <Field label="Inventory" hint="Leave blank to skip stock tracking.">
+              <Input
+                type="number" inputMode="numeric" step="1" min="0"
+                value={editing.inventory_count == null ? "" : String(editing.inventory_count)}
+                onChange={e => setEditing({
+                  ...editing,
+                  inventory_count: e.target.value === "" ? null : Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                })}
+                placeholder="—"
+              />
+            </Field>
+            <Field label="Featured image URL">
+              <Input
+                type="url" inputMode="url"
+                value={editing.image_url || ""}
+                onChange={e => setEditing({ ...editing, image_url: e.target.value || null })}
+                placeholder="https://…"
+              />
+            </Field>
+            <Field label="Gallery image URLs" hint="One URL per line — extra photos shown on the product page.">
+              <Textarea
+                value={(editing.gallery_images || []).join("\n")}
+                onChange={e => setEditing({
+                  ...editing,
+                  gallery_images: e.target.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean),
+                })}
+                rows={3}
+                placeholder="https://example.com/photo-1.jpg"
+              />
+            </Field>
+            <Field label="External checkout URL (optional)" hint="When set, the Buy button redirects out instead of running Stripe checkout.">
               <Input type="url" inputMode="url" value={editing.external_checkout_url || ""} onChange={e => setEditing({ ...editing, external_checkout_url: e.target.value || null })} placeholder="https://…" />
             </Field>
             <Card className="p-3.5">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold" style={{ color: C.espresso }}>Featured</p>
-                  <p className="text-[11px]" style={{ color: C.muted }}>Sorts first on the booking page.</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Pinned to the Featured rail on the storefront.</p>
                 </div>
                 <Toggle checked={!!editing.is_featured} onChange={(v: boolean) => setEditing({ ...editing, is_featured: v })} />
               </div>
@@ -18545,8 +18652,17 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
             <Card className="p-3.5">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Requires shipping</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Collects a shipping address at checkout.</p>
+                </div>
+                <Toggle checked={!!editing.requires_shipping} onChange={(v: boolean) => setEditing({ ...editing, requires_shipping: v })} />
+              </div>
+            </Card>
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold" style={{ color: C.espresso }}>Local pickup available</p>
-                  <p className="text-[11px]" style={{ color: C.muted }}>Adds a "Local pickup" badge on the booking page.</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Adds a "Local pickup" badge on the product page.</p>
                 </div>
                 <Toggle checked={!!editing.local_pickup_available} onChange={(v: boolean) => setEditing({ ...editing, local_pickup_available: v })} />
               </div>
@@ -18555,7 +18671,7 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold" style={{ color: C.espresso }}>Active</p>
-                  <p className="text-[11px]" style={{ color: C.muted }}>Inactive products hide from the booking page.</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Inactive products hide from the storefront.</p>
                 </div>
                 <Toggle checked={editing.active !== false} onChange={(v: boolean) => setEditing({ ...editing, active: v })} />
               </div>
