@@ -106,6 +106,17 @@ export const StorefrontShell = ({
         fontFamily: FONT_BODY,
       }}
     >
+      {/* Load the brand fonts — without these the h1 falls through
+          to Georgia/serif which renders visibly larger + heavier
+          than Cormorant Garamond, so the storefront title looked
+          chunkier than the booking-page title even though every
+          inline style matched. The booking page loads the same two
+          families via its own <style> block; we mirror that here so
+          /@handle/shop and /@handle/products/<slug> render with
+          identical metrics. */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600;700&display=swap');
+      `}</style>
       {/* Banner — falls back to a brand gradient when the stylist
           hasn't uploaded one. */}
       <div
