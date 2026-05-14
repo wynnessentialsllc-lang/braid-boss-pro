@@ -187,7 +187,7 @@ export default function FaqPage() {
       <CtaFooter
         title="The first 100 spots. One-time payment. Lifetime access."
         body="Founding stylists lock in lifetime access at a single one-time payment before Braid Boss Pro transitions to monthly membership pricing."
-        primaryCta={{ label: "Claim founding access", href: "/pricing" }}
+        primaryCta={{ label: "Claim founding access", href: "/founding-access" }}
         secondaryCta={{ label: "See features", href: "/features" }}
       />
     </MarketingShell>
