@@ -133,7 +133,12 @@ export const StorefrontShell = ({
         className="max-w-[640px] mx-auto px-5"
         style={{ marginTop: -44, position: "relative" }}
       >
-        <div className="flex items-end gap-3">
+        {/* Header row: logo overlaps the banner edge; title +
+            handle sit lower so they land on the white surface
+            instead of floating in the banner gradient. Mirrors the
+            booking-page header treatment so the two surfaces feel
+            like one site. */}
+        <div className="flex items-start gap-[14px]">
           <div
             className="rounded-2xl shrink-0 overflow-hidden"
             style={{
@@ -164,22 +169,23 @@ export const StorefrontShell = ({
               />
             )}
           </div>
-          <div className="flex-1 min-w-0 pb-2">
+          <div className="flex-1 min-w-0" style={{ marginTop: 52 }}>
             <h1
               className="truncate"
               style={{
                 fontFamily: FONT_DISPLAY,
-                fontSize: 22,
-                fontWeight: 600,
-                color: C.brandText,
+                fontSize: 28,
+                fontWeight: 700,
+                color: C.brandPrimary,
                 lineHeight: 1.1,
+                margin: 0,
               }}
             >
-              {businessName || "Stylist"}
+              {businessName || "Welcome"}
             </h1>
             <p
               className="text-[12px] truncate"
-              style={{ color: C.muted, marginTop: 2 }}
+              style={{ color: C.muted, marginTop: 4 }}
             >
               @{handle}
             </p>
