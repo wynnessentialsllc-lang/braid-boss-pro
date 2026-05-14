@@ -2109,13 +2109,36 @@ const Header = ({ title, subtitle, leftAction, rightAction }: {
     return null;
   };
 
+  // When the caller doesn't pass a title we treat the header as a
+  // "hero" — the Braid Boss Pro brand line scales up and becomes the
+  // focal point. Used by the Home dashboard, which no longer needs
+  // the "Good morning" greeting (the hero card below already covers
+  // that with the Welcome-back copy).
+  const hasTitle = title !== undefined && title !== null && title !== "";
   return (
     <header className="px-5 pt-4 pb-3 sticky top-0 z-10" style={{ background: C.cream, borderBottom: `1px solid ${C.hairline}` }}>
       <div className="flex items-center justify-between">
         <div className="w-9">{renderAction(leftAction)}</div>
         <div className="text-center flex-1">
-          <p className="text-[10px] font-bold tracking-[0.22em] uppercase" style={{ color: C.gold }}>Braid Boss Pro</p>
-          <h1 style={{ fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, color: C.espresso, lineHeight: 1.1 }}>{title}</h1>
+          {hasTitle ? (
+            <>
+              <p className="text-[10px] font-bold tracking-[0.22em] uppercase" style={{ color: C.brandPrimary }}>Braid Boss Pro</p>
+              <h1 style={{ fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, color: C.espresso, lineHeight: 1.1 }}>{title}</h1>
+            </>
+          ) : (
+            <h1
+              style={{
+                fontFamily: FONT_DISPLAY,
+                fontSize: 30,
+                fontWeight: 600,
+                color: C.espresso,
+                lineHeight: 1.05,
+                letterSpacing: "-0.01em",
+              }}
+            >
+              Braid Boss Pro
+            </h1>
+          )}
           {subtitle && <p className="text-xs mt-0.5" style={{ color: C.muted }}>{subtitle}</p>}
         </div>
         <div className="w-9 flex justify-end">{renderAction(rightAction)}</div>
@@ -3605,7 +3628,10 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
   return (
     <div className="bbp-fade">
       <Header
-        title={greeting}
+        // Empty title triggers the hero brand layout — the Welcome-back
+        // hero card immediately below already carries the greeting +
+        // owner name, so a separate "Good morning" line was redundant.
+        title=""
         subtitle={syncState ? <span className="inline-flex items-center gap-2">{fmtDateLong(today)}<SyncStatusPill display={computeSyncDisplay(syncState, 0, "authed", null)} /></span> as any : fmtDateLong(today)}
         leftAction={
           <button
@@ -4347,9 +4373,16 @@ const ClientRetentionCard = ({ clientId, clientName, appointments, today, busine
 };
 
 const QuickTile = ({ icon, label, onClick }) => (
+  // 2026 refresh: tiles now read in the brand-secondary pink rose
+  // family to match the dashboard hero. White icon + white label on
+  // a vibrant pink gradient, soft coral halo shadow.
   <button type="button" onClick={onClick} className="rounded-2xl p-4 text-left active:scale-[0.97] transition flex flex-col items-start gap-2"
-    style={{ background: C.espresso, color: C.cream, boxShadow: "0 8px 24px -16px rgba(21, 17, 26, 0.4)" }}>
-    <div className="rounded-full p-2" style={{ background: "rgba(124, 58, 237, 0.18)", color: C.gold }}>{icon}</div>
+    style={{
+      background: "linear-gradient(135deg, #FF6B9D 0%, #FF4D6D 55%, #E0354F 100%)",
+      color: "#FFFFFF",
+      boxShadow: "0 10px 24px -14px rgba(255, 77, 109, 0.55)",
+    }}>
+    <div className="rounded-full p-2" style={{ background: "rgba(255, 255, 255, 0.22)", color: "#FFFFFF", border: "1px solid rgba(255, 255, 255, 0.30)" }}>{icon}</div>
     <span className="font-semibold text-[14px]">{label}</span>
   </button>
 );
