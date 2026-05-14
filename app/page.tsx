@@ -3584,7 +3584,12 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
     const ms = new Date(now.getFullYear(), now.getMonth(), 1);
     const wkISO = localDateISO(wk);
     const msISO = localDateISO(ms);
-    const completedThisWeek = appointments.filter(a => a.status === "completed" && a.date >= wkISO);
+    // Use the same canonical helper as the Week Revenue / Week Clients detail
+    // sheets so the KPI tile counts and the sheet rows can never disagree
+    // (the prior inline filter omitted the `<= today` bound + `isBillable`
+    // guard, so a completed appointment dated later this week would show on
+    // the tile but be hidden in the sheet).
+    const completedThisWeek = weekRevenueAppts(appointments, today);
     const weekRevenue = roundCents(completedThisWeek.reduce((s, a) => s + calculateCollectedAmount(a), 0));
     const pendingBalance = calculatePendingBalance(appointments, today);
     const txIncomeMonth = transactions.filter(t => t.type === "income" && t.date >= msISO).reduce((s, t) => s + parseMoney(t.amount), 0);
