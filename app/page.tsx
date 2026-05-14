@@ -13157,6 +13157,17 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
     policies?: string | null;
     accent_color?: string | null;
     gallery_photos?: Array<{ url: string; path?: string; sort?: number }> | null;
+    // Storefront profile fields (PR #169). Selected from booking_links
+    // above; hydrated into the Customize sheet on open. Keep in sync
+    // with the SELECT below or the sheet renders empty inputs over
+    // saved data.
+    banner_image_url?: string | null;
+    business_city?: string | null;
+    business_state?: string | null;
+    instagram_url?: string | null;
+    tiktok_url?: string | null;
+    website_url?: string | null;
+    years_in_business?: number | null;
   } | null>(null);
   const [bookingBusy, setBookingBusy] = useState(false);
   const [bookingCopied, setBookingCopied] = useState(false);
@@ -13193,7 +13204,15 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
       const [{ data: link }, { count }] = await Promise.all([
         supabase
           .from("booking_links")
-          .select("slug, active, intro, business_name, logo_url, location_text, phone, policies, accent_color, gallery_photos")
+          // Storefront fields (banner_image_url, business_city,
+          // business_state, instagram_url, tiktok_url, website_url,
+          // years_in_business) MUST be in the SELECT — otherwise the
+          // Customize sheet hydrates them to empty strings even when
+          // they're populated, and the user sees \"empty\" fields
+          // while the public booking page renders the saved values.
+          .select(
+            "slug, active, intro, business_name, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business"
+          )
           .eq("user_id", userId)
           .order("created_at", { ascending: false })
           .limit(1)
