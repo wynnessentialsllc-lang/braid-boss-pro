@@ -50,7 +50,7 @@ export default function AuthCallbackPage() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "#FAF5EC",
+        background: "#FFFFFF",
         color: "#2A1810",
         fontFamily: '"DM Sans", system-ui, sans-serif',
         padding: 24,

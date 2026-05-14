@@ -26,8 +26,8 @@ import {
 import { getSupabase } from "../../lib/supabase";
 
 const C = {
-  espresso: "#2A1810", coffee: "#4A2C1A", cream: "#FAF5EC",
-  ivory: "#F5EBD9", paper: "#FFFBF2", gold: "#C9A961", goldDeep: "#A8893F",
+  espresso: "#2A1810", coffee: "#4A2C1A", cream: "#FFFFFF",
+  ivory: "#F6F2EC", paper: "#FFFFFF", gold: "#C9A961", goldDeep: "#A8893F",
   muted: "#8B7355", hairline: "rgba(74, 44, 26, 0.12)",
   success: "#5C7C4A", warning: "#B8860B", danger: "#9C3D2E",
 };

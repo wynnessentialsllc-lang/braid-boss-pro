@@ -38,9 +38,9 @@ import { trackEvent } from "../lib/track";
 // Palette — mirrors C in app/page.tsx so this component is portable.
 // =====================================================================
 const C = {
-  cream: "#FAF5EC",
-  ivory: "#F5EBD9",
-  paper: "#FFFBF2",
+  cream: "#FFFFFF",
+  ivory: "#F6F2EC",
+  paper: "#FFFFFF",
   espresso: "#2A1810",
   coffee: "#4A2C1A",
   caramel: "#8B5A2B",
