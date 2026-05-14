@@ -127,8 +127,12 @@ import {
   useProducts,
   fetchServiceRecommendations,
   saveServiceRecommendations,
+  PRODUCT_CATEGORIES,
+  PRODUCT_CATEGORY_LABEL,
+  slugifyProductTitle,
   type PublicReview,
   type Product as StorefrontProduct,
+  type ProductCategory,
 } from "./lib/storefront";
 import {
   type DashboardRevenue,
@@ -4583,6 +4587,15 @@ const Studio = ({ store }) => {
   const { userId } = store;
   const contracts = useContractTemplates(userId);
   const services = useServices(userId);
+  // Phase 1 storefront commerce — the Shop section reuses the
+  // productsApi the root component already mounts on `store`, so we
+  // don't double-fetch the catalog. All product CRUD lands through
+  // the same useProducts hook the existing Customize sheet uses.
+  const productsApi: any = (store as any).productsApi;
+  const [productForm, setProductForm] = useState<Partial<StorefrontProduct>>({});
+  const [editingProduct, setEditingProduct] = useState<string | null>(null);
+  const [productGalleryRaw, setProductGalleryRaw] = useState("");
+  const [productMsg, setProductMsg] = useState<{ kind: "error" | "ok"; text: string } | null>(null);
 
   const [contractForm, setContractForm] = useState<Partial<ContractTemplate>>({});
   const [contractAttachToAll, setContractAttachToAll] = useState(false);
@@ -4876,6 +4889,281 @@ const Studio = ({ store }) => {
             </button>
           )}
         </div>
+      </div>
+
+      {/* ====================================================
+          Shop — storefront commerce admin
+          Phase 1: create products, edit pricing/inventory,
+          activate/deactivate, set category, manage gallery URLs.
+          Image uploads use URL fields in this phase; Phase 2
+          will wire Supabase Storage and an upload widget. */}
+      <div className="space-y-3">
+        <h2 className="text-xl font-semibold" style={{ color: C.brandText, fontFamily: FONT_DISPLAY }}>Shop</h2>
+        <p className="text-[12px]" style={{ color: C.muted }}>
+          Every product you publish here shows up on your /@handle/shop storefront. Stripe Connect
+          handles the payments — funds land directly in your account.
+        </p>
+
+        {/* Product list */}
+        <div className="space-y-2">
+          {(productsApi?.products?.length ?? 0) === 0 ? (
+            <Card className="p-4 text-center" style={{ background: C.paper }}>
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>No products yet</p>
+              <p className="text-[12px] mt-1" style={{ color: C.muted }}>Create your first product below to open your shop.</p>
+            </Card>
+          ) : productsApi.products.map((p: StorefrontProduct) => {
+            const inv = p.inventory_count;
+            const lowStock = inv != null && inv > 0 && inv <= 5;
+            const soldOut = inv != null && inv <= 0;
+            return (
+              <Card key={p.id} className="p-3 flex items-center gap-3">
+                <div className="rounded-xl overflow-hidden shrink-0" style={{ width: 52, height: 52, background: C.brandBorder }}>
+                  {p.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={p.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : (
+                    <div style={{ width: "100%", height: "100%", background: GRADIENTS.primary }} />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{p.title}</p>
+                  <p className="text-[11px] truncate" style={{ color: C.muted }}>
+                    {p.category ? PRODUCT_CATEGORY_LABEL[p.category] + " · " : ""}
+                    {p.price != null ? fmtMoney(p.price, store.business?.currency || "USD") : "No price"}
+                    {!p.active ? " · Hidden" : ""}
+                    {soldOut ? " · Sold out" : lowStock ? ` · ${inv} left` : ""}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await productsApi.upsert({ ...p, active: !p.active });
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider"
+                  style={{
+                    background: p.active ? C.brandSuccess : C.brandBorder,
+                    color: p.active ? "#FFFFFF" : C.muted,
+                    letterSpacing: "0.10em",
+                  }}
+                >
+                  {p.active ? "Active" : "Hidden"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProductForm(p);
+                    setEditingProduct(p.id);
+                    setProductGalleryRaw((p.gallery_images || []).join("\n"));
+                    setProductMsg(null);
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider"
+                  style={{ color: C.brandPrimary, border: `1px solid ${C.brandPrimary}` }}
+                >
+                  Edit
+                </button>
+              </Card>
+            );
+          })}
+        </div>
+
+        {/* Product form */}
+        <Card className="p-4">
+          <p className="text-[11px] font-bold uppercase tracking-widest mb-3" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+            {editingProduct ? "Edit product" : "New product"}
+          </p>
+          <div className="space-y-2.5">
+            <input
+              type="text"
+              placeholder="Title (e.g. Coconut Edge Oil)"
+              value={productForm.title || ""}
+              onChange={e => setProductForm({ ...productForm, title: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg border text-sm"
+              style={{ borderColor: C.brandBorder, background: C.paper, color: C.brandText }}
+            />
+            <input
+              type="text"
+              placeholder="URL slug (auto-generated from title)"
+              value={productForm.slug || ""}
+              onChange={e => setProductForm({ ...productForm, slug: e.target.value })}
+              onBlur={e => {
+                const v = e.target.value.trim();
+                if (!v && productForm.title) {
+                  setProductForm(f => ({ ...f, slug: slugifyProductTitle(f.title || "") }));
+                }
+              }}
+              className="w-full px-3 py-2 rounded-lg border text-sm font-mono"
+              style={{ borderColor: C.brandBorder, background: C.paper, color: C.brandText }}
+            />
+            <textarea
+              placeholder="Description"
+              value={productForm.description || ""}
+              onChange={e => setProductForm({ ...productForm, description: e.target.value })}
+              rows={3}
+              className="w-full px-3 py-2 rounded-lg border text-sm"
+              style={{ borderColor: C.brandBorder, background: C.paper, color: C.brandText }}
+            />
+            <select
+              value={productForm.category || ""}
+              onChange={e => setProductForm({ ...productForm, category: (e.target.value || null) as ProductCategory | null })}
+              className="w-full px-3 py-2 rounded-lg border text-sm"
+              style={{ borderColor: C.brandBorder, background: C.paper, color: C.brandText }}
+            >
+              <option value="">Pick a category…</option>
+              {PRODUCT_CATEGORIES.map(c => (
+                <option key={c} value={c}>{PRODUCT_CATEGORY_LABEL[c]}</option>
+              ))}
+            </select>
+            <div className="grid grid-cols-2 gap-2.5">
+              <input
+                type="number" inputMode="decimal" step="0.01" min="0"
+                placeholder="Price"
+                value={productForm.price ?? ""}
+                onChange={e => setProductForm({ ...productForm, price: e.target.value === "" ? null : Number(e.target.value) })}
+                className="px-3 py-2 rounded-lg border text-sm"
+                style={{ borderColor: C.brandBorder, background: C.paper, color: C.brandText }}
+              />
+              <input
+                type="number" inputMode="decimal" step="0.01" min="0"
+                placeholder="Compare-at (optional)"
+                value={productForm.compare_at_price ?? ""}
+                onChange={e => setProductForm({ ...productForm, compare_at_price: e.target.value === "" ? null : Number(e.target.value) })}
+                className="px-3 py-2 rounded-lg border text-sm"
+                style={{ borderColor: C.brandBorder, background: C.paper, color: C.brandText }}
+              />
+            </div>
+            <input
+              type="number" inputMode="numeric" step="1" min="0"
+              placeholder="Inventory (blank = don't track)"
+              value={productForm.inventory_count ?? ""}
+              onChange={e => setProductForm({ ...productForm, inventory_count: e.target.value === "" ? null : Number(e.target.value) })}
+              className="w-full px-3 py-2 rounded-lg border text-sm"
+              style={{ borderColor: C.brandBorder, background: C.paper, color: C.brandText }}
+            />
+            <input
+              type="url"
+              placeholder="Featured image URL"
+              value={productForm.image_url || ""}
+              onChange={e => setProductForm({ ...productForm, image_url: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg border text-sm"
+              style={{ borderColor: C.brandBorder, background: C.paper, color: C.brandText }}
+            />
+            <textarea
+              placeholder="Gallery image URLs (one per line)"
+              value={productGalleryRaw}
+              onChange={e => setProductGalleryRaw(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 rounded-lg border text-sm font-mono"
+              style={{ borderColor: C.brandBorder, background: C.paper, color: C.brandText }}
+            />
+            <input
+              type="url"
+              placeholder="External checkout URL (optional — overrides Stripe checkout)"
+              value={productForm.external_checkout_url || ""}
+              onChange={e => setProductForm({ ...productForm, external_checkout_url: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg border text-sm"
+              style={{ borderColor: C.brandBorder, background: C.paper, color: C.brandText }}
+            />
+            <div className="flex flex-wrap gap-4 text-[12px]" style={{ color: C.coffee }}>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!productForm.is_featured}
+                  onChange={e => setProductForm({ ...productForm, is_featured: e.target.checked })}
+                />
+                Featured
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!productForm.requires_shipping}
+                  onChange={e => setProductForm({ ...productForm, requires_shipping: e.target.checked })}
+                />
+                Requires shipping
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!productForm.local_pickup_available}
+                  onChange={e => setProductForm({ ...productForm, local_pickup_available: e.target.checked })}
+                />
+                Local pickup
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={productForm.active !== false}
+                  onChange={e => setProductForm({ ...productForm, active: e.target.checked })}
+                />
+                Active (visible in shop)
+              </label>
+            </div>
+            {productMsg && (
+              <p
+                className="text-[12px] font-semibold"
+                style={{ color: productMsg.kind === "error" ? C.brandError : C.brandSuccess }}
+              >
+                {productMsg.text}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!productsApi) return;
+                  const gallery = productGalleryRaw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+                  const saved = await productsApi.upsert({ ...productForm, gallery_images: gallery });
+                  if (saved) {
+                    setProductMsg({ kind: "ok", text: editingProduct ? "Product updated." : "Product created." });
+                    setProductForm({});
+                    setEditingProduct(null);
+                    setProductGalleryRaw("");
+                  } else {
+                    setProductMsg({ kind: "error", text: productsApi.error || "Couldn't save product." });
+                  }
+                }}
+                className="px-4 py-2 rounded-lg font-bold text-[12px] uppercase tracking-wider"
+                style={{ background: GRADIENTS.primary, color: "#FFFFFF", letterSpacing: "0.10em", border: 0 }}
+              >
+                {editingProduct ? "Update product" : "Create product"}
+              </button>
+              {editingProduct && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProductForm({});
+                    setEditingProduct(null);
+                    setProductGalleryRaw("");
+                    setProductMsg(null);
+                  }}
+                  className="px-4 py-2 rounded-lg font-semibold text-[12px] uppercase tracking-wider"
+                  style={{ background: "transparent", color: C.muted, border: `1px solid ${C.brandBorder}` }}
+                >
+                  Cancel
+                </button>
+              )}
+              {editingProduct && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!productsApi || !editingProduct) return;
+                    if (!confirm("Delete this product? This can't be undone.")) return;
+                    const ok = await productsApi.remove(editingProduct);
+                    if (ok) {
+                      setProductMsg({ kind: "ok", text: "Product deleted." });
+                      setProductForm({});
+                      setEditingProduct(null);
+                      setProductGalleryRaw("");
+                    }
+                  }}
+                  className="px-4 py-2 rounded-lg font-semibold text-[12px] uppercase tracking-wider ml-auto"
+                  style={{ background: "transparent", color: C.brandError, border: `1px solid ${C.brandError}` }}
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+          </div>
+        </Card>
       </div>
     </div>
   );
