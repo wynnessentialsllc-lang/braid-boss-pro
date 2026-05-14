@@ -260,9 +260,9 @@ import {
 
 const C = {
   espresso: "#2A1810", coffee: "#4A2C1A", caramel: "#8B5A2B",
-  cream: "#FAF5EC", ivory: "#F5EBD9", paper: "#FFFBF2",
+  cream: "#FFFFFF", ivory: "#F6F2EC", paper: "#FFFFFF",
   gold: "#C9A961", goldDeep: "#A8893F", ink: "#1A0F08",
-  muted: "#8B7355", mutedSoft: "#B8A586",
+  muted: "#8B7355", mutedSoft: "#9C8C6E",
   success: "#5C7C4A", warning: "#C9762B", danger: "#9C3D2E",
   hairline: "rgba(74, 44, 26, 0.12)",
 

@@ -37,16 +37,16 @@ import { trackEvent } from "../lib/track";
 
 // Palette mirrors the project's C tokens (app/page.tsx:231).
 const P = {
-  cream: "#FAF5EC",
-  ivory: "#F5EBD9",
-  paper: "#FFFBF2",
+  cream: "#FFFFFF",
+  ivory: "#F6F2EC",
+  paper: "#FFFFFF",
   espresso: "#2A1810",
   coffee: "#4A2C1A",
   gold: "#C9A961",
   goldDeep: "#A8893F",
   goldSoft: "#F5E9C8",
   muted: "#8B7355",
-  mutedSoft: "#B8A586",
+  mutedSoft: "#9C8C6E",
   hairline: "rgba(74, 44, 26, 0.12)",
   hairlineSoft: "rgba(74, 44, 26, 0.06)",
   success: "#5C7C4A",

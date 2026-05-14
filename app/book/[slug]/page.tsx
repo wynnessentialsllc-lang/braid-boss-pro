@@ -38,7 +38,7 @@ const DEFAULT_DURATION_MIN = 60;
 // app shell (it's served to anonymous visitors).
 const C = {
   espresso: "#2A1810", coffee: "#4A2C1A", caramel: "#8B5A2B",
-  cream: "#FAF5EC", ivory: "#F5EBD9", paper: "#FFFBF2",
+  cream: "#FFFFFF", ivory: "#F6F2EC", paper: "#FFFFFF",
   gold: "#C9A961", goldDeep: "#A8893F",
   muted: "#8B7355", hairline: "rgba(74, 44, 26, 0.12)",
   success: "#5C7C4A", danger: "#9C3D2E",

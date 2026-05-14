@@ -27,8 +27,8 @@ export default function manifest(): MetadataRoute.Manifest {
     // iOS Safari's status bar + Android's task switcher tint don't
     // flash a different shade on launch. Splash background matches
     // too so the install + cold-start sequence is uniform.
-    background_color: "#FAF5EC",
-    theme_color: "#FAF5EC",
+    background_color: "#FFFFFF",
+    theme_color: "#FFFFFF",
     icons: [
       {
         src: "/icons/icon-192.png",

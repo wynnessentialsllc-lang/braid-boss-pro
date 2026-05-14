@@ -20,9 +20,9 @@ import { formatAppointmentDate } from "../../../lib/utils/formatAppointmentDate"
 import { trackEvent } from "../../../lib/track";
 
 const C = {
-  cream: "#FAF5EC",
-  paper: "#FFFBF2",
-  ivory: "#F5EBD9",
+  cream: "#FFFFFF",
+  paper: "#FFFFFF",
+  ivory: "#F6F2EC",
   espresso: "#2A1810",
   coffee: "#4A2C1A",
   gold: "#C9A961",

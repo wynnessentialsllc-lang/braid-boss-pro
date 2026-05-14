@@ -233,7 +233,7 @@ const PullToRefresh = () => {
           gap: 10,
           padding: "8px 16px 8px 12px",
           borderRadius: 999,
-          background: "#FFFBF2",
+          background: "#FFFFFF",
           border: "1px solid rgba(74,44,26,0.12)",
           boxShadow:
             "0 10px 22px -10px rgba(42,24,16,0.28), 0 2px 4px rgba(42,24,16,0.05)",

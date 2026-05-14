@@ -19,8 +19,8 @@ import {
 } from "../../components/PreviewUI";
 
 const C = {
-  cream: "#FAF5EC",
-  paper: "#FFFBF2",
+  cream: "#FFFFFF",
+  paper: "#FFFFFF",
   espresso: "#2A1810",
   coffee: "#4A2C1A",
   gold: "#C9A961",
