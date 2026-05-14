@@ -147,16 +147,27 @@ export const StorefrontShell = ({
             aria-hidden
             style={{
               position: "absolute",
-              top: 22,
+              top: 46,
               left: 0,
               right: 0,
               textAlign: "center",
-              color: "rgba(255, 255, 255, 0.92)",
-              fontSize: 12,
+              // Debossed / engraved look: the fill is almost
+              // transparent so the gradient reads through the text,
+              // and a paired shadow stack simulates the indentation
+              // — dark above (the lip casts shadow into the cut)
+              // plus a soft light below (the bottom edge of the
+              // groove catches light). Reads as if the wordmark
+              // is pressed into the gradient surface.
+              color: "rgba(21, 17, 26, 0.18)",
+              fontSize: 15,
               fontWeight: 800,
-              letterSpacing: "0.32em",
+              letterSpacing: "0.34em",
               textTransform: "uppercase",
-              textShadow: "0 1px 8px rgba(21, 17, 26, 0.18)",
+              textShadow: [
+                "0 -1px 0 rgba(21, 17, 26, 0.55)",
+                "0 1px 0 rgba(255, 255, 255, 0.40)",
+                "0 1px 2px rgba(255, 255, 255, 0.20)",
+              ].join(", "),
               margin: 0,
             }}
           >
