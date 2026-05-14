@@ -919,14 +919,14 @@ export default function PublicBookingPage() {
                       role="tablist"
                       aria-label="Service categories"
                       style={{
+                        // Wrap onto multiple lines instead of forcing
+                        // a sideways scroll. Keeps every category
+                        // visible on mobile and lets the row breathe
+                        // naturally on wider screens.
                         display: "flex",
+                        flexWrap: "wrap",
                         gap: 8,
-                        overflowX: "auto",
-                        WebkitOverflowScrolling: "touch",
-                        paddingBottom: 4,
-                        // Hide native scrollbars on iOS — the chip row
-                        // is the visual cue that this scrolls.
-                        scrollbarWidth: "none",
+                        justifyContent: "flex-start",
                       }}
                     >
                       {[
@@ -959,6 +959,11 @@ export default function PublicBookingPage() {
                               }
                             }}
                             style={{
+                              // Intrinsic width so each chip hugs its
+                              // own label; the wrapped row handles
+                              // multi-line layout. Don't grow / shrink
+                              // — chips of different lengths should
+                              // size to their content.
                               flex: "0 0 auto",
                               padding: "8px 14px",
                               borderRadius: 999,
