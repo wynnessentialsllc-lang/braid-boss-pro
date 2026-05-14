@@ -923,16 +923,16 @@ export default function PublicBookingPage() {
             aria-hidden
             style={{
               position: "absolute",
-              top: 22,
+              top: 46,
               left: 0,
               right: 0,
               textAlign: "center",
-              color: "rgba(255, 255, 255, 0.92)",
-              fontSize: 12,
+              color: "rgba(255, 255, 255, 0.96)",
+              fontSize: 15,
               fontWeight: 800,
-              letterSpacing: "0.32em",
+              letterSpacing: "0.34em",
               textTransform: "uppercase",
-              textShadow: "0 1px 8px rgba(21, 17, 26, 0.18)",
+              textShadow: "0 1px 10px rgba(21, 17, 26, 0.20)",
               margin: 0,
             }}
           >
