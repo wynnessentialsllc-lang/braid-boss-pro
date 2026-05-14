@@ -285,6 +285,39 @@ const C = {
   mintDeep: "#56947A",
   teal: "#4A8A8A",       // teal info accent
   tealDeep: "#356B6B",
+
+  // 2026 design system — bright, mobile-first beauty-tech palette.
+  // Layered on top of the existing tokens so old screens keep
+  // working while new screens lean on these for the refresh.
+  brandPrimary: "#7C3AED",       // vibrant purple
+  brandPrimaryDeep: "#5B21B6",
+  brandSecondary: "#FF4D6D",     // coral pink
+  brandSecondaryDeep: "#E0354F",
+  brandSparkle: "#C6FF00",       // citrus lime — sparingly
+  brandText: "#15111A",
+  brandMuted: "#6F6477",
+  brandBorder: "#ECE7F2",
+  brandSurface: "#FFFDF8",
+  brandSuccess: "#22C55E",
+  brandWarning: "#FBBF24",
+  brandError: "#EF4444",
+};
+
+// Reusable brand gradients. CSS strings so they can drop straight
+// into any `background` / `backgroundImage` prop. Keep these in
+// one place so a future palette tweak doesn't need a global search.
+const GRADIENTS = {
+  primary:   "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)",
+  secondary: "linear-gradient(135deg, #FF4D6D 0%, #FF7A45 100%)",
+  hero:      "linear-gradient(160deg, #7C3AED 0%, #B14BE0 45%, #FF4D6D 100%)",
+};
+
+// Shared elevation tokens. Used by primary buttons + lifted cards so
+// the same soft glow shows up everywhere instead of one-off shadows.
+const SHADOWS = {
+  primaryGlow: "0 10px 28px -10px rgba(124, 58, 237, 0.45), 0 4px 12px -4px rgba(255, 77, 109, 0.30)",
+  card:        "0 4px 14px rgba(21, 17, 26, 0.06)",
+  cardLifted:  "0 12px 32px -12px rgba(21, 17, 26, 0.18)",
 };
 const FONT_DISPLAY = `"Cormorant Garamond", Georgia, serif`;
 const FONT_BODY = `"DM Sans", "Inter", system-ui, sans-serif`;
@@ -1582,17 +1615,54 @@ const Button = ({ children, variant = "primary", onClick, disabled, className = 
   size?: string;
 }) => {
   void size;
+  // Primary now uses the 2026 brand gradient (purple → coral) with
+  // a soft halo shadow. The bg is a CSS gradient string assigned to
+  // background-image; we keep background-color as a fallback for
+  // very old engines. Border is transparent so the gradient owns
+  // the entire surface — the white inset text is what reads.
   const v = {
-    primary: { bg: C.gold, fg: C.espresso, border: C.gold, shadow: "0 6px 18px -8px rgba(168, 137, 63, 0.55)" },
-    dark: { bg: C.espresso, fg: C.cream, border: C.espresso, shadow: "0 6px 18px -8px rgba(42, 24, 16, 0.45)" },
-    outline: { bg: "transparent", fg: C.espresso, border: C.caramel, shadow: "none" },
-    ghost: { bg: "transparent", fg: C.coffee, border: "transparent", shadow: "none" },
-    danger: { bg: "transparent", fg: C.danger, border: C.danger, shadow: "none" },
+    primary: {
+      bg: GRADIENTS.primary,
+      bgColor: C.brandPrimary,
+      fg: "#FFFFFF",
+      border: "transparent",
+      shadow: SHADOWS.primaryGlow,
+    },
+    dark: {
+      bg: C.brandText,
+      bgColor: C.brandText,
+      fg: "#FFFFFF",
+      border: C.brandText,
+      shadow: "0 6px 18px -8px rgba(21, 17, 26, 0.35)",
+    },
+    outline: {
+      bg: "transparent",
+      bgColor: "transparent",
+      // Outline secondary follows the brand primary so it reads as
+      // a sibling action to the gradient CTA.
+      fg: C.brandPrimary,
+      border: C.brandPrimary,
+      shadow: "none",
+    },
+    ghost: {
+      bg: "transparent",
+      bgColor: "transparent",
+      fg: C.coffee,
+      border: "transparent",
+      shadow: "none",
+    },
+    danger: {
+      bg: "transparent",
+      bgColor: "transparent",
+      fg: C.brandError,
+      border: C.brandError,
+      shadow: "none",
+    },
   }[variant];
   return (
     <button type={type} onClick={onClick} disabled={disabled}
       className={`${className} ${fullWidth ? "w-full" : ""} font-semibold rounded-xl px-5 py-3.5 text-[15px] transition active:scale-[0.97] disabled:opacity-40 flex items-center justify-center gap-2`}
-      style={{ background: v.bg, color: v.fg, border: `1.5px solid ${v.border}`, boxShadow: v.shadow, letterSpacing: "0.01em" }}>
+      style={{ background: v.bg, backgroundColor: v.bgColor, color: v.fg, border: `1.5px solid ${v.border}`, boxShadow: v.shadow, letterSpacing: "0.01em" }}>
       {icon}{children}
     </button>
   );
