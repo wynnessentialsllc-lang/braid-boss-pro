@@ -10680,7 +10680,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                       aria-hidden
                       style={{
                         width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.gold, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                        background: GRADIENTS.secondary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(255, 77, 109, 0.32)",
                       }}
                     >
                       <Layers size={15} />
@@ -10733,7 +10733,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                       aria-hidden
                       style={{
                         width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
                       }}
                     >
                       <ScrollText size={15} />
@@ -10755,7 +10755,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                       aria-hidden
                       style={{
                         width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.gold, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                        background: GRADIENTS.secondary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(255, 77, 109, 0.32)",
                       }}
                     >
                       <Clock size={15} />
@@ -10777,7 +10777,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                       aria-hidden
                       style={{
                         width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
                       }}
                     >
                       <UserPlus size={15} />
@@ -10806,7 +10806,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                       aria-hidden
                       style={{
                         width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
                       }}
                     >
                       <CheckCircle2 size={15} />
@@ -10841,7 +10841,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                       aria-hidden
                       style={{
                         width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
                       }}
                     >
                       <FileText size={15} />
@@ -10865,7 +10865,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                       aria-hidden
                       style={{
                         width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
                       }}
                     >
                       <Sparkles size={15} />
@@ -10889,7 +10889,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                       aria-hidden
                       style={{
                         width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
                       }}
                     >
                       <Layers size={15} />
@@ -10913,7 +10913,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                       aria-hidden
                       style={{
                         width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
                       }}
                     >
                       <BarChart3 size={15} />
@@ -10943,7 +10943,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
                     aria-hidden
                     style={{
                       width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                      background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
                     }}
                   >
                     <DollarSign size={15} />
