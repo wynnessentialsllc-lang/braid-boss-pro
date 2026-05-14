@@ -1769,13 +1769,18 @@ const Pill = ({ children, tone = "neutral" }: {
   children: React.ReactNode;
   tone?: "neutral" | "gold" | "success" | "warning" | "danger" | "dark";
 }) => {
+  // 2026 refresh: pill palette now uses the brand tokens. Each tone
+  // is a tinted background + colored text + matching border — kept
+  // soft on a white canvas so a row of pills doesn't fight a row
+  // of buttons next to it. `dark` keeps the espresso treatment so
+  // a few one-off "premium" badges still land hard.
   const tones = {
-    neutral: { bg: C.ivory, fg: C.coffee, border: C.hairline },
-    gold: { bg: "#F5E9C8", fg: C.goldDeep, border: "#E5D4A0" },
-    success: { bg: "#E4EDD8", fg: C.success, border: "#C9D9B0" },
-    warning: { bg: "#F5DDC0", fg: C.warning, border: "#E8C99A" },
-    danger: { bg: "#F2D6D0", fg: C.danger, border: "#DFB5AC" },
-    dark: { bg: C.espresso, fg: C.cream, border: C.espresso },
+    neutral: { bg: C.brandBorder,                 fg: C.brandText,    border: C.brandBorder },
+    gold:    { bg: "rgba(255, 77, 109, 0.10)",    fg: C.brandSecondaryDeep, border: "rgba(255, 77, 109, 0.30)" },
+    success: { bg: "rgba(34, 197, 94, 0.12)",     fg: "#15803D",      border: "rgba(34, 197, 94, 0.30)" },
+    warning: { bg: "rgba(251, 191, 36, 0.18)",    fg: "#92400E",      border: "rgba(251, 191, 36, 0.40)" },
+    danger:  { bg: "rgba(239, 68, 68, 0.12)",     fg: "#B91C1C",      border: "rgba(239, 68, 68, 0.30)" },
+    dark:    { bg: C.brandText,                    fg: "#FFFFFF",     border: C.brandText },
   };
   const t = tones[tone] || tones.neutral;
   return (
@@ -1815,38 +1820,38 @@ const EmptyState = ({ icon, title, body, cta }: {
   cta?: React.ReactNode;
 }) => (
   <div className="flex flex-col items-center justify-center py-12 px-6 text-center bbp-fade">
-    {/* Soft halo behind the icon — gold core fading through coral
-        and lavender so empty states stop feeling like an "error" and
-        start feeling like an invitation. Pure CSS, no extra DOM. */}
+    {/* 2026 refresh: gradient icon bubble with a soft purple/coral
+        halo behind it. White inset icon, brand glow shadow. Same
+        animation hook as before — only the color story changed. */}
     <div
       className="relative mb-4 rounded-full"
       style={{
-        background: C.ivory,
-        border: `1px solid ${C.hairline}`,
-        padding: 16,
-        boxShadow: "0 1px 2px rgba(42, 24, 16, 0.04), 0 14px 36px -12px rgba(201, 169, 97, 0.45)",
+        background: GRADIENTS.primary,
+        padding: 20,
+        color: "#FFFFFF",
+        boxShadow: SHADOWS.primaryGlow,
       }}
     >
       <span
         aria-hidden
         className="absolute inset-0 rounded-full bbp-empty-halo"
         style={{
-          margin: -10,
+          margin: -14,
           background:
-            "conic-gradient(from 180deg, rgba(201, 169, 97, 0.32), rgba(224, 138, 106, 0.28), rgba(155, 124, 196, 0.28), rgba(124, 182, 158, 0.30), rgba(201, 169, 97, 0.32))",
-          filter: "blur(14px)",
-          opacity: 0.55,
+            "conic-gradient(from 180deg, rgba(124, 58, 237, 0.30), rgba(255, 77, 109, 0.30), rgba(255, 122, 69, 0.24), rgba(124, 58, 237, 0.30))",
+          filter: "blur(16px)",
+          opacity: 0.7,
           zIndex: 0,
         }}
       />
-      <span className="relative" style={{ zIndex: 1 }}>{icon}</span>
+      <span className="relative inline-flex" style={{ zIndex: 1, color: "#FFFFFF" }}>{icon}</span>
     </div>
-    <p className="italic mb-1.5" style={{ fontFamily: FONT_DISPLAY, color: C.gold, fontSize: 18 }}>a fresh page awaits</p>
-    <h4 style={{ fontFamily: FONT_DISPLAY, color: C.espresso, fontSize: 24, fontWeight: 600, lineHeight: 1.2 }}>{title}</h4>
-    <p className="mt-2 text-sm max-w-xs" style={{ color: C.muted, lineHeight: 1.5 }}>{body}</p>
+    <p className="italic mb-1.5" style={{ fontFamily: FONT_DISPLAY, color: C.brandPrimary, fontSize: 18 }}>a fresh page awaits</p>
+    <h4 style={{ fontFamily: FONT_DISPLAY, color: C.brandText, fontSize: 24, fontWeight: 600, lineHeight: 1.2 }}>{title}</h4>
+    <p className="mt-2 text-sm max-w-xs" style={{ color: C.brandMuted, lineHeight: 1.5 }}>{body}</p>
     {cta && <div className="mt-5">{cta}</div>}
     <style>{`
-      @keyframes bbpEmptyHalo { 0%, 100% { transform: rotate(0deg) scale(1); opacity: 0.45; } 50% { transform: rotate(180deg) scale(1.06); opacity: 0.65; } }
+      @keyframes bbpEmptyHalo { 0%, 100% { transform: rotate(0deg) scale(1); opacity: 0.55; } 50% { transform: rotate(180deg) scale(1.08); opacity: 0.78; } }
       .bbp-empty-halo { animation: bbpEmptyHalo 14s ease-in-out infinite; }
       @media (prefers-reduced-motion: reduce) { .bbp-empty-halo { animation: none; } }
     `}</style>
