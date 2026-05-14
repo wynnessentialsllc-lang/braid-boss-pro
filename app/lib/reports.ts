@@ -464,13 +464,26 @@ export const weekDepositBuckets = (
     if (!isBillable(a)) continue;
     const dep = num(a.depositPaid);
 
-    // Collected — deposit paid BEFORE the appointment date AND in
-    // this week's window. Matches the stylist's definition of a
-    // deposit: "money I take upon booking." Same-day or after-service
-    // payments are full / balance payments, not deposits, so they
-    // don't roll into this bucket.
-    if (dep > 0 && a.paymentDate && a.date && a.paymentDate < a.date) {
-      if (a.paymentDate >= ws && a.paymentDate <= reference) {
+    // Collected — deposit paid this week. Counts the deposit when
+    // the payment landed on or before the appointment date (same-day
+    // deposits count: a stylist who collects $25 at the chair before
+    // the appointment runs is still collecting a deposit, not a full
+    // payment). What rules this out is whether the depositPaid equals
+    // the full ticket — if so it's a full payment, not a deposit,
+    // and falls through to the regular revenue stream. Partial
+    // payments (deposit < total) always count when the paymentDate
+    // sits within this week.
+    if (
+      dep > 0
+      && a.paymentDate
+      && a.date
+      && a.paymentDate <= a.date
+      && a.paymentDate >= ws
+      && a.paymentDate <= reference
+    ) {
+      const ticket = num(a.totalPrice) - num(a.discountAmount);
+      const isPartial = ticket <= 0 || dep < ticket;
+      if (isPartial) {
         collected.push(a);
         continue;
       }
