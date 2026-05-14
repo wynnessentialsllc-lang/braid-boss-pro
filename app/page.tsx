@@ -8267,13 +8267,24 @@ const ClientProfileSheet = ({
           <StatTile label="Upcoming" value={String(upcomingCount)} hint={upcomingCount === 0 ? "Nothing scheduled" : "future bookings"} />
           <StatTile label="Last visit" value={lastVisit ? fmtDate(lastVisit) : "—"} />
           <StatTile label="First visit" value={firstVisit ? fmtDate(firstVisit) : "—"} />
-          <Card className="p-3.5 col-span-2" style={{ background: `linear-gradient(180deg, ${C.espresso}, ${C.coffee})`, border: `1px solid ${C.goldDeep}` }}>
-            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.gold, letterSpacing: "0.14em" }}>Lifetime spend</p>
-            <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600, color: C.cream, lineHeight: 1 }}>
+          {/* Lifetime spend — green to read as "money earned." Uses
+              the brand-success gradient and a soft green halo so the
+              card pops on the white client sheet without fighting
+              the rest of the page color story. */}
+          <Card
+            className="p-3.5 col-span-2"
+            style={{
+              background: "linear-gradient(135deg, #22C55E 0%, #16A34A 100%)",
+              border: "0",
+              boxShadow: "0 10px 28px -10px rgba(34, 197, 94, 0.45)",
+            }}
+          >
+            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: "rgba(255, 255, 255, 0.92)", letterSpacing: "0.14em" }}>Lifetime spend</p>
+            <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600, color: "#FFFFFF", lineHeight: 1 }}>
               {fmtMoney(lifetimeSpend, currency)}
             </p>
             {insights.averageTicket > 0 && (
-              <p className="mt-1 text-[11px]" style={{ color: C.mutedSoft }}>
+              <p className="mt-1 text-[11px]" style={{ color: "rgba(255, 255, 255, 0.78)" }}>
                 Avg ticket {fmtMoney(insights.averageTicket, currency)}
               </p>
             )}
@@ -9168,7 +9179,10 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
       return (
         <PreviewStyleCard style={{ marginBottom: 18 }} padding={20}>
           <SectionEyebrow>{rangeMeta.eyebrow}</SectionEyebrow>
-          <p style={{ margin: "4px 0 0", fontFamily: FONT_DISPLAY, fontSize: 34, fontWeight: 600, color: C.espresso, lineHeight: 1.05, letterSpacing: "-0.01em" }}>
+          {/* Income amount in brand-success green so the headline
+              earned number reads as "money in" immediately. Matches
+              the Lifetime spend card on the client profile. */}
+          <p style={{ margin: "4px 0 0", fontFamily: FONT_DISPLAY, fontSize: 34, fontWeight: 600, color: "#16A34A", lineHeight: 1.05, letterSpacing: "-0.01em" }}>
             {fmtMoney(income, business.currency)}
           </p>
           <p style={{ margin: "2px 0 14px", fontSize: 11, color: C.muted }}>{rangeMeta.sub}</p>
@@ -9305,13 +9319,23 @@ const ProductivityTab = ({ sessions, appointments, business, openTimerSessions }
 
   return (
     <div className="px-5">
-      {/* hourly hero */}
-      <Card className="p-5 mb-4" style={{ background: `linear-gradient(135deg, ${C.espresso}, ${C.coffee})`, color: C.cream }}>
-        <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.gold, letterSpacing: "0.16em" }}>Effective hourly</p>
-        <p className="text-5xl font-bold mb-1" style={{ fontFamily: FONT_DISPLAY, color: C.cream }}>
-          {fmtMoney(hourly, business.currency)}<span className="text-xl" style={{ color: "rgba(245,235,217,0.6)" }}>/hr</span>
+      {/* Effective-hourly hero — pink rose gradient to match the
+          dashboard hero and Quick Actions tiles. Soft coral halo
+          shadow; white text. */}
+      <Card
+        className="p-5 mb-4"
+        style={{
+          background: "linear-gradient(135deg, #FF6B9D 0%, #FF4D6D 55%, #E0354F 100%)",
+          color: "#FFFFFF",
+          border: "0",
+          boxShadow: "0 10px 28px -10px rgba(255, 77, 109, 0.45)",
+        }}
+      >
+        <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: "rgba(255, 255, 255, 0.92)", letterSpacing: "0.16em" }}>Effective hourly</p>
+        <p className="text-5xl font-bold mb-1" style={{ fontFamily: FONT_DISPLAY, color: "#FFFFFF" }}>
+          {fmtMoney(hourly, business.currency)}<span className="text-xl" style={{ color: "rgba(255, 255, 255, 0.65)" }}>/hr</span>
         </p>
-        <p className="text-xs" style={{ color: "rgba(245,235,217,0.7)" }}>
+        <p className="text-xs" style={{ color: "rgba(255, 255, 255, 0.78)" }}>
           {fmtMoney(totalEarned, business.currency)} earned over {hours.toFixed(1)}h · {sessions.length} session{sessions.length === 1 ? "" : "s"}
         </p>
       </Card>
