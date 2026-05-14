@@ -2935,6 +2935,17 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   const [phone, setPhone] = useState<string>(link?.phone || "");
   const [policies, setPolicies] = useState<string>(link?.policies || "");
   const [accent, setAccent] = useState<string>(link?.accent_color || "#C9A961");
+  // Storefront profile fields. All optional — empty strings save as
+  // NULL so the booking page renders nothing when they're not set.
+  const [bannerImageUrl, setBannerImageUrl] = useState<string>(link?.banner_image_url || "");
+  const [businessCity, setBusinessCity] = useState<string>(link?.business_city || "");
+  const [businessState, setBusinessState] = useState<string>(link?.business_state || "");
+  const [instagramUrl, setInstagramUrl] = useState<string>(link?.instagram_url || "");
+  const [tiktokUrl, setTiktokUrl] = useState<string>(link?.tiktok_url || "");
+  const [websiteUrl, setWebsiteUrl] = useState<string>(link?.website_url || "");
+  const [yearsInBusiness, setYearsInBusiness] = useState<string>(
+    link?.years_in_business != null ? String(link.years_in_business) : ""
+  );
   const [gallery, setGallery] = useState<GalleryPhoto[]>(
     Array.isArray(link?.gallery_photos)
       ? (link!.gallery_photos as any[]).map((p, i) => ({ url: p.url, path: p.path || "", sort: typeof p.sort === "number" ? p.sort : i }))
@@ -2957,6 +2968,13 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
     setPhone(link?.phone || "");
     setPolicies(link?.policies || "");
     setAccent(link?.accent_color || "#C9A961");
+    setBannerImageUrl(link?.banner_image_url || "");
+    setBusinessCity(link?.business_city || "");
+    setBusinessState(link?.business_state || "");
+    setInstagramUrl(link?.instagram_url || "");
+    setTiktokUrl(link?.tiktok_url || "");
+    setWebsiteUrl(link?.website_url || "");
+    setYearsInBusiness(link?.years_in_business != null ? String(link.years_in_business) : "");
     setGallery(
       Array.isArray(link?.gallery_photos)
         ? (link!.gallery_photos as any[]).map((p, i) => ({ url: p.url, path: p.path || "", sort: typeof p.sort === "number" ? p.sort : i }))
@@ -2972,6 +2990,14 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
     setErr(null);
     try {
       const supabase = getSupabase();
+      // Years cap mirrors the DB CHECK (0..80). Anything else clears
+      // the field so a typo can't write garbage.
+      const yearsParsed = (() => {
+        const trimmed = yearsInBusiness.trim();
+        if (!trimmed) return null;
+        const n = Number(trimmed);
+        return Number.isFinite(n) && n >= 0 && n <= 80 ? Math.round(n) : null;
+      })();
       const patch = {
         business_name: businessName.trim() || null,
         intro: intro.trim() || null,
@@ -2980,6 +3006,13 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         phone: phone.trim() || null,
         policies: policies.trim() || null,
         accent_color: /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(accent) ? accent : null,
+        banner_image_url: bannerImageUrl.trim() || null,
+        business_city: businessCity.trim() || null,
+        business_state: businessState.trim() || null,
+        instagram_url: instagramUrl.trim() || null,
+        tiktok_url: tiktokUrl.trim() || null,
+        website_url: websiteUrl.trim() || null,
+        years_in_business: yearsParsed,
         // Re-number sort on save so the persisted order matches what
         // the stylist sees in the editor. CHECK constraint in the DB
         // caps at 8 — we already enforce this in the UI but slice to
@@ -3195,9 +3228,48 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         <Field label="Location" hint="Shown as a small chip under your studio name.">
           <Input value={locationText} onChange={(e) => setLocationText(e.target.value)} placeholder="Dallas, TX" />
         </Field>
+        {/* City + state are stored separately so we can later use
+            them for marketplace filters / SEO. Optional — leave blank
+            to fall back to the free-form location chip above. */}
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="City" hint="Optional">
+            <Input value={businessCity} onChange={(e) => setBusinessCity(e.target.value)} placeholder="Dallas" />
+          </Field>
+          <Field label="State" hint="Optional">
+            <Input value={businessState} onChange={(e) => setBusinessState(e.target.value)} placeholder="TX" maxLength={2} />
+          </Field>
+        </div>
+        <Field label="Years in business" hint="Optional. Surfaces under your name as social proof.">
+          <Input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={80}
+            value={yearsInBusiness}
+            onChange={(e) => setYearsInBusiness(e.target.value)}
+            placeholder="e.g. 7"
+          />
+        </Field>
         <Field label="Phone for clients" hint="Powers the 'send a message' button (sms/tel).">
           <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="555-204-1839" />
         </Field>
+        <Field label="Banner image URL" hint="Optional. Wide hero image at the top of your booking page (1600×500 looks best).">
+          <Input value={bannerImageUrl} onChange={(e) => setBannerImageUrl(e.target.value)} placeholder="https://…/banner.jpg" />
+        </Field>
+        <div>
+          <p className="text-[11px] font-bold uppercase mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>Social links</p>
+          <div className="space-y-2">
+            <Field label="Instagram URL" hint="Optional">
+              <Input value={instagramUrl} onChange={(e) => setInstagramUrl(e.target.value)} placeholder="https://instagram.com/yourhandle" />
+            </Field>
+            <Field label="TikTok URL" hint="Optional">
+              <Input value={tiktokUrl} onChange={(e) => setTiktokUrl(e.target.value)} placeholder="https://tiktok.com/@yourhandle" />
+            </Field>
+            <Field label="Website URL" hint="Optional">
+              <Input value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder="https://yourstudio.com" />
+            </Field>
+          </div>
+        </div>
         <Field label="Studio policies" hint="Optional — shown in a collapsible card above the form.">
           <Textarea value={policies} onChange={(e) => setPolicies(e.target.value)} rows={5}
             placeholder="Deposit non-refundable. Late > 15 min cancels the slot." />
@@ -13812,6 +13884,7 @@ const ServicesScreen = ({
     max_concurrent: 1,
     category_id: null,
     extras: [],
+    featured: false,
   });
 
   const openEdit = (s: Service) => setEditing({
@@ -13830,6 +13903,7 @@ const ServicesScreen = ({
     max_concurrent: s.max_concurrent ?? 1,
     category_id: s.category_id ?? null,
     extras: Array.isArray(s.extras) ? s.extras : [],
+    featured: !!s.featured,
   });
 
   // Category CRUD handlers — kept local so the screen owns the
@@ -14289,6 +14363,24 @@ const ServicesScreen = ({
                 ))}
               </select>
             </Field>
+
+            {/* Featured pin — surfaces this service in a "Featured"
+                row at the top of the public booking page. Useful for
+                signature styles or seasonal pushes. Off by default. */}
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Feature on booking page</p>
+                  <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+                    Pin this service to a Featured row at the top of your booking page. Great for signature styles you want clients to see first.
+                  </p>
+                </div>
+                <Toggle
+                  checked={!!editing.featured}
+                  onChange={(v: boolean) => setEditing({ ...editing, featured: v })}
+                />
+              </div>
+            </Card>
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Duration (hrs)">
