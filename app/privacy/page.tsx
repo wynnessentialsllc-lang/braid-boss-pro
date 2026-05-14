@@ -65,7 +65,7 @@ export default function PrivacyPage() {
 
       <LegalSection title="Contact">
         <p>
-          Questions? Contact <a href="mailto:hello@hairwellnessslab.com">hello@hairwellnessslab.com</a>.
+          Questions? Contact <a href="mailto:hello@braidbosspro.app">hello@braidbosspro.app</a>.
         </p>
       </LegalSection>
     </LegalShell>
