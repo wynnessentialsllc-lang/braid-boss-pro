@@ -49,6 +49,20 @@ const C = {
   gold: "#C9A961", goldDeep: "#A8893F",
   muted: "#8B7355", hairline: "rgba(74, 44, 26, 0.12)",
   success: "#5C7C4A", danger: "#9C3D2E",
+  // 2026 design system tokens (mirror of app/page.tsx). Public
+  // booking page reads these for its primary CTA gradient + future
+  // refresh sections.
+  brandPrimary: "#7C3AED",
+  brandPrimaryDeep: "#5B21B6",
+  brandSecondary: "#FF4D6D",
+  brandText: "#15111A",
+  brandBorder: "#ECE7F2",
+};
+const GRADIENTS = {
+  primary: "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)",
+};
+const SHADOWS = {
+  primaryGlow: "0 10px 28px -10px rgba(124, 58, 237, 0.45), 0 4px 12px -4px rgba(255, 77, 109, 0.30)",
 };
 const FONT_DISPLAY = `"Cormorant Garamond", Georgia, serif`;
 const FONT_BODY = `"DM Sans", "Inter", system-ui, sans-serif`;
@@ -2116,18 +2130,26 @@ export default function PublicBookingPage() {
               <p style={{ fontSize: 12, color: C.danger }}>{submitError}</p>
             )}
             <button type="submit" disabled={submitting}
+              // 2026 refresh: primary booking CTA now uses the brand
+              // purple→coral gradient with a soft halo shadow. The
+              // stylist's accent still drives borders/chips, but the
+              // primary action gets the platform's hero treatment so
+              // booking feels consistent across stylists.
               style={{
                 marginTop: 6,
-                padding: "14px 18px",
-                borderRadius: 12,
-                background: accent,
-                color: C.espresso,
-                border: `1.5px solid ${C.goldDeep}`,
+                padding: "16px 18px",
+                borderRadius: 14,
+                background: GRADIENTS.primary,
+                backgroundColor: C.brandPrimary,
+                color: "#FFFFFF",
+                border: "0",
                 fontWeight: 700,
                 fontSize: 15,
                 letterSpacing: "0.02em",
+                boxShadow: submitting ? "none" : SHADOWS.primaryGlow,
                 cursor: submitting ? "default" : "pointer",
                 opacity: submitting ? 0.6 : 1,
+                transition: "transform 120ms ease, box-shadow 120ms ease",
               }}>
               {submitting
                 ? "Sending…"
