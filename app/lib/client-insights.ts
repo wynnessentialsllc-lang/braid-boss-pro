@@ -87,8 +87,12 @@ export const deriveClientInsights = (
   allAppointments: any[],
   todayISO: string,
 ): ClientInsights => {
+  // Personal events / blocked time can leak into a client's record
+  // if a row was wrong-templated; they must never count as visits,
+  // spend, or cancellations. Match the rest of the app on excluding
+  // non-appointment kinds.
   const appts = (Array.isArray(allAppointments) ? allAppointments : [])
-    .filter((a: any) => a && a.clientId === client?.id);
+    .filter((a: any) => a && a.clientId === client?.id && (!a.kind || a.kind === "appointment"));
 
   const completed = appts.filter(isCompleted);
   const visitCount = completed.length;
