@@ -912,6 +912,33 @@ export default function PublicBookingPage() {
             background: "linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.18) 100%)",
           }}
         />
+        {/* Brand wordmark — sits in the upper portion of the banner
+            so it doesn't collide with the logo overlap below. Only
+            renders when the stylist hasn't uploaded a custom banner;
+            stamping the wordmark over their photography would feel
+            cheap. Matches the same treatment on the storefront shell
+            so /book/<slug> and /@handle/shop share one identity. */}
+        {!link?.banner_image_url && (
+          <p
+            aria-hidden
+            style={{
+              position: "absolute",
+              top: 22,
+              left: 0,
+              right: 0,
+              textAlign: "center",
+              color: "rgba(255, 255, 255, 0.92)",
+              fontSize: 12,
+              fontWeight: 800,
+              letterSpacing: "0.32em",
+              textTransform: "uppercase",
+              textShadow: "0 1px 8px rgba(21, 17, 26, 0.18)",
+              margin: 0,
+            }}
+          >
+            Braid Boss Pro
+          </p>
+        )}
       </div>
       <div
         className="mx-auto"
