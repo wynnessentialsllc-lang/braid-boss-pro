@@ -18,6 +18,13 @@ import {
   type MonthDayStatus,
 } from "../../lib/services";
 import { trackEvent } from "../../lib/track";
+import {
+  fetchPublicReviews,
+  fetchPublicProducts,
+  fetchPublicServiceRecommendations,
+  type PublicReview,
+  type PublicProduct,
+} from "../../lib/storefront";
 import { collectPublicContext } from "../../lib/waitlist";
 
 // Local-date "YYYY-MM-DD" — never UTC-shifts so the calendar lines up
@@ -228,6 +235,11 @@ export default function PublicBookingPage() {
   // category row above the service select; "" means "all services"
   // (default, so links without categories behave exactly as before).
   const [serviceCategories, setServiceCategories] = useState<PublicServiceCategory[]>([]);
+  // Storefront commerce (Phases 3-5). Each list is independent so a
+  // failed fetch in one section doesn't blank the others.
+  const [reviews, setReviews] = useState<PublicReview[]>([]);
+  const [products, setProducts] = useState<PublicProduct[]>([]);
+  const [serviceRecs, setServiceRecs] = useState<PublicProduct[]>([]);
   const [activeCategoryId, setActiveCategoryId] = useState<string>("");
   // Phase B2 — live slot picker driven by public_list_availability.
   const [slots, setSlots] = useState<PublicSlot[]>([]);
@@ -423,6 +435,46 @@ export default function PublicBookingPage() {
     })();
     return () => { cancelled = true; };
   }, [slug]);
+
+  // Public reviews ("Client Love") — fired once per slug. Empty
+  // array → section hides itself, so stylists with no reviews don't
+  // see ghost UI.
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    (async () => {
+      const r = await fetchPublicReviews(slug);
+      if (cancelled) return;
+      if (r.ok) setReviews(r.reviews);
+    })();
+    return () => { cancelled = true; };
+  }, [slug]);
+
+  // Storefront products ("Recommended Products") — same lazy pattern.
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    (async () => {
+      const r = await fetchPublicProducts(slug);
+      if (cancelled) return;
+      if (r.ok) setProducts(r.products);
+    })();
+    return () => { cancelled = true; };
+  }, [slug]);
+
+  // Per-service recommendations. Refetch whenever the visitor picks
+  // a different service so the "For your appointment" row stays in
+  // sync with the picker.
+  useEffect(() => {
+    if (!slug || !serviceId) { setServiceRecs([]); return; }
+    let cancelled = false;
+    (async () => {
+      const r = await fetchPublicServiceRecommendations(slug, serviceId);
+      if (cancelled) return;
+      if (r.ok) setServiceRecs(r.products);
+    })();
+    return () => { cancelled = true; };
+  }, [slug, serviceId]);
 
   // Catalog wins; fall back to legacy free-form list if the RPC
   // returns nothing (older booking links that haven't migrated).
@@ -1122,6 +1174,180 @@ export default function PublicBookingPage() {
                     />
                   </button>
                 ))}
+            </div>
+          </div>
+        )}
+
+        {/* Phase 3 — Client Love. Renders only when the stylist has
+            at least one review. Featured-first sort already happens
+            server-side; we just present the list. */}
+        {reviews.length > 0 && (
+          <div style={{ marginTop: 28 }}>
+            <p
+              style={{
+                textAlign: "center",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: accent,
+                margin: 0,
+              }}
+            >
+              Client Love
+            </p>
+            <div
+              role="list"
+              aria-label="Client testimonials"
+              style={{
+                marginTop: 12,
+                display: "flex",
+                gap: 12,
+                overflowX: "auto",
+                WebkitOverflowScrolling: "touch",
+                paddingBottom: 4,
+                scrollbarWidth: "none",
+                scrollSnapType: "x mandatory",
+              }}
+            >
+              {reviews.map(r => (
+                <div
+                  key={r.id}
+                  role="listitem"
+                  style={{
+                    flex: "0 0 280px",
+                    scrollSnapAlign: "start",
+                    padding: 16,
+                    borderRadius: 16,
+                    background: C.paper,
+                    border: `1px solid ${C.hairline}`,
+                    boxShadow: "0 4px 12px rgba(74, 44, 26, 0.04)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 18, lineHeight: 1.4, color: C.espresso, fontStyle: "italic" }}>
+                    “{r.review_text}”
+                  </p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: "auto" }}>
+                    {r.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={r.image_url}
+                        alt={r.reviewer_name}
+                        loading="lazy"
+                        style={{ width: 36, height: 36, borderRadius: 999, objectFit: "cover", flexShrink: 0 }}
+                      />
+                    ) : (
+                      <div
+                        aria-hidden
+                        style={{
+                          width: 36, height: 36, borderRadius: 999, flexShrink: 0,
+                          background: C.ivory, color: C.coffee,
+                          display: "grid", placeItems: "center",
+                          fontWeight: 700, fontSize: 13,
+                          border: `1px solid ${C.hairline}`,
+                        }}
+                      >
+                        {(r.reviewer_name || "?").slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: C.espresso }}>
+                        {r.reviewer_name}
+                      </p>
+                      <p style={{ margin: 0, fontSize: 11, color: C.muted, lineHeight: 1.3 }}>
+                        {r.service_name || "Verified guest"}
+                        {r.is_verified_booking ? " · Verified booking" : ""}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Phase 4 — Recommended Products. Hides itself when empty so
+            the section never feels like dead retail real estate. */}
+        {products.length > 0 && (
+          <div style={{ marginTop: 28 }}>
+            <p
+              style={{
+                textAlign: "center",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: accent,
+                margin: 0,
+              }}
+            >
+              Recommended Products
+            </p>
+            <p style={{ textAlign: "center", fontSize: 12, color: C.muted, marginTop: 4 }}>
+              Complete your appointment
+            </p>
+            <div
+              role="list"
+              aria-label="Recommended products"
+              style={{
+                marginTop: 12,
+                display: "flex",
+                gap: 12,
+                overflowX: "auto",
+                WebkitOverflowScrolling: "touch",
+                paddingBottom: 4,
+                scrollbarWidth: "none",
+                scrollSnapType: "x mandatory",
+              }}
+            >
+              {products.map(p => (
+                <ProductCard key={p.id} product={p} accent={accent} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Phase 5 — Per-service recommendations. Renders only after
+            the visitor has picked a service AND the stylist has
+            mapped at least one product to that service. */}
+        {serviceRecs.length > 0 && (
+          <div style={{ marginTop: 24 }}>
+            <p
+              style={{
+                textAlign: "center",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: accent,
+                margin: 0,
+              }}
+            >
+              For Your Appointment
+            </p>
+            <p style={{ textAlign: "center", fontSize: 12, color: C.muted, marginTop: 4 }}>
+              Hand-picked for {selectedCatalogService?.name || "this service"}
+            </p>
+            <div
+              role="list"
+              aria-label="Recommended for this service"
+              style={{
+                marginTop: 12,
+                display: "flex",
+                gap: 12,
+                overflowX: "auto",
+                WebkitOverflowScrolling: "touch",
+                paddingBottom: 4,
+                scrollbarWidth: "none",
+                scrollSnapType: "x mandatory",
+              }}
+            >
+              {serviceRecs.map(p => (
+                <ProductCard key={`rec_${p.id}`} product={p} accent={accent} />
+              ))}
             </div>
           </div>
         )}
@@ -2141,6 +2367,96 @@ const inputStyle: React.CSSProperties = {
   outline: "none",
 };
 const selectStyle: React.CSSProperties = { ...inputStyle, appearance: "none" };
+
+// Shared between the "Recommended Products" + "For Your Appointment"
+// rails. Image on top, title + price below, optional external
+// checkout link as a footer pill.
+const ProductCard = ({ product, accent }: { product: PublicProduct; accent: string }) => {
+  const hasCheckout = !!product.external_checkout_url;
+  const body = (
+    <>
+      {product.image_url ? (
+        <div style={{ aspectRatio: "1 / 1", background: C.ivory, overflow: "hidden" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={product.image_url}
+            alt={product.title}
+            loading="lazy"
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          />
+        </div>
+      ) : (
+        <div
+          aria-hidden
+          style={{
+            aspectRatio: "1 / 1",
+            background: `linear-gradient(180deg, ${C.cream}, ${C.ivory})`,
+            display: "grid", placeItems: "center",
+            color: C.muted, fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase",
+          }}
+        >
+          Product
+        </div>
+      )}
+      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+        <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: C.espresso, lineHeight: 1.25 }}>
+          {product.title}
+        </p>
+        {product.description && (
+          <p style={{ margin: 0, fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
+            {product.description.length > 70 ? `${product.description.slice(0, 67)}…` : product.description}
+          </p>
+        )}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 4 }}>
+          <span style={{ fontWeight: 700, color: C.goldDeep, fontSize: 14 }}>
+            {product.price != null ? `$${product.price.toFixed(2)}` : "Ask"}
+          </span>
+          {product.local_pickup_available && (
+            <span
+              style={{
+                fontSize: 9.5, fontWeight: 600, letterSpacing: "0.08em",
+                textTransform: "uppercase", color: C.muted,
+              }}
+            >
+              Local pickup
+            </span>
+          )}
+        </div>
+        {hasCheckout && (
+          <span
+            style={{
+              marginTop: 6,
+              fontSize: 11, fontWeight: 600, textAlign: "center",
+              color: accent, border: `1px solid ${accent}`,
+              borderRadius: 99, padding: "6px 10px", background: "#FFFFFF",
+            }}
+          >
+            Shop now
+          </span>
+        )}
+      </div>
+    </>
+  );
+  const sharedStyle: React.CSSProperties = {
+    flex: "0 0 200px",
+    scrollSnapAlign: "start",
+    borderRadius: 16,
+    background: C.paper,
+    border: `1px solid ${C.hairline}`,
+    boxShadow: "0 4px 12px rgba(74, 44, 26, 0.04)",
+    overflow: "hidden",
+    color: "inherit",
+    textDecoration: "none",
+    cursor: hasCheckout ? "pointer" : "default",
+  };
+  return hasCheckout ? (
+    <a href={product.external_checkout_url!} target="_blank" rel="noopener noreferrer" style={sharedStyle}>
+      {body}
+    </a>
+  ) : (
+    <div style={sharedStyle}>{body}</div>
+  );
+};
 
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <label style={{ display: "block" }}>
