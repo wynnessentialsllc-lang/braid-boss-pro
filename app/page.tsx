@@ -348,6 +348,20 @@ const GlobalStyle = () => (
     .bbp-fade { animation: bbpFade 0.35s cubic-bezier(.2,.8,.2,1) both; }
     .bbp-sheet { animation: bbpSheet 0.32s cubic-bezier(.2,.8,.2,1) both; }
     .bbp-pulse-gold { animation: bbpPulseGold 2s ease-in-out infinite; }
+    /* 2026 polish: gentle card entrance + tap-scale feedback that
+       applies on touch (active) and pointer (hover) without
+       fighting any inline transition. Used by the dashboard KPI
+       grid, Quick actions, Pending balances. The .bbp-rise variant
+       lets us stagger entrance by setting --bbp-rise-delay inline. */
+    @keyframes bbpRise { from { opacity:0; transform: translateY(10px) scale(0.985);} to { opacity:1; transform: translateY(0) scale(1);} }
+    .bbp-rise { animation: bbpRise 0.42s cubic-bezier(.2,.8,.2,1) both; animation-delay: var(--bbp-rise-delay, 0ms); }
+    .bbp-tap { transition: transform 140ms cubic-bezier(.2,.8,.2,1), box-shadow 140ms ease; }
+    .bbp-tap:active { transform: scale(0.975); }
+    @media (hover: hover) { .bbp-tap:hover { transform: translateY(-1px); } }
+    @media (prefers-reduced-motion: reduce) {
+      .bbp-rise { animation: none; }
+      .bbp-tap, .bbp-tap:hover, .bbp-tap:active { transform: none; }
+    }
     input, textarea, select, button { font-family: inherit; }
     input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     input[type=number] { -moz-appearance: textfield; }
@@ -2101,7 +2115,17 @@ const Header = ({ title, subtitle, leftAction, rightAction }: {
     if (React.isValidElement(action)) return action;
     if (action.icon && action.onClick) {
       return (
-        <button type="button" onClick={action.onClick} className="p-2 rounded-full transition active:scale-[0.95]" style={{ color: C.coffee }}>
+        <button
+          type="button"
+          onClick={action.onClick}
+          className="rounded-full bbp-tap flex items-center justify-center"
+          style={{
+            width: 38, height: 38,
+            color: C.coffee,
+            background: C.paper,
+            border: `1px solid ${C.hairline}`,
+          }}
+        >
           {action.icon}
         </button>
       );
@@ -2116,36 +2140,55 @@ const Header = ({ title, subtitle, leftAction, rightAction }: {
   // that with the Welcome-back copy).
   const hasTitle = title !== undefined && title !== null && title !== "";
   return (
-    <header className="px-5 pt-4 pb-3 sticky top-0 z-10" style={{ background: C.cream, borderBottom: `1px solid ${C.hairline}` }}>
-      <div className="flex items-center justify-between">
-        <div className="w-9">{renderAction(leftAction)}</div>
-        <div className="text-center flex-1">
+    <header
+      className="px-4 sticky top-0 z-10"
+      style={{
+        background: C.cream,
+        borderBottom: `1px solid ${C.hairline}`,
+        // Honor iOS notch / dynamic island. Adds the env inset on
+        // top of a flat 12px so the brand line never collides with
+        // the status bar but doesn't add dead space when the safe
+        // area is 0 (Android, desktop).
+        paddingTop: "calc(env(safe-area-inset-top, 0px) + 10px)",
+        paddingBottom: 10,
+      }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="w-10 flex justify-start">{renderAction(leftAction)}</div>
+        <div className="text-center flex-1 min-w-0 px-1">
           {hasTitle ? (
             <>
-              <p className="text-[10px] font-bold tracking-[0.22em] uppercase" style={{ color: C.brandPrimary }}>Braid Boss Pro</p>
-              <h1 style={{ fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, color: C.espresso, lineHeight: 1.1 }}>{title}</h1>
+              <p className="text-[10px] font-bold tracking-[0.20em] uppercase" style={{ color: C.brandPrimary, letterSpacing: "0.20em" }}>Braid Boss Pro</p>
+              <h1 className="truncate" style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso, lineHeight: 1.15, marginTop: 1 }}>{title}</h1>
             </>
           ) : (
-            // Dashboard-only hero brand. Matches the eyebrow style
-            // every other screen uses (uppercase, purple, wide
-            // tracking) so the brand reads consistently — just
-            // scaled UP since the dashboard's brand line is the
-            // standalone headline, not an eyebrow.
+            // Dashboard hero brand. Single-line brand mark — the
+            // welcome card below carries the greeting, so the
+            // header stays compact (one row of brand + a date
+            // subtitle).
             <h1
-              className="font-bold uppercase"
+              className="font-bold uppercase truncate"
               style={{
-                fontSize: 18,
-                letterSpacing: "0.10em",
+                fontSize: 17,
+                letterSpacing: "0.12em",
                 color: C.brandPrimary,
-                lineHeight: 1.15,
+                lineHeight: 1.2,
               }}
             >
               Braid Boss Pro
             </h1>
           )}
-          {subtitle && <p className="text-xs mt-0.5" style={{ color: C.muted }}>{subtitle}</p>}
+          {subtitle && (
+            // Subtitle may be a plain date string or a compound
+            // (date + cloud-backup pill). Render as flex-wrap so
+            // the pill drops below the date on narrow viewports
+            // instead of clipping or pushing the title.
+            <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 mt-1 text-[11px]" style={{ color: C.muted, lineHeight: 1.3 }}>
+              {subtitle}
+            </div>
+          )}
         </div>
-        <div className="w-9 flex justify-end">{renderAction(rightAction)}</div>
+        <div className="w-10 flex justify-end">{renderAction(rightAction)}</div>
       </div>
     </header>
   );
@@ -3661,12 +3704,20 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
                 window.dispatchEvent(new ErrorEvent("error", { error: err as Error, message: (err as Error)?.message || String(err) }));
               }
             }}
-            className="p-2 rounded-full relative"
-            // Classic gold for the notification bell — the C.gold
-            // token now points at brandPrimary purple after the
-            // palette swap, so we use a literal warm gold hex here
-            // to preserve the intended visual.
-            style={{ color: "#F0A500", WebkitAppearance: "none" as any, appearance: "none" as any, background: "transparent", border: 0 }}
+            className="rounded-full relative bbp-tap flex items-center justify-center"
+            // Classic warm gold for the bell. The icon-chip matches
+            // the settings button on the right for visual balance —
+            // both render as 38×38 paper-tinted circles with a
+            // hairline border, just with the bell's stroke tinted
+            // gold for the notification meaning.
+            style={{
+              width: 38, height: 38,
+              color: "#F0A500",
+              WebkitAppearance: "none" as any,
+              appearance: "none" as any,
+              background: C.paper,
+              border: `1px solid ${C.hairline}`,
+            }}
             aria-label="Notifications">
             <Bell size={20} />
             {notifBadgeCount > 0 && (
@@ -3677,10 +3728,25 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
             )}
           </button>
         }
-        rightAction={<button type="button" onClick={openSettings} className="p-2 rounded-full" style={{ color: C.coffee }}><SettingsIcon size={20} /></button>}
+        rightAction={
+          <button
+            type="button"
+            onClick={openSettings}
+            className="rounded-full bbp-tap flex items-center justify-center"
+            style={{
+              width: 38, height: 38,
+              color: C.coffee,
+              background: C.paper,
+              border: `1px solid ${C.hairline}`,
+            }}
+            aria-label="Settings"
+          >
+            <SettingsIcon size={18} />
+          </button>
+        }
       />
 
-      <div className="px-5 pt-4 pb-28 space-y-5">
+      <div className="px-5 pt-4 pb-28 space-y-4">
         <DashboardHero
           greeting={greeting}
           ownerName={business.ownerName?.split(" ")[0] || null}
@@ -3691,23 +3757,61 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
         />
 
 
-        <div className="grid grid-cols-2 gap-3">
-          {/* 2026 refresh: tone map intentionally varied so the
-              dashboard row reads as a polished portfolio instead of
-              one repeated color. Revenue tiles get the coral
-              brand-secondary; the social tiles (clients) get the
-              purple brand-primary; deposits stay success-green;
-              pending stays warning-amber. Zeros downshift to
-              neutral so a brand-new account doesn't look loud. */}
-          <KpiCard label="Today revenue" value={fmtMoney(revenueStats.todayRevenue, business.currency)} icon={<DollarSign size={16} />} tone={revenueStats.todayRevenue > 0 ? "gold" : "neutral"} onClick={() => openKpi("today")} />
-          <KpiCard label="Week revenue" value={fmtMoney(stats.weekRevenue, business.currency)} icon={<ArrowUpRight size={16} />} tone="gold" onClick={() => openKpi("week")} />
-          <KpiCard label="Week clients" value={stats.weekAppts} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("weekClients")} />
-          <KpiCard label="Avg ticket (30d)" value={fmtMoney(revenueStats.averageTicket30d, business.currency)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => openKpi("avgTicket")} />
-          <KpiCard label="Deposits (week)" value={fmtMoney(revenueStats.weekDeposits, business.currency)} icon={<Check size={16} />} tone={revenueStats.weekDeposits > 0 ? "success" : "neutral"} onClick={() => openKpi("deposits")} />
-          <KpiCard label="Pending balance" value={fmtMoney(stats.pendingBalance, business.currency)} icon={<Clock size={16} />} tone={stats.pendingBalance > 0 ? "warning" : "neutral"} onClick={() => openKpi("pending")} />
-          <KpiCard label="Month expected" value={fmtMoney(revenueStats.monthExpected, business.currency)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "primary" : "neutral"} onClick={() => openKpi("monthExpected")} />
-          <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} onClick={() => openKpi("monthProfit")} />
-          <KpiCard label="Year made" value={fmtMoney(revenueStats.yearMade, business.currency)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => setActive("money")} />
+        {/* Hierarchy: money-critical cards get a dedicated headline
+            row (today / week revenue, deposits this week, pending
+            balance). Pending Balance is `emphasized` so it lifts
+            slightly above the others — it's the row the stylist
+            most needs to action. The remaining 5 KPIs drop into a
+            secondary compact grid below so the dashboard doesn't
+            read as 9 equal-weight cards competing for attention. */}
+        <div>
+          <SectionTitle>This week</SectionTitle>
+          <div className="grid grid-cols-2 gap-3">
+            <KpiCard
+              label="Today revenue"
+              value={fmtMoney(revenueStats.todayRevenue, business.currency)}
+              icon={<DollarSign size={16} />}
+              tone={revenueStats.todayRevenue > 0 ? "gold" : "neutral"}
+              onClick={() => openKpi("today")}
+              riseDelay={0}
+            />
+            <KpiCard
+              label="Week revenue"
+              value={fmtMoney(stats.weekRevenue, business.currency)}
+              icon={<ArrowUpRight size={16} />}
+              tone="gold"
+              onClick={() => openKpi("week")}
+              riseDelay={40}
+            />
+            <KpiCard
+              label="Deposits (week)"
+              value={fmtMoney(revenueStats.weekDeposits, business.currency)}
+              icon={<Check size={16} />}
+              tone={revenueStats.weekDeposits > 0 ? "success" : "neutral"}
+              onClick={() => openKpi("deposits")}
+              riseDelay={80}
+            />
+            <KpiCard
+              label="Pending balance"
+              value={fmtMoney(stats.pendingBalance, business.currency)}
+              icon={<Clock size={16} />}
+              tone={stats.pendingBalance > 0 ? "warning" : "neutral"}
+              onClick={() => openKpi("pending")}
+              emphasized
+              riseDelay={120}
+            />
+          </div>
+        </div>
+
+        <div>
+          <SectionTitle>More stats</SectionTitle>
+          <div className="grid grid-cols-2 gap-2.5">
+            <KpiCard label="Week clients" value={stats.weekAppts} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("weekClients")} compact riseDelay={0} />
+            <KpiCard label="Avg ticket (30d)" value={fmtMoney(revenueStats.averageTicket30d, business.currency)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => openKpi("avgTicket")} compact riseDelay={40} />
+            <KpiCard label="Month expected" value={fmtMoney(revenueStats.monthExpected, business.currency)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "primary" : "neutral"} onClick={() => openKpi("monthExpected")} compact riseDelay={80} />
+            <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} onClick={() => openKpi("monthProfit")} compact riseDelay={120} />
+            <KpiCard label="Year made" value={fmtMoney(revenueStats.yearMade, business.currency)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => setActive("money")} compact riseDelay={160} />
+          </div>
         </div>
 
         <KpiDetailSheet
@@ -3885,7 +3989,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
   );
 };
 
-const KpiCard = ({ label, value, icon, tone = "neutral", onClick }: { label: any; value: any; icon: any; tone?: string; onClick?: () => void }) => {
+const KpiCard = ({ label, value, icon, tone = "neutral", onClick, emphasized, compact, riseDelay }: { label: any; value: any; icon: any; tone?: string; onClick?: () => void; emphasized?: boolean; compact?: boolean; riseDelay?: number }) => {
   // 2026 refresh: colorful gradient pills on the icon + a thin
   // accent strip at the top of the card. White card body keeps the
   // page airy; the gradient bubble is the chromatic hit. Tones map
@@ -3935,32 +4039,43 @@ const KpiCard = ({ label, value, icon, tone = "neutral", onClick }: { label: any
     },
   };
   const t = tones[tone] || tones.neutral;
+  // Hierarchy: `emphasized` lifts a money-critical tile above the
+  // rest of the row (thicker strip, slightly larger value, deeper
+  // shadow). `compact` reduces padding + value size so the
+  // secondary KPI grid reads as supporting data, not competing
+  // headlines.
+  const stripHeight = emphasized ? 5 : 3;
+  const valueSize = compact ? 22 : emphasized ? 30 : 26;
+  const pad = compact ? "p-3.5" : "p-4";
+  const iconSize = compact ? 28 : 32;
   return (
     <Card
-      className={`p-4 ${onClick ? "cursor-pointer active:scale-[0.98] transition" : ""}`}
+      className={`${pad} bbp-rise ${onClick ? "bbp-tap" : ""}`}
       onClick={onClick}
       style={{
         position: "relative",
         overflow: "hidden",
-        // Lifted shadow on the new card variant so a row of KPI
-        // tiles reads as a polished SaaS surface rather than flat.
-        boxShadow: SHADOWS.card,
+        // Money-critical cards get the lifted shadow; secondary
+        // cards stay flat-ish so the eye lands on the headline row
+        // first.
+        boxShadow: emphasized
+          ? "0 1px 2px rgba(21, 17, 26, 0.06), 0 16px 32px -14px rgba(21, 17, 26, 0.20)"
+          : SHADOWS.card,
+        // Stagger entrance — passed by the dashboard so the row of
+        // KPI tiles cascades in instead of popping all at once.
+        ["--bbp-rise-delay" as any]: `${riseDelay ?? 0}ms`,
       }}
     >
-      {/* Thin gradient accent strip at the top edge of the card —
-          tints the white surface without flooding it. Transparent
-          for the neutral tone so the row stays calm when all the
-          numbers are zero. */}
       <span
         aria-hidden
         style={{
           position: "absolute",
           top: 0, left: 0, right: 0,
-          height: 3,
+          height: stripHeight,
           background: t.strip === "transparent" ? "transparent" : t.gradient,
         }}
       />
-      <div className="flex items-center justify-between mb-3">
+      <div className={`flex items-center justify-between ${compact ? "mb-2" : "mb-3"}`}>
         <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.brandMuted, letterSpacing: "0.14em" }}>
           {label}
         </span>
@@ -3968,7 +4083,7 @@ const KpiCard = ({ label, value, icon, tone = "neutral", onClick }: { label: any
           aria-hidden
           className="rounded-full"
           style={{
-            width: 32, height: 32,
+            width: iconSize, height: iconSize,
             display: "grid", placeItems: "center",
             background: t.gradient,
             color: t.iconColor,
@@ -3978,8 +4093,8 @@ const KpiCard = ({ label, value, icon, tone = "neutral", onClick }: { label: any
           {icon}
         </div>
       </div>
-      <p style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: C.brandText, lineHeight: 1 }}>{value}</p>
-      {onClick && (
+      <p style={{ fontFamily: FONT_DISPLAY, fontSize: valueSize, fontWeight: 600, color: C.brandText, lineHeight: 1 }}>{value}</p>
+      {onClick && !compact && (
         <p className="text-[10px] font-semibold mt-1.5 flex items-center gap-0.5" style={{ color: t.linkColor }}>
           View <ChevronRight size={11} />
         </p>
@@ -4001,6 +4116,11 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
     generateBossInsights({ clients, appointments, communications: commLog, settings, today }),
     [clients, appointments, commLog, settings, today]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Density: cap the visible insights at 3 by default. A long
+  // unfiltered list overwhelmed the dashboard; the stylist can tap
+  // "Show all" to see the rest, and Boss insights are sorted by
+  // priority upstream so the first 3 are always the most important.
+  const [showAll, setShowAll] = useState(false);
 
   const tone = (p: Insight["priority"]): "danger" | "gold" | "neutral" =>
     p === "high" ? "danger" : p === "medium" ? "gold" : "neutral";
@@ -4012,6 +4132,9 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
     else if (target.startsWith("client:")) setActive("clients");
     else if (target.startsWith("appointment:")) setActive("schedule");
   };
+
+  const visibleInsights = showAll ? insights : insights.slice(0, 3);
+  const hiddenCount = Math.max(0, insights.length - 3);
 
   return (
     <div>
@@ -4026,31 +4149,31 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
         </Card>
       ) : (
         <div className="space-y-2">
-          {insights.map(i => {
+          {visibleInsights.map((i, idx) => {
             const isOpen = !!expanded[i.id];
             return (
-              <Card key={i.id} className="p-3.5">
+              <Card key={i.id} className="p-3 bbp-rise" style={{ ["--bbp-rise-delay" as any]: `${idx * 35}ms` }}>
                 <button
-                  type="button" className="w-full text-left active:scale-[0.99] transition"
+                  type="button" className="w-full text-left bbp-tap"
                   onClick={() => setExpanded(prev => ({ ...prev, [i.id]: !prev[i.id] }))}>
-                  <div className="flex items-start justify-between gap-2 mb-1.5 flex-wrap">
+                  <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
                     <Pill tone={tone(i.priority)}>{i.category.toUpperCase()}</Pill>
                     {i.why && (
                       <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: C.muted }}>
-                        {isOpen ? "Hide why" : "Why this matters"}
+                        {isOpen ? "Hide why" : "Why"}
                       </span>
                     )}
                   </div>
-                  <p className="font-semibold text-sm" style={{ color: C.espresso }}>{i.title}</p>
-                  {i.body && <p className="text-[12px] mt-1 leading-relaxed" style={{ color: C.coffee }}>{i.body}</p>}
+                  <p className="font-semibold text-[13.5px] leading-snug" style={{ color: C.espresso }}>{i.title}</p>
+                  {i.body && <p className="text-[12px] mt-0.5 leading-relaxed" style={{ color: C.coffee }}>{i.body}</p>}
                   {isOpen && i.why && (
-                    <p className="text-[11px] mt-2 italic leading-relaxed bbp-fade" style={{ color: C.muted }}>{i.why}</p>
+                    <p className="text-[11px] mt-1.5 italic leading-relaxed bbp-fade" style={{ color: C.muted }}>{i.why}</p>
                   )}
                 </button>
                 {i.actionLabel && (
                   <div className="flex justify-end mt-2">
                     <button type="button" onClick={() => handleAction(i.actionTarget)}
-                      className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider bbp-tap"
                       style={{ background: "transparent", color: C.goldDeep, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
                       {i.actionLabel}
                     </button>
@@ -4059,6 +4182,16 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
               </Card>
             );
           })}
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAll(v => !v)}
+              className="w-full text-center text-[11px] font-bold uppercase tracking-wider py-2 rounded-lg bbp-tap"
+              style={{ color: C.goldDeep, letterSpacing: "0.10em" }}
+            >
+              {showAll ? "Show less" : `Show ${hiddenCount} more`}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -4389,17 +4522,37 @@ const ClientRetentionCard = ({ clientId, clientName, appointments, today, busine
 };
 
 const QuickTile = ({ icon, label, onClick }) => (
-  // 2026 refresh: tiles now read in the brand-secondary pink rose
-  // family to match the dashboard hero. White icon + white label on
-  // a vibrant pink gradient, soft coral halo shadow.
-  <button type="button" onClick={onClick} className="rounded-2xl p-4 text-left active:scale-[0.97] transition flex flex-col items-start gap-2"
+  // 2026 refresh: tiles read in the brand-secondary pink rose
+  // family to match the dashboard hero. White icon-chip is now a
+  // fixed 36×36 square so a row of tiles aligns regardless of the
+  // icon's intrinsic size, and the label sits at the bottom for a
+  // consistent two-row card silhouette.
+  <button
+    type="button"
+    onClick={onClick}
+    className="rounded-2xl text-left bbp-tap flex flex-col items-start justify-between"
     style={{
       background: "linear-gradient(135deg, #FF6B9D 0%, #FF4D6D 55%, #E0354F 100%)",
       color: "#FFFFFF",
       boxShadow: "0 10px 24px -14px rgba(255, 77, 109, 0.55)",
-    }}>
-    <div className="rounded-full p-2" style={{ background: "rgba(255, 255, 255, 0.22)", color: "#FFFFFF", border: "1px solid rgba(255, 255, 255, 0.30)" }}>{icon}</div>
-    <span className="font-semibold text-[14px]">{label}</span>
+      padding: 14,
+      gap: 14,
+      minHeight: 96,
+    }}
+  >
+    <div
+      aria-hidden
+      className="rounded-full flex items-center justify-center"
+      style={{
+        width: 36, height: 36,
+        background: "rgba(255, 255, 255, 0.22)",
+        color: "#FFFFFF",
+        border: "1px solid rgba(255, 255, 255, 0.30)",
+      }}
+    >
+      {icon}
+    </div>
+    <span className="font-semibold text-[14px] leading-tight">{label}</span>
   </button>
 );
 
