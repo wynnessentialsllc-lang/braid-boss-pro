@@ -3556,13 +3556,20 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
 
 
         <div className="grid grid-cols-2 gap-3">
+          {/* 2026 refresh: tone map intentionally varied so the
+              dashboard row reads as a polished portfolio instead of
+              one repeated color. Revenue tiles get the coral
+              brand-secondary; the social tiles (clients) get the
+              purple brand-primary; deposits stay success-green;
+              pending stays warning-amber. Zeros downshift to
+              neutral so a brand-new account doesn't look loud. */}
           <KpiCard label="Today revenue" value={fmtMoney(revenueStats.todayRevenue, business.currency)} icon={<DollarSign size={16} />} tone={revenueStats.todayRevenue > 0 ? "gold" : "neutral"} onClick={() => openKpi("today")} />
           <KpiCard label="Week revenue" value={fmtMoney(stats.weekRevenue, business.currency)} icon={<ArrowUpRight size={16} />} tone="gold" onClick={() => openKpi("week")} />
-          <KpiCard label="Week clients" value={stats.weekAppts} icon={<Users size={16} />} onClick={() => openKpi("weekClients")} />
+          <KpiCard label="Week clients" value={stats.weekAppts} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("weekClients")} />
           <KpiCard label="Avg ticket (30d)" value={fmtMoney(revenueStats.averageTicket30d, business.currency)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => openKpi("avgTicket")} />
           <KpiCard label="Deposits (week)" value={fmtMoney(revenueStats.weekDeposits, business.currency)} icon={<Check size={16} />} tone={revenueStats.weekDeposits > 0 ? "success" : "neutral"} onClick={() => openKpi("deposits")} />
           <KpiCard label="Pending balance" value={fmtMoney(stats.pendingBalance, business.currency)} icon={<Clock size={16} />} tone={stats.pendingBalance > 0 ? "warning" : "neutral"} onClick={() => openKpi("pending")} />
-          <KpiCard label="Month expected" value={fmtMoney(revenueStats.monthExpected, business.currency)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "gold" : "neutral"} onClick={() => openKpi("monthExpected")} />
+          <KpiCard label="Month expected" value={fmtMoney(revenueStats.monthExpected, business.currency)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "primary" : "neutral"} onClick={() => openKpi("monthExpected")} />
           <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} onClick={() => openKpi("monthProfit")} />
           <KpiCard label="Year made" value={fmtMoney(revenueStats.yearMade, business.currency)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => setActive("money")} />
         </div>
@@ -3743,22 +3750,104 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
 };
 
 const KpiCard = ({ label, value, icon, tone = "neutral", onClick }: { label: any; value: any; icon: any; tone?: string; onClick?: () => void }) => {
-  const tones: Record<string, { accent: string; bg: string }> = {
-    neutral: { accent: C.coffee, bg: C.ivory },
-    gold: { accent: C.goldDeep, bg: "#F5E9C8" },
-    success: { accent: C.success, bg: "#E4EDD8" },
-    warning: { accent: C.warning, bg: "#F5DDC0" },
-    danger: { accent: C.danger, bg: "#F2D6D0" },
+  // 2026 refresh: colorful gradient pills on the icon + a thin
+  // accent strip at the top of the card. White card body keeps the
+  // page airy; the gradient bubble is the chromatic hit. Tones map
+  // cleanly onto the new brand palette so a future tone tweak
+  // touches one place. The neutral tone stays muted so a screen
+  // with many cards doesn't read as a rainbow.
+  const tones: Record<string, { gradient: string; strip: string; iconColor: string; linkColor: string }> = {
+    neutral: {
+      gradient: `linear-gradient(135deg, ${C.brandBorder} 0%, ${C.ivory} 100%)`,
+      strip: "transparent",
+      iconColor: C.brandMuted,
+      linkColor: C.brandMuted,
+    },
+    primary: {
+      gradient: GRADIENTS.primary,
+      strip: C.brandPrimary,
+      iconColor: "#FFFFFF",
+      linkColor: C.brandPrimary,
+    },
+    gold: {
+      // "Gold" tone is repurposed for the revenue/secondary
+      // gradient. Old callers pass tone="gold" — we map it to the
+      // coral→orange brand secondary so the screen still feels
+      // gold-warm but in the 2026 vocabulary.
+      gradient: GRADIENTS.secondary,
+      strip: C.brandSecondary,
+      iconColor: "#FFFFFF",
+      linkColor: C.brandSecondary,
+    },
+    success: {
+      gradient: `linear-gradient(135deg, ${C.brandSuccess} 0%, #16A34A 100%)`,
+      strip: C.brandSuccess,
+      iconColor: "#FFFFFF",
+      linkColor: C.brandSuccess,
+    },
+    warning: {
+      gradient: `linear-gradient(135deg, ${C.brandWarning} 0%, #F59E0B 100%)`,
+      strip: C.brandWarning,
+      iconColor: "#15111A",
+      linkColor: "#B45309",
+    },
+    danger: {
+      gradient: `linear-gradient(135deg, ${C.brandError} 0%, #DC2626 100%)`,
+      strip: C.brandError,
+      iconColor: "#FFFFFF",
+      linkColor: C.brandError,
+    },
   };
   const t = tones[tone] || tones.neutral;
   return (
-    <Card className={`p-4 ${onClick ? "cursor-pointer active:scale-[0.98] transition" : ""}`} onClick={onClick}>
+    <Card
+      className={`p-4 ${onClick ? "cursor-pointer active:scale-[0.98] transition" : ""}`}
+      onClick={onClick}
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        // Lifted shadow on the new card variant so a row of KPI
+        // tiles reads as a polished SaaS surface rather than flat.
+        boxShadow: SHADOWS.card,
+      }}
+    >
+      {/* Thin gradient accent strip at the top edge of the card —
+          tints the white surface without flooding it. Transparent
+          for the neutral tone so the row stays calm when all the
+          numbers are zero. */}
+      <span
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: 0, left: 0, right: 0,
+          height: 3,
+          background: t.strip === "transparent" ? "transparent" : t.gradient,
+        }}
+      />
       <div className="flex items-center justify-between mb-3">
-        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>{label}</span>
-        <div className="rounded-full p-1.5" style={{ background: t.bg, color: t.accent }}>{icon}</div>
+        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.brandMuted, letterSpacing: "0.14em" }}>
+          {label}
+        </span>
+        <div
+          aria-hidden
+          className="rounded-full"
+          style={{
+            width: 32, height: 32,
+            display: "grid", placeItems: "center",
+            background: t.gradient,
+            color: t.iconColor,
+            boxShadow: tone === "neutral" ? "none" : "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
+          }}
+        >
+          {icon}
+        </div>
       </div>
-      <p style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: C.espresso, lineHeight: 1 }}>{value}</p>
-      {onClick && <p className="text-[10px] font-semibold mt-1.5 flex items-center gap-0.5" style={{ color: C.gold }}>View <ChevronRight size={11} /></p>}
+      <p style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: C.brandText, lineHeight: 1 }}>{value}</p>
+      {onClick && (
+        <p className="text-[10px] font-semibold mt-1.5 flex items-center gap-0.5" style={{ color: t.linkColor }}>
+          View <ChevronRight size={11} />
+        </p>
+      )}
     </Card>
   );
 };
