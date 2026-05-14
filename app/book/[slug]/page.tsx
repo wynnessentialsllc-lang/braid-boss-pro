@@ -1926,10 +1926,13 @@ export default function PublicBookingPage() {
               <button
                 type="button"
                 onClick={() => setWaitlistOpen(true)}
+                // Cream / tan treatment so the waitlist CTA reads
+                // visibly warmer than the surrounding white canvas
+                // without competing with the stylist's accent button.
                 style={{
                   width: "100%", padding: "12px 14px", borderRadius: 12,
-                  background: "transparent", color: C.coffee,
-                  border: `1px solid ${C.hairline}`,
+                  background: "#F4E9D3", color: C.espresso,
+                  border: `1px solid ${C.goldDeep}`,
                   fontSize: 14, fontWeight: 600, cursor: "pointer",
                 }}
               >
