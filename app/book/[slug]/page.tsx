@@ -1283,89 +1283,6 @@ export default function PublicBookingPage() {
           </div>
         )}
 
-        {/* Phase 4 — Recommended Products. Hides itself when empty so
-            the section never feels like dead retail real estate. */}
-        {products.length > 0 && (
-          <div style={{ marginTop: 28 }}>
-            <p
-              style={{
-                textAlign: "center",
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: "0.22em",
-                textTransform: "uppercase",
-                color: accent,
-                margin: 0,
-              }}
-            >
-              Recommended Products
-            </p>
-            <p style={{ textAlign: "center", fontSize: 12, color: C.muted, marginTop: 4 }}>
-              Complete your appointment
-            </p>
-            <div
-              role="list"
-              aria-label="Recommended products"
-              style={{
-                marginTop: 12,
-                display: "flex",
-                gap: 12,
-                overflowX: "auto",
-                WebkitOverflowScrolling: "touch",
-                paddingBottom: 4,
-                scrollbarWidth: "none",
-                scrollSnapType: "x mandatory",
-              }}
-            >
-              {products.map(p => (
-                <ProductCard key={p.id} product={p} accent={accent} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Phase 5 — Per-service recommendations. Renders only after
-            the visitor has picked a service AND the stylist has
-            mapped at least one product to that service. */}
-        {serviceRecs.length > 0 && (
-          <div style={{ marginTop: 24 }}>
-            <p
-              style={{
-                textAlign: "center",
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: "0.22em",
-                textTransform: "uppercase",
-                color: accent,
-                margin: 0,
-              }}
-            >
-              For Your Appointment
-            </p>
-            <p style={{ textAlign: "center", fontSize: 12, color: C.muted, marginTop: 4 }}>
-              Hand-picked for {selectedCatalogService?.name || "this service"}
-            </p>
-            <div
-              role="list"
-              aria-label="Recommended for this service"
-              style={{
-                marginTop: 12,
-                display: "flex",
-                gap: 12,
-                overflowX: "auto",
-                WebkitOverflowScrolling: "touch",
-                paddingBottom: 4,
-                scrollbarWidth: "none",
-                scrollSnapType: "x mandatory",
-              }}
-            >
-              {serviceRecs.map(p => (
-                <ProductCard key={`rec_${p.id}`} product={p} accent={accent} />
-              ))}
-            </div>
-          </div>
-        )}
-
         {linkLoading && (
           <p style={{ textAlign: "center", marginTop: 32, color: C.muted, fontSize: 13 }}>Loading…</p>
         )}
@@ -2246,6 +2163,92 @@ export default function PublicBookingPage() {
                 </p>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Phase 4 — Recommended Products. Lives below the waitlist
+            CTA so the booking form (and the alternate waitlist flow)
+            sit above the fold and the retail rail reads as a tail
+            "before you go" prompt instead of competing with the
+            booking decision. Hides itself when empty. */}
+        {products.length > 0 && (
+          <div style={{ marginTop: 28 }}>
+            <p
+              style={{
+                textAlign: "center",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: accent,
+                margin: 0,
+              }}
+            >
+              Recommended Products
+            </p>
+            <p style={{ textAlign: "center", fontSize: 12, color: C.muted, marginTop: 4 }}>
+              Complete your appointment
+            </p>
+            <div
+              role="list"
+              aria-label="Recommended products"
+              style={{
+                marginTop: 12,
+                display: "flex",
+                gap: 12,
+                overflowX: "auto",
+                WebkitOverflowScrolling: "touch",
+                paddingBottom: 4,
+                scrollbarWidth: "none",
+                scrollSnapType: "x mandatory",
+              }}
+            >
+              {products.map(p => (
+                <ProductCard key={p.id} product={p} accent={accent} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Phase 5 — Per-service recommendations. Renders only after
+            the visitor has picked a service AND the stylist has
+            mapped at least one product to that service. */}
+        {serviceRecs.length > 0 && (
+          <div style={{ marginTop: 24 }}>
+            <p
+              style={{
+                textAlign: "center",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: accent,
+                margin: 0,
+              }}
+            >
+              For Your Appointment
+            </p>
+            <p style={{ textAlign: "center", fontSize: 12, color: C.muted, marginTop: 4 }}>
+              Hand-picked for {selectedCatalogService?.name || "this service"}
+            </p>
+            <div
+              role="list"
+              aria-label="Recommended for this service"
+              style={{
+                marginTop: 12,
+                display: "flex",
+                gap: 12,
+                overflowX: "auto",
+                WebkitOverflowScrolling: "touch",
+                paddingBottom: 4,
+                scrollbarWidth: "none",
+                scrollSnapType: "x mandatory",
+              }}
+            >
+              {serviceRecs.map(p => (
+                <ProductCard key={`rec_${p.id}`} product={p} accent={accent} />
+              ))}
+            </div>
           </div>
         )}
       </div>
