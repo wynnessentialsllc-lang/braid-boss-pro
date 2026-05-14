@@ -684,10 +684,15 @@ const getPendingBalanceAppointments = (appointments: any[], todayIso: string): a
     .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 };
 
+// Personal events and blocked time live in `appointments` but aren't
+// real bookings, so dashboard cards / counts / upcoming lists must
+// skip them. Mirrors the lib/reports.ts `isBillable` rule.
+const isRealAppointment = (a: any): boolean => !a?.kind || a.kind === "appointment";
+
 const getTodaysAppointments = (appointments: any[], todayIso: string, excludeIds: Set<string> = new Set()): any[] => {
   if (!Array.isArray(appointments)) return [];
   const today = appointments
-    .filter(a => a && !isCanceledAppointment(a) && a.date === todayIso)
+    .filter(a => a && isRealAppointment(a) && !isCanceledAppointment(a) && a.date === todayIso)
     .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
   // If excluding pending-balance items would leave Today's Chair empty,
   // we fall back to the un-filtered list so the section never goes silent
@@ -704,7 +709,7 @@ const getUpcomingAppointments = (
 ): any[] => {
   if (!Array.isArray(appointments)) return [];
   return appointments
-    .filter(a => a && !isCanceledAppointment(a) && a.status !== "completed")
+    .filter(a => a && isRealAppointment(a) && !isCanceledAppointment(a) && a.status !== "completed")
     .filter(a => a.date && a.date > todayIso)
     .filter(a => !excludeIds.has(a.id))
     .sort((a, b) => ((a.date || "") + (a.time || "")).localeCompare((b.date || "") + (b.time || "")))
@@ -6964,7 +6969,10 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
 
   const today = todayISO();
   const enriched = useMemo(() => clients.map(c => {
-    const cAppts = appointments.filter(a => a.clientId === c.id);
+    // Drop personal/blocked rows even if one got tagged to this client
+    // by accident — they should never bump apptCount or visit dates.
+    const cAppts = appointments.filter(a =>
+      a.clientId === c.id && (!a.kind || a.kind === "appointment"));
     // Lifetime total = sum of what was actually collected, not quoted.
     const totalSpent = cAppts
       .filter(a => (a.status === "completed" || a.paymentStatus === "paid") && !isCanceledAppointment(a))
@@ -7594,7 +7602,13 @@ const ClientProfileSheet = ({
   const allAppts: any[] = (store.appointments as any[]) || [];
   const photos: any[] = (store.photos as any[]) || [];
   const cAppts = useMemo(
-    () => allAppts.filter(a => a?.clientId === client?.id && !isCanceledAppointment(a)),
+    // Personal events / blocked time can technically carry a clientId
+    // if a stylist taps the wrong template; they must not show up in
+    // a client's record, drive visit counts, or affect lifetime spend.
+    () => allAppts.filter(a =>
+      a?.clientId === client?.id
+      && (!a.kind || a.kind === "appointment")
+      && !isCanceledAppointment(a)),
     [allAppts, client?.id],
   );
   // Cancelled appointments are kept OUT of cAppts (so stats / money /
@@ -7602,7 +7616,10 @@ const ClientProfileSheet = ({
   // record still shows the booking history. The Previous tab below
   // merges this in so cancelled rows stay visible to the stylist.
   const cancelledClientAppts = useMemo(
-    () => allAppts.filter(a => a?.clientId === client?.id && isCanceledAppointment(a)),
+    () => allAppts.filter(a =>
+      a?.clientId === client?.id
+      && (!a.kind || a.kind === "appointment")
+      && isCanceledAppointment(a)),
     [allAppts, client?.id],
   );
   const cPhotos = useMemo(
