@@ -54,6 +54,7 @@ import {
 import { renderReceiptPdf } from "./lib/pdf-render";
 import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
 import WelcomeIntro from "./components/WelcomeIntro";
+import { ProductImageUploader } from "./components/ProductImageUploader";
 import {
   PreviewStyleCard,
   SectionEyebrow,
@@ -18618,23 +18619,34 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
                 placeholder="—"
               />
             </Field>
-            <Field label="Featured image URL">
-              <Input
-                type="url" inputMode="url"
-                value={editing.image_url || ""}
-                onChange={e => setEditing({ ...editing, image_url: e.target.value || null })}
-                placeholder="https://…"
+            <Field label="Featured image" hint="Main photo shown on the storefront grid.">
+              <ProductImageUploader
+                mode="single"
+                userId={store.userId}
+                value={editing.image_url ?? null}
+                onChange={(url) => setEditing({ ...editing, image_url: url })}
+                tokens={{
+                  border: C.hairline,
+                  muted: C.muted,
+                  error: C.brandError,
+                  primary: C.brandPrimary,
+                  paper: C.paper,
+                }}
               />
             </Field>
-            <Field label="Gallery image URLs" hint="One URL per line — extra photos shown on the product page.">
-              <Textarea
-                value={(editing.gallery_images || []).join("\n")}
-                onChange={e => setEditing({
-                  ...editing,
-                  gallery_images: e.target.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean),
-                })}
-                rows={3}
-                placeholder="https://example.com/photo-1.jpg"
+            <Field label="Gallery" hint="Extra photos shown on the product page.">
+              <ProductImageUploader
+                mode="multi"
+                userId={store.userId}
+                value={editing.gallery_images || []}
+                onChange={(urls) => setEditing({ ...editing, gallery_images: urls })}
+                tokens={{
+                  border: C.hairline,
+                  muted: C.muted,
+                  error: C.brandError,
+                  primary: C.brandPrimary,
+                  paper: C.paper,
+                }}
               />
             </Field>
             <Field label="External checkout URL (optional)" hint="When set, the Buy button redirects out instead of running Stripe checkout.">
