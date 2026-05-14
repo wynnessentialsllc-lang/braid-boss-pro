@@ -2153,7 +2153,10 @@ const TabBar = ({ active, setActive }: {
 }) => {
   const tabs = [
     { id: "dashboard", label: "Home", icon: Home },
-    { id: "studio", label: "Studio", icon: SettingsIcon },
+    // Tab id stays "studio" for back-compat with every active===
+    // "studio" check across the codebase; only the visible label is
+    // updated since the tab routes to the SettingsScreen.
+    { id: "studio", label: "Settings", icon: SettingsIcon },
     { id: "calculator", label: "Quote", icon: CalcIcon },
     { id: "schedule", label: "Schedule", icon: Calendar },
     { id: "clients", label: "Clients", icon: Users },
