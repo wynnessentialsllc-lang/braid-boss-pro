@@ -2682,21 +2682,25 @@ const DashboardHero = ({
       style={{
         borderRadius: 28,
         padding: "22px 22px 18px",
-        background: `linear-gradient(135deg, ${C.espresso} 0%, ${C.coffee} 100%)`,
-        color: C.cream,
+        // Pink rose gradient — the brand-secondary family. Replaces
+        // the prior dark espresso/coffee fill so the hero card
+        // matches the 2026 brand direction the user approved.
+        background: "linear-gradient(135deg, #FF6B9D 0%, #FF4D6D 55%, #E0354F 100%)",
+        color: "#FFFFFF",
         boxShadow:
-          "0 1px 2px rgba(21, 17, 26, 0.06), 0 28px 60px -22px rgba(21, 17, 26, 0.45)",
+          "0 1px 2px rgba(255, 77, 109, 0.18), 0 28px 60px -22px rgba(255, 77, 109, 0.45)",
       }}
     >
-      {/* Slow shimmer of the new accent palette behind a glass blur.
-          Stays subtle so the copy stays the hero. */}
+      {/* Slow shimmer behind a glass blur. Now reads in pink/coral
+          tones so it glows the same brand-secondary family as the
+          background gradient instead of fighting it with purple. */}
       <span
         aria-hidden
         className="bbp-hero-shimmer absolute"
         style={{
           inset: -40,
           background:
-            "conic-gradient(from 200deg, rgba(124, 58, 237, 0.40), rgba(255, 77, 109, 0.34), rgba(124, 58, 237, 0.32), rgba(34, 197, 94, 0.32), rgba(124, 58, 237, 0.40))",
+            "conic-gradient(from 200deg, rgba(255, 122, 69, 0.40), rgba(255, 77, 109, 0.45), rgba(255, 107, 157, 0.40), rgba(255, 175, 121, 0.32), rgba(255, 122, 69, 0.40))",
           filter: "blur(40px)",
           opacity: 0.55,
           zIndex: 0,
@@ -2704,9 +2708,13 @@ const DashboardHero = ({
         }}
       />
       <div className="relative" style={{ zIndex: 1 }}>
+        {/* Eyebrow + headline, white-on-pink. The greeting (Good
+            morning / afternoon / evening) lives in the page header
+            above so we don't repeat the date here — the header
+            already renders fmtDateLong(today) just above this card. */}
         <p
           className="text-[10px] font-bold uppercase tracking-widest"
-          style={{ color: C.gold, letterSpacing: "0.18em" }}
+          style={{ color: "rgba(255, 255, 255, 0.85)", letterSpacing: "0.18em" }}
         >
           {greeting}
         </p>
@@ -2716,15 +2724,12 @@ const DashboardHero = ({
             fontSize: 32,
             fontWeight: 600,
             lineHeight: 1.05,
-            color: C.cream,
+            color: "#FFFFFF",
             marginTop: 4,
           }}
         >
-          {ownerName ? <>Welcome back, <em style={{ color: C.gold, fontStyle: "normal" }}>{ownerName}</em>.</> : "Welcome back."}
+          {ownerName ? <>Welcome back, <em style={{ color: "#FFFFFF", fontStyle: "normal", textDecoration: "underline", textDecorationColor: "rgba(255, 255, 255, 0.55)", textUnderlineOffset: 4 }}>{ownerName}</em>.</> : "Welcome back."}
         </h1>
-        <p className="mt-1 text-[12px]" style={{ color: "rgba(255, 255, 255, 0.78)" }}>
-          {fmtDateLong(today)}
-        </p>
 
         {/* Tiny ribbon of two live numbers to anchor the card with
             real signal — today's revenue and the week's appointment
@@ -2734,30 +2739,30 @@ const DashboardHero = ({
           <div
             className="flex-1 rounded-2xl px-3 py-2.5"
             style={{
-              background: "rgba(255, 255, 255, 0.10)",
-              border: "1px solid rgba(124, 58, 237, 0.30)",
+              background: "rgba(255, 255, 255, 0.18)",
+              border: "1px solid rgba(255, 255, 255, 0.30)",
               backdropFilter: "blur(4px)",
             }}
           >
-            <p className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.gold, letterSpacing: "0.16em" }}>
+            <p className="text-[9px] uppercase tracking-widest font-bold" style={{ color: "rgba(255, 255, 255, 0.90)", letterSpacing: "0.16em" }}>
               Today
             </p>
-            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.cream, lineHeight: 1 }}>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: "#FFFFFF", lineHeight: 1 }}>
               {fmtMoney(todayRevenue, currency)}
             </p>
           </div>
           <div
             className="flex-1 rounded-2xl px-3 py-2.5"
             style={{
-              background: "rgba(255, 255, 255, 0.10)",
-              border: "1px solid rgba(124, 58, 237, 0.30)",
+              background: "rgba(255, 255, 255, 0.18)",
+              border: "1px solid rgba(255, 255, 255, 0.30)",
               backdropFilter: "blur(4px)",
             }}
           >
-            <p className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.gold, letterSpacing: "0.16em" }}>
+            <p className="text-[9px] uppercase tracking-widest font-bold" style={{ color: "rgba(255, 255, 255, 0.90)", letterSpacing: "0.16em" }}>
               Week
             </p>
-            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.cream, lineHeight: 1 }}>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: "#FFFFFF", lineHeight: 1 }}>
               {weekAppts} {weekAppts === 1 ? "booking" : "bookings"}
             </p>
           </div>
