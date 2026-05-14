@@ -888,17 +888,17 @@ export default function PublicBookingPage() {
           return (
             <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
               {composedLocation && (
-                <span style={{ fontSize: 11, color: C.coffee, padding: "4px 10px", borderRadius: 99, background: C.cream, border: `1px solid ${C.hairline}` }}>
+                <span style={{ fontSize: 11, color: C.coffee, padding: "4px 10px", borderRadius: 99, background: "#FFFFFF", border: `1px solid ${accent}` }}>
                   {composedLocation}
                 </span>
               )}
               {link?.years_in_business != null && link.years_in_business > 0 && (
-                <span style={{ fontSize: 11, color: C.coffee, padding: "4px 10px", borderRadius: 99, background: C.cream, border: `1px solid ${C.hairline}` }}>
+                <span style={{ fontSize: 11, color: C.coffee, padding: "4px 10px", borderRadius: 99, background: "#FFFFFF", border: `1px solid ${accent}` }}>
                   {link.years_in_business} {link.years_in_business === 1 ? "yr" : "yrs"} in business
                 </span>
               )}
               {link?.phone && (
-                <a href={`tel:${link.phone.replace(/\s/g, "")}`} style={{ fontSize: 11, color: C.coffee, padding: "4px 10px", borderRadius: 99, background: C.cream, border: `1px solid ${C.hairline}`, textDecoration: "none" }}>
+                <a href={`tel:${link.phone.replace(/\s/g, "")}`} style={{ fontSize: 11, color: C.coffee, padding: "4px 10px", borderRadius: 99, background: "#FFFFFF", border: `1px solid ${accent}`, textDecoration: "none" }}>
                   {link.phone}
                 </a>
               )}
@@ -949,16 +949,20 @@ export default function PublicBookingPage() {
                   href={s.href}
                   target="_blank"
                   rel="noopener noreferrer"
+                  // Outline + label colored by the stylist's accent
+                  // so the social row reads as a cohesive set with
+                  // Share / Send-a-message rather than two visual
+                  // styles fighting on the same row.
                   style={{
                     fontSize: 11,
                     fontWeight: 600,
                     letterSpacing: "0.04em",
-                    color: C.coffee,
+                    color: accent,
                     textDecoration: "none",
                     padding: "6px 12px",
                     borderRadius: 99,
-                    background: C.paper,
-                    border: `1px solid ${C.hairline}`,
+                    background: "#FFFFFF",
+                    border: `1px solid ${accent}`,
                   }}
                 >
                   {s.label}
@@ -973,7 +977,7 @@ export default function PublicBookingPage() {
                     fontWeight: 600,
                     letterSpacing: "0.04em",
                     color: accent,
-                    background: "transparent",
+                    background: "#FFFFFF",
                     border: `1px solid ${accent}`,
                     padding: "6px 12px",
                     borderRadius: 99,
@@ -1003,7 +1007,7 @@ export default function PublicBookingPage() {
                 textDecoration: "none",
                 padding: "8px 14px",
                 borderRadius: 99,
-                background: "transparent",
+                background: "#FFFFFF",
                 border: `1px solid ${accent}`,
                 letterSpacing: "0.04em",
               }}

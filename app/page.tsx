@@ -2998,11 +2998,22 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         const n = Number(trimmed);
         return Number.isFinite(n) && n >= 0 && n <= 80 ? Math.round(n) : null;
       })();
-      const patch = {
+      // City + state is the new source of truth. When at least one
+      // is provided we sync the legacy location_text column so
+      // surfaces still reading it (emails, etc.) stay accurate.
+      // When BOTH are blank we leave the existing location_text
+      // untouched so a user who has only a legacy chip doesn't lose
+      // it just by opening the sheet.
+      const composedLocation = (() => {
+        const c = businessCity.trim();
+        const s = businessState.trim();
+        if (c && s) return `${c}, ${s}`;
+        return c || s || null;
+      })();
+      const patch: Record<string, any> = {
         business_name: businessName.trim() || null,
         intro: intro.trim() || null,
         logo_url: logoUrl.trim() || null,
-        location_text: locationText.trim() || null,
         phone: phone.trim() || null,
         policies: policies.trim() || null,
         accent_color: /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(accent) ? accent : null,
@@ -3225,14 +3236,12 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
           </p>
         </div>
 
-        <Field label="Location" hint="Shown as a small chip under your studio name.">
-          <Input value={locationText} onChange={(e) => setLocationText(e.target.value)} placeholder="Dallas, TX" />
-        </Field>
-        {/* City + state are stored separately so we can later use
-            them for marketplace filters / SEO. Optional — leave blank
-            to fall back to the free-form location chip above. */}
+        {/* Location → City + State. The legacy free-form `Location`
+            input was removed to avoid two fields that produce the
+            same chip; the public booking page already preferred
+            structured city/state over the legacy text. */}
         <div className="grid grid-cols-2 gap-3">
-          <Field label="City" hint="Optional">
+          <Field label="City" hint="Shown as a small chip under your studio name.">
             <Input value={businessCity} onChange={(e) => setBusinessCity(e.target.value)} placeholder="Dallas" />
           </Field>
           <Field label="State" hint="Optional">
