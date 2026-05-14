@@ -2722,7 +2722,7 @@ const DashboardHero = ({
         >
           {ownerName ? <>Welcome back, <em style={{ color: C.gold, fontStyle: "normal" }}>{ownerName}</em>.</> : "Welcome back."}
         </h1>
-        <p className="mt-1 text-[12px]" style={{ color: "rgba(245, 235, 217, 0.78)" }}>
+        <p className="mt-1 text-[12px]" style={{ color: "rgba(255, 255, 255, 0.78)" }}>
           {fmtDateLong(today)}
         </p>
 
@@ -2734,7 +2734,7 @@ const DashboardHero = ({
           <div
             className="flex-1 rounded-2xl px-3 py-2.5"
             style={{
-              background: "rgba(245, 235, 217, 0.10)",
+              background: "rgba(255, 255, 255, 0.10)",
               border: "1px solid rgba(124, 58, 237, 0.30)",
               backdropFilter: "blur(4px)",
             }}
@@ -2749,7 +2749,7 @@ const DashboardHero = ({
           <div
             className="flex-1 rounded-2xl px-3 py-2.5"
             style={{
-              background: "rgba(245, 235, 217, 0.10)",
+              background: "rgba(255, 255, 255, 0.10)",
               border: "1px solid rgba(124, 58, 237, 0.30)",
               backdropFilter: "blur(4px)",
             }}
@@ -2879,7 +2879,7 @@ const KpiDetailSheet = ({
       <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 600, color: C.cream, lineHeight: 1 }}>
         {value}
       </p>
-      {hint && <p className="text-[11px] mt-1.5" style={{ color: "rgba(245, 235, 217, 0.78)" }}>{hint}</p>}
+      {hint && <p className="text-[11px] mt-1.5" style={{ color: "rgba(255, 255, 255, 0.78)" }}>{hint}</p>}
     </Card>
   );
 
@@ -4929,7 +4929,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
 
 const BreakRow = ({ label, value, bold }: { label: string; value: string; bold?: boolean }) => (
   <div className="flex items-center justify-between py-1">
-    <span className="text-sm" style={{ color: bold ? C.cream : "rgba(245, 235, 217, 0.75)", fontWeight: bold ? 600 : 400 }}>{label}</span>
+    <span className="text-sm" style={{ color: bold ? C.cream : "rgba(255, 255, 255, 0.75)", fontWeight: bold ? 600 : 400 }}>{label}</span>
     <span style={{ color: bold ? C.gold : C.cream, fontWeight: bold ? 700 : 500 }} className="text-sm font-mono">{value}</span>
   </div>
 );
@@ -5519,8 +5519,8 @@ const DayCalendarView = ({
             const isBlockedBlock = kind === "blocked";
             const color = (isPersonalBlock || isBlockedBlock)
               ? {
-                  background: isBlockedBlock ? "rgba(21, 17, 26, 0.08)" : "rgba(139, 115, 85, 0.10)",
-                  border: isBlockedBlock ? "rgba(21, 17, 26, 0.30)" : "rgba(139, 115, 85, 0.35)",
+                  background: isBlockedBlock ? "rgba(21, 17, 26, 0.08)" : "rgba(111, 100, 119, 0.10)",
+                  border: isBlockedBlock ? "rgba(21, 17, 26, 0.30)" : "rgba(111, 100, 119, 0.35)",
                   foreground: isBlockedBlock ? C.muted : C.coffee,
                   accent: isBlockedBlock ? C.muted : C.caramel,
                   label: isBlockedBlock ? "Unavailable" : "Personal",
@@ -5650,8 +5650,8 @@ const WeekCalendarView = ({
                   const isBlockedBlock = kind === "blocked";
                   const color = (isPersonalBlock || isBlockedBlock)
                     ? {
-                        background: isBlockedBlock ? "rgba(21, 17, 26, 0.08)" : "rgba(139, 115, 85, 0.10)",
-                        border: isBlockedBlock ? "rgba(21, 17, 26, 0.30)" : "rgba(139, 115, 85, 0.35)",
+                        background: isBlockedBlock ? "rgba(21, 17, 26, 0.08)" : "rgba(111, 100, 119, 0.10)",
+                        border: isBlockedBlock ? "rgba(21, 17, 26, 0.30)" : "rgba(111, 100, 119, 0.35)",
                         foreground: isBlockedBlock ? C.muted : C.coffee,
                         accent: isBlockedBlock ? C.muted : C.caramel,
                       }
@@ -5798,7 +5798,7 @@ const IncomeCalendarView = ({
         <p style={{ fontFamily: FONT_DISPLAY, fontSize: 40, fontWeight: 600, color: C.cream, lineHeight: 1, marginTop: 6 }}>
           {fmtMoney(money.expected, currency)}
         </p>
-        <p className="text-[11px] mt-2" style={{ color: "rgba(245, 235, 217, 0.75)" }}>
+        <p className="text-[11px] mt-2" style={{ color: "rgba(255, 255, 255, 0.75)" }}>
           {fmtDateLong(selectedDate)} · {money.count} {money.count === 1 ? "booking" : "bookings"}
         </p>
       </Card>
@@ -8640,7 +8640,7 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
           <Card className="p-4 mb-4" style={{ background: `linear-gradient(135deg, ${C.espresso} 0%, ${C.coffee} 100%)` }}>
             <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.gold, letterSpacing: "0.18em" }}>Lifetime spent</p>
             <p style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 600, color: C.cream, lineHeight: 1.1 }}>{fmtMoney(totalSpent, business.currency)}</p>
-            <p className="text-xs mt-1" style={{ color: "rgba(245, 235, 217, 0.7)" }}>{myAppts.length} total · {myPhotos.length} photo{myPhotos.length === 1 ? "" : "s"}</p>
+            <p className="text-xs mt-1" style={{ color: "rgba(255, 255, 255, 0.7)" }}>{myAppts.length} total · {myPhotos.length} photo{myPhotos.length === 1 ? "" : "s"}</p>
           </Card>
         )}
 
@@ -12917,7 +12917,7 @@ const SyncStatusCard = ({ mode, sync }: {
 
 const SyncStatusPill = ({ display }: { display: SyncDisplay }) => (
   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
-    style={{ background: "rgba(245, 235, 217, 0.6)", color: display.tone, border: `1px solid ${display.tone}33`, letterSpacing: "0.08em" }}>
+    style={{ background: "rgba(255, 255, 255, 0.6)", color: display.tone, border: `1px solid ${display.tone}33`, letterSpacing: "0.08em" }}>
     <span className="inline-block rounded-full" style={{ width: 6, height: 6, background: display.tone }} />
     {display.label}
   </span>

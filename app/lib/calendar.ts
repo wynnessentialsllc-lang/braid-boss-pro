@@ -91,8 +91,8 @@ const PALETTE = {
   scheduled: { bg: "rgba(124, 58, 237, 0.18)", border: "rgba(91, 33, 182, 0.55)", fg: "#3D3447", accent: "#5B21B6" },
   confirmed: { bg: "rgba(91, 33, 182, 0.28)", border: "#5B21B6", fg: "#15111A", accent: "#5B21B6" },
   completed: { bg: "rgba(92, 124, 74, 0.18)", border: "rgba(92, 124, 74, 0.55)", fg: "#15111A", accent: "#5C7C4A" },
-  cancelled: { bg: "rgba(139, 115, 85, 0.14)", border: "rgba(139, 115, 85, 0.4)",  fg: "#6F6477", accent: "#6F6477" },
-  canceled: { bg: "rgba(139, 115, 85, 0.14)", border: "rgba(139, 115, 85, 0.4)",  fg: "#6F6477", accent: "#6F6477" },
+  cancelled: { bg: "rgba(111, 100, 119, 0.14)", border: "rgba(111, 100, 119, 0.4)",  fg: "#6F6477", accent: "#6F6477" },
+  canceled: { bg: "rgba(111, 100, 119, 0.14)", border: "rgba(111, 100, 119, 0.4)",  fg: "#6F6477", accent: "#6F6477" },
   pending:   { bg: "rgba(201, 118, 43, 0.16)", border: "rgba(201, 118, 43, 0.5)",  fg: "#3D3447", accent: "#C9762B" },
   noShow:    { bg: "rgba(156, 61, 46, 0.14)", border: "rgba(156, 61, 46, 0.45)",  fg: "#9C3D2E", accent: "#9C3D2E" },
 
@@ -105,7 +105,7 @@ const PALETTE = {
   overdue:   { bg: "rgba(156, 61, 46, 0.16)", border: "rgba(156, 61, 46, 0.55)", fg: "#9C3D2E", accent: "#9C3D2E" },
 
   serviceA:  { bg: "rgba(21, 17, 26, 0.10)",  border: "rgba(21, 17, 26, 0.35)",  fg: "#15111A", accent: "#3D3447" },
-  serviceB:  { bg: "rgba(139, 90, 43, 0.16)", border: "rgba(139, 90, 43, 0.45)", fg: "#15111A", accent: "#6F6477" },
+  serviceB:  { bg: "rgba(111, 100, 119, 0.16)", border: "rgba(111, 100, 119, 0.45)", fg: "#15111A", accent: "#6F6477" },
   serviceC:  { bg: "rgba(124, 58, 237, 0.20)", border: "rgba(91, 33, 182, 0.55)", fg: "#15111A", accent: "#5B21B6" },
   serviceD:  { bg: "rgba(92, 124, 74, 0.18)", border: "rgba(92, 124, 74, 0.5)",  fg: "#15111A", accent: "#5C7C4A" },
   serviceE:  { bg: "rgba(91, 33, 182, 0.18)", border: "#5B21B6", fg: "#15111A", accent: "#5B21B6" },

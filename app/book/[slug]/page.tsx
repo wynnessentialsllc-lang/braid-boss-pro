@@ -2712,8 +2712,8 @@ const BookingCalendar = ({
         display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12,
         fontSize: 10, color: C.muted, alignItems: "center",
       }}>
-        <Legend swatch={C.gold} label="Open" />
-        <Legend swatch="#E5D4A0" label="Limited" />
+        <Legend swatch={C.brandPrimary} label="Open" />
+        <Legend swatch="#FBBF24" label="Limited" />
         <Legend swatch={C.hairline} label="Booked" />
         <Legend swatch="transparent" border label="Closed" />
       </div>
@@ -2788,8 +2788,11 @@ const CalendarCell = ({ day, status, loading, disabled, selected, onClick }: Cel
     bg = "rgba(124, 58, 237, 0.18)";
     border = `1px solid rgba(124, 58, 237, 0.35)`;
   } else if (status === "limited") {
-    bg = "rgba(229, 212, 160, 0.35)";
-    border = `1px solid rgba(229, 212, 160, 0.55)`;
+    // brandWarning amber tint (instead of the old beige) so the
+    // "limited availability" day reads in the same vocabulary as
+    // the rest of the storefront.
+    bg = "rgba(251, 191, 36, 0.22)";
+    border = `1px solid rgba(251, 191, 36, 0.55)`;
   } else if (status === "booked") {
     bg = C.cream;
     fg = C.muted;
