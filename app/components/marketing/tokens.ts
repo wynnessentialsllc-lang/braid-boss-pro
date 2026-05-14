@@ -1,7 +1,7 @@
 "use client";
 
 // Marketing-surface design tokens — mirror of app/page.tsx so the
-// public /features + /getting-started pages render the same brand
+// public /features + /how-it-works pages render the same brand
 // palette as the booking page and the storefront without importing
 // the 18k admin shell.
 

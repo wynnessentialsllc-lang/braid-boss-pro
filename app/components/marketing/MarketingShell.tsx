@@ -1,7 +1,7 @@
 "use client";
 
 // Marketing-page shell: shared header + footer + global font load
-// + entrance-animation styles. Wraps /features and /getting-started
+// + entrance-animation styles. Wraps /features and /how-it-works
 // (and any future marketing page) so they all carry the same brand
 // chrome without each page redeclaring it.
 
@@ -106,11 +106,11 @@ const MarketingHeader = () => (
           Features
         </Link>
         <Link
-          href="/getting-started"
+          href="/how-it-works"
           className="hidden sm:inline-block"
           style={marketingNavLink}
         >
-          Get started
+          How it works
         </Link>
         <Link href="/pricing" style={marketingNavLink}>
           Pricing
@@ -118,21 +118,7 @@ const MarketingHeader = () => (
         <Link href="/faq" className="hidden sm:inline-block" style={marketingNavLink}>
           FAQ
         </Link>
-        <Link
-          href="/"
-          style={{
-            padding: "8px 16px",
-            borderRadius: 12,
-            background: GRADIENTS.primary,
-            color: "#FFFFFF",
-            fontSize: 12,
-            fontWeight: 800,
-            letterSpacing: "0.12em",
-            textTransform: "uppercase",
-            textDecoration: "none",
-            boxShadow: SHADOWS.primaryGlow,
-          }}
-        >
+        <Link href="/" style={marketingNavLink}>
           Sign in
         </Link>
       </nav>
@@ -182,8 +168,8 @@ const MarketingFooter = () => (
         <Link href="/features" style={footerLink}>
           Features
         </Link>
-        <Link href="/getting-started" style={footerLink}>
-          Get started
+        <Link href="/how-it-works" style={footerLink}>
+          How it works
         </Link>
         <Link href="/pricing" style={footerLink}>
           Pricing
@@ -215,7 +201,7 @@ const footerLink: React.CSSProperties = {
   textDecoration: "none",
 };
 
-// Hero section — used by both /features and /getting-started.
+// Hero section — used by both /features and /how-it-works.
 export const MarketingHero = ({
   eyebrow,
   title,

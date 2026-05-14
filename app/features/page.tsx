@@ -33,14 +33,25 @@ import {
 import { FeatureCard, FeatureGrid } from "../components/marketing/FeatureCard";
 
 export const metadata: Metadata = {
-  title: "Features · Braid Boss Pro",
+  title: "Features · Braid Boss Pro — the business OS for braiders",
   description:
-    "Every tool a braid stylist needs to run their business — bookings, deposits, contracts, retail storefront, automation, and a mobile dashboard built for the chair.",
+    "Braid Boss Pro is the business operating system for braiders. Branded booking links, deposits, Stripe Connect, retail storefronts, contracts, analytics, and modern beauty-tech tools built specifically for braid stylists.",
   alternates: { canonical: "/features" },
+  keywords: [
+    "braid business software",
+    "braid business management app",
+    "booking app for braiders",
+    "braider booking software",
+    "braider scheduling app",
+    "business tools for braiders",
+    "braid pricing software",
+    "braider client management app",
+    "creator economy braid platform",
+  ],
   openGraph: {
-    title: "Features · Braid Boss Pro",
+    title: "Features · Braid Boss Pro — the business OS for braiders",
     description:
-      "Every tool a braid stylist needs to run their business — bookings, deposits, contracts, retail storefront, automation, and a mobile dashboard built for the chair.",
+      "The business operating system for braiders. Branded booking links, deposits, Stripe Connect, retail storefronts, contracts, analytics — built specifically for braid stylists.",
     url: "/features",
     siteName: "Braid Boss Pro",
     type: "website",
@@ -48,8 +59,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Features · Braid Boss Pro",
-    description:
-      "Every tool a braid stylist needs to run their business — bookings, deposits, contracts, retail storefront, automation, and a mobile dashboard built for the chair.",
+    description: "The business operating system for braiders.",
   },
 };
 
@@ -57,10 +67,10 @@ export default function FeaturesPage() {
   return (
     <MarketingShell>
       <MarketingHero
-        eyebrow="Everything in one app"
+        eyebrow="The business OS for braiders"
         title={
           <>
-            Run your braid business{" "}
+            Built for braiders.{" "}
             <em
               style={{
                 fontStyle: "italic",
@@ -70,13 +80,13 @@ export default function FeaturesPage() {
                 backgroundClip: "text",
               }}
             >
-              from the chair.
+              Only braiders.
             </em>
           </>
         }
-        body="Bookings, deposits, contracts, retail, analytics — the full operating system for braid stylists. Built mobile-first, polished like a fintech app, and priced like a tool you'd actually keep."
-        primaryCta={{ label: "Get started free", href: "/getting-started" }}
-        secondaryCta={{ label: "Sign in", href: "/" }}
+        body="Braid Boss Pro is a premium business operating system for braid stylists — branded booking links, deposits, contracts, retail storefronts, analytics, and creator-economy tools built around how braiders actually run their chairs. Not generic salon software."
+        primaryCta={{ label: "Claim founding access", href: "/pricing" }}
+        secondaryCta={{ label: "How it works", href: "/how-it-works" }}
       />
 
       {/* Booking & Scheduling */}
@@ -310,10 +320,10 @@ export default function FeaturesPage() {
       </Section>
 
       <CtaFooter
-        title="Run your chair like a brand."
-        body="Free to start. No setup fees. Built by stylists, for stylists who are tired of stacking apps."
-        primaryCta={{ label: "Start your account", href: "/getting-started" }}
-        secondaryCta={{ label: "Sign in", href: "/" }}
+        title="Run your braid business like a brand."
+        body="The first 100 stylists lock in lifetime founding access at a single one-time payment. After that, Braid Boss Pro moves to monthly membership pricing."
+        primaryCta={{ label: "Claim founding access", href: "/pricing" }}
+        secondaryCta={{ label: "How it works", href: "/how-it-works" }}
       />
     </MarketingShell>
   );
