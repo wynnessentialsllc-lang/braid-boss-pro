@@ -137,26 +137,26 @@ export const StorefrontShell = ({
               "linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.18) 100%)",
           }}
         />
-        {/* Brand wordmark — sits in the upper portion of the banner
-            so it doesn't collide with the logo overlap below. Only
-            renders when there's no custom banner image; a stylist
-            who uploaded their own banner shouldn't have our wordmark
-            stamped over their photography. */}
+        {/* Brand wordmark — centered in the visual top half of the
+            banner (the bottom 44px is reserved for the logo
+            overlap). Only renders when there's no custom banner
+            image; a stylist who uploaded their own banner shouldn't
+            have our wordmark stamped over their photography. */}
         {!bannerUrl && (
           <p
             aria-hidden
             style={{
               position: "absolute",
-              top: 22,
+              top: 46,
               left: 0,
               right: 0,
               textAlign: "center",
-              color: "rgba(255, 255, 255, 0.92)",
-              fontSize: 12,
+              color: "rgba(255, 255, 255, 0.96)",
+              fontSize: 15,
               fontWeight: 800,
-              letterSpacing: "0.32em",
+              letterSpacing: "0.34em",
               textTransform: "uppercase",
-              textShadow: "0 1px 8px rgba(21, 17, 26, 0.18)",
+              textShadow: "0 1px 10px rgba(21, 17, 26, 0.20)",
               margin: 0,
             }}
           >
