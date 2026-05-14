@@ -132,9 +132,12 @@ import {
   PRODUCT_CATEGORY_LABEL,
   slugifyProductTitle,
   parseVariantsFromText,
+  newVariantId,
+  normalizeVariant,
   type PublicReview,
   type Product as StorefrontProduct,
   type ProductCategory,
+  type ProductVariant,
 } from "./lib/storefront";
 import {
   type DashboardRevenue,
@@ -18435,7 +18438,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings }: { s
     external_checkout_url: string | null;
     requires_shipping: boolean;
     variant_label: string | null;
-    variants: Array<{ id: string; name: string }>;
+    variants: ProductVariant[];
     active: boolean;
   }>;
   const [editing, setEditing] = useState<Draft | null>(null);
@@ -18452,8 +18455,13 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings }: { s
   const handleSave = async () => {
     if (!editing || busy) return;
     setBusy(true); setErr(null);
-    const parsedVariants = parseVariantsFromText(variantsRaw, editing.variants || []);
-    const saved = await api.upsert({ ...editing, variants: parsedVariants });
+    // editing.variants is the source of truth (kept in sync by both
+    // the textarea and the per-row editor). Filter out blank-name
+    // rows so an empty 'Add option' draft doesn't persist.
+    const cleanedVariants = (editing.variants || [])
+      .map(v => normalizeVariant(v))
+      .filter(v => v.name);
+    const saved = await api.upsert({ ...editing, variants: cleanedVariants });
     setBusy(false);
     if (!saved) { setErr(api?.error || "Couldn't save."); return; }
     setEditing(null);
@@ -18713,11 +18721,136 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings }: { s
             <Field label="Options" hint="One option per line. Customers must pick one before checkout.">
               <Textarea
                 value={variantsRaw}
-                onChange={e => setVariantsRaw(e.target.value)}
-                rows={4}
+                onChange={e => {
+                  setVariantsRaw(e.target.value);
+                  // Keep editing.variants in lockstep with the textarea
+                  // so the per-row editor below renders the same set.
+                  // parseVariantsFromText reconciles by name so any
+                  // per-variant inventory/price/image overrides set in
+                  // the row editor are preserved across textarea edits
+                  // — as long as the name still matches.
+                  setEditing({
+                    ...editing,
+                    variants: parseVariantsFromText(e.target.value, editing.variants || []),
+                  });
+                }}
+                rows={3}
                 placeholder={"Black\nGold\nPink\nPurple"}
               />
             </Field>
+            {/* Per-variant stock + override editor — rendered once
+                the stylist has at least one variant. Each row edits
+                one variant in-place (stock / low-stock threshold /
+                price override / compare-at override / image URL).
+                All overrides are optional; blank fields fall back to
+                the product-level value at storefront + checkout. */}
+            {(editing.variants || []).length > 0 && (
+              <Field label="Per-option stock & overrides" hint="Leave fields blank to inherit from the product.">
+                <div className="space-y-2">
+                  {(editing.variants || []).map((v, idx) => {
+                    const update = (patch: Partial<ProductVariant>) => {
+                      const next = [...(editing.variants || [])];
+                      next[idx] = normalizeVariant({ ...next[idx], ...patch });
+                      setEditing({ ...editing, variants: next });
+                    };
+                    return (
+                      <Card key={v.id} className="p-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={v.name}
+                            onChange={(e) => update({ name: e.target.value })}
+                            placeholder="Option name"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = (editing.variants || []).filter((_, i) => i !== idx);
+                              setEditing({ ...editing, variants: next });
+                              setVariantsRaw(next.map(x => x.name).join("\n"));
+                            }}
+                            aria-label="Remove option"
+                            style={{
+                              width: 32, height: 32, borderRadius: 8,
+                              background: "transparent", border: `1px solid ${C.hairline}`,
+                              color: C.muted, cursor: "pointer", flexShrink: 0,
+                            }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            type="number" inputMode="numeric" min="0" step="1"
+                            value={v.inventory_count == null ? "" : String(v.inventory_count)}
+                            onChange={(e) => update({
+                              inventory_count: e.target.value === "" ? null : Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                            })}
+                            placeholder="Stock"
+                          />
+                          <Input
+                            type="number" inputMode="numeric" min="0" step="1"
+                            value={v.low_stock_threshold == null ? "" : String(v.low_stock_threshold)}
+                            onChange={(e) => update({
+                              low_stock_threshold: e.target.value === "" ? null : Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                            })}
+                            placeholder="Low-stock at"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            type="number" inputMode="decimal" min="0" step="0.01"
+                            value={v.price == null ? "" : String(v.price)}
+                            onChange={(e) => update({
+                              price: e.target.value === "" ? null : Number(e.target.value),
+                            })}
+                            placeholder="Price (override)"
+                          />
+                          <Input
+                            type="number" inputMode="decimal" min="0" step="0.01"
+                            value={v.compare_at_price == null ? "" : String(v.compare_at_price)}
+                            onChange={(e) => update({
+                              compare_at_price: e.target.value === "" ? null : Number(e.target.value),
+                            })}
+                            placeholder="Compare-at (override)"
+                          />
+                        </div>
+                        <Input
+                          type="url" inputMode="url"
+                          value={v.image_url || ""}
+                          onChange={(e) => update({ image_url: e.target.value || null })}
+                          placeholder="Image URL (override)"
+                        />
+                        {/* Quick badges for the stylist's at-a-glance read. */}
+                        <div className="flex flex-wrap gap-1.5">
+                          {v.inventory_count != null && v.inventory_count <= 0 && <Pill tone="danger">Sold out</Pill>}
+                          {v.inventory_count != null && v.inventory_count > 0 && v.inventory_count <= (v.low_stock_threshold ?? 5) && (
+                            <Pill tone="warning">{v.inventory_count} left</Pill>
+                          )}
+                          {v.inventory_count == null && <Pill tone="neutral">Untracked</Pill>}
+                          {v.price != null && <Pill tone="gold">Price override</Pill>}
+                          {v.image_url && <Pill tone="neutral">Image override</Pill>}
+                        </div>
+                      </Card>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = [...(editing.variants || []), normalizeVariant({ id: newVariantId(), name: "" })];
+                      setEditing({ ...editing, variants: next });
+                      // Don't append a blank line to the textarea —
+                      // names are blank by default, and parseVariantsFromText
+                      // would filter them out on the next reconciliation.
+                      // The textarea will rebuild from variants on close.
+                    }}
+                    className="px-3 py-2 rounded-lg text-[12px] font-bold uppercase tracking-wider w-full"
+                    style={{ background: "transparent", color: C.brandPrimary, border: `1px solid ${C.brandPrimary}`, letterSpacing: "0.10em" }}
+                  >
+                    + Add option
+                  </button>
+                </div>
+              </Field>
+            )}
             <Field label="External checkout URL (optional)" hint="When set, the Buy button redirects out instead of running Stripe checkout.">
               <Input type="url" inputMode="url" value={editing.external_checkout_url || ""} onChange={e => setEditing({ ...editing, external_checkout_url: e.target.value || null })} placeholder="https://…" />
             </Field>

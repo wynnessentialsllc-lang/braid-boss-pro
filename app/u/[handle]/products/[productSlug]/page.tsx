@@ -24,6 +24,13 @@ import {
 import { useStylistProfile } from "../../_components/useStylistProfile";
 import { useCart } from "../../../../lib/cart";
 import {
+  effectiveInventory,
+  effectiveLowStockThreshold,
+  effectivePrice,
+  effectiveCompareAtPrice,
+  effectiveImageUrl,
+} from "../../../../lib/storefront";
+import {
   fetchPublicProduct,
   fetchPublicProducts,
   PRODUCT_CATEGORY_LABEL,
@@ -61,21 +68,6 @@ export default function ProductDetailPage() {
   // image as the first gallery image.
   const [galleryIdx, setGalleryIdx] = useState(0);
 
-  const gallery = useMemo(() => {
-    if (!product) return [] as string[];
-    const all = [product.image_url, ...product.gallery_images].filter(
-      (s): s is string => !!s && s.trim().length > 0,
-    );
-    return Array.from(new Set(all));
-  }, [product]);
-
-  const onSale =
-    product?.price != null &&
-    product?.compare_at_price != null &&
-    product.compare_at_price > product.price;
-  const soldOut =
-    product?.inventory_count != null && product.inventory_count <= 0;
-
   // Checkout button state
   const [buyState, setBuyState] = useState<"idle" | "loading" | "error">("idle");
   const [buyError, setBuyError] = useState<string | null>(null);
@@ -86,6 +78,50 @@ export default function ProductDetailPage() {
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
   const hasVariants = (product?.variants?.length || 0) > 0;
   const needsVariantPick = hasVariants && !selectedVariantId;
+  const selectedVariant = useMemo(
+    () =>
+      product?.variants?.find((v) => v.id === selectedVariantId) ?? null,
+    [product, selectedVariantId],
+  );
+
+  // Effective values — variant overrides win when set, else product-
+  // level. Recompute when the selected variant changes so the price /
+  // image / sold-out state swap immediately.
+  const effPrice = useMemo(
+    () => effectivePrice(product?.price, selectedVariant),
+    [product, selectedVariant],
+  );
+  const effCompareAt = useMemo(
+    () => effectiveCompareAtPrice(product?.compare_at_price, selectedVariant),
+    [product, selectedVariant],
+  );
+  const effImage = useMemo(
+    () => effectiveImageUrl(product?.image_url, selectedVariant),
+    [product, selectedVariant],
+  );
+  const effStock = useMemo(
+    () => effectiveInventory(product?.inventory_count, selectedVariant),
+    [product, selectedVariant],
+  );
+
+  // Gallery — variant image swap when present, then the variant
+  // image plus the product gallery, deduped. The featured product
+  // image stays in the deck so the visitor can see the generic
+  // hero shot even after picking a variant with its own photo.
+  const gallery = useMemo(() => {
+    if (!product) return [] as string[];
+    const all = [effImage, product.image_url, ...product.gallery_images].filter(
+      (s): s is string => !!s && s.trim().length > 0,
+    );
+    return Array.from(new Set(all));
+  }, [product, effImage]);
+
+  const onSale =
+    effPrice != null && effCompareAt != null && effCompareAt > effPrice;
+  const soldOut = effStock != null && effStock <= 0;
+  const lowStockThreshold = effectiveLowStockThreshold(selectedVariant);
+  const isLowStock =
+    effStock != null && effStock > 0 && effStock <= lowStockThreshold;
 
   useEffect(() => {
     if (profileState.status !== "ready") return;
@@ -315,7 +351,7 @@ export default function ProductDetailPage() {
         </h1>
         <div className="flex items-baseline gap-3 mt-2">
           <span style={{ fontSize: 22, fontWeight: 700, color: C.brandText }}>
-            {fmtMoney(product.price)}
+            {fmtMoney(effPrice)}
           </span>
           {onSale && (
             <span
@@ -325,7 +361,7 @@ export default function ProductDetailPage() {
                 textDecoration: "line-through",
               }}
             >
-              {fmtMoney(product.compare_at_price)}
+              {fmtMoney(effCompareAt)}
             </span>
           )}
           {onSale && (
@@ -341,13 +377,13 @@ export default function ProductDetailPage() {
             </span>
           )}
         </div>
-        {product.inventory_count != null && (
+        {effStock != null && (
           <p
             className="text-[12px] mt-2"
             style={{
               color: soldOut
                 ? C.brandError
-                : product.inventory_count <= 5
+                : isLowStock
                 ? "#B45309"
                 : C.brandSuccess,
               fontWeight: 600,
@@ -355,8 +391,8 @@ export default function ProductDetailPage() {
           >
             {soldOut
               ? "Out of stock"
-              : product.inventory_count <= 5
-              ? `Only ${product.inventory_count} left`
+              : isLowStock
+              ? `Only ${effStock} left`
               : "In stock"}
           </p>
         )}
@@ -382,22 +418,55 @@ export default function ProductDetailPage() {
           >
             {product.variants.map((v) => {
               const isActive = selectedVariantId === v.id;
+              // Per-variant inventory + low-stock from the variant
+              // itself, falling back to the product-level count when
+              // the variant has no override. Sold-out variants stay
+              // tappable so the customer can see what's missing —
+              // but the Buy / Add-to-cart buttons gate on the
+              // selected variant's stock below.
+              const vStock = effectiveInventory(product.inventory_count, v);
+              const vThreshold = effectiveLowStockThreshold(v);
+              const vSoldOut = vStock != null && vStock <= 0;
+              const vLowStock = vStock != null && vStock > 0 && vStock <= vThreshold;
               return (
                 <button
                   key={v.id}
                   role="radio"
                   aria-checked={isActive}
                   type="button"
-                  onClick={() => setSelectedVariantId(v.id)}
+                  onClick={() => { setSelectedVariantId(v.id); setGalleryIdx(0); }}
+                  disabled={vSoldOut}
                   className="px-3.5 py-2 rounded-full text-[13px] font-semibold transition active:scale-[0.97]"
                   style={{
-                    background: isActive ? GRADIENTS.primary : C.paper,
-                    color: isActive ? "#FFFFFF" : C.brandText,
+                    background: isActive
+                      ? GRADIENTS.primary
+                      : vSoldOut
+                        ? C.brandBorder
+                        : C.paper,
+                    color: isActive
+                      ? "#FFFFFF"
+                      : vSoldOut
+                        ? C.mutedSoft
+                        : C.brandText,
                     border: `1.5px solid ${isActive ? "transparent" : C.brandBorder}`,
                     boxShadow: isActive ? SHADOWS.primaryGlow : "none",
+                    textDecoration: vSoldOut ? "line-through" : "none",
+                    cursor: vSoldOut ? "not-allowed" : "pointer",
+                    opacity: vSoldOut ? 0.7 : 1,
                   }}
+                  aria-label={`${v.name}${vSoldOut ? " (sold out)" : vLowStock ? ` (only ${vStock} left)` : ""}`}
                 >
                   {v.name}
+                  {vSoldOut && (
+                    <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 800, letterSpacing: "0.10em" }}>
+                      · SOLD OUT
+                    </span>
+                  )}
+                  {!vSoldOut && vLowStock && (
+                    <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 800, color: isActive ? "#FFFFFF" : "#B45309" }}>
+                      · {vStock} LEFT
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -432,9 +501,12 @@ export default function ProductDetailPage() {
                 product_id: product.id,
                 product_slug: product.slug,
                 title: product.title,
-                image_url: product.image_url,
-                unit_amount: Number(product.price || 0),
-                inventory_count: product.inventory_count,
+                // Variant overrides flow into the cart so the drawer
+                // + checkout API + Stripe receipt all show the
+                // picked variant's price / image / stock ceiling.
+                image_url: effImage,
+                unit_amount: Number(effPrice ?? product.price ?? 0),
+                inventory_count: effStock,
                 variant_id: variant?.id || null,
                 variant_label: variant ? product.variant_label : null,
                 variant_name: variant?.name || null,

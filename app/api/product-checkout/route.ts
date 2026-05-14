@@ -142,37 +142,76 @@ export async function POST(req: Request) {
     if (product.external_checkout_url) {
       return fail(409, `'${product.title}' is sold via an external store — remove it from the cart and visit the product page.`);
     }
-    const priceDollars = product.price == null ? null : Number(product.price);
-    if (priceDollars == null || !Number.isFinite(priceDollars) || priceDollars < 0) {
-      return fail(400, `'${product.title}' doesn't have a price set.`);
-    }
-    if (product.inventory_count != null && Number(product.inventory_count) < item.quantity) {
-      return fail(409, `'${product.title}' only has ${product.inventory_count} in stock.`);
-    }
-    // Variant validation: required when product declares variants.
+    // Variant validation runs FIRST so a variant-specific price /
+    // inventory override applies to the rest of the checks.
     const variants = Array.isArray(product.variants) ? (product.variants as any[]) : [];
-    let resolvedVariant: { id: string; name: string } | null = null;
+    let resolvedVariant: any = null;
     if (variants.length > 0) {
       if (!item.variant_id) {
         return fail(400, `Pick a ${product.variant_label || "variant"} for '${product.title}'.`);
       }
       const match = variants.find((v) => v && String(v.id) === item.variant_id);
       if (!match) return fail(400, `That variant is no longer available for '${product.title}'.`);
-      resolvedVariant = { id: String(match.id), name: String(match.name || "").trim() };
+      resolvedVariant = match;
     }
+
+    // Variant price override wins when set; otherwise fall back to
+    // product.price. Negative / missing prices reject the line.
+    const variantPriceRaw = resolvedVariant?.price;
+    const variantPrice =
+      variantPriceRaw === null || variantPriceRaw === undefined || variantPriceRaw === ""
+        ? null
+        : Number(variantPriceRaw);
+    const priceDollars =
+      variantPrice != null && Number.isFinite(variantPrice) && variantPrice >= 0
+        ? variantPrice
+        : product.price == null
+          ? null
+          : Number(product.price);
+    if (priceDollars == null || !Number.isFinite(priceDollars) || priceDollars < 0) {
+      return fail(400, `'${product.title}' doesn't have a price set.`);
+    }
+
+    // Inventory ceiling: variant's count wins when present, else
+    // product.inventory_count, else untracked (null = unlimited).
+    const variantInvRaw = resolvedVariant?.inventory_count;
+    const variantInv =
+      variantInvRaw === null || variantInvRaw === undefined || variantInvRaw === ""
+        ? null
+        : Number(variantInvRaw);
+    const effectiveStock =
+      variantInv != null && Number.isFinite(variantInv)
+        ? variantInv
+        : product.inventory_count == null
+          ? null
+          : Number(product.inventory_count);
+    if (effectiveStock != null && effectiveStock < item.quantity) {
+      const variantLabel = resolvedVariant ? ` (${resolvedVariant.name})` : "";
+      if (effectiveStock <= 0) {
+        return fail(409, `'${product.title}${variantLabel}' is sold out.`);
+      }
+      return fail(409, `'${product.title}${variantLabel}' only has ${effectiveStock} in stock.`);
+    }
+
+    // Variant image override: persist on the line item so the order
+    // tracking + admin show the picked variant's photo, not the
+    // generic product photo.
+    const variantImage = resolvedVariant?.image_url
+      ? String(resolvedVariant.image_url)
+      : product.image_url ?? null;
 
     resolved.push({
       product_id: String(product.id),
       product_slug: String(product.slug),
       title: String(product.title),
-      image_url: product.image_url ?? null,
+      image_url: variantImage,
       unit_amount_dollars: priceDollars,
       unit_amount_cents: Math.round(priceDollars * 100),
       quantity: item.quantity,
       requires_shipping: !!product.requires_shipping,
       variant_label: resolvedVariant ? (product.variant_label || null) : null,
       variant_id: resolvedVariant?.id || null,
-      variant_name: resolvedVariant?.name || null,
+      variant_name: resolvedVariant ? String(resolvedVariant.name || "").trim() : null,
     });
   }
 
