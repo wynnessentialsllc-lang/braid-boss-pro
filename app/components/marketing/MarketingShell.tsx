@@ -119,7 +119,7 @@ const MarketingHeader = () => (
           FAQ
         </Link>
         <Link
-          href="/"
+          href="/?signin=1"
           style={{
             padding: "8px 16px",
             borderRadius: 12,

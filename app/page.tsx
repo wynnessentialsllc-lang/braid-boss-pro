@@ -19335,7 +19335,28 @@ export default function App() {
   const [authInitialTab, setAuthInitialTab] = useState<"signin" | "signup">("signin");
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // Deep-link from marketing pages: /?signin=1 or /?signup=1
+    // bypasses the WelcomeIntro screen entirely and opens the auth
+    // sheet straight to the requested tab. This is what the public
+    // marketing 'Sign in' link points at — without the bypass it
+    // bounces visitors to WelcomeIntro and they have to tap Sign In
+    // a second time.
     try {
+      const params = new URLSearchParams(window.location.search);
+      const wantsSignin = params.get("signin") === "1" || params.get("auth") === "signin";
+      const wantsSignup = params.get("signup") === "1" || params.get("auth") === "signup";
+      if (wantsSignin || wantsSignup) {
+        setAuthInitialTab(wantsSignup ? "signup" : "signin");
+        setIntroSeen(true);
+        try {
+          window.localStorage.setItem("bbp-intro-seen-v1", "1");
+        } catch { /* private mode — proceed in-memory */ }
+        // Strip the query param so a refresh doesn't keep forcing
+        // the auth sheet open after the session is restored.
+        const clean = window.location.pathname + window.location.hash;
+        window.history.replaceState(null, "", clean);
+        return;
+      }
       setIntroSeen(window.localStorage.getItem("bbp-intro-seen-v1") === "1");
     } catch {
       setIntroSeen(true);
