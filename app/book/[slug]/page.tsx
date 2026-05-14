@@ -61,6 +61,16 @@ type LinkConfig = {
   accent_color?: string | null;
   // Gallery — added by 20260608 migration. Array of { url, path, sort }.
   gallery_photos?: Array<{ url: string; path?: string; sort?: number }> | null;
+  // Storefront profile fields — added by 20260617 migration. All
+  // optional; the branded header gracefully drops sections that
+  // aren't filled in.
+  banner_image_url?: string | null;
+  business_city?: string | null;
+  business_state?: string | null;
+  instagram_url?: string | null;
+  tiktok_url?: string | null;
+  website_url?: string | null;
+  years_in_business?: number | null;
 };
 
 const SUPABASE_URL =
@@ -102,15 +112,58 @@ export default function PublicBookingPage() {
   useEffect(() => {
     if (typeof document === "undefined") return;
     const businessName = link?.business_name?.trim();
-    if (businessName) {
-      document.title = `${businessName} | Book Appointment | Braid Boss Pro`;
-    } else {
-      document.title = "Book Appointment | Braid Boss Pro";
+    const title = businessName
+      ? `${businessName} | Book Appointment | Braid Boss Pro`
+      : "Book Appointment | Braid Boss Pro";
+    document.title = title;
+
+    // Open Graph + Twitter card meta — injected client-side. This
+    // lightly polishes link previews for crawlers that execute JS
+    // (Twitter, iMessage, Slack often do); fully server-rendered
+    // metadata is a follow-up that needs a server-component split.
+    const description = link?.intro?.trim()
+      || (businessName ? `Book your next appointment with ${businessName}.` : "Book your next braiding appointment online.");
+    const ogImage = link?.banner_image_url || link?.logo_url || null;
+    const url = typeof window !== "undefined" ? window.location.href : "";
+
+    const setMeta = (selector: string, attr: "name" | "property", key: string, content: string) => {
+      let el = document.head.querySelector<HTMLMetaElement>(selector);
+      if (!el) {
+        el = document.createElement("meta");
+        el.setAttribute(attr, key);
+        document.head.appendChild(el);
+      }
+      el.setAttribute("content", content);
+    };
+
+    setMeta('meta[name="description"]', "name", "description", description);
+    setMeta('meta[property="og:title"]', "property", "og:title", title);
+    setMeta('meta[property="og:description"]', "property", "og:description", description);
+    setMeta('meta[property="og:type"]', "property", "og:type", "website");
+    if (url) setMeta('meta[property="og:url"]', "property", "og:url", url);
+    if (ogImage) setMeta('meta[property="og:image"]', "property", "og:image", ogImage);
+    setMeta('meta[name="twitter:card"]', "name", "twitter:card", ogImage ? "summary_large_image" : "summary");
+    setMeta('meta[name="twitter:title"]', "name", "twitter:title", title);
+    setMeta('meta[name="twitter:description"]', "name", "twitter:description", description);
+    if (ogImage) setMeta('meta[name="twitter:image"]', "name", "twitter:image", ogImage);
+
+    // Canonical URL — points at the branded slug when available so
+    // SEO consolidates around the friendly URL even if the visitor
+    // landed on the legacy random one.
+    if (url) {
+      let canon = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+      if (!canon) {
+        canon = document.createElement("link");
+        canon.setAttribute("rel", "canonical");
+        document.head.appendChild(canon);
+      }
+      canon.setAttribute("href", url);
     }
+
     return () => {
       document.title = "Braid Boss Pro";
     };
-  }, [link?.business_name]);
+  }, [link?.business_name, link?.intro, link?.banner_image_url, link?.logo_url]);
   // Tap-to-expand lightbox for the stylist's photo gallery. Stores
   // the active index into the sorted gallery_photos array so prev /
   // next swipes stay in order.
@@ -326,6 +379,13 @@ export default function PublicBookingPage() {
             policies: row.policies,
             accent_color: row.accent_color,
             gallery_photos: row.gallery_photos,
+            banner_image_url: row.banner_image_url ?? null,
+            business_city: row.business_city ?? null,
+            business_state: row.business_state ?? null,
+            instagram_url: row.instagram_url ?? null,
+            tiktok_url: row.tiktok_url ?? null,
+            website_url: row.website_url ?? null,
+            years_in_business: row.years_in_business ?? null,
           };
           setLink(config);
         }
@@ -763,6 +823,33 @@ export default function PublicBookingPage() {
           paddingBottom: "calc(120px + env(safe-area-inset-bottom, 0px))",
         }}
       >
+        {/* Banner image — wide hero rendered only when set. Soft
+            inset shadow + overflow:hidden so the radius reads even
+            when the source image is bright at the edges. Lazy load
+            so it never blocks first paint of the form. */}
+        {link?.banner_image_url && (
+          <div
+            style={{
+              position: "relative",
+              width: "100%",
+              aspectRatio: "16 / 6",
+              borderRadius: 18,
+              overflow: "hidden",
+              marginBottom: 18,
+              background: C.paper,
+              border: `1px solid ${C.hairline}`,
+              boxShadow: "0 6px 20px rgba(74, 44, 26, 0.06)",
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={link.banner_image_url}
+              alt={link.business_name ? `${link.business_name} banner` : "Studio banner"}
+              loading="lazy"
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            />
+          </div>
+        )}
         {/* Logo — rendered only when the stylist set logo_url. Uses
             a plain <img> so any public CDN URL works without
             configuring next/image domains. */}
@@ -790,25 +877,117 @@ export default function PublicBookingPage() {
         {/* Contact pills row — location + phone surface as small
             chips beneath the headline. Phone is tappable (tel: on
             mobile). */}
-        {(link?.location_text || link?.phone) && (
-          <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-            {link?.location_text && (
-              <span style={{ fontSize: 11, color: C.coffee, padding: "4px 10px", borderRadius: 99, background: C.cream, border: `1px solid ${C.hairline}` }}>
-                {link.location_text}
-              </span>
-            )}
-            {link?.phone && (
-              <a href={`tel:${link.phone.replace(/\s/g, "")}`} style={{ fontSize: 11, color: C.coffee, padding: "4px 10px", borderRadius: 99, background: C.cream, border: `1px solid ${C.hairline}`, textDecoration: "none" }}>
-                {link.phone}
-              </a>
-            )}
-          </div>
-        )}
+        {/* Location + phone chips. Prefer the structured city/state
+            pair when present, fall back to the free-form
+            location_text. Phone stays its own tappable chip. */}
+        {(() => {
+          const city = (link?.business_city || "").trim();
+          const state = (link?.business_state || "").trim();
+          const composedLocation = (city && state) ? `${city}, ${state}` : (city || state || link?.location_text || "");
+          if (!composedLocation && !link?.phone && !link?.years_in_business) return null;
+          return (
+            <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              {composedLocation && (
+                <span style={{ fontSize: 11, color: C.coffee, padding: "4px 10px", borderRadius: 99, background: C.cream, border: `1px solid ${C.hairline}` }}>
+                  {composedLocation}
+                </span>
+              )}
+              {link?.years_in_business != null && link.years_in_business > 0 && (
+                <span style={{ fontSize: 11, color: C.coffee, padding: "4px 10px", borderRadius: 99, background: C.cream, border: `1px solid ${C.hairline}` }}>
+                  {link.years_in_business} {link.years_in_business === 1 ? "yr" : "yrs"} in business
+                </span>
+              )}
+              {link?.phone && (
+                <a href={`tel:${link.phone.replace(/\s/g, "")}`} style={{ fontSize: 11, color: C.coffee, padding: "4px 10px", borderRadius: 99, background: C.cream, border: `1px solid ${C.hairline}`, textDecoration: "none" }}>
+                  {link.phone}
+                </a>
+              )}
+            </div>
+          );
+        })()}
         {link?.intro && (
           <p style={{ textAlign: "center", color: C.muted, marginTop: 10, fontSize: 14 }}>
             {link.intro}
           </p>
         )}
+        {/* Social + share row. Each social link is its own pill
+            opening in a new tab; share uses navigator.share when
+            available and falls back to clipboard copy so it always
+            does *something*. Hidden entirely when the stylist hasn't
+            set socials AND we have nothing useful to share. */}
+        {(() => {
+          const socials: Array<{ key: string; label: string; href: string }> = [];
+          if (link?.instagram_url) socials.push({ key: "ig", label: "Instagram", href: link.instagram_url });
+          if (link?.tiktok_url) socials.push({ key: "tt", label: "TikTok", href: link.tiktok_url });
+          if (link?.website_url) socials.push({ key: "web", label: "Website", href: link.website_url });
+          const showShare = typeof window !== "undefined";
+          if (socials.length === 0 && !showShare) return null;
+          const handleShare = async () => {
+            const url = typeof window !== "undefined" ? window.location.href : "";
+            const title = link?.business_name ? `${link.business_name} — book an appointment` : "Book an appointment";
+            try {
+              if (navigator.share) {
+                await navigator.share({ title, url });
+                return;
+              }
+            } catch { /* user cancelled — fall through silently */ }
+            try { await navigator.clipboard?.writeText(url); } catch { /* ignore */ }
+          };
+          return (
+            <div
+              style={{
+                marginTop: 14,
+                display: "flex",
+                justifyContent: "center",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              {socials.map(s => (
+                <a
+                  key={s.key}
+                  href={s.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: "0.04em",
+                    color: C.coffee,
+                    textDecoration: "none",
+                    padding: "6px 12px",
+                    borderRadius: 99,
+                    background: C.paper,
+                    border: `1px solid ${C.hairline}`,
+                  }}
+                >
+                  {s.label}
+                </a>
+              ))}
+              {showShare && (
+                <button
+                  type="button"
+                  onClick={handleShare}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: "0.04em",
+                    color: accent,
+                    background: "transparent",
+                    border: `1px solid ${accent}`,
+                    padding: "6px 12px",
+                    borderRadius: 99,
+                    cursor: "pointer",
+                    appearance: "none",
+                    WebkitAppearance: "none",
+                  }}
+                >
+                  Share profile
+                </button>
+              )}
+            </div>
+          );
+        })()}
         {/* Send-a-message CTA — uses sms: when phone is set, mailto:
             falls through to a future stylist contact email. Shown
             only when at least one channel is available. */}
@@ -970,6 +1149,91 @@ export default function PublicBookingPage() {
             </div>
             {hasCatalog ? (
               <>
+                {/* Featured services — pinned row above the category
+                    chips. Only renders when at least one service has
+                    `featured = true`. Tapping a card jumps straight
+                    to that service in the picker (sets serviceId so
+                    the existing flow takes over). */}
+                {(() => {
+                  const featured = catalog.filter(s => (s as any).featured === true);
+                  if (featured.length === 0) return null;
+                  return (
+                    <Field label="Featured">
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 10,
+                          overflowX: "auto",
+                          WebkitOverflowScrolling: "touch",
+                          paddingBottom: 4,
+                          scrollbarWidth: "none",
+                        }}
+                      >
+                        {featured.map(s => (
+                          <button
+                            key={`feat_${s.id}`}
+                            type="button"
+                            onClick={() => {
+                              setServiceId(s.id);
+                              setSelectedVariationId("");
+                              setServiceName(s.name || "");
+                              if (s.category_id) setActiveCategoryId(s.category_id);
+                            }}
+                            style={{
+                              flex: "0 0 220px",
+                              padding: 14,
+                              borderRadius: 16,
+                              background: C.paper,
+                              border: `1.5px solid ${serviceId === s.id ? accent : C.hairline}`,
+                              boxShadow: serviceId === s.id
+                                ? `0 0 0 3px ${C.cream}`
+                                : "0 4px 14px rgba(74, 44, 26, 0.06)",
+                              textAlign: "left",
+                              font: "inherit",
+                              color: "inherit",
+                              cursor: "pointer",
+                              appearance: "none",
+                              WebkitAppearance: "none",
+                              transition: "border-color 120ms ease, box-shadow 120ms ease",
+                            }}
+                          >
+                            <p
+                              style={{
+                                fontSize: 9.5,
+                                fontWeight: 700,
+                                letterSpacing: "0.18em",
+                                textTransform: "uppercase",
+                                color: accent,
+                                margin: 0,
+                              }}
+                            >
+                              Signature
+                            </p>
+                            <p
+                              style={{
+                                fontFamily: FONT_DISPLAY,
+                                fontSize: 18,
+                                fontWeight: 600,
+                                color: C.espresso,
+                                margin: "4px 0 0",
+                                lineHeight: 1.15,
+                              }}
+                            >
+                              {s.name}
+                            </p>
+                            <p style={{ marginTop: 6, fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
+                              {s.duration_hours}h · ${Number(s.base_price).toFixed(0)}
+                              {s.deposit_required && s.deposit_amount
+                                ? ` · $${Number(s.deposit_amount).toFixed(0)} deposit`
+                                : ""}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </Field>
+                  );
+                })()}
+
                 {/* Category browse — a horizontal-scrolling chip row
                     above the service select. "All" is always present.
                     "Other" only when there are uncategorized services,

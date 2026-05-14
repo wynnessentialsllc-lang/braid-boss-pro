@@ -163,6 +163,9 @@ export type Service = {
   // Service categories — optional parent group. Null = appears under
   // "Other Services" in the editor + on the public booking page.
   category_id: string | null;
+  // Pinned to the top of the public booking page in a "Featured"
+  // row. Defaults to false; stylist toggles per service.
+  featured: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -184,6 +187,7 @@ export type ServiceInput = Pick<
   | "contract_template_id"
   | "category_id"
   | "extras"
+  | "featured"
 >;
 
 // ---- Validation -------------------------------------------------------
@@ -432,6 +436,7 @@ export const useServices = (
       contract_template_id: draft.contract_template_id || null,
       // Empty string from the editor dropdown means "no category".
       category_id: draft.category_id ? draft.category_id : null,
+      featured: !!draft.featured,
       // Round-trip the optional add-ons. Keep null/undefined sane and
       // coerce numeric fields so we never persist NaN. Each entry is
       // stored verbatim in services.extras jsonb.
@@ -514,6 +519,7 @@ export type PublicService = Pick<
   | "contract_template_id"
   | "category_id"
   | "extras"
+  | "featured"
 >;
 
 export const fetchPublicServices = async (
@@ -539,6 +545,7 @@ export const fetchPublicServices = async (
     contract_template_id: s.contract_template_id ?? null,
     category_id: s.category_id ?? null,
     extras: Array.isArray(s.extras) ? s.extras : [],
+    featured: !!s.featured,
   }));
   return { ok: true, services };
 };
