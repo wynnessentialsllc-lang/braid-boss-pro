@@ -107,6 +107,7 @@ import {
   type Service,
   type ServiceInput,
   type ServiceAddOn,
+  type ServiceExtra,
   SERVICES_EMPTY_COPY,
   formatServicePrice,
   useServices,
@@ -6527,6 +6528,37 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                 Source: {form.source === "public_booking" ? "Booking link" : form.source === "manual" ? "Manual" : form.source}
               </p>
             )}
+          </Card>
+        )}
+
+        {/* Booked add-ons — read-only snapshot from the public
+            booking flow. Only renders when the client actually picked
+            extras. Manual appointments edit price/duration directly
+            instead, so we never show an empty card here. */}
+        {isAppointment && Array.isArray((appt as any)?.addons) && (appt as any).addons.length > 0 && (
+          <Card className="p-3.5">
+            <p className="text-sm font-semibold mb-1" style={{ color: C.espresso }}>Booked add-ons</p>
+            <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+              Picked by the client at booking. Already included in this appointment's total price.
+            </p>
+            <ul className="mt-2 space-y-1.5" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {(appt as any).addons.map((a: any, i: number) => (
+                <li
+                  key={a?.id || i}
+                  className="text-[12px] flex items-start justify-between gap-2"
+                  style={{ color: C.coffee, lineHeight: 1.4 }}
+                >
+                  <span className="flex-1 min-w-0">
+                    {a?.name || "Add-on"}
+                    {Number(a?.duration_hours_delta) > 0 ? ` · +${Number(a.duration_hours_delta)}h` : ""}
+                    {a?.include_in_deposit ? " · in deposit" : ""}
+                  </span>
+                  <span style={{ color: C.goldDeep, fontWeight: 600, whiteSpace: "nowrap" }}>
+                    +{fmtMoney(Number(a?.price) || 0, business?.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </Card>
         )}
 
@@ -13502,6 +13534,7 @@ const ServicesScreen = ({
     buffer_after_minutes: 0,
     max_concurrent: 1,
     category_id: null,
+    extras: [],
   });
 
   const openEdit = (s: Service) => setEditing({
@@ -13519,6 +13552,7 @@ const ServicesScreen = ({
     buffer_after_minutes: s.buffer_after_minutes ?? 0,
     max_concurrent: s.max_concurrent ?? 1,
     category_id: s.category_id ?? null,
+    extras: Array.isArray(s.extras) ? s.extras : [],
   });
 
   // Category CRUD handlers — kept local so the screen owns the
@@ -14039,6 +14073,145 @@ const ServicesScreen = ({
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+            </Card>
+
+            {/* Optional paid ADD-ONS. Different from Variations
+                above: these stack on top of the picked base/variation
+                rather than replacing it. Common examples: waist
+                length, curly pieces, extra fullness, triangle parts. */}
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Add-ons</p>
+                  <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+                    Optional paid extras the client can stack on top of the picked variation — e.g. waist length, curly pieces, extra fullness. Each add-on adds its price (and optional duration). Deposit isn't bumped unless you flip "Include in deposit".
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  icon={<Plus size={14} />}
+                  onClick={() => setEditing(prev => prev ? {
+                    ...prev,
+                    extras: [
+                      ...(prev.extras || []),
+                      {
+                        id: `extra_${uid()}`,
+                        name: "",
+                        description: "",
+                        price: 0,
+                        duration_hours_delta: 0,
+                        include_in_deposit: false,
+                        active: true,
+                        sort_order: (prev.extras || []).length,
+                      },
+                    ],
+                  } : prev)}
+                >
+                  Add
+                </Button>
+              </div>
+              {(editing.extras || []).length === 0 ? (
+                <p className="text-[11px]" style={{ color: C.muted }}>
+                  No add-ons yet. Examples: "Waist length +$30", "Curly pieces +$25 / +0.5h", "Triangle parts +$15".
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {(editing.extras || []).map((e, idx) => {
+                    const updateExtra = (patch: Partial<ServiceExtra>) =>
+                      setEditing(prev => prev ? {
+                        ...prev,
+                        extras: (prev.extras || []).map(x => x.id === e.id ? { ...x, ...patch } : x),
+                      } : prev);
+                    const removeExtra = () =>
+                      setEditing(prev => prev ? {
+                        ...prev,
+                        extras: (prev.extras || []).filter(x => x.id !== e.id),
+                      } : prev);
+                    return (
+                      <div
+                        key={e.id}
+                        className="rounded-xl p-3"
+                        style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="flex-1">
+                            <Input
+                              value={e.name}
+                              onChange={ev => updateExtra({ name: ev.target.value })}
+                              placeholder={`Add-on ${idx + 1} name`}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={removeExtra}
+                            className="p-2 rounded-lg"
+                            style={{ color: C.danger }}
+                            aria-label="Remove add-on"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                        <Field label="Description" hint="Shown under the add-on on the booking page. Optional.">
+                          <Input
+                            value={e.description || ""}
+                            onChange={ev => updateExtra({ description: ev.target.value })}
+                            placeholder="e.g. Adds 4 inches of length"
+                          />
+                        </Field>
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          <Field label="Price">
+                            <MoneyInput
+                              value={e.price ?? 0}
+                              onChange={(v) => updateExtra({ price: parseMoney(v) })}
+                            />
+                          </Field>
+                          <Field label="Extra time (hrs)" hint="Optional">
+                            <Input
+                              type="number"
+                              inputMode="decimal"
+                              step="0.25"
+                              min={0}
+                              value={e.duration_hours_delta ?? ""}
+                              onChange={ev => updateExtra({
+                                duration_hours_delta: ev.target.value === ""
+                                  ? 0
+                                  : Number(ev.target.value),
+                              })}
+                              placeholder="0"
+                            />
+                          </Field>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[12px] font-semibold" style={{ color: C.espresso }}>
+                              Include in deposit
+                            </p>
+                            <p className="text-[10px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+                              Off by default. Turn on to roll this add-on's price into the deposit due today.
+                            </p>
+                          </div>
+                          <Toggle
+                            checked={!!e.include_in_deposit}
+                            onChange={(v) => updateExtra({ include_in_deposit: v })}
+                          />
+                        </div>
+                        <div className="mt-2 flex items-center justify-between">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[12px] font-semibold" style={{ color: C.espresso }}>Active</p>
+                            <p className="text-[10px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+                              Inactive add-ons hide from the public booking page but stay editable here.
+                            </p>
+                          </div>
+                          <Toggle
+                            checked={e.active !== false}
+                            onChange={(v) => updateExtra({ active: v })}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </Card>
@@ -15452,6 +15625,11 @@ const ApprovalQueueScreen = ({
         variationPrice: req.selected_variation_price != null ? Number(req.selected_variation_price) : null,
         variationDurationHours: req.selected_variation_duration_hours != null ? Number(req.selected_variation_duration_hours) : null,
         variationDepositAmount: req.selected_variation_deposit_amount != null ? Number(req.selected_variation_deposit_amount) : null,
+        // Picked add-ons. The submit RPC has already rolled their
+        // price/duration into req.service_price/duration, so the
+        // headline totals are correct out of the box. We carry the
+        // raw snapshot onto the appointment for display + audit.
+        addons: Array.isArray(req.selected_addons) ? req.selected_addons : [],
       };
       const saved = await store.upsertAppointment(newAppt);
       if (!saved) throw new Error("Couldn't create appointment");

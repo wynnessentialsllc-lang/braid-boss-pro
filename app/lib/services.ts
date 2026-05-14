@@ -20,6 +20,27 @@ import { getSupabase } from "./supabase";
 // resolver in `resolveVariationPricing` falls back to the parent's
 // base_price / duration / deposit when a per-variation field is null
 // or undefined, so existing services keep working unchanged.
+// Optional paid add-ons. Stacked on top of the picked base/variation
+// at booking time. Stored in services.extras jsonb.
+//   * price        — flat $ added per booking
+//   * duration_hours_delta — added to the appointment length
+//   * include_in_deposit   — when true, the add-on's price is rolled
+//                            into the deposit due today. Defaults to
+//                            false so picking add-ons doesn't quietly
+//                            bump the deposit on the public page.
+//   * active       — soft toggle; inactive add-ons hide from the
+//                    public picker but stay editable.
+export type ServiceExtra = {
+  id: string;
+  name: string;
+  description?: string | null;
+  price: number;
+  duration_hours_delta?: number | null;
+  include_in_deposit?: boolean | null;
+  active?: boolean | null;
+  sort_order?: number | null;
+};
+
 export type ServiceAddOn = {
   id: string;
   name: string;
@@ -125,6 +146,11 @@ export type Service = {
   deposit_required: boolean;
   deposit_amount: number | null;
   add_ons: ServiceAddOn[];
+  // Optional paid add-ons stacked on top of the picked base/variation
+  // (waist length, curly pieces, extra fullness, etc.). Distinct from
+  // add_ons / variations — these don't replace the service, they
+  // augment it. Stored in services.extras jsonb.
+  extras: ServiceExtra[];
   prep_instructions: string | null;
   is_active: boolean;
   // Phase B1 — feed the slot engine when this service is booked:
@@ -157,6 +183,7 @@ export type ServiceInput = Pick<
   | "max_concurrent"
   | "contract_template_id"
   | "category_id"
+  | "extras"
 >;
 
 // ---- Validation -------------------------------------------------------
@@ -238,6 +265,30 @@ draft.deposit_amount > draft.base_price) {
       : ((Number(draft.base_price) || 0) + (Number(a.amount) || 0));
     if (a.variation_deposit_amount != null && Number(a.variation_deposit_amount) > vEffPrice) {
       errors.push({ field: "add_ons", message: `Variation ${i + 1} deposit can't exceed its price.` });
+      return;
+    }
+  });
+  draft.extras?.forEach((e, i) => {
+    const name = (e.name || "").trim();
+    if (!name) {
+      errors.push({ field: "extras" as any, message: `Add-on ${i + 1} needs a name.` });
+      return;
+    }
+    if (name.length > 60) {
+      errors.push({ field: "extras" as any, message: `Add-on ${i + 1} name must be 60 characters or less.` });
+      return;
+    }
+    if (!Number.isFinite(e.price) || e.price < 0) {
+      errors.push({ field: "extras" as any, message: `Add-on ${i + 1} price can't be negative.` });
+      return;
+    }
+    if (e.duration_hours_delta != null
+        && (!Number.isFinite(e.duration_hours_delta) || e.duration_hours_delta < 0 || e.duration_hours_delta > 48)) {
+      errors.push({ field: "extras" as any, message: `Add-on ${i + 1} extra time must be between 0 and 48 hours.` });
+      return;
+    }
+    if (e.description && e.description.length > 280) {
+      errors.push({ field: "extras" as any, message: `Add-on ${i + 1} description must be 280 characters or less.` });
       return;
     }
   });
@@ -381,6 +432,21 @@ export const useServices = (
       contract_template_id: draft.contract_template_id || null,
       // Empty string from the editor dropdown means "no category".
       category_id: draft.category_id ? draft.category_id : null,
+      // Round-trip the optional add-ons. Keep null/undefined sane and
+      // coerce numeric fields so we never persist NaN. Each entry is
+      // stored verbatim in services.extras jsonb.
+      extras: (draft.extras || []).map(e => ({
+        id: e.id || `extra_${Math.random().toString(36).slice(2, 8)}`,
+        name: (e.name || "").trim(),
+        description: e.description?.trim() || null,
+        price: Number.isFinite(e.price) ? Number(e.price) : 0,
+        duration_hours_delta: e.duration_hours_delta != null && Number.isFinite(e.duration_hours_delta)
+          ? Number(e.duration_hours_delta)
+          : 0,
+        include_in_deposit: e.include_in_deposit === true,
+        active: e.active === false ? false : true,
+        sort_order: Number.isFinite(e.sort_order) ? Number(e.sort_order) : 0,
+      })),
     };
     const { data, error: err } = draft.id
       ? await supabase.from("services").update(payload).eq("id", draft.id).eq("user_id", userId).select("*").maybeSingle()
@@ -447,6 +513,7 @@ export type PublicService = Pick<
   | "max_concurrent"
   | "contract_template_id"
   | "category_id"
+  | "extras"
 >;
 
 export const fetchPublicServices = async (
@@ -471,6 +538,7 @@ export const fetchPublicServices = async (
     max_concurrent: Number(s.max_concurrent) || 1,
     contract_template_id: s.contract_template_id ?? null,
     category_id: s.category_id ?? null,
+    extras: Array.isArray(s.extras) ? s.extras : [],
   }));
   return { ok: true, services };
 };

@@ -68,6 +68,16 @@ export type BookingRequestRecord = {
   selected_variation_price: number | null;
   selected_variation_duration_hours: number | null;
   selected_variation_deposit_amount: number | null;
+  // Optional paid add-ons picked at submit time. Each entry is a
+  // snapshot of the services.extras row at the moment of booking,
+  // so editing the catalog later never alters in-flight bookings.
+  selected_addons: Array<{
+    id: string;
+    name: string;
+    price: number;
+    duration_hours_delta: number;
+    include_in_deposit: boolean;
+  }> | null;
   created_at: string;
   updated_at: string;
 };

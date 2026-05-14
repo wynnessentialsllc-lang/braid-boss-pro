@@ -136,6 +136,11 @@ export default function PublicBookingPage() {
   // Picked variation (one of service.add_ons). "" = no variation
   // selected; the resolver then falls back to the parent service.
   const [selectedVariationId, setSelectedVariationId] = useState<string>("");
+  // Picked add-ons. Distinct from variations: multiple can be
+  // selected, and they stack on top of whichever variation/base is
+  // currently picked. Cleared whenever the service changes so a
+  // ghost pick from a prior service can't ride along.
+  const [selectedExtraIds, setSelectedExtraIds] = useState<string[]>([]);
   // Service categories — populated alongside the catalog. When the
   // stylist has any active categories with services we surface a
   // category row above the service select; "" means "all services"
@@ -327,13 +332,67 @@ export default function PublicBookingPage() {
   // flow exactly what to charge / book / show — variation overrides
   // when picked, parent service otherwise. See lib/services.ts for
   // the inheritance rules.
-  const resolved = useMemo(() => {
+  const baseResolved = useMemo(() => {
     if (!selectedCatalogService) return null;
     return resolveVariationPricing(
       selectedCatalogService,
       selectedVariationId || null,
     );
   }, [selectedCatalogService, selectedVariationId]);
+
+  // Active (and picked) add-ons. We filter to active only for display
+  // — server-side the RPC also rechecks the active flag so a stale
+  // pick can't slip through. Each pick stacks price + duration on the
+  // base/variation; only `include_in_deposit` flagged add-ons fold
+  // into the deposit due today.
+  const availableExtras = useMemo(() => {
+    return (selectedCatalogService?.extras || []).filter(e => e.active !== false);
+  }, [selectedCatalogService?.extras]);
+
+  const pickedExtras = useMemo(() => {
+    return availableExtras.filter(e => selectedExtraIds.includes(e.id));
+  }, [availableExtras, selectedExtraIds]);
+
+  // Final resolved pricing including the picked add-ons. This is what
+  // the summary box, deposit/balance lines, and the pay-button label
+  // all read from.
+  const resolved = useMemo(() => {
+    if (!baseResolved) return null;
+    const addonsPrice = pickedExtras.reduce((s, e) => s + (Number(e.price) || 0), 0);
+    const addonsDuration = pickedExtras.reduce((s, e) => s + (Number(e.duration_hours_delta) || 0), 0);
+    const addonsDepositExtra = pickedExtras
+      .filter(e => e.include_in_deposit === true)
+      .reduce((s, e) => s + (Number(e.price) || 0), 0);
+    const price = baseResolved.price + addonsPrice;
+    const durationHours = baseResolved.durationHours + addonsDuration;
+    // Deposit rules:
+    //   * If the base/variation already requires a deposit, add only
+    //     the include_in_deposit add-ons to it.
+    //   * If the base doesn't require one but an add-on does, the
+    //     deposit becomes the sum of those flagged add-ons.
+    let depositRequired = baseResolved.depositRequired;
+    let depositAmount = baseResolved.depositAmount;
+    if (depositRequired) {
+      depositAmount = Math.min(price, depositAmount + addonsDepositExtra);
+    } else if (addonsDepositExtra > 0) {
+      depositRequired = true;
+      depositAmount = Math.min(price, addonsDepositExtra);
+    }
+    return {
+      ...baseResolved,
+      price,
+      durationHours,
+      depositRequired,
+      depositAmount,
+      balanceDue: Math.max(0, price - depositAmount),
+    };
+  }, [baseResolved, pickedExtras]);
+
+  // Reset picked add-ons whenever the service changes so a stale
+  // pick from another service can't carry over.
+  useEffect(() => {
+    setSelectedExtraIds([]);
+  }, [serviceId]);
 
   // Phase B7 — derived duration. When a catalog service is picked we
   // use its real duration; otherwise default to 60 minutes so the
@@ -485,6 +544,12 @@ export default function PublicBookingPage() {
           // New param — RPC resolves variation pricing server-side
           // against services.add_ons. Null = no variation picked.
           variation_id_in: hasCatalog && selectedVariationId ? selectedVariationId : null,
+          // Pass picked add-on ids. The RPC resolves them server-side
+          // against services.extras so a tampered payload can't invent
+          // free upgrades — we only echo back what we trust.
+          addon_ids_in: hasCatalog && selectedExtraIds.length > 0
+            ? selectedExtraIds
+            : null,
         },
       );
       if (!rpcErr && rpcRows) {
@@ -1173,6 +1238,107 @@ export default function PublicBookingPage() {
                     </Field>
                   );
                 })()}
+
+                {/* Optional ADD-ONS picker. Multi-select; each pick
+                    stacks price + duration on the base/variation.
+                    Deposit only bumps if the add-on has
+                    include_in_deposit = true. */}
+                {selectedCatalogService && availableExtras.length > 0 && (
+                  <Field label="Optional add-ons">
+                    <p style={{ margin: "0 0 8px", fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
+                      Pick any extras you want — your total updates as you tap.
+                    </p>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {availableExtras.map(e => {
+                        const picked = selectedExtraIds.includes(e.id);
+                        const extraTime = Number(e.duration_hours_delta) || 0;
+                        return (
+                          <button
+                            key={e.id}
+                            type="button"
+                            aria-pressed={picked}
+                            onClick={() => setSelectedExtraIds(prev =>
+                              prev.includes(e.id) ? prev.filter(x => x !== e.id) : [...prev, e.id],
+                            )}
+                            style={{
+                              position: "relative",
+                              textAlign: "left",
+                              padding: 12,
+                              borderRadius: 12,
+                              background: picked ? C.cream : C.paper,
+                              border: `1.5px solid ${picked ? C.goldDeep : C.hairline}`,
+                              boxShadow: picked ? `0 0 0 3px ${C.cream}` : "none",
+                              cursor: "pointer",
+                              font: "inherit",
+                              color: "inherit",
+                              appearance: "none",
+                              WebkitAppearance: "none",
+                              transition: "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                              <span style={{ fontWeight: 600, color: C.espresso, fontSize: 13 }}>
+                                {e.name || "Add-on"}
+                              </span>
+                              <span style={{ fontWeight: 700, color: C.goldDeep, fontSize: 14, whiteSpace: "nowrap" }}>
+                                +${(Number(e.price) || 0).toFixed(2)}
+                              </span>
+                            </div>
+                            {(e.description || extraTime > 0 || e.include_in_deposit) && (
+                              <p style={{ marginTop: 4, fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
+                                {e.description || ""}
+                                {extraTime > 0
+                                  ? `${e.description ? " · " : ""}+${extraTime}h`
+                                  : ""}
+                                {e.include_in_deposit
+                                  ? `${e.description || extraTime > 0 ? " · " : ""}Added to deposit`
+                                  : ""}
+                              </p>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {/* Live totals — recompute on every pick. */}
+                    {resolved && pickedExtras.length > 0 && (
+                      <div
+                        style={{
+                          marginTop: 10,
+                          padding: 10,
+                          borderRadius: 10,
+                          background: C.paper,
+                          border: `1px solid ${C.hairline}`,
+                          fontSize: 12,
+                          color: C.coffee,
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span>Total</span>
+                          <strong style={{ color: C.espresso }}>${resolved.price.toFixed(2)}</strong>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span>Duration</span>
+                          <span>{resolved.durationHours}h</span>
+                        </div>
+                        {resolved.depositRequired && resolved.depositAmount > 0 && (
+                          <>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span>Deposit due today</span>
+                              <span style={{ color: C.goldDeep, fontWeight: 600 }}>
+                                ${resolved.depositAmount.toFixed(2)}
+                              </span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span>Remaining balance</span>
+                              <span>${resolved.balanceDue.toFixed(2)}</span>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </Field>
+                )}
               </>
             ) : services.length > 0 ? (
               <Field label="Service">
