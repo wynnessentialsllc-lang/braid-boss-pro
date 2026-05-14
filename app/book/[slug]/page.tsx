@@ -1926,14 +1926,17 @@ export default function PublicBookingPage() {
               <button
                 type="button"
                 onClick={() => setWaitlistOpen(true)}
-                // Cream / tan treatment so the waitlist CTA reads
-                // visibly warmer than the surrounding white canvas
-                // without competing with the stylist's accent button.
+                // Solid gold fill so the secondary CTA stands on its
+                // own against white. Sits below the stylist's accent
+                // primary button so hierarchy is still primary →
+                // secondary, not two equally loud buttons.
                 style={{
                   width: "100%", padding: "12px 14px", borderRadius: 12,
-                  background: "#F4E9D3", color: C.espresso,
+                  background: C.gold, color: C.espresso,
                   border: `1px solid ${C.goldDeep}`,
-                  fontSize: 14, fontWeight: 600, cursor: "pointer",
+                  boxShadow: "0 2px 8px rgba(168, 137, 63, 0.18)",
+                  fontSize: 14, fontWeight: 700, cursor: "pointer",
+                  letterSpacing: "0.01em",
                 }}
               >
                 Don&apos;t see a time that works? · Join the waitlist
