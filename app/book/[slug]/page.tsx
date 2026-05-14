@@ -906,7 +906,19 @@ export default function PublicBookingPage() {
           );
         })()}
         {link?.intro && (
-          <p style={{ textAlign: "center", color: C.muted, marginTop: 10, fontSize: 14 }}>
+          // Bolder + darker than before so the stylist's tagline
+          // reads as a real statement, not a caption.
+          <p
+            style={{
+              textAlign: "center",
+              color: C.espresso,
+              marginTop: 12,
+              fontSize: 15,
+              fontWeight: 600,
+              lineHeight: 1.35,
+              letterSpacing: "-0.005em",
+            }}
+          >
             {link.intro}
           </p>
         )}
