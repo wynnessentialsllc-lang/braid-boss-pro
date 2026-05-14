@@ -13894,6 +13894,8 @@ const ServicesScreen = ({
     category_id: null,
     extras: [],
     featured: false,
+    cover_image_url: null,
+    before_after_image_url: null,
   });
 
   const openEdit = (s: Service) => setEditing({
@@ -13913,6 +13915,8 @@ const ServicesScreen = ({
     category_id: s.category_id ?? null,
     extras: Array.isArray(s.extras) ? s.extras : [],
     featured: !!s.featured,
+    cover_image_url: s.cover_image_url ?? null,
+    before_after_image_url: s.before_after_image_url ?? null,
   });
 
   // Category CRUD handlers — kept local so the screen owns the
@@ -14372,6 +14376,56 @@ const ServicesScreen = ({
                 ))}
               </select>
             </Field>
+
+            {/* Cover image — rendered at the top of the service
+                card on the public booking page (and as the hero on
+                the Featured row when featured is on). Object-cover
+                so any aspect ratio just works. */}
+            <Card className="p-3.5">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Cover image</p>
+                  <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+                    Optional. Paste an image URL — we render it on the service card and (when featured) at the top of your booking page.
+                  </p>
+                </div>
+                {editing.cover_image_url ? (
+                  <button
+                    type="button"
+                    onClick={() => setEditing({ ...editing, cover_image_url: null })}
+                    className="text-[11px] font-semibold px-2 py-1 rounded-md"
+                    style={{ color: C.danger, background: "transparent", border: 0 }}
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+              <Input
+                type="url"
+                inputMode="url"
+                value={editing.cover_image_url || ""}
+                onChange={(e) => setEditing({ ...editing, cover_image_url: e.target.value || null })}
+                placeholder="https://…/cover.jpg"
+              />
+              {editing.cover_image_url && (
+                <div
+                  className="mt-2 rounded-xl overflow-hidden"
+                  style={{
+                    aspectRatio: "16 / 9",
+                    background: C.ivory,
+                    border: `1px solid ${C.hairline}`,
+                  }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={editing.cover_image_url}
+                    alt="Cover preview"
+                    loading="lazy"
+                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                  />
+                </div>
+              )}
+            </Card>
 
             {/* Featured pin — surfaces this service in a "Featured"
                 row at the top of the public booking page. Useful for

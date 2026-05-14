@@ -1196,9 +1196,9 @@ export default function PublicBookingPage() {
                               if (s.category_id) setActiveCategoryId(s.category_id);
                             }}
                             style={{
-                              flex: "0 0 220px",
-                              padding: 14,
-                              borderRadius: 16,
+                              flex: "0 0 240px",
+                              padding: 0,
+                              borderRadius: 18,
                               background: C.paper,
                               border: `1.5px solid ${serviceId === s.id ? accent : C.hairline}`,
                               boxShadow: serviceId === s.id
@@ -1211,38 +1211,62 @@ export default function PublicBookingPage() {
                               appearance: "none",
                               WebkitAppearance: "none",
                               transition: "border-color 120ms ease, box-shadow 120ms ease",
+                              overflow: "hidden",
                             }}
                           >
-                            <p
-                              style={{
-                                fontSize: 9.5,
-                                fontWeight: 700,
-                                letterSpacing: "0.18em",
-                                textTransform: "uppercase",
-                                color: accent,
-                                margin: 0,
-                              }}
-                            >
-                              Signature
-                            </p>
-                            <p
-                              style={{
-                                fontFamily: FONT_DISPLAY,
-                                fontSize: 18,
-                                fontWeight: 600,
-                                color: C.espresso,
-                                margin: "4px 0 0",
-                                lineHeight: 1.15,
-                              }}
-                            >
-                              {s.name}
-                            </p>
-                            <p style={{ marginTop: 6, fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
-                              {s.duration_hours}h · ${Number(s.base_price).toFixed(0)}
-                              {s.deposit_required && s.deposit_amount
-                                ? ` · $${Number(s.deposit_amount).toFixed(0)} deposit`
-                                : ""}
-                            </p>
+                            {/* Image-first layout when the stylist set
+                                a cover. Falls back to a luxury text-
+                                only card so empty / placeholder rows
+                                still look intentional. */}
+                            {(s as any).cover_image_url && (
+                              <div
+                                style={{
+                                  aspectRatio: "4 / 3",
+                                  background: C.ivory,
+                                  overflow: "hidden",
+                                }}
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={(s as any).cover_image_url}
+                                  alt={`${s.name} cover`}
+                                  loading="lazy"
+                                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                                />
+                              </div>
+                            )}
+                            <div style={{ padding: 14 }}>
+                              <p
+                                style={{
+                                  fontSize: 9.5,
+                                  fontWeight: 700,
+                                  letterSpacing: "0.18em",
+                                  textTransform: "uppercase",
+                                  color: accent,
+                                  margin: 0,
+                                }}
+                              >
+                                Signature
+                              </p>
+                              <p
+                                style={{
+                                  fontFamily: FONT_DISPLAY,
+                                  fontSize: 18,
+                                  fontWeight: 600,
+                                  color: C.espresso,
+                                  margin: "4px 0 0",
+                                  lineHeight: 1.15,
+                                }}
+                              >
+                                {s.name}
+                              </p>
+                              <p style={{ marginTop: 6, fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
+                                {s.duration_hours}h · ${Number(s.base_price).toFixed(0)}
+                                {s.deposit_required && s.deposit_amount
+                                  ? ` · $${Number(s.deposit_amount).toFixed(0)} deposit`
+                                  : ""}
+                              </p>
+                            </div>
                           </button>
                         ))}
                       </div>
@@ -1380,15 +1404,27 @@ export default function PublicBookingPage() {
                 {selectedCatalogService && !hasVariations && (
                   <div
                     style={{
-                      padding: 12,
                       borderRadius: 12,
                       background: C.paper,
                       border: `1px solid ${C.hairline}`,
                       fontSize: 12,
                       color: C.coffee,
                       lineHeight: 1.5,
+                      overflow: "hidden",
                     }}
                   >
+                    {(selectedCatalogService as any).cover_image_url && (
+                      <div style={{ aspectRatio: "16 / 9", background: C.ivory }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={(selectedCatalogService as any).cover_image_url}
+                          alt={`${selectedCatalogService.name} cover`}
+                          loading="lazy"
+                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                        />
+                      </div>
+                    )}
+                    <div style={{ padding: 12 }}>
                     <strong style={{ color: C.espresso }}>{selectedCatalogService.name}</strong>
                     <br />
                     {(resolved?.durationHours ?? selectedCatalogService.duration_hours)}h
@@ -1416,6 +1452,7 @@ export default function PublicBookingPage() {
                         Remaining balance after deposit: ${resolved.balanceDue.toFixed(2)}
                       </p>
                     )}
+                    </div>
                   </div>
                 )}
                 {/* Parent-service header card. Sits above the variation
@@ -1425,15 +1462,30 @@ export default function PublicBookingPage() {
                 {selectedCatalogService && hasVariations && (
                   <div
                     style={{
-                      padding: 12,
                       borderRadius: 12,
                       background: C.paper,
                       border: `1px solid ${C.hairline}`,
                       fontSize: 12,
                       color: C.coffee,
                       lineHeight: 1.5,
+                      overflow: "hidden",
                     }}
                   >
+                    {/* Cover image on the parent header — same
+                        object-cover treatment as the featured cards
+                        so the page reads as one design system. */}
+                    {(selectedCatalogService as any).cover_image_url && (
+                      <div style={{ aspectRatio: "16 / 9", background: C.ivory }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={(selectedCatalogService as any).cover_image_url}
+                          alt={`${selectedCatalogService.name} cover`}
+                          loading="lazy"
+                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                        />
+                      </div>
+                    )}
+                    <div style={{ padding: 12 }}>
                     <strong style={{ color: C.espresso, fontSize: 14 }}>
                       {selectedCatalogService.name}
                     </strong>
@@ -1454,6 +1506,7 @@ export default function PublicBookingPage() {
                         {selectedCatalogService.prep_instructions}
                       </p>
                     )}
+                    </div>
                   </div>
                 )}
                 {/* Unified picker: the base service is the first

@@ -166,6 +166,12 @@ export type Service = {
   // Pinned to the top of the public booking page in a "Featured"
   // row. Defaults to false; stylist toggles per service.
   featured: boolean;
+  // Optional cover image rendered on the service card. Object-cover
+  // ratio kept consistent across the page; null = no image. A
+  // future before/after slot uses before_after_image_url for the
+  // "transformation" UI we'll ship in Phase 3.
+  cover_image_url: string | null;
+  before_after_image_url: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -188,6 +194,8 @@ export type ServiceInput = Pick<
   | "category_id"
   | "extras"
   | "featured"
+  | "cover_image_url"
+  | "before_after_image_url"
 >;
 
 // ---- Validation -------------------------------------------------------
@@ -437,6 +445,8 @@ export const useServices = (
       // Empty string from the editor dropdown means "no category".
       category_id: draft.category_id ? draft.category_id : null,
       featured: !!draft.featured,
+      cover_image_url: draft.cover_image_url?.trim() || null,
+      before_after_image_url: draft.before_after_image_url?.trim() || null,
       // Round-trip the optional add-ons. Keep null/undefined sane and
       // coerce numeric fields so we never persist NaN. Each entry is
       // stored verbatim in services.extras jsonb.
@@ -520,6 +530,8 @@ export type PublicService = Pick<
   | "category_id"
   | "extras"
   | "featured"
+  | "cover_image_url"
+  | "before_after_image_url"
 >;
 
 export const fetchPublicServices = async (
@@ -546,6 +558,8 @@ export const fetchPublicServices = async (
     category_id: s.category_id ?? null,
     extras: Array.isArray(s.extras) ? s.extras : [],
     featured: !!s.featured,
+    cover_image_url: s.cover_image_url ?? null,
+    before_after_image_url: s.before_after_image_url ?? null,
   }));
   return { ok: true, services };
 };
