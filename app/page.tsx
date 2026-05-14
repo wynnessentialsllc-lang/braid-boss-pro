@@ -2126,14 +2126,18 @@ const Header = ({ title, subtitle, leftAction, rightAction }: {
               <h1 style={{ fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, color: C.espresso, lineHeight: 1.1 }}>{title}</h1>
             </>
           ) : (
+            // Dashboard-only hero brand. Matches the eyebrow style
+            // every other screen uses (uppercase, purple, wide
+            // tracking) so the brand reads consistently — just
+            // scaled UP since the dashboard's brand line is the
+            // standalone headline, not an eyebrow.
             <h1
+              className="font-bold uppercase"
               style={{
-                fontFamily: FONT_DISPLAY,
-                fontSize: 30,
-                fontWeight: 600,
-                color: C.espresso,
-                lineHeight: 1.05,
-                letterSpacing: "-0.01em",
+                fontSize: 22,
+                letterSpacing: "0.22em",
+                color: C.brandPrimary,
+                lineHeight: 1.15,
               }}
             >
               Braid Boss Pro
