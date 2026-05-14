@@ -234,10 +234,10 @@ const PullToRefresh = () => {
           padding: "8px 16px 8px 12px",
           borderRadius: 999,
           background: "#FFFFFF",
-          border: "1px solid rgba(74,44,26,0.12)",
+          border: "1px solid rgba(21, 17, 26,0.12)",
           boxShadow:
-            "0 10px 22px -10px rgba(42,24,16,0.28), 0 2px 4px rgba(42,24,16,0.05)",
-          color: "#2A1810",
+            "0 10px 22px -10px rgba(21, 17, 26,0.28), 0 2px 4px rgba(21, 17, 26,0.05)",
+          color: "#15111A",
           fontSize: 12,
           fontWeight: 600,
           letterSpacing: "0.03em",
@@ -255,7 +255,7 @@ const PullToRefresh = () => {
             height: 16,
             borderRadius: 99,
             border: "2px solid rgba(168,137,63,0.25)",
-            borderTopColor: "#A8893F",
+            borderTopColor: "#5B21B6",
             // While pulling, the ring rotates with the pull progress
             // for a tactile feel; while refreshing, the keyframe spin
             // takes over.

@@ -51,13 +51,13 @@ export default function AuthCallbackPage() {
         alignItems: "center",
         justifyContent: "center",
         background: "#FFFFFF",
-        color: "#2A1810",
+        color: "#15111A",
         fontFamily: '"DM Sans", system-ui, sans-serif',
         padding: 24,
         textAlign: "center",
       }}>
       <div>
-        <p style={{ fontSize: 14, fontWeight: 600, letterSpacing: "0.18em", textTransform: "uppercase", color: "#C9A961" }}>
+        <p style={{ fontSize: 14, fontWeight: 600, letterSpacing: "0.18em", textTransform: "uppercase", color: "#7C3AED" }}>
           Braid Boss Pro
         </p>
         <p style={{ marginTop: 12, fontSize: 16 }}>

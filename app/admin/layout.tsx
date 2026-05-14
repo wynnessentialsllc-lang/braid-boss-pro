@@ -51,7 +51,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         style={{
           minHeight: "100dvh",
           background: "#FFFFFF",
-          color: "#2A1810",
+          color: "#15111A",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",

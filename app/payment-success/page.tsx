@@ -16,16 +16,16 @@ import { getSupabase } from "../lib/supabase";
 import { cacheLifetimeAccess } from "../lib/premium";
 
 const C = {
-  espresso: "#2A1810",
-  coffee: "#4A2C1A",
-  caramel: "#8B5A2B",
+  espresso: "#15111A",
+  coffee: "#3D3447",
+  caramel: "#6F6477",
   cream: "#FFFFFF",
   ivory: "#F6F2EC",
   paper: "#FFFFFF",
-  gold: "#C9A961",
-  goldDeep: "#A8893F",
-  muted: "#8B7355",
-  hairline: "rgba(74, 44, 26, 0.12)",
+  gold: "#7C3AED",
+  goldDeep: "#5B21B6",
+  muted: "#6F6477",
+  hairline: "rgba(21, 17, 26, 0.12)",
   danger: "#9C3D2E",
 };
 
@@ -107,7 +107,7 @@ function PaymentSuccessInner() {
           background: C.paper,
           border: `1px solid ${C.hairline}`,
           boxShadow:
-            "0 1px 2px rgba(42, 24, 16, 0.06), 0 24px 48px -16px rgba(42, 24, 16, 0.18)",
+            "0 1px 2px rgba(21, 17, 26, 0.06), 0 24px 48px -16px rgba(21, 17, 26, 0.18)",
         }}
       >
         {status === "verifying" && (
@@ -193,7 +193,7 @@ function PaymentSuccessInner() {
                 background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
                 color: C.paper,
                 border: `1px solid ${C.goldDeep}`,
-                boxShadow: "0 8px 20px -10px rgba(168, 137, 63, 0.6)",
+                boxShadow: "0 8px 20px -10px rgba(91, 33, 182, 0.6)",
               }}
             >
               Continue to Studio
@@ -279,7 +279,7 @@ function Crest({ gold = false }: { gold?: boolean }) {
           : C.ivory,
         border: `1px solid ${gold ? C.goldDeep : C.hairline}`,
         boxShadow: gold
-          ? "0 6px 18px -8px rgba(168, 137, 63, 0.55)"
+          ? "0 6px 18px -8px rgba(91, 33, 182, 0.55)"
           : "none",
         color: gold ? C.paper : C.caramel,
         fontFamily: FONT_DISPLAY,

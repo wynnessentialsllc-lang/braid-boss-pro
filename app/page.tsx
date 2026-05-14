@@ -267,22 +267,22 @@ import {
    ============================================================ */
 
 const C = {
-  espresso: "#2A1810", coffee: "#4A2C1A", caramel: "#8B5A2B",
+  espresso: "#15111A", coffee: "#3D3447", caramel: "#6F6477",
   cream: "#FFFFFF", ivory: "#F6F2EC", paper: "#FFFFFF",
-  gold: "#C9A961", goldDeep: "#A8893F", ink: "#1A0F08",
-  muted: "#8B7355", mutedSoft: "#9C8C6E",
+  gold: "#7C3AED", goldDeep: "#5B21B6", ink: "#15111A",
+  muted: "#6F6477", mutedSoft: "#9F95A8",
   success: "#5C7C4A", warning: "#C9762B", danger: "#9C3D2E",
-  hairline: "rgba(74, 44, 26, 0.12)",
+  hairline: "rgba(21, 17, 26, 0.12)",
 
   // 2026 facelift accents — bright but professional, calibrated to
   // sit on the cream surface without fighting the gold lead. Add
   // usage gradually; the existing brand tokens above stay primary.
-  coral: "#E08A6A",      // soft coral / rose accent
-  coralDeep: "#C56947",
-  lavender: "#9B7CC4",   // electric-lavender / plum accent
-  lavenderDeep: "#7556A0",
-  mint: "#7CB69E",       // fresh mint success accent
-  mintDeep: "#56947A",
+  coral: "#FF4D6D",      // soft coral / rose accent
+  coralDeep: "#E0354F",
+  lavender: "#B14BE0",   // electric-lavender / plum accent
+  lavenderDeep: "#7C3AED",
+  mint: "#22C55E",       // fresh mint success accent
+  mintDeep: "#16A34A",
   teal: "#4A8A8A",       // teal info accent
   tealDeep: "#356B6B",
 
@@ -330,7 +330,7 @@ const GlobalStyle = () => (
     .bbp-scroll { -ms-overflow-style: none; scrollbar-width: none; }
     @keyframes bbpFade { from { opacity:0; transform: translateY(8px);} to { opacity:1; transform: translateY(0);} }
     @keyframes bbpSheet { from { transform: translateY(100%);} to { transform: translateY(0);} }
-    @keyframes bbpPulseGold { 0%, 100% { box-shadow: 0 0 0 0 rgba(201, 169, 97, 0.5);} 50% { box-shadow: 0 0 0 12px rgba(201, 169, 97, 0);} }
+    @keyframes bbpPulseGold { 0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.5);} 50% { box-shadow: 0 0 0 12px rgba(124, 58, 237, 0);} }
     /* 2026 skeleton shimmer — animates a soft band across the
        placeholder box so loading reads as active polish, not a
        freeze. Honors prefers-reduced-motion so users opting out
@@ -1611,7 +1611,7 @@ const Card = ({ children, className = "", style, onClick, id }: {
       style={{
         background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
         border: `1px solid ${C.hairline}`,
-        boxShadow: "0 1px 2px rgba(42, 24, 16, 0.04), 0 8px 24px -12px rgba(42, 24, 16, 0.12)",
+        boxShadow: "0 1px 2px rgba(21, 17, 26, 0.04), 0 8px 24px -12px rgba(21, 17, 26, 0.12)",
         ...style
       }}>{children}</div>
   );
@@ -2079,7 +2079,7 @@ const FAB = ({ onClick, icon = <Plus size={26} strokeWidth={2.4} />, bottom = 80
       width: 58, height: 58, borderRadius: "50%",
       background: `linear-gradient(180deg, ${C.gold} 0%, ${C.goldDeep} 100%)`,
       color: C.espresso,
-      boxShadow: "0 12px 28px -8px rgba(168, 137, 63, 0.6), 0 4px 8px rgba(0,0,0,0.1)",
+      boxShadow: "0 12px 28px -8px rgba(91, 33, 182, 0.6), 0 4px 8px rgba(0,0,0,0.1)",
       border: `1.5px solid ${C.goldDeep}`,
       display: "flex", alignItems: "center", justifyContent: "center",
     }}>
@@ -2149,7 +2149,7 @@ const TabBar = ({ active, setActive }: {
         background: `linear-gradient(180deg, ${C.cream} 0%, ${C.paper} 100%)`,
         borderTop: `1px solid ${C.hairline}`,
         paddingBottom: "env(safe-area-inset-bottom, 0px)",
-        boxShadow: "0 -8px 24px -16px rgba(42, 24, 16, 0.18)",
+        boxShadow: "0 -8px 24px -16px rgba(21, 17, 26, 0.18)",
       }}>
       <div className="flex items-center justify-around px-2 py-2">
         {tabs.map(t => {
@@ -2162,8 +2162,11 @@ const TabBar = ({ active, setActive }: {
               onClick={() => setActive(t.id)}
               aria-current={isActive ? "page" : undefined}
               className="relative flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition"
+              // 2026 refresh: active tab now picks up the brand
+              // gradient (purple → coral) on the icon stroke and
+              // the indicator pill below the label.
               style={{
-                color: isActive ? C.goldDeep : C.mutedSoft,
+                color: isActive ? C.brandPrimary : C.brandMuted,
                 minWidth: 60,
               }}
             >
@@ -2172,7 +2175,7 @@ const TabBar = ({ active, setActive }: {
                 className="text-[10px] tracking-wide"
                 style={{
                   fontWeight: isActive ? 700 : 600,
-                  color: isActive ? C.espresso : C.mutedSoft,
+                  color: isActive ? C.brandText : C.brandMuted,
                   letterSpacing: "0.06em",
                 }}
               >
@@ -2188,7 +2191,8 @@ const TabBar = ({ active, setActive }: {
                     transform: "translateX(-50%)",
                     width: 18, height: 2.5,
                     borderRadius: 999,
-                    background: `linear-gradient(90deg, ${C.gold}, ${C.goldDeep})`,
+                    background: GRADIENTS.primary,
+                    boxShadow: "0 2px 6px -1px rgba(124, 58, 237, 0.4)",
                   }}
                 />
               )}
@@ -2227,7 +2231,7 @@ const TimerMiniPill = ({ timer, onClick }) => {
         bottom: 84, left: "50%", transform: "translateX(-50%)",
         background: `linear-gradient(135deg, ${C.espresso}, ${C.coffee})`,
         color: C.cream, border: `1.5px solid ${C.gold}`,
-        boxShadow: "0 12px 32px -8px rgba(42, 24, 16, 0.45)",
+        boxShadow: "0 12px 32px -8px rgba(21, 17, 26, 0.45)",
         minWidth: 220,
       }}>
       <div className="rounded-full p-1.5" style={{ background: timer.status === "running" ? C.gold : C.mutedSoft, color: C.espresso }}>
@@ -2681,7 +2685,7 @@ const DashboardHero = ({
         background: `linear-gradient(135deg, ${C.espresso} 0%, ${C.coffee} 100%)`,
         color: C.cream,
         boxShadow:
-          "0 1px 2px rgba(42, 24, 16, 0.06), 0 28px 60px -22px rgba(42, 24, 16, 0.45)",
+          "0 1px 2px rgba(21, 17, 26, 0.06), 0 28px 60px -22px rgba(21, 17, 26, 0.45)",
       }}
     >
       {/* Slow shimmer of the new accent palette behind a glass blur.
@@ -2692,7 +2696,7 @@ const DashboardHero = ({
         style={{
           inset: -40,
           background:
-            "conic-gradient(from 200deg, rgba(201, 169, 97, 0.40), rgba(224, 138, 106, 0.34), rgba(155, 124, 196, 0.32), rgba(124, 182, 158, 0.32), rgba(201, 169, 97, 0.40))",
+            "conic-gradient(from 200deg, rgba(124, 58, 237, 0.40), rgba(255, 77, 109, 0.34), rgba(124, 58, 237, 0.32), rgba(34, 197, 94, 0.32), rgba(124, 58, 237, 0.40))",
           filter: "blur(40px)",
           opacity: 0.55,
           zIndex: 0,
@@ -2718,7 +2722,7 @@ const DashboardHero = ({
         >
           {ownerName ? <>Welcome back, <em style={{ color: C.gold, fontStyle: "normal" }}>{ownerName}</em>.</> : "Welcome back."}
         </h1>
-        <p className="mt-1 text-[12px]" style={{ color: "rgba(245, 235, 217, 0.78)" }}>
+        <p className="mt-1 text-[12px]" style={{ color: "rgba(255, 255, 255, 0.78)" }}>
           {fmtDateLong(today)}
         </p>
 
@@ -2730,8 +2734,8 @@ const DashboardHero = ({
           <div
             className="flex-1 rounded-2xl px-3 py-2.5"
             style={{
-              background: "rgba(245, 235, 217, 0.10)",
-              border: "1px solid rgba(201, 169, 97, 0.30)",
+              background: "rgba(255, 255, 255, 0.10)",
+              border: "1px solid rgba(124, 58, 237, 0.30)",
               backdropFilter: "blur(4px)",
             }}
           >
@@ -2745,8 +2749,8 @@ const DashboardHero = ({
           <div
             className="flex-1 rounded-2xl px-3 py-2.5"
             style={{
-              background: "rgba(245, 235, 217, 0.10)",
-              border: "1px solid rgba(201, 169, 97, 0.30)",
+              background: "rgba(255, 255, 255, 0.10)",
+              border: "1px solid rgba(124, 58, 237, 0.30)",
               backdropFilter: "blur(4px)",
             }}
           >
@@ -2875,7 +2879,7 @@ const KpiDetailSheet = ({
       <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 600, color: C.cream, lineHeight: 1 }}>
         {value}
       </p>
-      {hint && <p className="text-[11px] mt-1.5" style={{ color: "rgba(245, 235, 217, 0.78)" }}>{hint}</p>}
+      {hint && <p className="text-[11px] mt-1.5" style={{ color: "rgba(255, 255, 255, 0.78)" }}>{hint}</p>}
     </Card>
   );
 
@@ -3077,12 +3081,12 @@ const KpiDetailSheet = ({
 // and a single accent color. All fields write directly to
 // booking_links under owner RLS — no new RPC needed.
 const ACCENT_PALETTE = [
-  "#C9A961", // gold (default)
+  "#7C3AED", // gold (default)
   "#1F140A", // espresso
   "#9C3D2E", // crimson
   "#5C7C4A", // forest
   "#3D5A80", // navy
-  "#7556A0", // lavender
+  "#7C3AED", // lavender
 ];
 const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   open: boolean;
@@ -3097,7 +3101,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   const [locationText, setLocationText] = useState<string>(link?.location_text || "");
   const [phone, setPhone] = useState<string>(link?.phone || "");
   const [policies, setPolicies] = useState<string>(link?.policies || "");
-  const [accent, setAccent] = useState<string>(link?.accent_color || "#C9A961");
+  const [accent, setAccent] = useState<string>(link?.accent_color || "#7C3AED");
   // Storefront profile fields. All optional — empty strings save as
   // NULL so the booking page renders nothing when they're not set.
   const [bannerImageUrl, setBannerImageUrl] = useState<string>(link?.banner_image_url || "");
@@ -3130,7 +3134,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
     setLocationText(link?.location_text || "");
     setPhone(link?.phone || "");
     setPolicies(link?.policies || "");
-    setAccent(link?.accent_color || "#C9A961");
+    setAccent(link?.accent_color || "#7C3AED");
     setBannerImageUrl(link?.banner_image_url || "");
     setBusinessCity(link?.business_city || "");
     setBusinessState(link?.business_state || "");
@@ -3385,7 +3389,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
                     style={{
                       position: "absolute", top: 4, right: 4,
                       width: 22, height: 22, borderRadius: 99,
-                      background: "rgba(42,24,16,0.78)", color: C.cream,
+                      background: "rgba(21, 17, 26,0.78)", color: C.cream,
                       border: "none", fontSize: 13, fontWeight: 700,
                       lineHeight: 1, padding: 0, cursor: "pointer",
                     }}
@@ -3459,7 +3463,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
                   width: 36, height: 36, borderRadius: 999,
                   background: hex,
                   border: accent === hex ? `3px solid ${C.espresso}` : `1px solid ${C.hairline}`,
-                  boxShadow: accent === hex ? "0 0 0 3px rgba(74,44,26,0.06)" : "none",
+                  boxShadow: accent === hex ? "0 0 0 3px rgba(21, 17, 26,0.06)" : "none",
                   cursor: "pointer",
                 }}
               />
@@ -4339,8 +4343,8 @@ const ClientRetentionCard = ({ clientId, clientName, appointments, today, busine
 
 const QuickTile = ({ icon, label, onClick }) => (
   <button type="button" onClick={onClick} className="rounded-2xl p-4 text-left active:scale-[0.97] transition flex flex-col items-start gap-2"
-    style={{ background: C.espresso, color: C.cream, boxShadow: "0 8px 24px -16px rgba(42, 24, 16, 0.4)" }}>
-    <div className="rounded-full p-2" style={{ background: "rgba(201, 169, 97, 0.18)", color: C.gold }}>{icon}</div>
+    style={{ background: C.espresso, color: C.cream, boxShadow: "0 8px 24px -16px rgba(21, 17, 26, 0.4)" }}>
+    <div className="rounded-full p-2" style={{ background: "rgba(124, 58, 237, 0.18)", color: C.gold }}>{icon}</div>
     <span className="font-semibold text-[14px]">{label}</span>
   </button>
 );
@@ -4885,7 +4889,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
             {result.overhead > 0 && <MetricRow label="Overhead" value={fmtMoney(result.overhead, business.currency)} />}
             {result.profitMargin > 0 && <MetricRow label="Profit margin" value={fmtMoney(result.profitMargin, business.currency)} />}
           </div>
-          <div className="my-3" style={{ borderTop: `1px solid rgba(74,44,26,0.08)` }} />
+          <div className="my-3" style={{ borderTop: `1px solid rgba(21, 17, 26,0.08)` }} />
           {result.discountAmount > 0 && (
             <MetricRow
               label={selectedDiscount ? `Discount — ${selectedDiscount.name}` : "Discount"}
@@ -4894,7 +4898,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
           )}
           <MetricRow label="Subtotal" value={fmtMoney(result.subtotal, business.currency)} emphasis="strong" />
           {result.tipPct > 0 && <MetricRow label={`Tip (${result.tipPct}% of subtotal)`} value={fmtMoney(result.tipAmount, business.currency)} />}
-          <div className="mt-4 pt-4" style={{ borderTop: `1px solid rgba(201, 169, 97, 0.4)`, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <div className="mt-4 pt-4" style={{ borderTop: `1px solid rgba(124, 58, 237, 0.4)`, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <SectionEyebrow>Final price</SectionEyebrow>
             <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 36, fontWeight: 600, color: C.goldDeep, lineHeight: 1, letterSpacing: "-0.01em" }}>
               {fmtMoney(result.finalPrice, business.currency)}
@@ -4925,7 +4929,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
 
 const BreakRow = ({ label, value, bold }: { label: string; value: string; bold?: boolean }) => (
   <div className="flex items-center justify-between py-1">
-    <span className="text-sm" style={{ color: bold ? C.cream : "rgba(245, 235, 217, 0.75)", fontWeight: bold ? 600 : 400 }}>{label}</span>
+    <span className="text-sm" style={{ color: bold ? C.cream : "rgba(255, 255, 255, 0.75)", fontWeight: bold ? 600 : 400 }}>{label}</span>
     <span style={{ color: bold ? C.gold : C.cream, fontWeight: bold ? 700 : 500 }} className="text-sm font-mono">{value}</span>
   </div>
 );
@@ -5104,7 +5108,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
             style={{
               color: C.paper,
               background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
-              boxShadow: "0 6px 14px -6px rgba(168, 137, 63, 0.55)",
+              boxShadow: "0 6px 14px -6px rgba(91, 33, 182, 0.55)",
             }}
           >
             <Plus size={18} />
@@ -5180,7 +5184,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
                     : (isToday ? C.ivory : "transparent"),
                   color: isSelected ? C.paper : C.espresso,
                   border: isToday && !isSelected ? `1px solid ${C.gold}` : "none",
-                  boxShadow: isSelected ? "0 6px 14px -6px rgba(168, 137, 63, 0.55)" : "none",
+                  boxShadow: isSelected ? "0 6px 14px -6px rgba(91, 33, 182, 0.55)" : "none",
                 }}
               >
                 {dayNum}
@@ -5384,10 +5388,10 @@ const DayCalendarView = ({
 
   const dayStatusToneBg = (() => {
     switch (dayStatus.status) {
-      case "fully_booked": return "rgba(168, 137, 63, 0.18)";
+      case "fully_booked": return "rgba(91, 33, 182, 0.18)";
       case "deposit_due":  return "rgba(201, 118, 43, 0.16)";
       case "openings_available": return "rgba(92, 124, 74, 0.16)";
-      case "off":          return "rgba(74, 44, 26, 0.10)";
+      case "off":          return "rgba(21, 17, 26, 0.10)";
       default:             return C.ivory;
     }
   })();
@@ -5515,8 +5519,8 @@ const DayCalendarView = ({
             const isBlockedBlock = kind === "blocked";
             const color = (isPersonalBlock || isBlockedBlock)
               ? {
-                  background: isBlockedBlock ? "rgba(74, 44, 26, 0.08)" : "rgba(139, 115, 85, 0.10)",
-                  border: isBlockedBlock ? "rgba(74, 44, 26, 0.30)" : "rgba(139, 115, 85, 0.35)",
+                  background: isBlockedBlock ? "rgba(21, 17, 26, 0.08)" : "rgba(111, 100, 119, 0.10)",
+                  border: isBlockedBlock ? "rgba(21, 17, 26, 0.30)" : "rgba(111, 100, 119, 0.35)",
                   foreground: isBlockedBlock ? C.muted : C.coffee,
                   accent: isBlockedBlock ? C.muted : C.caramel,
                   label: isBlockedBlock ? "Unavailable" : "Personal",
@@ -5646,8 +5650,8 @@ const WeekCalendarView = ({
                   const isBlockedBlock = kind === "blocked";
                   const color = (isPersonalBlock || isBlockedBlock)
                     ? {
-                        background: isBlockedBlock ? "rgba(74, 44, 26, 0.08)" : "rgba(139, 115, 85, 0.10)",
-                        border: isBlockedBlock ? "rgba(74, 44, 26, 0.30)" : "rgba(139, 115, 85, 0.35)",
+                        background: isBlockedBlock ? "rgba(21, 17, 26, 0.08)" : "rgba(111, 100, 119, 0.10)",
+                        border: isBlockedBlock ? "rgba(21, 17, 26, 0.30)" : "rgba(111, 100, 119, 0.35)",
                         foreground: isBlockedBlock ? C.muted : C.coffee,
                         accent: isBlockedBlock ? C.muted : C.caramel,
                       }
@@ -5794,7 +5798,7 @@ const IncomeCalendarView = ({
         <p style={{ fontFamily: FONT_DISPLAY, fontSize: 40, fontWeight: 600, color: C.cream, lineHeight: 1, marginTop: 6 }}>
           {fmtMoney(money.expected, currency)}
         </p>
-        <p className="text-[11px] mt-2" style={{ color: "rgba(245, 235, 217, 0.75)" }}>
+        <p className="text-[11px] mt-2" style={{ color: "rgba(255, 255, 255, 0.75)" }}>
           {fmtDateLong(selectedDate)} · {money.count} {money.count === 1 ? "booking" : "bookings"}
         </p>
       </Card>
@@ -5878,7 +5882,7 @@ const CreateMenu = ({
         background: C.paper,
         border: `1px solid ${C.hairline}`,
         boxShadow:
-          "0 1px 2px rgba(42, 24, 16, 0.06), 0 18px 36px -12px rgba(42, 24, 16, 0.22)",
+          "0 1px 2px rgba(21, 17, 26, 0.06), 0 18px 36px -12px rgba(21, 17, 26, 0.22)",
       }}
     >
       {items.map((it, i) => (
@@ -6045,7 +6049,7 @@ const DatePickerSheet = ({
                     : "transparent",
                   border: isToday && !isSelected ? `1px solid ${C.gold}` : "none",
                   color: isSelected ? C.paper : (cell.inMonth ? C.espresso : C.mutedSoft),
-                  boxShadow: isSelected ? "0 6px 14px -6px rgba(168, 137, 63, 0.55)" : "none",
+                  boxShadow: isSelected ? "0 6px 14px -6px rgba(91, 33, 182, 0.55)" : "none",
                 }}
               >
                 <span className="text-[14px] font-semibold">{cell.day}</span>
@@ -7447,7 +7451,7 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
               width: 40, height: 40,
               background: C.paper,
               border: `1px solid ${C.hairline}`,
-              boxShadow: "0 1px 2px rgba(42, 24, 16, 0.04), 0 6px 18px -10px rgba(42, 24, 16, 0.18)",
+              boxShadow: "0 1px 2px rgba(21, 17, 26, 0.04), 0 6px 18px -10px rgba(21, 17, 26, 0.18)",
               color: C.coffee,
             }}
           >
@@ -7539,7 +7543,7 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
                 border: `1px solid ${C.hairline}`,
                 borderRadius: 18,
                 padding: "14px 16px",
-                boxShadow: "0 1px 2px rgba(42, 24, 16, 0.04)",
+                boxShadow: "0 1px 2px rgba(21, 17, 26, 0.04)",
                 fontFamily: "inherit",
                 color: "inherit",
                 appearance: "none",
@@ -7688,7 +7692,7 @@ const CustomersOverflowMenu = ({
         background: C.paper,
         border: `1px solid ${C.hairline}`,
         boxShadow:
-          "0 1px 2px rgba(42, 24, 16, 0.06), 0 18px 36px -12px rgba(42, 24, 16, 0.22)",
+          "0 1px 2px rgba(21, 17, 26, 0.06), 0 18px 36px -12px rgba(21, 17, 26, 0.22)",
         transformOrigin: "top right",
       }}
     >
@@ -7862,7 +7866,7 @@ const PHOTO_CATEGORIES = [
   { value: "before", label: "Before", color: "#D4C5A8" },
   { value: "in_progress", label: "In progress", color: "#E8C99A" },
   { value: "after", label: "After", color: "#C9D9B0" },
-  { value: "transformation", label: "Transformation", color: "#F5E9C8" },
+  { value: "transformation", label: "Transformation", color: "#F1EBFD" },
   { value: "color_reference", label: "Color ref", color: "#E5C6BD" },
   { value: "scalp", label: "Scalp", color: "#DFB5AC" },
 ];
@@ -8636,7 +8640,7 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
           <Card className="p-4 mb-4" style={{ background: `linear-gradient(135deg, ${C.espresso} 0%, ${C.coffee} 100%)` }}>
             <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.gold, letterSpacing: "0.18em" }}>Lifetime spent</p>
             <p style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 600, color: C.cream, lineHeight: 1.1 }}>{fmtMoney(totalSpent, business.currency)}</p>
-            <p className="text-xs mt-1" style={{ color: "rgba(245, 235, 217, 0.7)" }}>{myAppts.length} total · {myPhotos.length} photo{myPhotos.length === 1 ? "" : "s"}</p>
+            <p className="text-xs mt-1" style={{ color: "rgba(255, 255, 255, 0.7)" }}>{myAppts.length} total · {myPhotos.length} photo{myPhotos.length === 1 ? "" : "s"}</p>
           </Card>
         )}
 
@@ -8888,7 +8892,7 @@ const PhotoLightbox = ({ photo, photos, onClose, onEdit, onDelete, onToggleFav }
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: "rgba(15, 8, 4, 0.96)" }}>
-      <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid rgba(201, 169, 97, 0.2)` }}>
+      <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid rgba(124, 58, 237, 0.2)` }}>
         <button type="button" onClick={onClose} className="p-2 rounded-full" style={{ color: C.gold }}><X size={22} /></button>
         <div className="flex items-center gap-3">
           <button type="button" onClick={() => onToggleFav(current)} className="p-2 rounded-full" style={{ color: current.isFavorite ? C.gold : C.mutedSoft }}>
@@ -8912,7 +8916,7 @@ const PhotoLightbox = ({ photo, photos, onClose, onEdit, onDelete, onToggleFav }
           </button>
         )}
       </div>
-      <div className="px-5 py-4" style={{ background: "rgba(42, 24, 16, 0.85)" }}>
+      <div className="px-5 py-4" style={{ background: "rgba(21, 17, 26, 0.85)" }}>
         <Pill tone="gold">{PHOTO_CATEGORIES.find(c => c.value === current.category)?.label || current.category}</Pill>
         {current.caption && <p className="mt-2 text-sm" style={{ color: C.cream }}>{current.caption}</p>}
         <p className="text-xs mt-2" style={{ color: C.mutedSoft }}>{fmtDate(current.takenAt || current.createdAt?.slice(0, 10))}</p>
@@ -9122,7 +9126,7 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
           <MiniBarChart data={buckets} ariaLabel="Daily income, last 7 days" />
           <div style={{ marginTop: 14 }}>
             <MetricRow label="Expenses" value={fmtMoney(expenses, business.currency)} />
-            <div className="mt-2 pt-2" style={{ borderTop: `1px solid rgba(74,44,26,0.08)` }}>
+            <div className="mt-2 pt-2" style={{ borderTop: `1px solid rgba(21, 17, 26,0.08)` }}>
               <MetricRow
                 label={<><SectionEyebrow tone="muted">Net</SectionEyebrow></>}
                 value={fmtMoney(net, business.currency)}
@@ -10709,7 +10713,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
               style={{
                 background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
                 border: `1px solid ${C.hairline}`,
-                boxShadow: "0 1px 2px rgba(42, 24, 16, 0.04), 0 8px 24px -12px rgba(42, 24, 16, 0.12)",
+                boxShadow: "0 1px 2px rgba(21, 17, 26, 0.04), 0 8px 24px -12px rgba(21, 17, 26, 0.12)",
                 font: "inherit",
                 color: "inherit",
                 appearance: "none",
@@ -11088,7 +11092,7 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
             style={{
               background: `linear-gradient(180deg, ${C.paper} 0%, ${C.ivory} 100%)`,
               border: `1px solid ${C.hairline}`,
-              boxShadow: "0 1px 2px rgba(42, 24, 16, 0.04), 0 8px 24px -12px rgba(42, 24, 16, 0.12)",
+              boxShadow: "0 1px 2px rgba(21, 17, 26, 0.04), 0 8px 24px -12px rgba(21, 17, 26, 0.12)",
               font: "inherit",
               color: "inherit",
               appearance: "none",
@@ -12913,7 +12917,7 @@ const SyncStatusCard = ({ mode, sync }: {
 
 const SyncStatusPill = ({ display }: { display: SyncDisplay }) => (
   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
-    style={{ background: "rgba(245, 235, 217, 0.6)", color: display.tone, border: `1px solid ${display.tone}33`, letterSpacing: "0.08em" }}>
+    style={{ background: "rgba(255, 255, 255, 0.6)", color: display.tone, border: `1px solid ${display.tone}33`, letterSpacing: "0.08em" }}>
     <span className="inline-block rounded-full" style={{ width: 6, height: 6, background: display.tone }} />
     {display.label}
   </span>
@@ -13779,7 +13783,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
                   background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
                   color: C.paper,
                   border: `1px solid ${C.goldDeep}`,
-                  boxShadow: "0 8px 20px -10px rgba(168, 137, 63, 0.6)",
+                  boxShadow: "0 8px 20px -10px rgba(91, 33, 182, 0.6)",
                 }}
               >
                 {paymentLinkReady ? `Unlock for ${LIFETIME_PRICE_LABEL}` : "Coming soon"}
@@ -15794,7 +15798,7 @@ const INTEL_WEEKDAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const intelToneStyle = (tone: SmartInsight["tone"]) => {
   switch (tone) {
     case "gold":
-      return { bg: "#F5E9C8", fg: C.goldDeep, border: "#E5D4A0" };
+      return { bg: "#F1EBFD", fg: C.goldDeep, border: "#E5D4A0" };
     case "success":
       return { bg: "#E4EDD8", fg: C.success, border: "#C9D9B0" };
     case "warning":
@@ -16283,8 +16287,8 @@ const ApprovalContractsBlock = ({
     <div
       className="space-y-2 px-3 py-2 rounded-xl"
       style={{
-        background: allSigned ? "rgba(92, 124, 74, 0.08)" : "rgba(201, 169, 97, 0.10)",
-        border: `1px solid ${allSigned ? "rgba(92, 124, 74, 0.30)" : "rgba(201, 169, 97, 0.35)"}`,
+        background: allSigned ? "rgba(92, 124, 74, 0.08)" : "rgba(124, 58, 237, 0.10)",
+        border: `1px solid ${allSigned ? "rgba(92, 124, 74, 0.30)" : "rgba(124, 58, 237, 0.35)"}`,
       }}
     >
       <div className="flex items-center justify-between">
@@ -17931,7 +17935,7 @@ const UpgradeSheet = ({
                 style={{
                   background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
                   color: C.paper, border: `1px solid ${C.goldDeep}`,
-                  boxShadow: "0 8px 20px -10px rgba(168, 137, 63, 0.6)",
+                  boxShadow: "0 8px 20px -10px rgba(91, 33, 182, 0.6)",
                 }}
               >
                 Sign in to unlock
@@ -17950,7 +17954,7 @@ const UpgradeSheet = ({
                 style={{
                   background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
                   color: C.paper, border: `1px solid ${C.goldDeep}`,
-                  boxShadow: "0 8px 20px -10px rgba(168, 137, 63, 0.6)",
+                  boxShadow: "0 8px 20px -10px rgba(91, 33, 182, 0.6)",
                 }}
               >
                 {linkReady ? `Unlock for ${LIFETIME_PRICE_LABEL}` : "Coming soon"}
@@ -19055,7 +19059,7 @@ const Frame = ({ children, withTabBar = false }: { children: React.ReactNode; wi
         maxWidth: 480,
         minHeight: "100dvh",
         background: C.cream,
-        boxShadow: "0 0 60px -10px rgba(42,24,16,0.12)",
+        boxShadow: "0 0 60px -10px rgba(21, 17, 26,0.12)",
         // Reserve space at the bottom so primary-screen content can scroll
         // past the fixed tab bar without being hidden behind it. Each
         // screen still sets its own `pb-XX` for in-flow spacing; this

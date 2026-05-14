@@ -40,15 +40,15 @@ const P = {
   cream: "#FFFFFF",
   ivory: "#F6F2EC",
   paper: "#FFFFFF",
-  espresso: "#2A1810",
-  coffee: "#4A2C1A",
-  gold: "#C9A961",
-  goldDeep: "#A8893F",
-  goldSoft: "#F5E9C8",
-  muted: "#8B7355",
-  mutedSoft: "#9C8C6E",
-  hairline: "rgba(74, 44, 26, 0.12)",
-  hairlineSoft: "rgba(74, 44, 26, 0.06)",
+  espresso: "#15111A",
+  coffee: "#3D3447",
+  gold: "#7C3AED",
+  goldDeep: "#5B21B6",
+  goldSoft: "#F1EBFD",
+  muted: "#6F6477",
+  mutedSoft: "#9F95A8",
+  hairline: "rgba(21, 17, 26, 0.12)",
+  hairlineSoft: "rgba(21, 17, 26, 0.06)",
   success: "#5C7C4A",
   successSoft: "rgba(92, 124, 74, 0.12)",
   // 2026 refresh tokens — used for the new gradient hero, the
@@ -143,7 +143,7 @@ const PreviewFrame = ({
       background: P.paper,
       border: `1px solid ${P.hairline}`,
       boxShadow:
-        "0 18px 38px -22px rgba(42,24,16,0.28), 0 2px 4px rgba(42,24,16,0.04)",
+        "0 18px 38px -22px rgba(21, 17, 26,0.28), 0 2px 4px rgba(21, 17, 26,0.04)",
       overflow: "hidden",
       animation: reduced
         ? "none"
@@ -312,7 +312,7 @@ const Pill = ({
       ? { bg: P.goldSoft, fg: P.goldDeep }
       : tone === "success"
       ? { bg: P.successSoft, fg: P.success }
-      : { bg: "rgba(74,44,26,0.06)", fg: P.coffee };
+      : { bg: "rgba(21, 17, 26,0.06)", fg: P.coffee };
   return (
     <span
       style={{
