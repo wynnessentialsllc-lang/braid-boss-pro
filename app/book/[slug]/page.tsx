@@ -887,6 +887,29 @@ export default function PublicBookingPage() {
         * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
         body { margin: 0; }
         input, textarea, select, button { font-family: inherit; }
+        /* Brand wordmark entrance — slides in from the left while
+           fading + finishing on its wider letter-spacing. Mirrors
+           the StorefrontShell animation so both surfaces play the
+           same opening on first paint. */
+        @keyframes bbpBrandSlideIn {
+          0% {
+            opacity: 0;
+            transform: translateX(-36px);
+            letter-spacing: 0.20em;
+          }
+          100% {
+            opacity: 1;
+            transform: translateX(0);
+            letter-spacing: 0.34em;
+          }
+        }
+        .bbp-brand-wordmark {
+          animation: bbpBrandSlideIn 1.2s cubic-bezier(.2,.8,.2,1) both;
+          animation-delay: 180ms;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .bbp-brand-wordmark { animation: none; }
+        }
       `}</style>
 
       {/* Storefront-style hero — full-width gradient (or banner
@@ -921,6 +944,7 @@ export default function PublicBookingPage() {
         {!link?.banner_image_url && (
           <p
             aria-hidden
+            className="bbp-brand-wordmark"
             style={{
               position: "absolute",
               top: 46,
@@ -933,6 +957,7 @@ export default function PublicBookingPage() {
               letterSpacing: "0.34em",
               textTransform: "uppercase",
               textShadow: "0 1px 10px rgba(21, 17, 26, 0.20)",
+              willChange: "transform, opacity, letter-spacing",
               margin: 0,
             }}
           >

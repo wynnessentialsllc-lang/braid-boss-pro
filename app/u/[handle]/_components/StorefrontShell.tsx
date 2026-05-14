@@ -116,6 +116,28 @@ export const StorefrontShell = ({
           identical metrics. */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600;700&display=swap');
+        /* Brand wordmark entrance — slides in from the left while
+           fading + finishing on its wider letter-spacing. Plays
+           once on first paint; honors prefers-reduced-motion. */
+        @keyframes bbpBrandSlideIn {
+          0% {
+            opacity: 0;
+            transform: translateX(-36px);
+            letter-spacing: 0.20em;
+          }
+          100% {
+            opacity: 1;
+            transform: translateX(0);
+            letter-spacing: 0.34em;
+          }
+        }
+        .bbp-brand-wordmark {
+          animation: bbpBrandSlideIn 1.2s cubic-bezier(.2,.8,.2,1) both;
+          animation-delay: 180ms;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .bbp-brand-wordmark { animation: none; }
+        }
       `}</style>
       {/* Banner — falls back to a brand gradient when the stylist
           hasn't uploaded one. */}
@@ -145,6 +167,7 @@ export const StorefrontShell = ({
         {!bannerUrl && (
           <p
             aria-hidden
+            className="bbp-brand-wordmark"
             style={{
               position: "absolute",
               top: 46,
@@ -158,6 +181,11 @@ export const StorefrontShell = ({
               textTransform: "uppercase",
               textShadow: "0 1px 10px rgba(21, 17, 26, 0.20)",
               margin: 0,
+              // The keyframe drives transform / opacity /
+              // letter-spacing. willChange hints the browser to
+              // promote a compositor layer for the transform so
+              // the slide stays jank-free on a low-end phone.
+              willChange: "transform, opacity, letter-spacing",
             }}
           >
             Braid Boss Pro
