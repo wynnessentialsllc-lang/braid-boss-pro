@@ -1115,6 +1115,49 @@ const WelcomeIntro = ({
           >
             Sign In
           </button>
+
+          {/* Quiet text-link row to the marketing pages —
+              browsable from the first-launch screen without
+              competing with the primary 'Get Started' CTA. */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 18,
+              marginTop: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <a
+              href="/features"
+              onClick={() => trackEvent("welcome_features_link", { category: "activation" })}
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: P.brandPrimary,
+                textDecoration: "none",
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+              }}
+            >
+              Explore features
+            </a>
+            <a
+              href="/getting-started"
+              onClick={() => trackEvent("welcome_getting_started_link", { category: "activation" })}
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: P.brandPrimary,
+                textDecoration: "none",
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+              }}
+            >
+              Getting started
+            </a>
+          </div>
         </div>
       </div>
 
