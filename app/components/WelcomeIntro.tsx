@@ -1099,12 +1099,26 @@ const WelcomeIntro = ({
               margin: "4px 0 0",
               textAlign: "center",
               fontSize: 11,
-              letterSpacing: "0.04em",
-              color: P.muted,
+              fontWeight: 700,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              color: P.brandPrimary,
               lineHeight: 1.5,
             }}
           >
-            Free to start · Mobile friendly · Guest mode available
+            The business OS for braiders
+          </p>
+          <p
+            style={{
+              margin: "6px 0 0",
+              textAlign: "center",
+              fontSize: 12,
+              letterSpacing: "0.02em",
+              color: P.muted,
+              lineHeight: 1.55,
+            }}
+          >
+            Bookings · Deposits · Clients · Storefronts
           </p>
 
           <button

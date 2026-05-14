@@ -1,13 +1,20 @@
 "use client";
 
 // Marketing-page shell: shared header + footer + global font load
-// + entrance-animation styles. Wraps /features and /getting-started
-// (and any future marketing page) so they all carry the same brand
-// chrome without each page redeclaring it.
+// + entrance-animation styles. Wraps every public marketing page
+// (/features, /how-it-works, /pricing, /faq) so they carry the
+// same brand chrome without each page redeclaring it.
 
 import Link from "next/link";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { C, FONT_BODY, FONT_DISPLAY, GRADIENTS, SHADOWS } from "./tokens";
+
+const NAV_LINKS: Array<{ href: string; label: string }> = [
+  { href: "/features", label: "Features" },
+  { href: "/how-it-works", label: "How it works" },
+  { href: "/pricing", label: "Pricing" },
+  { href: "/faq", label: "FAQ" },
+];
 
 export const MarketingShell = ({ children }: { children: ReactNode }) => {
   // IntersectionObserver-driven reveal: any element with .bbp-reveal
@@ -63,6 +70,13 @@ export const MarketingShell = ({ children }: { children: ReactNode }) => {
         }
         .bbp-hero-halo { animation: bbpHeroHalo 18s ease-in-out infinite; }
         @media (prefers-reduced-motion: reduce) { .bbp-hero-halo { animation: none; } }
+        @keyframes bbpDrawerSlide { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        @keyframes bbpDrawerFade { from { opacity: 0; } to { opacity: 1; } }
+        .bbp-mobile-drawer { animation: bbpDrawerSlide 280ms cubic-bezier(.2,.8,.2,1) both; }
+        .bbp-mobile-drawer-backdrop { animation: bbpDrawerFade 200ms ease both; }
+        @media (prefers-reduced-motion: reduce) {
+          .bbp-mobile-drawer, .bbp-mobile-drawer-backdrop { animation: none; }
+        }
       `}</style>
 
       <MarketingHeader />
@@ -72,26 +86,200 @@ export const MarketingShell = ({ children }: { children: ReactNode }) => {
   );
 };
 
-const MarketingHeader = () => (
-  <header
+// ---- Header --------------------------------------------------------------
+
+const MarketingHeader = () => {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Lock body scroll while the mobile drawer is open so iOS Safari
+  // doesn't bounce the page under the sheet. Also closes the
+  // drawer on Esc for keyboard users.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
+  return (
+    <>
+      <header
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 30,
+          background: "rgba(255, 255, 255, 0.85)",
+          backdropFilter: "saturate(180%) blur(12px)",
+          WebkitBackdropFilter: "saturate(180%) blur(12px)",
+          borderBottom: `1px solid ${C.brandBorder}`,
+          paddingTop: "calc(env(safe-area-inset-top, 0px))",
+        }}
+      >
+        <div
+          className="max-w-[1100px] mx-auto flex items-center justify-between"
+          style={{ padding: "14px 20px" }}
+        >
+          <Link href="/" style={{ textDecoration: "none" }}>
+            <span
+              style={{
+                fontSize: 14,
+                fontWeight: 800,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: C.brandPrimary,
+              }}
+            >
+              Braid Boss Pro
+            </span>
+          </Link>
+
+          {/* Desktop inline nav — hidden on mobile (md = 768px and up). */}
+          <nav
+            className="hidden md:flex items-center"
+            style={{ gap: 20 }}
+            aria-label="Primary"
+          >
+            {NAV_LINKS.map((l) => (
+              <Link key={l.href} href={l.href} style={marketingNavLink}>
+                {l.label}
+              </Link>
+            ))}
+            <Link href="/?signin=1" style={marketingNavLink}>
+              Sign in
+            </Link>
+          </nav>
+
+          {/* Mobile hamburger — shown below md. */}
+          <button
+            type="button"
+            className="md:hidden"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open menu"
+            aria-expanded={menuOpen}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              background: "transparent",
+              border: `1px solid ${C.brandBorder}`,
+              display: "grid",
+              placeItems: "center",
+              color: C.ink,
+              cursor: "pointer",
+            }}
+          >
+            <HamburgerIcon />
+          </button>
+        </div>
+      </header>
+
+      {menuOpen && (
+        <MobileDrawer onClose={() => setMenuOpen(false)} />
+      )}
+    </>
+  );
+};
+
+const HamburgerIcon = () => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <line x1="4" y1="7" x2="20" y2="7" />
+    <line x1="4" y1="12" x2="20" y2="12" />
+    <line x1="4" y1="17" x2="20" y2="17" />
+  </svg>
+);
+
+const CloseIcon = () => (
+  <svg
+    width="22"
+    height="22"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <line x1="6" y1="6" x2="18" y2="18" />
+    <line x1="18" y1="6" x2="6" y2="18" />
+  </svg>
+);
+
+const MobileDrawer = ({ onClose }: { onClose: () => void }) => (
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-label="Menu"
+    className="md:hidden"
     style={{
-      position: "sticky",
-      top: 0,
-      zIndex: 30,
-      background: "rgba(255, 255, 255, 0.85)",
-      backdropFilter: "saturate(180%) blur(12px)",
-      borderBottom: `1px solid ${C.brandBorder}`,
-      paddingTop: "calc(env(safe-area-inset-top, 0px))",
+      position: "fixed",
+      inset: 0,
+      zIndex: 100,
+      display: "flex",
     }}
   >
-    <div
-      className="max-w-[1100px] mx-auto flex items-center justify-between"
-      style={{ padding: "14px 20px" }}
+    {/* Backdrop blur — tap to close. */}
+    <button
+      type="button"
+      aria-label="Close menu"
+      onClick={onClose}
+      className="bbp-mobile-drawer-backdrop"
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: "rgba(21, 17, 26, 0.45)",
+        backdropFilter: "blur(6px)",
+        WebkitBackdropFilter: "blur(6px)",
+        border: 0,
+        cursor: "pointer",
+      }}
+    />
+    {/* Drawer panel — slides in from the right. Width capped so a
+        tablet doesn't render edge-to-edge. */}
+    <aside
+      className="bbp-mobile-drawer"
+      style={{
+        marginLeft: "auto",
+        position: "relative",
+        height: "100%",
+        width: "min(86vw, 360px)",
+        background: C.paper,
+        boxShadow: SHADOWS.cardLifted,
+        display: "flex",
+        flexDirection: "column",
+        paddingTop: "calc(env(safe-area-inset-top, 0px) + 14px)",
+        paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 24px)",
+      }}
     >
-      <Link href="/" style={{ textDecoration: "none" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 20px 18px",
+          borderBottom: `1px solid ${C.brandBorder}`,
+        }}
+      >
         <span
           style={{
-            fontSize: 14,
+            fontSize: 13,
             fontWeight: 800,
             letterSpacing: "0.22em",
             textTransform: "uppercase",
@@ -100,34 +288,61 @@ const MarketingHeader = () => (
         >
           Braid Boss Pro
         </span>
-      </Link>
-      <nav className="flex items-center" style={{ gap: 14 }}>
-        <Link href="/features" style={marketingNavLink}>
-          Features
-        </Link>
-        <Link
-          href="/getting-started"
-          className="hidden sm:inline-block"
-          style={marketingNavLink}
-        >
-          Get started
-        </Link>
-        <Link href="/pricing" style={marketingNavLink}>
-          Pricing
-        </Link>
-        <Link href="/faq" className="hidden sm:inline-block" style={marketingNavLink}>
-          FAQ
-        </Link>
-        <Link
-          href="/"
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close menu"
           style={{
-            padding: "8px 16px",
+            width: 38,
+            height: 38,
             borderRadius: 12,
+            background: "transparent",
+            border: `1px solid ${C.brandBorder}`,
+            display: "grid",
+            placeItems: "center",
+            color: C.ink,
+            cursor: "pointer",
+          }}
+        >
+          <CloseIcon />
+        </button>
+      </div>
+
+      <nav
+        aria-label="Primary"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          padding: "10px 16px",
+          gap: 2,
+        }}
+      >
+        {NAV_LINKS.map((l) => (
+          <Link
+            key={l.href}
+            href={l.href}
+            onClick={onClose}
+            style={mobileNavLink}
+          >
+            {l.label}
+          </Link>
+        ))}
+      </nav>
+
+      <div style={{ marginTop: "auto", padding: "16px 20px 0" }}>
+        <Link
+          href="/?signin=1"
+          onClick={onClose}
+          style={{
+            display: "block",
+            textAlign: "center",
+            padding: "14px 18px",
+            borderRadius: 14,
             background: GRADIENTS.primary,
             color: "#FFFFFF",
-            fontSize: 12,
+            fontSize: 13,
             fontWeight: 800,
-            letterSpacing: "0.12em",
+            letterSpacing: "0.14em",
             textTransform: "uppercase",
             textDecoration: "none",
             boxShadow: SHADOWS.primaryGlow,
@@ -135,25 +350,59 @@ const MarketingHeader = () => (
         >
           Sign in
         </Link>
-      </nav>
-    </div>
-  </header>
+        <Link
+          href="/pricing"
+          onClick={onClose}
+          style={{
+            display: "block",
+            textAlign: "center",
+            padding: "12px 18px",
+            marginTop: 8,
+            borderRadius: 14,
+            background: "transparent",
+            color: C.brandPrimary,
+            fontSize: 12,
+            fontWeight: 800,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            textDecoration: "none",
+            border: `1.5px solid ${C.brandPrimary}`,
+          }}
+        >
+          Claim founding access
+        </Link>
+      </div>
+    </aside>
+  </div>
 );
 
 const marketingNavLink: React.CSSProperties = {
-  fontSize: 13,
+  fontSize: 14,
   fontWeight: 600,
   color: "#3D3447",
   textDecoration: "none",
 };
+
+const mobileNavLink: React.CSSProperties = {
+  display: "block",
+  padding: "14px 12px",
+  borderRadius: 12,
+  fontSize: 16,
+  fontWeight: 700,
+  color: "#15111A",
+  textDecoration: "none",
+  letterSpacing: "-0.005em",
+};
+
+// ---- Footer --------------------------------------------------------------
 
 const MarketingFooter = () => (
   <footer
     style={{
       borderTop: `1px solid ${C.brandBorder}`,
       background: C.brandSurface,
-      padding: "32px 20px 40px",
-      marginTop: 80,
+      padding: "40px 20px 48px",
+      marginTop: 96,
     }}
   >
     <div
@@ -161,7 +410,7 @@ const MarketingFooter = () => (
       style={{
         display: "grid",
         gridTemplateColumns: "1fr",
-        gap: 16,
+        gap: 20,
         alignItems: "center",
         justifyItems: "center",
         textAlign: "center",
@@ -174,35 +423,25 @@ const MarketingFooter = () => (
           letterSpacing: "0.20em",
           textTransform: "uppercase",
           color: C.brandPrimary,
+          margin: 0,
         }}
       >
         Braid Boss Pro
       </p>
-      <nav className="flex flex-wrap items-center justify-center" style={{ gap: 16 }}>
-        <Link href="/features" style={footerLink}>
-          Features
-        </Link>
-        <Link href="/getting-started" style={footerLink}>
-          Get started
-        </Link>
-        <Link href="/pricing" style={footerLink}>
-          Pricing
-        </Link>
-        <Link href="/faq" style={footerLink}>
-          FAQ
-        </Link>
-        <Link href="/privacy" style={footerLink}>
-          Privacy
-        </Link>
-        <Link href="/terms" style={footerLink}>
-          Terms
-        </Link>
-        <Link href="/support" style={footerLink}>
-          Support
-        </Link>
+      <p style={{ fontSize: 12, color: C.muted, margin: 0, maxWidth: 420, lineHeight: 1.55 }}>
+        The business operating system for braiders.
+      </p>
+      <nav className="flex flex-wrap items-center justify-center" style={{ gap: 16, marginTop: 4 }}>
+        <Link href="/features" style={footerLink}>Features</Link>
+        <Link href="/how-it-works" style={footerLink}>How it works</Link>
+        <Link href="/pricing" style={footerLink}>Pricing</Link>
+        <Link href="/faq" style={footerLink}>FAQ</Link>
+        <Link href="/privacy" style={footerLink}>Privacy</Link>
+        <Link href="/terms" style={footerLink}>Terms</Link>
+        <Link href="/support" style={footerLink}>Support</Link>
       </nav>
-      <p style={{ fontSize: 11, color: C.mutedSoft }}>
-        © {new Date().getFullYear()} Braid Boss Pro. Built for stylists, by stylists.
+      <p style={{ fontSize: 11, color: C.mutedSoft, margin: 0 }}>
+        © {new Date().getFullYear()} Braid Boss Pro. Built for braiders.
       </p>
     </div>
   </footer>
@@ -215,7 +454,8 @@ const footerLink: React.CSSProperties = {
   textDecoration: "none",
 };
 
-// Hero section — used by both /features and /getting-started.
+// ---- Hero ----------------------------------------------------------------
+
 export const MarketingHero = ({
   eyebrow,
   title,
@@ -233,12 +473,10 @@ export const MarketingHero = ({
     style={{
       position: "relative",
       overflow: "hidden",
-      padding: "72px 20px 56px",
+      padding: "96px 20px 72px",
       background: C.paper,
     }}
   >
-    {/* Soft brand halo behind the title — no overlap with content,
-        just a colored cloud for warmth. */}
     <div
       aria-hidden
       className="bbp-hero-halo"
@@ -273,11 +511,11 @@ export const MarketingHero = ({
         style={{
           fontFamily: FONT_DISPLAY,
           fontWeight: 700,
-          fontSize: "clamp(36px, 6vw, 64px)",
-          lineHeight: 1.05,
+          fontSize: "clamp(40px, 6vw, 68px)",
+          lineHeight: 1.04,
           color: C.ink,
-          margin: "14px 0 0",
-          letterSpacing: "-0.01em",
+          margin: "18px 0 0",
+          letterSpacing: "-0.015em",
         }}
       >
         {title}
@@ -285,9 +523,9 @@ export const MarketingHero = ({
       <p
         style={{
           color: C.coffee,
-          fontSize: "clamp(15px, 2vw, 18px)",
-          lineHeight: 1.55,
-          marginTop: 16,
+          fontSize: "clamp(16px, 2vw, 18px)",
+          lineHeight: 1.6,
+          marginTop: 20,
           maxWidth: 640,
           marginLeft: "auto",
           marginRight: "auto",
@@ -295,11 +533,11 @@ export const MarketingHero = ({
       >
         {body}
       </p>
-      <div className="flex flex-wrap items-center justify-center" style={{ gap: 10, marginTop: 26 }}>
+      <div className="flex flex-wrap items-center justify-center" style={{ gap: 12, marginTop: 32 }}>
         <a
           href={primaryCta.href}
           style={{
-            padding: "14px 22px",
+            padding: "15px 24px",
             borderRadius: 14,
             background: GRADIENTS.primary,
             color: "#FFFFFF",
@@ -317,7 +555,7 @@ export const MarketingHero = ({
           <a
             href={secondaryCta.href}
             style={{
-              padding: "14px 22px",
+              padding: "15px 24px",
               borderRadius: 14,
               background: "transparent",
               color: C.brandPrimary,
@@ -337,7 +575,8 @@ export const MarketingHero = ({
   </section>
 );
 
-// Section wrapper — eyebrow + title + optional intro, then children.
+// ---- Section -------------------------------------------------------------
+
 export const Section = ({
   eyebrow,
   title,
@@ -353,10 +592,10 @@ export const Section = ({
   background?: string;
   id?: string;
 }) => (
-  <section id={id} style={{ background, padding: "60px 20px" }}>
+  <section id={id} style={{ background, padding: "72px 20px" }}>
     <div className="max-w-[1100px] mx-auto">
       {(eyebrow || title || intro) && (
-        <header className="text-center bbp-reveal" style={{ marginBottom: 36 }}>
+        <header className="text-center bbp-reveal" style={{ marginBottom: 44 }}>
           {eyebrow && (
             <p
               style={{
@@ -376,11 +615,11 @@ export const Section = ({
               style={{
                 fontFamily: FONT_DISPLAY,
                 fontWeight: 700,
-                fontSize: "clamp(28px, 4.5vw, 40px)",
+                fontSize: "clamp(30px, 4.5vw, 42px)",
                 lineHeight: 1.1,
                 color: C.ink,
-                margin: "10px 0 0",
-                letterSpacing: "-0.005em",
+                margin: "12px 0 0",
+                letterSpacing: "-0.01em",
               }}
             >
               {title}
@@ -391,9 +630,9 @@ export const Section = ({
               style={{
                 color: C.coffee,
                 fontSize: 15,
-                lineHeight: 1.6,
-                marginTop: 12,
-                maxWidth: 560,
+                lineHeight: 1.65,
+                marginTop: 14,
+                maxWidth: 580,
                 marginLeft: "auto",
                 marginRight: "auto",
               }}
@@ -408,7 +647,8 @@ export const Section = ({
   </section>
 );
 
-// Sticky CTA panel — bottom of marketing pages.
+// ---- CtaFooter -----------------------------------------------------------
+
 export const CtaFooter = ({
   title,
   body,
@@ -420,14 +660,14 @@ export const CtaFooter = ({
   primaryCta: { label: string; href: string };
   secondaryCta?: { label: string; href: string };
 }) => (
-  <section style={{ padding: "60px 20px" }}>
+  <section style={{ padding: "72px 20px" }}>
     <div
       className="max-w-[980px] mx-auto bbp-reveal"
       style={{
         position: "relative",
         overflow: "hidden",
         borderRadius: 32,
-        padding: "48px 28px",
+        padding: "56px 28px",
         background: GRADIENTS.hero,
         color: "#FFFFFF",
         textAlign: "center",
@@ -451,9 +691,10 @@ export const CtaFooter = ({
           style={{
             fontFamily: FONT_DISPLAY,
             fontWeight: 700,
-            fontSize: "clamp(30px, 4.5vw, 44px)",
+            fontSize: "clamp(32px, 4.5vw, 46px)",
             lineHeight: 1.05,
             margin: 0,
+            letterSpacing: "-0.01em",
           }}
         >
           {title}
@@ -462,20 +703,20 @@ export const CtaFooter = ({
           style={{
             fontSize: 16,
             opacity: 0.92,
-            marginTop: 12,
-            lineHeight: 1.55,
-            maxWidth: 600,
+            marginTop: 14,
+            lineHeight: 1.6,
+            maxWidth: 620,
             marginLeft: "auto",
             marginRight: "auto",
           }}
         >
           {body}
         </p>
-        <div className="flex flex-wrap items-center justify-center" style={{ gap: 10, marginTop: 24 }}>
+        <div className="flex flex-wrap items-center justify-center" style={{ gap: 12, marginTop: 30 }}>
           <a
             href={primaryCta.href}
             style={{
-              padding: "14px 24px",
+              padding: "15px 26px",
               borderRadius: 14,
               background: "#FFFFFF",
               color: C.brandPrimary,
@@ -493,7 +734,7 @@ export const CtaFooter = ({
             <a
               href={secondaryCta.href}
               style={{
-                padding: "14px 24px",
+                padding: "15px 26px",
                 borderRadius: 14,
                 background: "transparent",
                 color: "#FFFFFF",
