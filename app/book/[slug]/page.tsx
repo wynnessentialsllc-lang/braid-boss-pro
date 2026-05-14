@@ -7,10 +7,12 @@ import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LA
 import { emitAnalyticsEvent } from "../../lib/analytics-events";
 import {
   fetchPublicServices,
+  fetchPublicServiceCategories,
   fetchPublicAvailability,
   fetchPublicMonthAvailability,
   resolveVariationPricing,
   type PublicService,
+  type PublicServiceCategory,
   type PublicSlot,
   type MonthDay,
   type MonthDayStatus,
@@ -134,6 +136,12 @@ export default function PublicBookingPage() {
   // Picked variation (one of service.add_ons). "" = no variation
   // selected; the resolver then falls back to the parent service.
   const [selectedVariationId, setSelectedVariationId] = useState<string>("");
+  // Service categories — populated alongside the catalog. When the
+  // stylist has any active categories with services we surface a
+  // category row above the service select; "" means "all services"
+  // (default, so links without categories behave exactly as before).
+  const [serviceCategories, setServiceCategories] = useState<PublicServiceCategory[]>([]);
+  const [activeCategoryId, setActiveCategoryId] = useState<string>("");
   // Phase B2 — live slot picker driven by public_list_availability.
   const [slots, setSlots] = useState<PublicSlot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
@@ -276,11 +284,35 @@ export default function PublicBookingPage() {
     return () => { cancelled = true; };
   }, [slug]);
 
+  // Categories load in parallel. The RPC only returns categories with
+  // at least one active service, so we won't render ghost tabs.
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    (async () => {
+      const result = await fetchPublicServiceCategories(slug);
+      if (cancelled) return;
+      if (result.ok) setServiceCategories(result.categories);
+    })();
+    return () => { cancelled = true; };
+  }, [slug]);
+
   // Catalog wins; fall back to legacy free-form list if the RPC
   // returns nothing (older booking links that haven't migrated).
   const legacyServices = Array.isArray(link?.services) ? link!.services! : [];
   const hasCatalog = catalog.length > 0;
-  const services = hasCatalog ? catalog : legacyServices;
+  // Filter the catalog by the active category when categories exist.
+  // activeCategoryId === "" means "All" (or no categories defined).
+  // "__other__" surfaces uncategorized services so links with mixed
+  // categorized + uncategorized rows still expose everything.
+  const filteredCatalog = hasCatalog && activeCategoryId
+    ? (activeCategoryId === "__other__"
+        ? catalog.filter(s => !s.category_id)
+        : catalog.filter(s => s.category_id === activeCategoryId))
+    : catalog;
+  const hasCategories = serviceCategories.length > 0;
+  const hasUncategorized = catalog.some(s => !s.category_id);
+  const services = hasCatalog ? filteredCatalog : legacyServices;
   const selectedCatalogService = hasCatalog
     ? catalog.find(s => s.id === serviceId) || null
     : null;
@@ -811,6 +843,92 @@ export default function PublicBookingPage() {
             </div>
             {hasCatalog ? (
               <>
+                {/* Category browse — a horizontal-scrolling chip row
+                    above the service select. "All" is always present.
+                    "Other" only when there are uncategorized services,
+                    so the row stays clean for stylists who haven't
+                    categorized everything yet. */}
+                {hasCategories && (
+                  <Field label="Browse by category">
+                    <div
+                      role="tablist"
+                      aria-label="Service categories"
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        overflowX: "auto",
+                        WebkitOverflowScrolling: "touch",
+                        paddingBottom: 4,
+                        // Hide native scrollbars on iOS — the chip row
+                        // is the visual cue that this scrolls.
+                        scrollbarWidth: "none",
+                      }}
+                    >
+                      {[
+                        { id: "", label: "All" },
+                        ...serviceCategories.map(c => ({ id: c.id, label: c.name })),
+                        ...(hasUncategorized ? [{ id: "__other__", label: "Other" }] : []),
+                      ].map(tab => {
+                        const active = activeCategoryId === tab.id;
+                        return (
+                          <button
+                            key={tab.id || "__all__"}
+                            type="button"
+                            role="tab"
+                            aria-selected={active}
+                            onClick={() => {
+                              setActiveCategoryId(tab.id);
+                              // Clear the service pick if it falls
+                              // outside the new filter — keeps the
+                              // select dropdown's value coherent.
+                              const stillVisible = catalog.some(s => {
+                                if (s.id !== serviceId) return false;
+                                if (tab.id === "") return true;
+                                if (tab.id === "__other__") return !s.category_id;
+                                return s.category_id === tab.id;
+                              });
+                              if (!stillVisible) {
+                                setServiceId("");
+                                setSelectedVariationId("");
+                                setServiceName("");
+                              }
+                            }}
+                            style={{
+                              flex: "0 0 auto",
+                              padding: "8px 14px",
+                              borderRadius: 999,
+                              background: active ? C.espresso : C.paper,
+                              color: active ? C.cream : C.coffee,
+                              border: `1px solid ${active ? C.espresso : C.hairline}`,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              letterSpacing: "0.01em",
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                              transition: "background 120ms ease, color 120ms ease, border-color 120ms ease",
+                              appearance: "none",
+                              WebkitAppearance: "none",
+                            }}
+                          >
+                            {tab.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </Field>
+                )}
+                {/* Description card for the active category, when the
+                    stylist wrote one. Sits between the chip row and
+                    the service select so context flows top-down. */}
+                {hasCategories && activeCategoryId && activeCategoryId !== "__other__" && (() => {
+                  const c = serviceCategories.find(x => x.id === activeCategoryId);
+                  if (!c?.description) return null;
+                  return (
+                    <p style={{ fontSize: 12, color: C.muted, marginTop: -4, lineHeight: 1.4 }}>
+                      {c.description}
+                    </p>
+                  );
+                })()}
                 <Field label="Service">
                   <select
                     value={serviceId}
@@ -836,7 +954,7 @@ export default function PublicBookingPage() {
                     style={selectStyle}
                   >
                     <option value="">— Pick a service —</option>
-                    {catalog.map(s => (
+                    {filteredCatalog.map(s => (
                       <option key={s.id} value={s.id}>
                         {s.name} · {s.duration_hours}h · ${s.base_price}
                       </option>

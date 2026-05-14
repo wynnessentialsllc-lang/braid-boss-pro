@@ -113,6 +113,10 @@ import {
   validateService,
 } from "./lib/services";
 import {
+  type ServiceCategory,
+  useServiceCategories,
+} from "./lib/service-categories";
+import {
   type DashboardRevenue,
   type RevenueGranularity,
   type RevenuePoint,
@@ -234,7 +238,7 @@ import {
 } from "./lib/push";
 import {
   Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon,
-  Plus, X, ChevronRight, ChevronLeft, ChevronDown, Search, Copy, Check, Trash2, Edit3,
+  Plus, X, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Search, Copy, Check, Trash2, Edit3,
   FileText, DollarSign, Clock, Phone, Mail, AlertCircle, Sparkles,
   ArrowUpRight, ArrowDownRight, Save, RefreshCw, Download, Upload, Bell, BellOff,
   CalendarPlus, UserPlus, Coffee, Lock, Receipt, ScrollText, Image as ImageIcon, Camera,
@@ -13454,10 +13458,20 @@ const ServicesScreen = ({
   onBack: () => void;
 }) => {
   const api = store.servicesApi;
+  const categoriesApi = store.serviceCategoriesApi;
   const services: Service[] = api?.services || [];
+  const categories: ServiceCategory[] = categoriesApi?.categories || [];
   const currency = store.business?.currency || "USD";
   const [editing, setEditing] = useState<(Partial<ServiceInput> & { id?: string }) | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Service | null>(null);
+  // Category editor state — separate from the service editor so the
+  // two stay independently dismissable.
+  const [editingCategory, setEditingCategory] = useState<
+    (Partial<{ id: string; name: string; description: string }> ) | null
+  >(null);
+  const [confirmDeleteCategory, setConfirmDeleteCategory] = useState<ServiceCategory | null>(null);
+  const [categoryBusy, setCategoryBusy] = useState(false);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Inline save error. The editor is a sheet that covers the parent
   // services screen where api.error renders, so silent validation
@@ -13487,6 +13501,7 @@ const ServicesScreen = ({
     buffer_before_minutes: 0,
     buffer_after_minutes: 0,
     max_concurrent: 1,
+    category_id: null,
   });
 
   const openEdit = (s: Service) => setEditing({
@@ -13503,7 +13518,43 @@ const ServicesScreen = ({
     buffer_before_minutes: s.buffer_before_minutes ?? 0,
     buffer_after_minutes: s.buffer_after_minutes ?? 0,
     max_concurrent: s.max_concurrent ?? 1,
+    category_id: s.category_id ?? null,
   });
+
+  // Category CRUD handlers — kept local so the screen owns the
+  // open/edit/close lifecycle without leaking into the catalog hook.
+  const openNewCategory = () => {
+    setCategoryError(null);
+    setEditingCategory({ name: "", description: "" });
+  };
+  const openEditCategory = (c: ServiceCategory) => {
+    setCategoryError(null);
+    setEditingCategory({ id: c.id, name: c.name, description: c.description || "" });
+  };
+  const handleSaveCategory = async () => {
+    if (!editingCategory || categoryBusy) return;
+    setCategoryError(null);
+    const name = (editingCategory.name || "").trim();
+    if (!name) { setCategoryError("Category name is required."); return; }
+    setCategoryBusy(true);
+    const saved = await categoriesApi?.upsert({
+      id: editingCategory.id,
+      name,
+      description: editingCategory.description || null,
+      sort_order: editingCategory.id ? undefined as any : (categories.length || 0),
+      active: true,
+    });
+    setCategoryBusy(false);
+    if (saved) setEditingCategory(null);
+    else setCategoryError(categoriesApi?.error || "Couldn't save the category.");
+  };
+  const handleConfirmDeleteCategory = async () => {
+    if (!confirmDeleteCategory) return;
+    setCategoryBusy(true);
+    const ok = await categoriesApi?.remove(confirmDeleteCategory.id);
+    setCategoryBusy(false);
+    if (ok) setConfirmDeleteCategory(null);
+  };
 
   const handleSave = async () => {
     if (!editing || busy) return;
@@ -13627,6 +13678,88 @@ const ServicesScreen = ({
           </Card>
         )}
 
+        {/* CATEGORY MANAGER — sits above the service list so the
+            stylist can build their booking structure top-down:
+            categories first, then services slotted into them. */}
+        <Card className="p-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Categories</p>
+              <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+                Group related services so clients can browse by category on your booking page. Optional — services without a category still appear under "Other services".
+              </p>
+            </div>
+            <Button variant="outline" icon={<Plus size={14} />} onClick={openNewCategory}>
+              Add
+            </Button>
+          </div>
+          {categoriesApi?.error && (
+            <p className="text-[11px] mt-2" style={{ color: C.danger }}>{categoriesApi.error}</p>
+          )}
+          {categories.length === 0 ? (
+            <p className="text-[11px]" style={{ color: C.muted }}>
+              No categories yet. Add one like "Boho Braids", "Knotless", or "Maintenance" to group your styles.
+            </p>
+          ) : (
+            <div className="space-y-2 mt-1">
+              {categories.map((c, idx) => {
+                const count = services.filter(s => s.category_id === c.id).length;
+                return (
+                  <div
+                    key={c.id}
+                    className="rounded-xl p-2.5 flex items-center gap-2"
+                    style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}
+                  >
+                    <div className="flex flex-col gap-0.5 shrink-0">
+                      <button
+                        type="button"
+                        aria-label="Move up"
+                        disabled={idx === 0}
+                        onClick={() => categoriesApi?.reorder(c.id, "up")}
+                        className="p-1 rounded"
+                        style={{ opacity: idx === 0 ? 0.3 : 1, color: C.coffee, background: "transparent", border: 0, cursor: idx === 0 ? "default" : "pointer" }}
+                      >
+                        <ChevronUp size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Move down"
+                        disabled={idx === categories.length - 1}
+                        onClick={() => categoriesApi?.reorder(c.id, "down")}
+                        className="p-1 rounded"
+                        style={{ opacity: idx === categories.length - 1 ? 0.3 : 1, color: C.coffee, background: "transparent", border: 0, cursor: idx === categories.length - 1 ? "default" : "pointer" }}
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openEditCategory(c)}
+                      className="flex-1 min-w-0 text-left"
+                      style={{ background: "transparent", border: 0, color: "inherit", font: "inherit", cursor: "pointer", padding: 0 }}
+                    >
+                      <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{c.name}</p>
+                      <p className="text-[10.5px]" style={{ color: C.muted }}>
+                        {count} service{count === 1 ? "" : "s"}
+                        {c.description ? ` · ${c.description}` : ""}
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteCategory(c)}
+                      className="p-2 rounded-lg"
+                      style={{ color: C.danger, background: "transparent", border: 0 }}
+                      aria-label="Delete category"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+
         {api?.loading && services.length === 0 ? (
           <Card className="p-4">
             <p className="text-[12px]" style={{ color: C.muted }}>Loading services…</p>
@@ -13657,44 +13790,72 @@ const ServicesScreen = ({
               </Button>
             </div>
           </Card>
-        ) : (
-          services.map(s => (
-            <Card
-              key={s.id}
-              className="p-4 active:scale-[0.99] cursor-pointer"
-              onClick={() => openEdit(s)}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>
-                      {s.name}
-                    </p>
-                    <Pill tone={s.is_active ? "success" : "neutral"}>
-                      {s.is_active ? "Active" : "Inactive"}
-                    </Pill>
-                    {s.deposit_required && (
-                      <Pill tone="gold">Deposit required</Pill>
-                    )}
-                  </div>
-                  <p className="text-[11px]" style={{ color: C.muted }}>
-                    {formatServicePrice(s, currency)}
-                    {s.deposit_required && s.deposit_amount
-                      ? ` · Deposit ${fmtMoney(Number(s.deposit_amount), currency)}`
-                      : ""}
-                    {s.add_ons.length > 0 ? ` · ${s.add_ons.length} add-on${s.add_ons.length === 1 ? "" : "s"}` : ""}
+        ) : (() => {
+          // Group services by category for display. Build the section
+          // order from the (already sort_order'd) categories list, with
+          // an "Other services" bucket at the end for uncategorized
+          // rows so existing services without a category stay visible.
+          const groups: Array<{ key: string; label: string; svcs: Service[] }> = categories.map(c => ({
+            key: c.id,
+            label: c.name,
+            svcs: services.filter(s => s.category_id === c.id),
+          }));
+          const uncategorized = services.filter(s => !s.category_id);
+          if (uncategorized.length > 0 || groups.length === 0) {
+            groups.push({
+              key: "__other__",
+              label: groups.length === 0 ? "Services" : "Other services",
+              svcs: uncategorized.length > 0 ? uncategorized : services,
+            });
+          }
+          return (
+            <>
+              {groups.map(g => g.svcs.length === 0 ? null : (
+                <div key={g.key} className="space-y-2">
+                  <p className="text-[10px] uppercase tracking-widest font-bold mt-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+                    {g.label}
                   </p>
-                  {s.description && (
-                    <p className="text-[12px] mt-2" style={{ color: C.coffee, lineHeight: 1.4 }}>
-                      {s.description}
-                    </p>
-                  )}
+                  {g.svcs.map(s => (
+                    <Card
+                      key={s.id}
+                      className="p-4 active:scale-[0.99] cursor-pointer"
+                      onClick={() => openEdit(s)}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>
+                              {s.name}
+                            </p>
+                            <Pill tone={s.is_active ? "success" : "neutral"}>
+                              {s.is_active ? "Active" : "Inactive"}
+                            </Pill>
+                            {s.deposit_required && (
+                              <Pill tone="gold">Deposit required</Pill>
+                            )}
+                          </div>
+                          <p className="text-[11px]" style={{ color: C.muted }}>
+                            {formatServicePrice(s, currency)}
+                            {s.deposit_required && s.deposit_amount
+                              ? ` · Deposit ${fmtMoney(Number(s.deposit_amount), currency)}`
+                              : ""}
+                            {s.add_ons.length > 0 ? ` · ${s.add_ons.length} variation${s.add_ons.length === 1 ? "" : "s"}` : ""}
+                          </p>
+                          {s.description && (
+                            <p className="text-[12px] mt-2" style={{ color: C.coffee, lineHeight: 1.4 }}>
+                              {s.description}
+                            </p>
+                          )}
+                        </div>
+                        <ChevronRight size={18} style={{ color: C.muted, marginTop: 2, flexShrink: 0 }} />
+                      </div>
+                    </Card>
+                  ))}
                 </div>
-                <ChevronRight size={18} style={{ color: C.muted, marginTop: 2, flexShrink: 0 }} />
-              </div>
-            </Card>
-          ))
-        )}
+              ))}
+            </>
+          );
+        })()}
       </div>
 
       <Sheet
@@ -13718,6 +13879,32 @@ const ServicesScreen = ({
                 onChange={e => setEditing({ ...editing, description: e.target.value })}
                 rows={2}
               />
+            </Field>
+
+            <Field
+              label="Category"
+              hint={categories.length === 0
+                ? "Add categories above to group your services."
+                : "Optional. Leave as 'Uncategorized' to show under Other services."}
+            >
+              <select
+                value={editing.category_id || ""}
+                onChange={e => setEditing({ ...editing, category_id: e.target.value || null })}
+                className="w-full px-3 py-2.5 rounded-lg text-[13px]"
+                style={{
+                  background: C.paper,
+                  border: `1px solid ${C.hairline}`,
+                  color: C.espresso,
+                  appearance: "none",
+                  WebkitAppearance: "none",
+                }}
+                disabled={categories.length === 0}
+              >
+                <option value="">— Uncategorized —</option>
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
             </Field>
 
             <div className="grid grid-cols-2 gap-3">
@@ -13959,6 +14146,83 @@ const ServicesScreen = ({
                 {busy ? "Deleting…" : "Delete"}
               </Button>
               <Button variant="outline" onClick={() => setConfirmDelete(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </Sheet>
+
+      {/* CATEGORY EDITOR sheet — small modal so it doesn't fight with
+          the service editor. Name + optional description for V1; cover
+          image can layer on later via image_url. */}
+      <Sheet
+        open={!!editingCategory}
+        onClose={() => setEditingCategory(null)}
+        title={editingCategory?.id ? "Edit category" : "New category"}
+      >
+        {editingCategory && (
+          <div className="space-y-3 pb-2">
+            <Field label="Name">
+              <Input
+                value={editingCategory.name || ""}
+                onChange={e => setEditingCategory({ ...editingCategory, name: e.target.value })}
+                placeholder="e.g. Boho Braids"
+              />
+            </Field>
+            <Field label="Description" hint="Shown on the booking page card. Optional.">
+              <Textarea
+                value={editingCategory.description || ""}
+                onChange={e => setEditingCategory({ ...editingCategory, description: e.target.value })}
+                rows={2}
+                placeholder="Effortless boho with loose curl pieces."
+              />
+            </Field>
+            {categoryError && (
+              <div role="alert" className="p-3 rounded-lg" style={{ background: C.ivory, border: `1px solid ${C.danger}` }}>
+                <p className="text-[12px]" style={{ color: C.danger }}>{categoryError}</p>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <Button variant="primary" icon={<Save size={16} />} onClick={handleSaveCategory}>
+                {categoryBusy ? "Saving…" : "Save category"}
+              </Button>
+              <Button variant="outline" onClick={() => setEditingCategory(null)}>
+                Cancel
+              </Button>
+            </div>
+            {editingCategory.id && (
+              <Button
+                variant="outline"
+                icon={<Trash2 size={14} />}
+                onClick={() => {
+                  const target = categories.find(c => c.id === editingCategory.id) || null;
+                  if (target) { setEditingCategory(null); setConfirmDeleteCategory(target); }
+                }}
+                fullWidth
+              >
+                Delete category
+              </Button>
+            )}
+          </div>
+        )}
+      </Sheet>
+
+      <Sheet
+        open={!!confirmDeleteCategory}
+        onClose={() => setConfirmDeleteCategory(null)}
+        title="Delete category?"
+      >
+        {confirmDeleteCategory && (
+          <div className="space-y-3 pb-2">
+            <p className="text-[14px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+              Remove <strong>{confirmDeleteCategory.name}</strong>? Services in this category will move to "Other services" — none of your services or appointments are deleted.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <Button variant="danger" onClick={handleConfirmDeleteCategory}>
+                {categoryBusy ? "Deleting…" : "Delete"}
+              </Button>
+              <Button variant="outline" onClick={() => setConfirmDeleteCategory(null)}>
                 Cancel
               </Button>
             </div>
@@ -16664,6 +16928,7 @@ export default function App() {
   const { premium } = usePremiumStatus(auth.userId);
   const discountsApi = useDiscounts(auth.userId);
   const servicesApi = useServices(auth.userId);
+  const serviceCategoriesApi = useServiceCategories(auth.userId);
   const policiesApi = useBookingPolicy(auth.userId);
   const availabilityApi = useAvailability(auth.userId);
   const waitlistApi = useWaitlist(auth.userId);
@@ -16699,6 +16964,7 @@ export default function App() {
       requestUpgrade,
       discountsApi,
       servicesApi,
+      serviceCategoriesApi,
       policiesApi,
       availabilityApi,
       waitlistApi,
@@ -16724,7 +16990,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, policiesApi, availabilityApi, waitlistApi, approvalsApi]);
+  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, serviceCategoriesApi, policiesApi, availabilityApi, waitlistApi, approvalsApi]);
 
   const sync = useCloudSync(auth.userId, store);
 

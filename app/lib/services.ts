@@ -134,6 +134,9 @@ export type Service = {
   max_concurrent: number;
   // Phase Contract Templates — optional contract to attach
   contract_template_id: string | null;
+  // Service categories — optional parent group. Null = appears under
+  // "Other Services" in the editor + on the public booking page.
+  category_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -153,6 +156,7 @@ export type ServiceInput = Pick<
   | "buffer_after_minutes"
   | "max_concurrent"
   | "contract_template_id"
+  | "category_id"
 >;
 
 // ---- Validation -------------------------------------------------------
@@ -375,6 +379,8 @@ export const useServices = (
       buffer_after_minutes: Math.max(0, Math.min(240, Math.round(Number(draft.buffer_after_minutes) || 0))),
       max_concurrent: Math.max(1, Math.min(50, Math.round(Number(draft.max_concurrent) || 1))),
       contract_template_id: draft.contract_template_id || null,
+      // Empty string from the editor dropdown means "no category".
+      category_id: draft.category_id ? draft.category_id : null,
     };
     const { data, error: err } = draft.id
       ? await supabase.from("services").update(payload).eq("id", draft.id).eq("user_id", userId).select("*").maybeSingle()
@@ -440,6 +446,7 @@ export type PublicService = Pick<
   | "buffer_after_minutes"
   | "max_concurrent"
   | "contract_template_id"
+  | "category_id"
 >;
 
 export const fetchPublicServices = async (
@@ -463,8 +470,38 @@ export const fetchPublicServices = async (
     buffer_after_minutes: Number(s.buffer_after_minutes) || 0,
     max_concurrent: Number(s.max_concurrent) || 1,
     contract_template_id: s.contract_template_id ?? null,
+    category_id: s.category_id ?? null,
   }));
   return { ok: true, services };
+};
+
+// Public-facing category, fetched alongside services so /book/<slug>
+// can render category tabs/cards above the service picker.
+export type PublicServiceCategory = {
+  id: string;
+  name: string;
+  slug: string | null;
+  description: string | null;
+  image_url: string | null;
+  sort_order: number;
+};
+
+export const fetchPublicServiceCategories = async (
+  slug: string,
+): Promise<{ ok: true; categories: PublicServiceCategory[] } | { ok: false; error: string }> => {
+  if (!slug) return { ok: false, error: "Missing booking slug." };
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("public_list_service_categories", { slug_in: slug });
+  if (error) return { ok: false, error: error.message };
+  const categories = ((data || []) as any[]).map(c => ({
+    id: String(c.id),
+    name: String(c.name || ""),
+    slug: c.slug ?? null,
+    description: c.description ?? null,
+    image_url: c.image_url ?? null,
+    sort_order: Number(c.sort_order) || 0,
+  }));
+  return { ok: true, categories };
 };
 
 export type PublicSlot = {
