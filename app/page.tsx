@@ -18598,13 +18598,22 @@ const ProductsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
               <Field label="Price">
                 <MoneyInput
                   value={editing.price ?? ""}
-                  onChange={(v) => setEditing({ ...editing, price: v === "" ? null : parseMoney(v) })}
+                  // Store the raw cleaned string from MoneyInput in
+                  // state and let the hook coerce on save. parseMoney()
+                  // on every keystroke collapses "25." to 25 and
+                  // strips trailing zeros, so the stylist couldn't
+                  // enter prices like $25.99 — once the dot was typed
+                  // the input snapped back to the integer. The DB
+                  // column is numeric(10,2); the useProducts.upsert
+                  // path already calls Number(draft.price) and
+                  // validates finite + >= 0.
+                  onChange={(v) => setEditing({ ...editing, price: v === "" ? null : (v as any) })}
                 />
               </Field>
               <Field label="Compare-at" hint="Original price; shown as strikethrough.">
                 <MoneyInput
                   value={editing.compare_at_price ?? ""}
-                  onChange={(v) => setEditing({ ...editing, compare_at_price: v === "" ? null : parseMoney(v) })}
+                  onChange={(v) => setEditing({ ...editing, compare_at_price: v === "" ? null : (v as any) })}
                 />
               </Field>
             </div>
