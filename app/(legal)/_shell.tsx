@@ -10,10 +10,10 @@ import { useRouter } from "next/navigation";
 // without booting the whole React tree.
 
 const C = {
-  espresso: "#2A1810", coffee: "#4A2C1A", caramel: "#8B5A2B",
+  espresso: "#15111A", coffee: "#3D3447", caramel: "#6F6477",
   cream: "#FFFFFF", ivory: "#F6F2EC", paper: "#FFFFFF",
-  gold: "#C9A961", goldDeep: "#A8893F",
-  muted: "#8B7355", hairline: "rgba(74, 44, 26, 0.12)",
+  gold: "#7C3AED", goldDeep: "#5B21B6",
+  muted: "#6F6477", hairline: "rgba(21, 17, 26, 0.12)",
 } as const;
 const FONT_DISPLAY = `"Cormorant Garamond", Georgia, serif`;
 const FONT_BODY = `"DM Sans", "Inter", system-ui, sans-serif`;

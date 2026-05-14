@@ -88,29 +88,29 @@ export type AppointmentColor = {
 // Soft palette derived from the existing brand tokens. Every entry
 // stays in the warm cream / coffee / gold family; nothing neon.
 const PALETTE = {
-  scheduled: { bg: "rgba(201, 169, 97, 0.18)", border: "rgba(168, 137, 63, 0.55)", fg: "#4A2C1A", accent: "#A8893F" },
-  confirmed: { bg: "rgba(168, 137, 63, 0.28)", border: "#A8893F", fg: "#2A1810", accent: "#A8893F" },
-  completed: { bg: "rgba(92, 124, 74, 0.18)", border: "rgba(92, 124, 74, 0.55)", fg: "#2A1810", accent: "#5C7C4A" },
-  cancelled: { bg: "rgba(139, 115, 85, 0.14)", border: "rgba(139, 115, 85, 0.4)",  fg: "#8B7355", accent: "#8B7355" },
-  canceled: { bg: "rgba(139, 115, 85, 0.14)", border: "rgba(139, 115, 85, 0.4)",  fg: "#8B7355", accent: "#8B7355" },
-  pending:   { bg: "rgba(201, 118, 43, 0.16)", border: "rgba(201, 118, 43, 0.5)",  fg: "#4A2C1A", accent: "#C9762B" },
+  scheduled: { bg: "rgba(124, 58, 237, 0.18)", border: "rgba(91, 33, 182, 0.55)", fg: "#3D3447", accent: "#5B21B6" },
+  confirmed: { bg: "rgba(91, 33, 182, 0.28)", border: "#5B21B6", fg: "#15111A", accent: "#5B21B6" },
+  completed: { bg: "rgba(92, 124, 74, 0.18)", border: "rgba(92, 124, 74, 0.55)", fg: "#15111A", accent: "#5C7C4A" },
+  cancelled: { bg: "rgba(139, 115, 85, 0.14)", border: "rgba(139, 115, 85, 0.4)",  fg: "#6F6477", accent: "#6F6477" },
+  canceled: { bg: "rgba(139, 115, 85, 0.14)", border: "rgba(139, 115, 85, 0.4)",  fg: "#6F6477", accent: "#6F6477" },
+  pending:   { bg: "rgba(201, 118, 43, 0.16)", border: "rgba(201, 118, 43, 0.5)",  fg: "#3D3447", accent: "#C9762B" },
   noShow:    { bg: "rgba(156, 61, 46, 0.14)", border: "rgba(156, 61, 46, 0.45)",  fg: "#9C3D2E", accent: "#9C3D2E" },
 
-  paid:      { bg: "rgba(92, 124, 74, 0.16)", border: "rgba(92, 124, 74, 0.5)",  fg: "#2A1810", accent: "#5C7C4A" },
-  partial:   { bg: "rgba(201, 169, 97, 0.16)", border: "rgba(168, 137, 63, 0.5)", fg: "#4A2C1A", accent: "#A8893F" },
-  unpaid:    { bg: "rgba(201, 118, 43, 0.16)", border: "rgba(201, 118, 43, 0.5)", fg: "#4A2C1A", accent: "#C9762B" },
+  paid:      { bg: "rgba(92, 124, 74, 0.16)", border: "rgba(92, 124, 74, 0.5)",  fg: "#15111A", accent: "#5C7C4A" },
+  partial:   { bg: "rgba(124, 58, 237, 0.16)", border: "rgba(91, 33, 182, 0.5)", fg: "#3D3447", accent: "#5B21B6" },
+  unpaid:    { bg: "rgba(201, 118, 43, 0.16)", border: "rgba(201, 118, 43, 0.5)", fg: "#3D3447", accent: "#C9762B" },
 
-  noBalance: { bg: "rgba(92, 124, 74, 0.16)", border: "rgba(92, 124, 74, 0.5)",  fg: "#2A1810", accent: "#5C7C4A" },
-  balanceDue:{ bg: "rgba(201, 118, 43, 0.16)", border: "rgba(201, 118, 43, 0.5)", fg: "#4A2C1A", accent: "#C9762B" },
+  noBalance: { bg: "rgba(92, 124, 74, 0.16)", border: "rgba(92, 124, 74, 0.5)",  fg: "#15111A", accent: "#5C7C4A" },
+  balanceDue:{ bg: "rgba(201, 118, 43, 0.16)", border: "rgba(201, 118, 43, 0.5)", fg: "#3D3447", accent: "#C9762B" },
   overdue:   { bg: "rgba(156, 61, 46, 0.16)", border: "rgba(156, 61, 46, 0.55)", fg: "#9C3D2E", accent: "#9C3D2E" },
 
-  serviceA:  { bg: "rgba(74, 44, 26, 0.10)",  border: "rgba(74, 44, 26, 0.35)",  fg: "#2A1810", accent: "#4A2C1A" },
-  serviceB:  { bg: "rgba(139, 90, 43, 0.16)", border: "rgba(139, 90, 43, 0.45)", fg: "#2A1810", accent: "#8B5A2B" },
-  serviceC:  { bg: "rgba(201, 169, 97, 0.20)", border: "rgba(168, 137, 63, 0.55)", fg: "#2A1810", accent: "#A8893F" },
-  serviceD:  { bg: "rgba(92, 124, 74, 0.18)", border: "rgba(92, 124, 74, 0.5)",  fg: "#2A1810", accent: "#5C7C4A" },
-  serviceE:  { bg: "rgba(168, 137, 63, 0.18)", border: "#A8893F", fg: "#2A1810", accent: "#A8893F" },
+  serviceA:  { bg: "rgba(21, 17, 26, 0.10)",  border: "rgba(21, 17, 26, 0.35)",  fg: "#15111A", accent: "#3D3447" },
+  serviceB:  { bg: "rgba(139, 90, 43, 0.16)", border: "rgba(139, 90, 43, 0.45)", fg: "#15111A", accent: "#6F6477" },
+  serviceC:  { bg: "rgba(124, 58, 237, 0.20)", border: "rgba(91, 33, 182, 0.55)", fg: "#15111A", accent: "#5B21B6" },
+  serviceD:  { bg: "rgba(92, 124, 74, 0.18)", border: "rgba(92, 124, 74, 0.5)",  fg: "#15111A", accent: "#5C7C4A" },
+  serviceE:  { bg: "rgba(91, 33, 182, 0.18)", border: "#5B21B6", fg: "#15111A", accent: "#5B21B6" },
 
-  neutral:   { bg: "rgba(74, 44, 26, 0.08)",  border: "rgba(74, 44, 26, 0.20)",  fg: "#4A2C1A", accent: "#8B7355" },
+  neutral:   { bg: "rgba(21, 17, 26, 0.08)",  border: "rgba(21, 17, 26, 0.20)",  fg: "#3D3447", accent: "#6F6477" },
 };
 
 // Hash a free-text style name into one of the soft service swatches.

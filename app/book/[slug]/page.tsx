@@ -44,10 +44,10 @@ const DEFAULT_DURATION_MIN = 60;
 // Minimal palette — kept inline so this page never imports the main
 // app shell (it's served to anonymous visitors).
 const C = {
-  espresso: "#2A1810", coffee: "#4A2C1A", caramel: "#8B5A2B",
+  espresso: "#15111A", coffee: "#3D3447", caramel: "#6F6477",
   cream: "#FFFFFF", ivory: "#F6F2EC", paper: "#FFFFFF",
-  gold: "#C9A961", goldDeep: "#A8893F",
-  muted: "#8B7355", hairline: "rgba(74, 44, 26, 0.12)",
+  gold: "#7C3AED", goldDeep: "#5B21B6",
+  muted: "#6F6477", hairline: "rgba(21, 17, 26, 0.12)",
   success: "#5C7C4A", danger: "#9C3D2E",
   // 2026 design system tokens (mirror of app/page.tsx). Public
   // booking page reads these for its primary CTA gradient + future
@@ -904,7 +904,7 @@ export default function PublicBookingPage() {
               marginBottom: 18,
               background: C.paper,
               border: `1px solid ${C.hairline}`,
-              boxShadow: "0 6px 20px rgba(74, 44, 26, 0.06)",
+              boxShadow: "0 6px 20px rgba(21, 17, 26, 0.06)",
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1235,7 +1235,7 @@ export default function PublicBookingPage() {
                     borderRadius: 16,
                     background: C.paper,
                     border: `1px solid ${C.hairline}`,
-                    boxShadow: "0 4px 12px rgba(74, 44, 26, 0.04)",
+                    boxShadow: "0 4px 12px rgba(21, 17, 26, 0.04)",
                     display: "flex",
                     flexDirection: "column",
                     gap: 10,
@@ -1443,7 +1443,7 @@ export default function PublicBookingPage() {
                               border: `1.5px solid ${serviceId === s.id ? accent : C.hairline}`,
                               boxShadow: serviceId === s.id
                                 ? `0 0 0 3px ${C.cream}`
-                                : "0 4px 14px rgba(74, 44, 26, 0.06)",
+                                : "0 4px 14px rgba(21, 17, 26, 0.06)",
                               textAlign: "left",
                               font: "inherit",
                               color: "inherit",
@@ -2465,7 +2465,7 @@ const ProductCard = ({ product, accent }: { product: PublicProduct; accent: stri
     borderRadius: 16,
     background: C.paper,
     border: `1px solid ${C.hairline}`,
-    boxShadow: "0 4px 12px rgba(74, 44, 26, 0.04)",
+    boxShadow: "0 4px 12px rgba(21, 17, 26, 0.04)",
     overflow: "hidden",
     color: "inherit",
     textDecoration: "none",
@@ -2785,8 +2785,8 @@ const CalendarCell = ({ day, status, loading, disabled, selected, onClick }: Cel
     fg = C.paper;
     border = `1px solid ${C.goldDeep}`;
   } else if (status === "available") {
-    bg = "rgba(201, 169, 97, 0.18)";
-    border = `1px solid rgba(201, 169, 97, 0.35)`;
+    bg = "rgba(124, 58, 237, 0.18)";
+    border = `1px solid rgba(124, 58, 237, 0.35)`;
   } else if (status === "limited") {
     bg = "rgba(229, 212, 160, 0.35)";
     border = `1px solid rgba(229, 212, 160, 0.55)`;
@@ -2795,7 +2795,7 @@ const CalendarCell = ({ day, status, loading, disabled, selected, onClick }: Cel
     fg = C.muted;
   } else if (status === "off") {
     bg = "transparent";
-    fg = "rgba(74, 44, 26, 0.35)";
+    fg = "rgba(21, 17, 26, 0.35)";
   }
   return (
     <button

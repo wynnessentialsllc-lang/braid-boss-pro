@@ -23,12 +23,12 @@ const C = {
   cream: "#FFFFFF",
   paper: "#FFFFFF",
   ivory: "#F6F2EC",
-  espresso: "#2A1810",
-  coffee: "#4A2C1A",
-  gold: "#C9A961",
-  goldDeep: "#A8893F",
-  muted: "#8B7355",
-  hairline: "rgba(74, 44, 26, 0.12)",
+  espresso: "#15111A",
+  coffee: "#3D3447",
+  gold: "#7C3AED",
+  goldDeep: "#5B21B6",
+  muted: "#6F6477",
+  hairline: "rgba(21, 17, 26, 0.12)",
   success: "#5C7C4A",
   danger: "#9C3D2E",
 } as const;
@@ -293,7 +293,7 @@ const card: React.CSSProperties = {
   border: `1px solid ${C.hairline}`,
   borderRadius: 22,
   padding: 22,
-  boxShadow: "0 20px 40px -28px rgba(42,24,16,0.28), 0 2px 4px rgba(42,24,16,0.04)",
+  boxShadow: "0 20px 40px -28px rgba(21, 17, 26,0.28), 0 2px 4px rgba(21, 17, 26,0.04)",
 };
 const h1: React.CSSProperties = {
   margin: "8px 0 4px",
@@ -332,7 +332,7 @@ const primaryBtn: React.CSSProperties = {
   letterSpacing: "0.02em",
   cursor: "pointer",
   minHeight: 52,
-  boxShadow: "0 10px 22px rgba(42,24,16,0.18)",
+  boxShadow: "0 10px 22px rgba(21, 17, 26,0.18)",
   font: "inherit",
 };
 
