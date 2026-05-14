@@ -4350,7 +4350,10 @@ const RetentionInsights = ({ clients, appointments, today, business, openCommuni
                       {i + 1}
                     </div>
                     <p className="flex-1 text-sm font-semibold text-left truncate" style={{ color: C.espresso }}>{client.name}</p>
-                    <p className="text-sm font-mono font-bold" style={{ color: C.goldDeep }}>{fmtMoney(monthValue, business?.currency || "USD")}</p>
+                    {/* Top-client revenue is money-in — read it as
+                        green to match the Today / Deposits headline
+                        cards and the Money tab income totals. */}
+                    <p className="text-sm font-mono font-bold" style={{ color: "#16A34A" }}>{fmtMoney(monthValue, business?.currency || "USD")}</p>
                   </button>
                 ))}
               </div>
