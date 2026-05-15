@@ -105,7 +105,19 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
   //
   // We surface ONE balance insight at most (the highest-priority one
   // that triggers) so the card list stays focused.
-  const owingAppts = appts.filter(a => a.paymentStatus !== "paid" && num(a.balanceDue) > 0);
+  // Must match the dashboard Pending Balances rule exactly, or the
+  // count here ("N clients owe a balance") disagrees with the list
+  // the stylist actually sees. Exclude cancelled, personal/blocked,
+  // and dateless rows — same filters as lib/reports.ts
+  // pendingBalanceAppts + the dashboard helpers.
+  const owingAppts = appts.filter(a =>
+    a &&
+    !isCanceledAppointment(a) &&
+    (!a.kind || a.kind === "appointment") &&
+    !!a.date &&
+    a.paymentStatus !== "paid" &&
+    num(a.balanceDue) > 0
+  );
   if (owingAppts.length > 0) {
     const overdue = owingAppts.filter(a => a.date && a.date < today);
     const dueToday = owingAppts.filter(a => a.date === today);
@@ -155,7 +167,14 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
   }
 
   // ---- BALANCE: low deposit collection rate ---------------------------
-  const upcoming = appts.filter(a => a.date && a.date >= today);
+  // Same exclusions — a cancelled or personal/blocked entry isn't an
+  // "upcoming booking" that should drag down the deposit rate.
+  const upcoming = appts.filter(a =>
+    a &&
+    !isCanceledAppointment(a) &&
+    (!a.kind || a.kind === "appointment") &&
+    a.date && a.date >= today
+  );
   if (upcoming.length >= 3) {
     const withDeposit = upcoming.filter(a => num(a.depositPaid) > 0).length;
     const rate = withDeposit / upcoming.length;
