@@ -81,6 +81,7 @@ export type BookingRequestRecord = {
   // Client self-service: cancel + one-time reschedule.
   cancel_token: string | null;
   reschedule_token: string | null;
+  cancelled_at: string | null;
   cancelled_by: string | null;
   cancellation_reason: string | null;
   reschedule_count: number;
@@ -331,6 +332,58 @@ export const useBookingApprovalQueue = (userId: string | null): {
         });
       } catch {
         // Confirmation already succeeded — email failure shouldn't surface.
+      }
+    }
+
+    // Last-minute reminder. The pg_cron reminder enqueue only picks
+    // up appointments in the [now+18h, now+30h] window, so a booking
+    // that's confirmed inside the 18-hour blackout would otherwise
+    // get no reminder at all. Mirror what the cron would have sent
+    // immediately so the client still gets a heads-up email with
+    // the cancel + reschedule action links. Dedupe key matches the
+    // cron's so a later cron tick can't double-send.
+    if (row?.client_email && row.preferred_date && row.preferred_time && row.cancel_token) {
+      try {
+        const startMs = new Date(`${row.preferred_date}T${row.preferred_time}:00Z`).getTime();
+        const hoursOut = (startMs - Date.now()) / 3_600_000;
+        if (hoursOut > 0 && hoursOut < 18) {
+          const { data: studio2 } = await supabase
+            .rpc("public_get_studio_name", { user_id_in: userId });
+          const studioName2 = (typeof studio2 === "string" && studio2.trim()) ? studio2.trim() : "your stylist";
+          const baseUrl = typeof window !== "undefined" ? window.location.origin : "https://braidbosspro.app";
+          await supabase.rpc("queue_notification", {
+            user_id_in: userId,
+            channel_in: "email",
+            notification_type_in: "appointment_reminder",
+            body_in: "Reminder: your appointment is coming up soon.",
+            subject_in: `Reminder: your appointment with ${studioName2}`,
+            recipient_email_in: row.client_email,
+            recipient_name_in: row.client_name || null,
+            payload_in: {
+              clientName: row.client_name || "there",
+              studioName: studioName2,
+              serviceName: row.selected_variation_name || row.service_name || null,
+              preferredDate: row.preferred_date,
+              preferredTime: row.preferred_time,
+              cancelUrl: `${baseUrl}/booking-action/${row.cancel_token}/cancel`,
+              rescheduleUrl: row.reschedule_count === 0 && row.reschedule_token
+                ? `${baseUrl}/booking-action/${row.reschedule_token}/reschedule`
+                : null,
+              rescheduleUsed: row.reschedule_count >= 1,
+            },
+            dedupe_key_in: `appointment_reminder:${row.id}:${row.preferred_date}`,
+            booking_request_id_in: row.id,
+            appointment_id_in: appointmentId,
+          });
+          // Stamp last_reminder_sent_at so the cron's 12-hour cooldown
+          // skips this row even if it later falls into the window.
+          await supabase
+            .from("booking_requests")
+            .update({ last_reminder_sent_at: new Date().toISOString() })
+            .eq("id", row.id);
+        }
+      } catch {
+        // Reminder is best-effort; never block the approval path.
       }
     }
 
