@@ -305,6 +305,144 @@ const renderAppointmentConfirmed = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- appointment_reminder (24h-out reminder with action links) -----
+//
+// The reminder is the only place the cancel/reschedule URLs surface
+// today. The enqueue RPC builds the URLs from the booking row's
+// tokens and passes them in `payload.cancelUrl` / `payload.rescheduleUrl`.
+// If reschedule has already been used, rescheduleUrl will be null
+// and the template hides that CTA in favor of a plain-text note.
+const renderAppointmentReminder = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const serviceName = p.serviceName || null;
+  const date = p.preferredDate || null;
+  const time = p.preferredTime || null;
+  const when = [date, time].filter(Boolean).join(" · ");
+  const cancelUrl = String(p.cancelUrl || "").trim();
+  const rescheduleUrl = String(p.rescheduleUrl || "").trim();
+  const rescheduleUsed = !!p.rescheduleUsed;
+
+  const subject = `Reminder: your appointment with ${studioName}`;
+  const rescheduleBlock = rescheduleUrl
+    ? `
+      <p style="margin:0 0 8px;font-size:14px;font-weight:600;color:${C.espresso};">Need to reschedule?</p>
+      <p style="margin:0 0 12px;font-size:13px;line-height:20px;color:${C.coffee};">You may reschedule one time without paying another deposit. Your original deposit will roll over to your new appointment time.</p>
+      <p style="margin:0 0 18px;"><a href="${escape(rescheduleUrl)}" style="display:inline-block;background:${C.espresso};color:${C.cream};text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:600;font-size:13px;letter-spacing:0.04em;">Reschedule appointment</a></p>`
+    : rescheduleUsed
+      ? `<p style="margin:0 0 18px;font-size:13px;line-height:20px;color:${C.muted};">You've already used your one-time reschedule option for this appointment. To make another change, contact your stylist directly.</p>`
+      : "";
+
+  const cancelBlock = cancelUrl
+    ? `
+      <p style="margin:0 0 8px;font-size:14px;font-weight:600;color:${C.espresso};">Need to cancel?</p>
+      <p style="margin:0 0 12px;font-size:13px;line-height:20px;color:${C.coffee};">You may cancel from this link, but your deposit will be forfeited according to the stylist's policy.</p>
+      <p style="margin:0;"><a href="${escape(cancelUrl)}" style="display:inline-block;background:transparent;color:${C.espresso};text-decoration:none;padding:11px 22px;border-radius:999px;font-weight:600;font-size:13px;letter-spacing:0.04em;border:1.5px solid ${C.espresso};">Cancel appointment</a></p>`
+    : "";
+
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Reminder</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">See you soon, ${escape(clientName)}.</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;">Your appointment with <strong>${escape(studioName)}</strong>${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}${when ? ` is on <strong>${escape(when)}</strong>` : " is coming up soon"}.</p>
+    <p style="font-size:14px;line-height:22px;margin:0 0 22px;color:${C.coffee};">If everything still looks good, no action needed — we just wanted to give you a heads up.</p>
+    <hr style="border:none;border-top:1px solid ${C.hairline};margin:22px 0;" />
+    <p style="font-size:13px;font-weight:700;letter-spacing:0.04em;color:${C.coffee};margin:0 0 14px;text-transform:uppercase;">Need to make a change?</p>
+    ${rescheduleBlock}
+    ${cancelBlock}
+  `);
+  return { subject, html };
+};
+
+// ---- client_booking_cancelled (after client cancels via link) -------
+const renderClientBookingCancelled = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const serviceName = p.serviceName || null;
+  const date = p.preferredDate || null;
+  const time = p.preferredTime || null;
+  const when = [date, time].filter(Boolean).join(" · ");
+  const depositForfeited = !!p.depositForfeited;
+  const depositAmount = Number(p.depositAmount) > 0 ? Number(p.depositAmount) : null;
+  const subject = "Your appointment was cancelled";
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.muted};margin:0 0 10px;font-weight:700;">Cancelled</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Your appointment was cancelled.</h1>
+    <p style="font-size:14px;line-height:22px;margin:0 0 12px;color:${C.coffee};">We've let ${escape(studioName)} know.${serviceName || when ? " The cancelled booking:" : ""}</p>
+    ${serviceName || when ? `<p style="font-size:14px;line-height:22px;margin:0 0 12px;color:${C.coffee};">${serviceName ? `<strong>${escape(serviceName)}</strong>` : ""}${serviceName && when ? " · " : ""}${when ? `<strong>${escape(when)}</strong>` : ""}</p>` : ""}
+    ${depositForfeited ? `<p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">Per the stylist's policy, your deposit${depositAmount ? ` of $${depositAmount.toFixed(2)}` : ""} has been forfeited.</p>` : ""}
+    <p style="font-size:13px;color:${C.muted};line-height:20px;margin-top:18px;">If this was a mistake, reach out to ${escape(studioName)} directly.</p>
+  `);
+  return { subject, html };
+};
+
+// ---- stylist_booking_cancelled (notify stylist) ---------------------
+const renderStylistBookingCancelled = (p: Record<string, any>) => {
+  const clientName = p.clientName || "A client";
+  const serviceName = p.serviceName || null;
+  const date = p.preferredDate || null;
+  const time = p.preferredTime || null;
+  const when = [date, time].filter(Boolean).join(" · ");
+  const reason = String(p.reason || "").trim();
+  const depositAmount = Number(p.depositAmount) > 0 ? Number(p.depositAmount) : null;
+  const subject = `Client cancelled — ${clientName}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.muted};margin:0 0 10px;font-weight:700;">Cancellation</p>
+    <h1 style="font-size:20px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">${escape(clientName)} cancelled.</h1>
+    <p style="font-size:14px;line-height:22px;margin:0 0 10px;color:${C.coffee};">${serviceName ? `<strong>${escape(serviceName)}</strong>` : ""}${serviceName && when ? " · " : ""}${when ? `<strong>${escape(when)}</strong>` : ""}</p>
+    ${reason ? `<p style="font-size:13px;line-height:20px;margin:0 0 14px;color:${C.coffee};"><strong>Reason:</strong> ${escape(reason)}</p>` : ""}
+    ${depositAmount ? `<p style="font-size:13px;line-height:20px;margin:0 0 14px;color:${C.coffee};">Deposit of <strong>$${depositAmount.toFixed(2)}</strong> has been marked forfeited. The slot is released from your calendar.</p>` : `<p style="font-size:13px;line-height:20px;margin:0 0 14px;color:${C.coffee};">The slot is released from your calendar.</p>`}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:18px;">Cancelled via the secure client self-service link.</p>
+  `);
+  return { subject, html };
+};
+
+// ---- client_booking_rescheduled (after successful reschedule) -------
+const renderClientBookingRescheduled = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const serviceName = p.serviceName || null;
+  const newDate = p.preferredDate || null;
+  const newTime = p.preferredTime || null;
+  const oldDate = p.fromDate || null;
+  const oldTime = p.fromTime || null;
+  const newWhen = [newDate, newTime].filter(Boolean).join(" · ");
+  const oldWhen = [oldDate, oldTime].filter(Boolean).join(" · ");
+  const depositAmount = Number(p.depositAmount) > 0 ? Number(p.depositAmount) : null;
+  const subject = "Your appointment was rescheduled";
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Rescheduled</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">You're rebooked, ${escape(clientName)}.</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 12px;">New time with <strong>${escape(studioName)}</strong>${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}: <strong>${escape(newWhen)}</strong>.</p>
+    ${oldWhen ? `<p style="font-size:13px;line-height:20px;margin:0 0 14px;color:${C.muted};">Moved from ${escape(oldWhen)}.</p>` : ""}
+    <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">Your existing deposit${depositAmount ? ` of $${depositAmount.toFixed(2)}` : ""} rolled over — no second charge.</p>
+    <p style="font-size:13px;color:${C.muted};line-height:20px;margin-top:18px;">This was your one-time reschedule. Any further changes need to go through ${escape(studioName)} directly.</p>
+  `);
+  return { subject, html };
+};
+
+// ---- stylist_booking_rescheduled (notify stylist) -------------------
+const renderStylistBookingRescheduled = (p: Record<string, any>) => {
+  const clientName = p.clientName || "A client";
+  const serviceName = p.serviceName || null;
+  const fromDate = p.fromDate || null;
+  const fromTime = p.fromTime || null;
+  const toDate = p.toDate || null;
+  const toTime = p.toTime || null;
+  const fromWhen = [fromDate, fromTime].filter(Boolean).join(" · ");
+  const toWhen = [toDate, toTime].filter(Boolean).join(" · ");
+  const subject = `Client rescheduled — ${clientName}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Rescheduled</p>
+    <h1 style="font-size:20px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">${escape(clientName)} moved their appointment.</h1>
+    ${serviceName ? `<p style="font-size:14px;line-height:22px;margin:0 0 10px;color:${C.coffee};"><strong>${escape(serviceName)}</strong></p>` : ""}
+    ${fromWhen ? `<p style="font-size:13px;line-height:20px;margin:0 0 6px;color:${C.muted};">From: ${escape(fromWhen)}</p>` : ""}
+    <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">To: <strong>${escape(toWhen)}</strong></p>
+    <p style="font-size:13px;line-height:20px;margin:0 0 6px;color:${C.coffee};">Deposit rolled over — no new charge. Your calendar has been updated automatically.</p>
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:18px;">Rescheduled via the secure client self-service link. The client has used their one-time reschedule.</p>
+  `);
+  return { subject, html };
+};
+
 // ---- founding_welcome (Founding Stylist Access activation) ---------
 const renderFoundingWelcome = (p: Record<string, any>) => {
   const stylistName = p.stylistName || "Stylist";
@@ -374,6 +512,16 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderBalancePaid(row.payload || {});
     case "appointment_confirmed":
       return renderAppointmentConfirmed(row.payload || {});
+    case "appointment_reminder":
+      return renderAppointmentReminder(row.payload || {});
+    case "client_booking_cancelled":
+      return renderClientBookingCancelled(row.payload || {});
+    case "stylist_booking_cancelled":
+      return renderStylistBookingCancelled(row.payload || {});
+    case "client_booking_rescheduled":
+      return renderClientBookingRescheduled(row.payload || {});
+    case "stylist_booking_rescheduled":
+      return renderStylistBookingRescheduled(row.payload || {});
     case "founding_welcome":
       return renderFoundingWelcome(row.payload || {});
     default:

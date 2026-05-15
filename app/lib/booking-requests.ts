@@ -78,6 +78,18 @@ export type BookingRequestRecord = {
     duration_hours_delta: number;
     include_in_deposit: boolean;
   }> | null;
+  // Client self-service: cancel + one-time reschedule.
+  cancel_token: string | null;
+  reschedule_token: string | null;
+  cancelled_by: string | null;
+  cancellation_reason: string | null;
+  reschedule_count: number;
+  rescheduled_from: string | null;
+  rescheduled_at: string | null;
+  reschedule_token_used_at: string | null;
+  deposit_forfeited: boolean;
+  deposit_rollover: boolean;
+  last_reminder_sent_at: string | null;
   created_at: string;
   updated_at: string;
 };
