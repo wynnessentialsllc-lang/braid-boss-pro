@@ -326,7 +326,10 @@ export const useBookingApprovalQueue = (userId: string | null): {
             depositPaid: depositPaid > 0 ? depositPaid : null,
             remainingBalance,
           },
-          dedupe_key_in: `appointment_confirmed:${row.id}`,
+          // Date in the key so a re-approval after a reschedule
+          // sends a fresh confirmation for the NEW time instead of
+          // being deduped against the original approval's email.
+          dedupe_key_in: `appointment_confirmed:${row.id}:${row.preferred_date || "nodate"}:${row.preferred_time || "notime"}`,
           booking_request_id_in: row.id,
           appointment_id_in: appointmentId,
         });
