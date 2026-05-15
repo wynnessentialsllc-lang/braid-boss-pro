@@ -556,18 +556,16 @@ const isIncomeAppt = (appt: any): boolean => {
 // Sum of outstanding balance across appointments whose payment is
 // pending / partially deposited / overdue. Cancelled and fully-paid
 // records are excluded.
-const calculatePendingBalance = (appts: any[], todayIso: string): number => {
-  if (!Array.isArray(appts)) return 0;
-  return roundCents(appts
-    .filter(a => a && !isCanceledAppointment(a))
-    // Keep the headline Pending Balance stat in lockstep with the
-    // list + sheet: no personal/blocked entries, no dateless
-    // orphans.
-    .filter(isRealAppointment)
-    .filter(a => !!a.date)
-    .map(a => ({ a, ps: paymentStatusOf(a, todayIso) }))
-    .filter(({ ps }) => ps !== "paid")
-    .reduce((s, { a }) => s + parseMoney(a.balanceDue), 0));
+const calculatePendingBalance = (appts: any[], _todayIso: string): number => {
+  // Single source of truth: the headline stat is exactly the sum of
+  // the Pending balances sheet's rows. Previously this summed the raw
+  // stored `a.balanceDue` field while the sheet/list used the
+  // computed ticketBalance (total − depositPaid), so a stale
+  // balanceDue made the card disagree with the sheet (e.g. $730 vs
+  // $655). Deriving from the same helpers guarantees they match.
+  return roundCents(
+    pendingBalanceAppts(appts).reduce((s, a) => s + reportTicketBalance(a), 0),
+  );
 };
 
 const calculateProfit = (income: number, expenses: number): number =>
