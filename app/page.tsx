@@ -12626,10 +12626,11 @@ const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: 
   );
 };
 
-const NotificationsSheet = ({ open, onClose, items, dismiss, clearAll, markAllRead, onTap, readIds }: {
+const NotificationsSheet = ({ open, onClose, items, unreadCount, dismiss, clearAll, markAllRead, onTap, readIds }: {
   open: boolean;
   onClose: () => void;
   items: NotifItem[];
+  unreadCount: number;
   dismiss: (id: string) => void;
   clearAll: () => void;
   markAllRead: () => void;
@@ -12646,10 +12647,13 @@ const NotificationsSheet = ({ open, onClose, items, dismiss, clearAll, markAllRe
         </button>
       }
       rightAction={
-        items.length > 0 ? (
+        unreadCount > 0 ? (
+          // Match the dashboard bell badge exactly (unread +
+          // actionable), not items.length — otherwise the bell says
+          // "1" while this header says "2" for the same state.
           <span className="px-2.5 py-1 rounded-full text-[11px] font-bold"
             style={{ background: C.gold, color: C.espresso, letterSpacing: "0.06em" }}>
-            {items.length}
+            {unreadCount}
           </span>
         ) : undefined
       }>
@@ -20195,6 +20199,7 @@ export default function App() {
         open={notifOpen}
         onClose={() => setNotifOpen(false)}
         items={notifications.items}
+        unreadCount={notifications.unreadCount}
         dismiss={notifications.dismiss}
         clearAll={notifications.clearAll}
         markAllRead={notifications.markAllRead}
