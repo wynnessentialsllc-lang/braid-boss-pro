@@ -7,10 +7,17 @@
 // The auto-claim wiring (link the paid Stripe customer to their
 // eventual sign-up email and stamp profiles.founding_access = true)
 // lands in a follow-up PR. Stripe dashboard is the source of truth
-// for who paid; reconciliation against new sign-ups happens there
-// for the founding cohort.
+// for who paid; reconciliation against new sign-ups happens
+// automatically via:
+//   • /api/founding-checkout/webhook — flips the order to 'paid'
+//     on checkout.session.completed + opportunistically claims the
+//     order for any registered user whose email already matches.
+//   • claim_founding_access_for_user RPC — called by the app after
+//     sign-up; claims any 'paid' orders matching the new user's
+//     email.
 
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,8 +45,12 @@ const baseUrlOf = (req: Request): string => {
 
 export async function POST(req: Request) {
   let stripeSecret: string;
+  let supabaseUrl: string;
+  let serviceKey: string;
   try {
     stripeSecret = env("STRIPE_SECRET_KEY");
+    supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || env("SUPABASE_URL");
+    serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
   } catch (e: any) {
     return fail(500, e?.message || "Server is not configured.");
   }
@@ -88,6 +99,31 @@ export async function POST(req: Request) {
   // a smoother checkout. Optional but improves conversion noticeably.
   form.set("payment_intent_data[setup_future_usage]", "off_session");
 
+  // Pre-insert a pending row in founding_access_orders so the
+  // webhook can find us on checkout.session.completed (the webhook
+  // looks the order up by stripe_session_id). If the row already
+  // somehow exists for the same session id, the webhook's defensive
+  // insert path covers it too.
+  const admin = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data: order, error: orderErr } = await admin
+    .from("founding_access_orders")
+    .insert({
+      customer_email: email || null,
+      amount_cents: FOUNDING_PRICE_CENTS,
+      currency: "usd",
+      status: "pending",
+      metadata: { source: "founding_access_page" },
+    })
+    .select("id")
+    .maybeSingle();
+  if (orderErr || !order?.id) {
+    return fail(500, orderErr?.message || "Couldn't create the order row.");
+  }
+  form.set("metadata[founding_order_id]", String(order.id));
+  form.set("payment_intent_data[metadata][founding_order_id]", String(order.id));
+
   const stripeRes = await fetch(`${STRIPE_API}/checkout/sessions`, {
     method: "POST",
     headers: {
@@ -100,6 +136,12 @@ export async function POST(req: Request) {
   });
   if (!stripeRes.ok) {
     const text = await stripeRes.text().catch(() => "");
+    // Mark the pending row failed so we don't accumulate stuck
+    // pending orders when Stripe rejects the session up front.
+    await admin
+      .from("founding_access_orders")
+      .update({ status: "failed", updated_at: new Date().toISOString() })
+      .eq("id", order.id);
     return fail(
       502,
       `Stripe rejected the session (${stripeRes.status}). ${text.slice(0, 200)}`,
@@ -107,8 +149,19 @@ export async function POST(req: Request) {
   }
   const session = (await stripeRes.json()) as { id?: string; url?: string };
   if (!session.id || !session.url) {
+    await admin
+      .from("founding_access_orders")
+      .update({ status: "failed" })
+      .eq("id", order.id);
     return fail(502, "Stripe returned an unusable session.");
   }
+
+  // Stamp the session id so the webhook can find this row by
+  // stripe_session_id when it fires.
+  await admin
+    .from("founding_access_orders")
+    .update({ stripe_session_id: session.id, updated_at: new Date().toISOString() })
+    .eq("id", order.id);
 
   return NextResponse.json({ url: session.url });
 }
