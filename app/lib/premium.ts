@@ -140,3 +140,60 @@ export const useLifetimeAccess = (userId: string | null): boolean | null => {
 // callback). `profile` is the row from `profiles`.
 export const isPremiumUnlocked = (profile: { lifetime_access?: boolean | null } | null | undefined): boolean =>
   !!profile?.lifetime_access;
+
+// Founding-membership read for the Account page. Returns the boolean
+// 'active' flag (true when either the newer profiles.founding_access
+// or the legacy profiles.lifetime_access is set) along with the
+// activation timestamp when available. Stays simple — caller renders
+// a card; null means 'still loading.'
+export type FoundingMembershipState = {
+  active: boolean | null;
+  activatedAt: string | null;
+};
+
+export const useFoundingMembership = (
+  userId: string | null,
+): FoundingMembershipState => {
+  const [state, setState] = useState<FoundingMembershipState>({
+    active: null,
+    activatedAt: null,
+  });
+
+  useEffect(() => {
+    if (!userId) {
+      setState({ active: false, activatedAt: null });
+      return;
+    }
+    let cancelled = false;
+    const supabase = getSupabase();
+    const refresh = async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("lifetime_access, founding_access, founding_paid_at")
+        .eq("id", userId)
+        .maybeSingle();
+      if (cancelled) return;
+      const founding = !!data?.founding_access;
+      const legacy = !!data?.lifetime_access;
+      setState({
+        active: founding || legacy,
+        activatedAt: data?.founding_paid_at ?? null,
+      });
+    };
+    void refresh();
+    // Re-check when the tab comes back to the foreground so a
+    // freshly-paid customer sees their card flip without a refresh.
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        void refresh();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [userId]);
+
+  return state;
+};
