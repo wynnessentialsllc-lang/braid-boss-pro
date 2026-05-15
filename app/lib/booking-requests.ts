@@ -87,7 +87,10 @@ export const APPROVAL_STATUS_LABEL: Record<ApprovalStatus, string> = {
   approved_pending_deposit:      "Approved · awaiting deposit",
   awaiting_deposit:              "Awaiting deposit",
   deposit_paid_pending_approval: "Deposit paid · needs approval",
-  approved:                      "Approved",
+  // `approved` is the post-confirmation terminal state in the RPC;
+  // surface it to clients as "Confirmed" so the badge matches the
+  // outbound email + the customer's mental model.
+  approved:                      "Confirmed",
   confirmed:                     "Confirmed",
   denied:                        "Denied",
   declined:                      "Declined",
@@ -273,13 +276,59 @@ export const useBookingApprovalQueue = (userId: string | null): {
       appointment_id_in: appointmentId,
     });
     if (err) { setError(err.message); return null; }
+    const row = (data as BookingRequestRecord) || null;
+
+    // Customer-facing confirmation. Distinct from the earlier
+    // "appointment_approved" (pay-deposit) email — this fires once
+    // after the deposit has landed AND the stylist has tapped
+    // Approve & schedule, so the client gets a clean "you're
+    // officially booked" message. Dedupe key is per-request id, so
+    // re-tapping approve (the RPC is idempotent) won't double-send.
+    if (row?.client_email) {
+      try {
+        const { data: studio } = await supabase
+          .rpc("public_get_studio_name", { user_id_in: userId });
+        const studioName = (typeof studio === "string" && studio.trim()) ? studio.trim() : "your stylist";
+        const servicePrice = Number(
+          (row as any).selected_variation_price ?? row.service_price ?? 0,
+        );
+        const depositPaid = Number(row.deposit_amount ?? 0);
+        const remainingBalance = servicePrice > 0
+          ? Math.max(0, servicePrice - depositPaid)
+          : null;
+        await supabase.rpc("queue_notification", {
+          user_id_in: userId,
+          channel_in: "email",
+          notification_type_in: "appointment_confirmed",
+          body_in: "Your appointment has been approved and confirmed.",
+          subject_in: "Your appointment is confirmed — Braid Boss Pro",
+          recipient_email_in: row.client_email,
+          recipient_name_in: row.client_name || null,
+          payload_in: {
+            clientName: row.client_name || "there",
+            studioName,
+            serviceName: row.selected_variation_name || row.service_name || null,
+            preferredDate: row.preferred_date || null,
+            preferredTime: row.preferred_time || null,
+            depositPaid: depositPaid > 0 ? depositPaid : null,
+            remainingBalance,
+          },
+          dedupe_key_in: `appointment_confirmed:${row.id}`,
+          booking_request_id_in: row.id,
+          appointment_id_in: appointmentId,
+        });
+      } catch {
+        // Confirmation already succeeded — email failure shouldn't surface.
+      }
+    }
+
     try {
       await generateAndSendContracts(id, appointmentId);
     } catch {
       // Keep appointment approval non-blocking; status UI can retry.
     }
     await refresh();
-    return (data as BookingRequestRecord) || null;
+    return row;
   };
 
   const generateAndSendContracts: ReturnType<typeof useBookingApprovalQueue>["generateAndSendContracts"] = async (id, appointmentId = null) => {

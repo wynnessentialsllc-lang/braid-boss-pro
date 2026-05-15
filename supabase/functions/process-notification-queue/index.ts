@@ -257,6 +257,54 @@ const renderBalancePaid = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- appointment_confirmed (final approval — deposit already in) ---
+//
+// Distinct from `appointment_approved`, which is the earlier "please
+// pay your deposit" approval email. This one fires after the stylist
+// taps Approve & schedule on a deposit-paid request, so the client
+// gets a clean "officially booked" confirmation with date, time,
+// and remaining balance.
+const renderAppointmentConfirmed = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const serviceName = p.serviceName || null;
+  const date = p.preferredDate || null;
+  const time = p.preferredTime || null;
+  const when = [date, time].filter(Boolean).join(" · ");
+  const depositPaid = Number(p.depositPaid) > 0 ? Number(p.depositPaid) : null;
+  const remainingBalance =
+    p.remainingBalance != null && Number(p.remainingBalance) >= 0
+      ? Number(p.remainingBalance)
+      : null;
+
+  const subject = "Your appointment is confirmed — Braid Boss Pro";
+  const balanceLine = remainingBalance != null
+    ? remainingBalance > 0
+      ? `<p style="font-size:14px;line-height:22px;margin:0 0 12px;color:${C.coffee};">Remaining balance: <strong>$${remainingBalance.toFixed(2)}</strong>${depositPaid ? ` (deposit of $${depositPaid.toFixed(2)} received)` : ""}. Due at your appointment.</p>`
+      : `<p style="font-size:14px;line-height:22px;margin:0 0 12px;color:${C.coffee};">Paid in full${depositPaid ? ` — deposit of $${depositPaid.toFixed(2)} received` : ""}. Nothing more due at your appointment.</p>`
+    : "";
+
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">
+      Confirmed
+    </p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">
+      You're officially booked, ${escape(clientName)}.
+    </h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;">
+      ${escape(studioName)} approved and scheduled your appointment${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}${when ? ` on <strong>${escape(when)}</strong>` : ""}.
+    </p>
+    ${balanceLine}
+    <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">
+      We'll send a reminder closer to the day. If anything changes, reply to this email and ${escape(studioName)} will get it.
+    </p>
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:18px;">
+      See you soon — thanks for booking with Braid Boss Pro.
+    </p>
+  `);
+  return { subject, html };
+};
+
 // ---- founding_welcome (Founding Stylist Access activation) ---------
 const renderFoundingWelcome = (p: Record<string, any>) => {
   const stylistName = p.stylistName || "Stylist";
@@ -324,6 +372,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderDepositReceived(row.payload || {});
     case "balance_paid":
       return renderBalancePaid(row.payload || {});
+    case "appointment_confirmed":
+      return renderAppointmentConfirmed(row.payload || {});
     case "founding_welcome":
       return renderFoundingWelcome(row.payload || {});
     default:
