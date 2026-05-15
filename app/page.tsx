@@ -12952,6 +12952,34 @@ const useCloudSync = (userId: string | null, store: any) => {
           await tryUpsert(table, userId, r);
           snap.current[table].set(r.id, hash);
         }
+        // DATA-LOSS GUARD. The delete pass below removes any cloud
+        // record that's in our last-synced snapshot but missing from
+        // the local store. That's correct for a genuine single
+        // delete, but catastrophic when the local store is empty or
+        // only partially hydrated — e.g. Safari Private mode wipes
+        // localStorage between sessions, so the app boots with zero
+        // local appointments while the snapshot still lists them, and
+        // the naive diff would delete every appointment from the
+        // cloud. (This is exactly how Kimberley Maxwell's appointment
+        // was lost.) An empty local array is NEVER a legitimate
+        // "user deleted everything" signal — it means "not loaded
+        // yet". Likewise, local shrinking to a small fraction of the
+        // snapshot is the signature of a wipe, not normal editing.
+        // In either case, skip deletes for this table and leave the
+        // snapshot intact so the next hydrated render reconciles
+        // normally.
+        const snapSize = snap.current[table].size;
+        const looksLikeWipe =
+          snapSize > 0 &&
+          (seen.size === 0 || (snapSize >= 4 && seen.size < snapSize * 0.5));
+        if (looksLikeWipe) {
+          if (typeof console !== "undefined") {
+            console.warn(
+              `[bbp] sync: skipping ${table} delete pass — local has ${seen.size}/${snapSize}, looks like an unhydrated/wiped store, not a user deletion.`,
+            );
+          }
+          continue;
+        }
         for (const id of Array.from(snap.current[table].keys())) {
           if (seen.has(id)) continue;
           dirty = true;
