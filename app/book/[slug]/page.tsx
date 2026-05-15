@@ -693,6 +693,8 @@ export default function PublicBookingPage() {
     setSubmitError(null);
     if (!name.trim()) { setSubmitError("Please enter your name."); return; }
     if (!phone.trim() && !email.trim()) { setSubmitError("Phone or email is required."); return; }
+    if (!preferredDate) { setSubmitError("Please pick a date for your appointment."); return; }
+    if (!preferredTime) { setSubmitError("Please pick a time for your appointment."); return; }
     setSubmitting(true);
     try {
       // When catalog is in play we send the real service snapshot
