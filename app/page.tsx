@@ -71,6 +71,7 @@ import {
   isPaymentLinkConfigured,
   openCheckout,
   useLifetimeAccess,
+  useFoundingMembership,
 } from "./lib/premium";
 import {
   GUEST_LIMITS,
@@ -13531,6 +13532,10 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [authSheetMode, setAuthSheetMode] = useState<AuthMode2 | null>(null);
   const lifetimeAccess = useLifetimeAccess(userId);
+  // Founding-access membership read — same source row as
+  // useLifetimeAccess plus the founding_paid_at timestamp so the
+  // Account card can show the activation date.
+  const foundingMembership = useFoundingMembership(userId);
   const paymentLinkReady = isPaymentLinkConfigured();
 
   useEffect(() => {
@@ -13606,7 +13611,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
         } else if (typeof Notification !== "undefined" && Notification.permission === "denied") {
           setPushError("Notifications are off. Re-enable them for this site in your browser settings, or turn them on later in Account & Sync.");
         } else {
-          setPushError("This browser doesn't support push notifications. iOS push will activate when you install the App Store build — your subscription will carry over.");
+          setPushError("This browser does not currently support web push. Install Braid Boss Pro to your home screen to unlock the full mobile app experience on supported devices.");
         }
       }
       const cap = await detectPushCapability();
@@ -14009,29 +14014,59 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
         )}
 
         {mode === "authed" && userId && (
-          lifetimeAccess === true ? (
+          foundingMembership.active === true ? (
             <Card className="p-4">
-              <div className="flex items-center gap-3">
+              <div className="flex items-start gap-3">
                 <div
                   aria-hidden
                   style={{
                     width: 36, height: 36, borderRadius: 999, display: "grid", placeItems: "center",
                     background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
                     color: C.paper,
+                    flexShrink: 0,
                   }}
                 >
                   <Sparkles size={18} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.goldDeep, letterSpacing: "0.12em" }}>
-                    Lifetime Access
+                    Founding Stylist Access
                   </p>
                   <p className="text-sm font-semibold mt-0.5" style={{ color: C.espresso }}>
-                    Activated — thank you.
+                    Lifetime access active
                   </p>
+                  <p className="text-[11px] mt-1" style={{ color: C.muted, lineHeight: 1.5 }}>
+                    Your account is grandfathered into lifetime platform access.
+                  </p>
+                  {foundingMembership.activatedAt && (() => {
+                    // Defensive date format — if the column ever
+                    // carries a malformed string we render nothing
+                    // rather than 'Invalid Date'.
+                    let formatted: string | null = null;
+                    try {
+                      const d = new Date(foundingMembership.activatedAt);
+                      if (!Number.isNaN(d.getTime())) {
+                        formatted = d.toLocaleDateString("en-US", {
+                          month: "long",
+                          day: "numeric",
+                          year: "numeric",
+                        });
+                      }
+                    } catch { /* ignore — hide the line */ }
+                    if (!formatted) return null;
+                    return (
+                      <p className="text-[11px] mt-2" style={{ color: C.muted, letterSpacing: "0.04em" }}>
+                        Activated: <span style={{ color: C.espresso, fontWeight: 600 }}>{formatted}</span>
+                      </p>
+                    );
+                  })()}
                 </div>
               </div>
             </Card>
+          ) : foundingMembership.active === null ? (
+            // Loading — render nothing rather than flash a paywall
+            // prompt. The card resolves once the profile row loads.
+            null
           ) : (
             <Card className="p-4">
               <div className="flex items-center gap-3 mb-3">
@@ -14099,7 +14134,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
                 : pushCap === "blocked"
                   ? "Notifications are blocked for this site. Re-enable them in your browser settings."
                   : pushCap === "unsupported"
-                    ? "This browser doesn't support web push. Push notifications will activate on iOS when you install the App Store build."
+                    ? "This browser does not currently support web push. Install Braid Boss Pro to your home screen to unlock the full mobile app experience on supported devices."
                     : "Get a quiet ping when something needs your attention. You can turn this off any time."}
             </p>
             {pushCap === "subscribed" ? (
