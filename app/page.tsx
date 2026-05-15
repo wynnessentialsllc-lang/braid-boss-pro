@@ -12968,6 +12968,50 @@ const useCloudSync = (userId: string | null, store: any) => {
     })().catch(() => setState("error"));
   }, [userId, store.clients, store.appointments, store.quotes, store.receipts, store.commLog, store.photos, store.business, store.reminderSettings]);
 
+  // Re-pull appointments when the app returns to the foreground.
+  //
+  // After the initial login pull, cloud sync is push-only. That
+  // means server-side appointment changes the stylist's device
+  // didn't make — a client cancel/reschedule via the secure token
+  // RPCs, or an admin edit — never reach the local calendar, and
+  // the stale local copy gets re-pushed, clobbering the server's
+  // cancellation. This reconciles the calendar with cloud truth on
+  // every foreground, then re-seeds the diff snapshot so the
+  // immediately-following push doesn't overwrite what we just
+  // pulled. Mirrors the initial-pull replace+seed pattern.
+  useEffect(() => {
+    if (!userId || !store?.premium) return;
+    if (typeof document === "undefined") return;
+    let busy = false;
+    const reconcile = async () => {
+      if (busy || !initialPullDone.current) return;
+      if (document.visibilityState !== "visible") return;
+      if (!navigator.onLine) return;
+      busy = true;
+      try {
+        const fresh = await syncAppointments.pull(userId);
+        if (Array.isArray(fresh)) {
+          store.replaceCloudState?.({ appointments: fresh });
+          snap.current.appointments.clear();
+          for (const r of fresh) {
+            if (r?.id) snap.current.appointments.set(r.id, JSON.stringify(r));
+          }
+        }
+      } catch {
+        /* best-effort — next foreground retries */
+      } finally {
+        busy = false;
+      }
+    };
+    const onVis = () => { void reconcile(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onVis);
+    };
+  }, [userId, store]);
+
   // Drain the offline write queue whenever connectivity resumes.
   useEffect(() => {
     if (!userId || typeof window === "undefined" || !store?.premium) return;
