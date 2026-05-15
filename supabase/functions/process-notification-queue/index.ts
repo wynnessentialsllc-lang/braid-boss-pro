@@ -257,6 +257,35 @@ const renderBalancePaid = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- founding_welcome (Founding Stylist Access activation) ---------
+const renderFoundingWelcome = (p: Record<string, any>) => {
+  const stylistName = p.stylistName || "Stylist";
+  const appUrl = String(p.appUrl || "https://braidbosspro.app").trim() || "https://braidbosspro.app";
+  const subject = "Welcome to Braid Boss Pro, Founding Stylist";
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">
+      Founding Stylist Access
+    </p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">
+      Welcome to Braid Boss Pro, ${escape(stylistName)}.
+    </h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;">
+      You're officially part of the first 100 founding stylists.
+    </p>
+    <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">
+      Your lifetime access is active, and your account is grandfathered into Braid Boss Pro as the platform grows.
+    </p>
+    <p style="font-size:14px;line-height:22px;margin:0 0 18px;color:${C.coffee};">
+      You can now set up your services, booking link, deposits, clients, storefront, contracts, and business tools.
+    </p>
+    ${ctaButton("Open Braid Boss Pro", appUrl)}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;text-align:center;margin-top:14px;">
+      Thank you for backing us early — we're building this with stylists like you in mind.
+    </p>
+  `);
+  return { subject, html };
+};
+
 // ---- generic fallback -----------------------------------------------
 const renderGeneric = (row: ClaimedRow) => {
   const subject = row.subject || "Notification from Braid Boss Pro";
@@ -295,6 +324,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderDepositReceived(row.payload || {});
     case "balance_paid":
       return renderBalancePaid(row.payload || {});
+    case "founding_welcome":
+      return renderFoundingWelcome(row.payload || {});
     default:
       return renderGeneric(row);
   }

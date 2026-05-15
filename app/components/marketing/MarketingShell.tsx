@@ -6,7 +6,7 @@
 // chrome without each page redeclaring it.
 
 import Link from "next/link";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { C, FONT_BODY, FONT_DISPLAY, GRADIENTS, SHADOWS } from "./tokens";
 
 export const MarketingShell = ({ children }: { children: ReactNode }) => {
@@ -72,59 +72,197 @@ export const MarketingShell = ({ children }: { children: ReactNode }) => {
   );
 };
 
-const MarketingHeader = () => (
-  <header
-    style={{
-      position: "sticky",
-      top: 0,
-      zIndex: 30,
-      background: "rgba(255, 255, 255, 0.85)",
-      backdropFilter: "saturate(180%) blur(12px)",
-      borderBottom: `1px solid ${C.brandBorder}`,
-      paddingTop: "calc(env(safe-area-inset-top, 0px))",
-    }}
-  >
-    <div
-      className="max-w-[1100px] mx-auto flex items-center justify-between"
-      style={{ padding: "14px 20px" }}
+const MARKETING_NAV_LINKS: Array<{ href: string; label: string }> = [
+  { href: "/features", label: "Features" },
+  { href: "/how-it-works", label: "How it works" },
+  { href: "/pricing", label: "Pricing" },
+  { href: "/faq", label: "FAQ" },
+];
+
+const MarketingHeader = () => {
+  const [open, setOpen] = useState(false);
+
+  // Lock background scroll while the drawer is open and close on Escape.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <header
+      style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 30,
+        background: "rgba(255, 255, 255, 0.85)",
+        backdropFilter: "saturate(180%) blur(12px)",
+        borderBottom: `1px solid ${C.brandBorder}`,
+        paddingTop: "calc(env(safe-area-inset-top, 0px))",
+      }}
     >
-      <Link href="/" style={{ textDecoration: "none" }}>
-        <span
+      <div
+        className="max-w-[1100px] mx-auto flex items-center justify-between"
+        style={{ padding: "14px 20px" }}
+      >
+        <Link href="/" style={{ textDecoration: "none" }} onClick={() => setOpen(false)}>
+          <span
+            style={{
+              fontSize: 14,
+              fontWeight: 800,
+              letterSpacing: "0.22em",
+              textTransform: "uppercase",
+              color: C.brandPrimary,
+            }}
+          >
+            Braid Boss Pro
+          </span>
+        </Link>
+
+        {/* Desktop nav — kept inline for sm+ screens. */}
+        <nav className="hidden sm:flex items-center" style={{ gap: 18 }}>
+          {MARKETING_NAV_LINKS.map((l) => (
+            <Link key={l.href} href={l.href} style={marketingNavLink}>
+              {l.label}
+            </Link>
+          ))}
+          <Link
+            href="/"
+            style={{
+              ...marketingNavLink,
+              padding: "8px 14px",
+              borderRadius: 999,
+              border: `1px solid ${C.brandBorder}`,
+              color: C.brandPrimary,
+            }}
+          >
+            Sign in
+          </Link>
+        </nav>
+
+        {/* Mobile hamburger trigger. */}
+        <button
+          type="button"
+          aria-label={open ? "Close menu" : "Open menu"}
+          aria-expanded={open}
+          aria-controls="bbp-mobile-nav"
+          onClick={() => setOpen((v) => !v)}
+          className="sm:hidden"
           style={{
-            fontSize: 14,
-            fontWeight: 800,
-            letterSpacing: "0.22em",
-            textTransform: "uppercase",
+            appearance: "none",
+            background: "transparent",
+            border: `1px solid ${C.brandBorder}`,
+            borderRadius: 12,
+            width: 40,
+            height: 40,
+            display: "grid",
+            placeItems: "center",
             color: C.brandPrimary,
           }}
         >
-          Braid Boss Pro
-        </span>
-      </Link>
-      <nav className="flex items-center" style={{ gap: 14 }}>
-        <Link href="/features" style={marketingNavLink}>
-          Features
-        </Link>
-        <Link
-          href="/how-it-works"
-          className="hidden sm:inline-block"
-          style={marketingNavLink}
+          <span aria-hidden style={{ position: "relative", width: 18, height: 14, display: "inline-block" }}>
+            <span style={hamburgerLine(open ? "translateY(6px) rotate(45deg)" : "translateY(0) rotate(0)", 0)} />
+            <span style={hamburgerLine(open ? "scaleX(0)" : "scaleX(1)", 6)} />
+            <span style={hamburgerLine(open ? "translateY(-6px) rotate(-45deg)" : "translateY(0) rotate(0)", 12)} />
+          </span>
+        </button>
+      </div>
+
+      {/* Drawer — slides under the sticky header. Uses pointer-events
+          gating so it never blocks taps when closed. */}
+      <div
+        id="bbp-mobile-nav"
+        className="sm:hidden"
+        style={{
+          position: "fixed",
+          left: 0,
+          right: 0,
+          top: 0,
+          bottom: 0,
+          paddingTop: "calc(env(safe-area-inset-top, 0px) + 68px)",
+          background: "rgba(21, 17, 26, 0.45)",
+          backdropFilter: "blur(4px)",
+          opacity: open ? 1 : 0,
+          pointerEvents: open ? "auto" : "none",
+          transition: "opacity 220ms ease",
+          zIndex: 29,
+        }}
+        onClick={() => setOpen(false)}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            background: "#FFFFFF",
+            margin: "0 12px",
+            borderRadius: 20,
+            border: `1px solid ${C.brandBorder}`,
+            boxShadow: SHADOWS.cardLifted,
+            padding: "16px 14px calc(20px + env(safe-area-inset-bottom, 0px))",
+            transform: open ? "translateY(0)" : "translateY(-10px)",
+            transition: "transform 240ms cubic-bezier(.2,.8,.2,1)",
+          }}
         >
-          How it works
-        </Link>
-        <Link href="/pricing" style={marketingNavLink}>
-          Pricing
-        </Link>
-        <Link href="/faq" className="hidden sm:inline-block" style={marketingNavLink}>
-          FAQ
-        </Link>
-        <Link href="/" style={marketingNavLink}>
-          Sign in
-        </Link>
-      </nav>
-    </div>
-  </header>
-);
+          <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {MARKETING_NAV_LINKS.map((l) => (
+              <Link
+                key={l.href}
+                href={l.href}
+                onClick={() => setOpen(false)}
+                style={mobileDrawerLink}
+              >
+                {l.label}
+              </Link>
+            ))}
+            <div style={{ height: 1, background: C.brandBorder, margin: "8px 4px" }} />
+            <Link
+              href="/"
+              onClick={() => setOpen(false)}
+              style={{
+                ...mobileDrawerLink,
+                color: "#FFFFFF",
+                background: GRADIENTS.primary,
+                textAlign: "center",
+                boxShadow: SHADOWS.primaryGlow,
+              }}
+            >
+              Sign in
+            </Link>
+          </nav>
+        </div>
+      </div>
+    </header>
+  );
+};
+
+const hamburgerLine = (transform: string, top: number): React.CSSProperties => ({
+  position: "absolute",
+  left: 0,
+  top,
+  width: 18,
+  height: 2,
+  background: "currentColor",
+  borderRadius: 2,
+  transformOrigin: "center",
+  transform,
+  transition: "transform 220ms ease",
+});
+
+const mobileDrawerLink: React.CSSProperties = {
+  display: "block",
+  padding: "14px 12px",
+  borderRadius: 12,
+  fontSize: 15,
+  fontWeight: 700,
+  letterSpacing: "0.02em",
+  color: C.ink,
+  textDecoration: "none",
+};
 
 const marketingNavLink: React.CSSProperties = {
   fontSize: 13,
