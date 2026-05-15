@@ -15,7 +15,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { getSupabase } from "../../../lib/supabase";
-import { fetchPublicAvailability, type PublicSlot } from "../../../lib/services";
+import {
+  fetchPublicAvailability,
+  fetchPublicMonthAvailability,
+  type PublicSlot,
+  type MonthDay,
+} from "../../../lib/services";
+import { AvailabilityCalendar } from "../../../components/booking/AvailabilityCalendar";
 
 const C = {
   espresso: "#15111A", coffee: "#3D3447", paper: "#FFFFFF",
@@ -42,10 +48,6 @@ type ActionState = {
   service_duration_hours: number;
 };
 
-const todayIso = (): string => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
 
 const fmtDateLong = (iso: string | null): string => {
   if (!iso) return "";
@@ -108,7 +110,14 @@ export default function ReschedulePage() {
   const [state, setState] = useState<ActionState | null>(null);
   const [errorReason, setErrorReason] = useState<string | null>(null);
 
-  const [newDate, setNewDate] = useState<string>(todayIso());
+  const [newDate, setNewDate] = useState<string>("");
+  const [monthCursor, setMonthCursor] = useState<{ year: number; month: number }>(() => {
+    const d = new Date();
+    return { year: d.getFullYear(), month: d.getMonth() + 1 };
+  });
+  const [monthDays, setMonthDays] = useState<MonthDay[]>([]);
+  const [monthLoading, setMonthLoading] = useState(false);
+  const [monthError, setMonthError] = useState<string | null>(null);
   const [slots, setSlots] = useState<PublicSlot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
@@ -133,6 +142,34 @@ export default function ReschedulePage() {
     })();
     return () => { cancelled = true; };
   }, [token]);
+
+  // Load month-level availability so the calendar can show which
+  // days the stylist has openings — same view as the booking link.
+  useEffect(() => {
+    if (!state?.link_slug) return;
+    let cancelled = false;
+    (async () => {
+      setMonthLoading(true);
+      setMonthError(null);
+      const durationMinutes = Math.round((state.service_duration_hours || 1) * 60);
+      const res = await fetchPublicMonthAvailability({
+        slug: state.link_slug!,
+        year: monthCursor.year,
+        month: monthCursor.month,
+        durationMinutes,
+      });
+      if (cancelled) return;
+      setMonthLoading(false);
+      if (!res.ok) { setMonthError(res.error || "Couldn't load availability."); return; }
+      setMonthDays(res.days);
+    })();
+    return () => { cancelled = true; };
+  }, [state?.link_slug, state?.service_duration_hours, monthCursor.year, monthCursor.month]);
+
+  const monthHasAnyAvailability = useMemo(
+    () => monthDays.some(d => d.status === "available" || d.status === "limited"),
+    [monthDays],
+  );
 
   // Fetch slots whenever the chosen date changes.
   useEffect(() => {
@@ -253,42 +290,37 @@ export default function ReschedulePage() {
           </p>
         </div>
 
-        <label style={{ display: "block", marginBottom: 16 }}>
-          <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.04em", color: C.coffee, display: "block", marginBottom: 6 }}>
-            New date
+        <div style={{ marginBottom: 16 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.04em", color: C.coffee, display: "block", marginBottom: 8 }}>
+            Pick a new date
           </span>
-          <input
-            type="date"
-            min={todayIso()}
-            value={newDate}
-            onChange={(e) => setNewDate(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "12px 14px",
-              borderRadius: 12,
-              border: `1px solid ${C.hairline}`,
-              fontFamily: FONT_BODY,
-              fontSize: 15,
-              color: C.espresso,
-              background: C.paper,
-              outline: "none",
-              boxSizing: "border-box",
-            }}
+          <AvailabilityCalendar
+            monthCursor={monthCursor}
+            setMonthCursor={setMonthCursor}
+            monthDays={monthDays}
+            monthLoading={monthLoading}
+            monthError={monthError}
+            monthHasAnyAvailability={monthHasAnyAvailability}
+            selectedDate={newDate}
+            onSelectDate={(iso) => { setNewDate(iso); setPickedTime(null); }}
           />
-        </label>
+        </div>
 
         <div style={{ marginBottom: 18 }}>
           <p style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.04em", color: C.coffee, margin: "0 0 8px" }}>
             Available times
           </p>
-          {slotsLoading && <p style={{ margin: 0, fontSize: 13, color: C.muted }}>Loading…</p>}
-          {!slotsLoading && slotsError && (
+          {!newDate && (
+            <p style={{ margin: 0, fontSize: 13, color: C.muted }}>Pick a date above to see open times.</p>
+          )}
+          {newDate && slotsLoading && <p style={{ margin: 0, fontSize: 13, color: C.muted }}>Loading…</p>}
+          {newDate && !slotsLoading && slotsError && (
             <p style={{ margin: 0, fontSize: 13, color: C.danger }}>{slotsError}</p>
           )}
-          {!slotsLoading && !slotsError && slots.length === 0 && (
+          {newDate && !slotsLoading && !slotsError && slots.length === 0 && (
             <p style={{ margin: 0, fontSize: 13, color: C.muted }}>No openings on this day. Try another date.</p>
           )}
-          {!slotsLoading && slots.length > 0 && (
+          {newDate && !slotsLoading && slots.length > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
               {slots.map((slot) => {
                 const active = pickedTime === slot.time;
