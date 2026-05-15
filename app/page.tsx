@@ -11965,14 +11965,44 @@ const buildNotifications = (store: any): NotifItem[] => {
     const amount = Number(r.deposit_amount) || 0;
     const dateLabel = r.preferred_date ? fmtDate(r.preferred_date) : "no date";
     const timeLabel = r.preferred_time ? ` at ${fmtTime(r.preferred_time)}` : "";
+    const isReschedule = Number(r.reschedule_count) > 0;
     items.push({
       id: `appr_${r.id}`,
       category: "appointment",
       kind: "booking_approval_pending",
       tone: "gold",
       icon: <DollarSign size={16} style={{ color: C.goldDeep }} />,
-      title: `${r.client_name || "Client"} paid deposit · needs approval`,
-      body: `${r.service_name || "Service"} · ${dateLabel}${timeLabel}${amount > 0 ? ` · ${fmtMoney(amount, currency)} deposit` : ""}`,
+      title: isReschedule
+        ? `${r.client_name || "Client"} rescheduled · needs approval`
+        : `${r.client_name || "Client"} paid deposit · needs approval`,
+      body: isReschedule
+        ? `New time requested: ${r.service_name || "Service"} · ${dateLabel}${timeLabel}. Approve to add it to your calendar.`
+        : `${r.service_name || "Service"} · ${dateLabel}${timeLabel}${amount > 0 ? ` · ${fmtMoney(amount, currency)} deposit` : ""}`,
+      meta: "Tap to review",
+      target: { kind: "booking_approval", requestId: r.id },
+    });
+  }
+
+  // APPOINTMENT — a client cancelled via their self-service link.
+  // The booking + calendar slot are already released server-side;
+  // this is the heads-up so the stylist isn't blindsided. Only
+  // surface recent ones (last 14 days) so the bell doesn't carry
+  // ancient cancellations forever.
+  const recentClientCancels = safeApprovals.filter((r: any) =>
+    r && r.approval_status === "cancelled" && r.cancelled_by === "client" &&
+    r.cancelled_at && (now - new Date(r.cancelled_at).getTime()) < 14 * 24 * 60 * 60 * 1000
+  );
+  for (const r of recentClientCancels) {
+    const dateLabel = r.preferred_date ? fmtDate(r.preferred_date) : "their appointment";
+    const timeLabel = r.preferred_time ? ` at ${fmtTime(r.preferred_time)}` : "";
+    items.push({
+      id: `cxl_${r.id}`,
+      category: "appointment",
+      kind: "booking_cancelled",
+      tone: "danger",
+      icon: <AlertCircle size={16} style={{ color: C.danger }} />,
+      title: `${r.client_name || "Client"} cancelled`,
+      body: `${r.service_name || "Appointment"} · ${dateLabel}${timeLabel}${r.deposit_forfeited ? " · deposit forfeited" : ""}. Slot released from your calendar.`,
       meta: "Tap to review",
       target: { kind: "booking_approval", requestId: r.id },
     });
