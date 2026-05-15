@@ -560,6 +560,11 @@ const calculatePendingBalance = (appts: any[], todayIso: string): number => {
   if (!Array.isArray(appts)) return 0;
   return roundCents(appts
     .filter(a => a && !isCanceledAppointment(a))
+    // Keep the headline Pending Balance stat in lockstep with the
+    // list + sheet: no personal/blocked entries, no dateless
+    // orphans.
+    .filter(isRealAppointment)
+    .filter(a => !!a.date)
     .map(a => ({ a, ps: paymentStatusOf(a, todayIso) }))
     .filter(({ ps }) => ps !== "paid")
     .reduce((s, { a }) => s + parseMoney(a.balanceDue), 0));
@@ -763,6 +768,12 @@ const getPendingBalanceAppointments = (appointments: any[], todayIso: string): a
   if (!Array.isArray(appointments)) return [];
   return appointments
     .filter(a => a && !isCanceledAppointment(a))
+    // Personal / blocked-time entries aren't real bookings, and a
+    // pending balance with no date is meaningless (orphaned/aborted
+    // booking). Both must stay out of the dashboard list, count, and
+    // the derived Pending Balance total — mirrors lib/reports.ts.
+    .filter(isRealAppointment)
+    .filter(a => !!a.date)
     .filter(a => parseMoney(a.balanceDue) > 0)
     .filter(a => paymentStatusOf(a, todayIso) !== "paid")
     .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
@@ -3928,7 +3939,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
                 </Card>
               ))}
               {pendingBalanceAppts.length > 4 && (
-                <button type="button" onClick={() => setActive("schedule")}
+                <button type="button" onClick={() => openKpi("pending")}
                   className="w-full text-center text-xs font-semibold py-2"
                   style={{ color: C.goldDeep }}>
                   View all {pendingBalanceAppts.length} pending →
