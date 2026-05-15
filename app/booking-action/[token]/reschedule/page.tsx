@@ -181,16 +181,16 @@ export default function ReschedulePage() {
       <Wrap>
         <Card>
           <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.18em", textTransform: "uppercase", color: C.brandDeep, margin: "0 0 10px" }}>
-            Rescheduled
+            Reschedule requested
           </p>
           <h1 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 28, lineHeight: 1.15, margin: "0 0 14px", color: C.espresso }}>
-            You're rebooked.
+            Request sent.
           </h1>
           <p style={{ margin: "0 0 8px", fontSize: 15, lineHeight: 1.55, color: C.coffee }}>
-            New appointment: <strong>{fmtDateLong(done.date)} · {fmtTime(done.time)}</strong>
+            Requested time: <strong>{fmtDateLong(done.date)} · {fmtTime(done.time)}</strong>
           </p>
           <p style={{ margin: 0, fontSize: 14, color: C.muted, lineHeight: 1.55 }}>
-            Your deposit rolled over. Your stylist has been notified. You'll see a confirmation in your email shortly.
+            Your deposit rolls over — no new charge. Your stylist needs to confirm the new time; you'll get an email once it's approved.
           </p>
         </Card>
       </Wrap>

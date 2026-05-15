@@ -408,13 +408,14 @@ const renderClientBookingRescheduled = (p: Record<string, any>) => {
   const newWhen = [newDate, newTime].filter(Boolean).join(" · ");
   const oldWhen = [oldDate, oldTime].filter(Boolean).join(" · ");
   const depositAmount = Number(p.depositAmount) > 0 ? Number(p.depositAmount) : null;
-  const subject = "Your appointment was rescheduled";
+  const subject = "Reschedule request received";
   const html = wrapHtml(subject, `
-    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Rescheduled</p>
-    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">You're rebooked, ${escape(clientName)}.</h1>
-    <p style="font-size:15px;line-height:24px;margin:0 0 12px;">New time with <strong>${escape(studioName)}</strong>${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}: <strong>${escape(newWhen)}</strong>.</p>
-    ${oldWhen ? `<p style="font-size:13px;line-height:20px;margin:0 0 14px;color:${C.muted};">Moved from ${escape(oldWhen)}.</p>` : ""}
-    <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">Your existing deposit${depositAmount ? ` of $${depositAmount.toFixed(2)}` : ""} rolled over — no second charge.</p>
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Reschedule requested</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">We got your request, ${escape(clientName)}.</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 12px;">Requested time with <strong>${escape(studioName)}</strong>${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}: <strong>${escape(newWhen)}</strong>.</p>
+    ${oldWhen ? `<p style="font-size:13px;line-height:20px;margin:0 0 14px;color:${C.muted};">Moving from ${escape(oldWhen)}.</p>` : ""}
+    <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">Your existing deposit${depositAmount ? ` of $${depositAmount.toFixed(2)}` : ""} rolls over — no second charge.</p>
+    <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};"><strong>${escape(studioName)} still needs to confirm the new time.</strong> We'll email you the moment it's approved.</p>
     <p style="font-size:13px;color:${C.muted};line-height:20px;margin-top:18px;">This was your one-time reschedule. Any further changes need to go through ${escape(studioName)} directly.</p>
   `);
   return { subject, html };
@@ -430,15 +431,15 @@ const renderStylistBookingRescheduled = (p: Record<string, any>) => {
   const toTime = p.toTime || null;
   const fromWhen = [fromDate, fromTime].filter(Boolean).join(" · ");
   const toWhen = [toDate, toTime].filter(Boolean).join(" · ");
-  const subject = `Client rescheduled — ${clientName}`;
+  const subject = `Reschedule request — ${clientName}`;
   const html = wrapHtml(subject, `
-    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Rescheduled</p>
-    <h1 style="font-size:20px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">${escape(clientName)} moved their appointment.</h1>
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Action needed</p>
+    <h1 style="font-size:20px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">${escape(clientName)} requested a new time.</h1>
     ${serviceName ? `<p style="font-size:14px;line-height:22px;margin:0 0 10px;color:${C.coffee};"><strong>${escape(serviceName)}</strong></p>` : ""}
     ${fromWhen ? `<p style="font-size:13px;line-height:20px;margin:0 0 6px;color:${C.muted};">From: ${escape(fromWhen)}</p>` : ""}
     <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">To: <strong>${escape(toWhen)}</strong></p>
-    <p style="font-size:13px;line-height:20px;margin:0 0 6px;color:${C.coffee};">Deposit rolled over — no new charge. Your calendar has been updated automatically.</p>
-    <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:18px;">Rescheduled via the secure client self-service link. The client has used their one-time reschedule.</p>
+    <p style="font-size:14px;line-height:22px;margin:0 0 6px;color:${C.coffee};">The original slot has been released. <strong>Open Braid Boss Pro and approve the new time</strong> to put it on your calendar — the deposit rolls over, no new charge.</p>
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:18px;">Requested via the secure client self-service link. The client has used their one-time reschedule.</p>
   `);
   return { subject, html };
 };
