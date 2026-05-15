@@ -154,35 +154,13 @@ begin
   exception when others then null;
   end;
 
-  -- Client confirmation — pending, not final.
-  if br.client_email is not null then
-    begin
-      perform public.queue_notification(
-        user_id_in           => br.user_id,
-        channel_in           => 'email',
-        notification_type_in => 'client_booking_rescheduled',
-        body_in              => 'Your reschedule request was received.',
-        subject_in           => 'Reschedule request received',
-        recipient_email_in   => br.client_email,
-        recipient_name_in    => br.client_name,
-        payload_in           => jsonb_build_object(
-          'clientName',  coalesce(br.client_name, 'there'),
-          'studioName',  studio_name,
-          'serviceName', service_label,
-          'fromDate',    (old_start_ts at time zone 'UTC')::date,
-          'fromTime',    to_char(old_start_ts at time zone 'UTC', 'HH24:MI'),
-          'preferredDate', new_date_in,
-          'preferredTime', new_time_in,
-          'depositRollover', true,
-          'depositAmount', br.deposit_amount,
-          'pendingApproval', true
-        ),
-        dedupe_key_in        => 'client_booking_rescheduled:' || br.id::text || ':' || new_date_in::text || ':' || new_time_in,
-        booking_request_id_in => br.id
-      );
-    exception when others then null;
-    end;
-  end if;
+  -- NOTE: no client email here on purpose. A reschedule confirmation
+  -- must not go out until the stylist actually approves the new time.
+  -- The client gets the existing `appointment_confirmed` email at
+  -- that point (queued by confirmApproval when the stylist taps
+  -- Approve & schedule), which already carries the new date/time.
+  -- The reschedule page itself shows "request sent, pending
+  -- approval" so the client still has immediate feedback.
 
   return jsonb_build_object(
     'ok', true,
