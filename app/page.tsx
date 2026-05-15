@@ -19499,6 +19499,39 @@ export default function App() {
   const availabilityApi = useAvailability(auth.userId);
   const waitlistApi = useWaitlist(auth.userId);
   const approvalsApi = useBookingApprovalQueue(auth.userId);
+
+  // Bridge: the Approvals queue pulls booking_requests LIVE on every
+  // refresh, so it reliably knows when a client cancelled (via the
+  // secure token link) — but the appointments store is push-only and
+  // doesn't see the server-side appointment cancellation, so the slot
+  // lingers on the calendar / Pending balances and the stale local
+  // copy gets re-pushed. Reconcile here: any cancelled booking_request
+  // with a linked appointment flips its local appointment to
+  // cancelled. Idempotent — once the local row is cancelled the
+  // condition is false and this no-ops.
+  useEffect(() => {
+    const reqs = approvalsApi?.requests;
+    if (!Array.isArray(reqs) || reqs.length === 0) return;
+    const appts = rawStore?.appointments;
+    if (!Array.isArray(appts) || appts.length === 0) return;
+    const isCancelled = (s: unknown) => s === "cancelled" || s === "canceled";
+    for (const r of reqs) {
+      const cancelled = r && (r.approval_status === "cancelled" || !!r.cancelled_at);
+      if (!cancelled || !r.appointment_id) continue;
+      const local = appts.find((a: any) => a?.id === r.appointment_id);
+      if (!local || isCancelled(local.status)) continue;
+      void rawStore.upsertAppointment({
+        ...local,
+        status: "cancelled",
+        cancelledAt: local.cancelledAt || r.cancelled_at || new Date().toISOString(),
+        cancellationReason:
+          local.cancellationReason ||
+          r.cancellation_reason ||
+          "Client cancelled via secure link",
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [approvalsApi?.requests, rawStore?.appointments]);
   const [upgradeFor, setUpgradeFor] = useState<GatedFeature | null>(null);
   const requestUpgrade = useCallback((feature: GatedFeature) => {
     setUpgradeFor(feature);
