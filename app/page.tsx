@@ -12706,6 +12706,21 @@ const useAuth = () => {
   useEffect(() => {
     const supabase = getSupabase();
     let cancelled = false;
+    // Fire-and-forget founding-access claim. The RPC is idempotent
+    // (short-circuits when the user is already founding) and
+    // security-definer, so it's safe to call on every auth-state
+    // transition. This handles the "paid before sign-up" path —
+    // the customer pays $9.99, then creates their account, and
+    // this call links the order to their profile.
+    const claimFoundingAccess = (emailVal: string | null) => {
+      if (!emailVal) return;
+      // The RPC builder is a thenable, not a real Promise — wrap
+      // through Promise.resolve so we can .catch the rejection
+      // without TS complaining about the missing catch method.
+      void Promise.resolve(
+        supabase.rpc("claim_founding_access_for_user", { email_in: emailVal }),
+      ).catch(() => { /* non-fatal — webhook also runs an opportunistic claim */ });
+    };
     (async () => {
       const { data } = await supabase.auth.getSession();
       if (cancelled) return;
@@ -12714,6 +12729,7 @@ const useAuth = () => {
         setUserId(session.user.id);
         setEmail(session.user.email ?? null);
         setMode("authed");
+        claimFoundingAccess(session.user.email ?? null);
         return;
       }
       const guest = typeof window !== "undefined" && window.localStorage.getItem(GUEST_FLAG_KEY) === "1";
@@ -12724,6 +12740,7 @@ const useAuth = () => {
         setUserId(session.user.id);
         setEmail(session.user.email ?? null);
         setMode("authed");
+        claimFoundingAccess(session.user.email ?? null);
       } else {
         setUserId(null);
         setEmail(null);
