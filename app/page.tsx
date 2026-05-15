@@ -13528,7 +13528,6 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   const [pushError, setPushError] = useState<string | null>(null);
   const [testStatus, setTestStatus] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
-  const [showReadiness, setShowReadiness] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [authSheetMode, setAuthSheetMode] = useState<AuthMode2 | null>(null);
   const lifetimeAccess = useLifetimeAccess(userId);
@@ -14401,9 +14400,6 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
           <Button variant="outline" icon={<Download size={15} />} fullWidth onClick={onExport}>Export all data (JSON)</Button>
           {mode === "authed" ? (
             <>
-              {isAdminViewer(email) && (
-                <Button variant="outline" icon={<ScrollText size={15} />} fullWidth onClick={() => setShowReadiness(true)}>App Store readiness checklist</Button>
-              )}
               <Button variant="outline" icon={<Trash2 size={15} />} fullWidth onClick={() => setShowDeleteConfirm(true)}>Delete account</Button>
               <Button variant="danger" fullWidth onClick={onSignOut}>Sign out</Button>
             </>
@@ -14437,9 +14433,6 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
         </Card>
       </div>
 
-      {isAdminViewer(email) && (
-        <ReadinessChecklistSheet open={showReadiness} onClose={() => setShowReadiness(false)} mode={mode} pushCap={pushCap} />
-      )}
       <DeleteAccountSheet open={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} onSignOut={onSignOut} />
       <AuthSheet
         open={!!authSheetMode}
