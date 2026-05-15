@@ -12993,7 +12993,7 @@ const AuthGate = ({ onContinueGuest, initialTab = "signin" }: {
           {tab === "signin" ? "Welcome back" : tab === "signup" ? "Create your account" : "Reset password"}
         </h1>
         <p className="text-center text-sm mb-5" style={{ color: C.muted }}>
-          {tab === "signin" ? "Sign in to sync your clients across devices." : tab === "signup" ? "Free to start. Cloud-synced from day one." : "Enter your email and we&apos;ll send a reset link."}
+          {tab === "signin" ? "Sign in to sync your clients across devices." : tab === "signup" ? "Built specifically for braid stylists. Cloud-synced from day one." : "Enter your email and we&apos;ll send a reset link."}
         </p>
         <Card className="p-5 space-y-3">
           <Field label="Email">
@@ -13287,7 +13287,7 @@ const AuthSheet = ({ open, initialMode, onClose, onAuthed }: {
     : mode === "reset" ? "Reset your password"
     : "Check your inbox";
   const sub = mode === "signin" ? "Pick up where you left off — your data syncs across every device."
-    : mode === "signup" ? "Free to start. Cloud-backed from your first booking."
+    : mode === "signup" ? "Built specifically for braid stylists. Cloud-backed from your first booking."
     : mode === "reset" ? "We'll email you a link to set a new password."
     : "We sent you an email. Tap the link to finish, then sign in.";
 

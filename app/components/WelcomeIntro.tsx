@@ -1104,7 +1104,7 @@ const WelcomeIntro = ({
               lineHeight: 1.5,
             }}
           >
-            Free to start · Mobile friendly · Guest mode available
+            Bookings · Deposits · Clients · Storefronts
           </p>
 
           <button

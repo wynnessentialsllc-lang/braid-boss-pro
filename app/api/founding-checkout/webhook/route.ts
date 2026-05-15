@@ -91,7 +91,15 @@ export async function POST(req: Request) {
   try { evt = JSON.parse(rawBody); }
   catch { return NextResponse.json({ error: "bad json" }, { status: 400 }); }
 
-  if (evt?.type !== "checkout.session.completed") {
+  // We handle two event families:
+  //   checkout.session.completed — flips orders to paid + claims them.
+  //   charge.refunded            — stamps the order as refunded for
+  //                                admin reconciliation. We deliberately
+  //                                do NOT revoke founding access here;
+  //                                see mark_founding_order_refunded for
+  //                                the rationale.
+  const handledTypes = new Set(["checkout.session.completed", "charge.refunded"]);
+  if (!handledTypes.has(evt?.type)) {
     return NextResponse.json({ received: true, ignored: evt?.type }, { status: 200 });
   }
 
@@ -121,6 +129,42 @@ export async function POST(req: Request) {
     if (firstTime === false) {
       return NextResponse.json({ received: true, duplicate: true }, { status: 200 });
     }
+  }
+
+  // Refund branch — charge.refunded fires on the Charge, not a
+  // Checkout Session, so we look the order up by payment_intent.
+  if (evt.type === "charge.refunded") {
+    const charge = evt?.data?.object;
+    const paymentIntent: string | undefined =
+      typeof charge?.payment_intent === "string" ? charge.payment_intent : undefined;
+    const chargeMeta = charge?.metadata || {};
+    // Only act when this charge was tagged as founding access (we set
+    // payment_intent_data[metadata][purpose] at session creation).
+    if (chargeMeta?.purpose !== "founding_stylist_access") {
+      return NextResponse.json({ received: true, ignored: "not_founding_purpose" }, { status: 200 });
+    }
+    if (!paymentIntent) {
+      return NextResponse.json({ received: true, ignored: "no_payment_intent" }, { status: 200 });
+    }
+    const refundSummary = {
+      amount_refunded: typeof charge?.amount_refunded === "number" ? charge.amount_refunded : null,
+      currency: typeof charge?.currency === "string" ? charge.currency : null,
+      refunded: charge?.refunded === true,
+      charge_id: typeof charge?.id === "string" ? charge.id : null,
+      reason:
+        Array.isArray(charge?.refunds?.data) && charge.refunds.data[0]?.reason
+          ? charge.refunds.data[0].reason
+          : null,
+    };
+    const { error: refundErr } = await admin.rpc("mark_founding_order_refunded", {
+      session_id_in: null,
+      payment_intent_in: paymentIntent,
+      refund_metadata_in: refundSummary,
+    });
+    if (refundErr) {
+      return NextResponse.json({ error: refundErr.message }, { status: 500 });
+    }
+    return NextResponse.json({ received: true, refunded: true }, { status: 200 });
   }
 
   const session = evt?.data?.object;
