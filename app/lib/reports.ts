@@ -513,6 +513,11 @@ export const pendingBalanceAppts = (
 ): AppointmentLike[] => {
   return (appointments || [])
     .filter(isBillable)
+    // A pending balance with no date is meaningless — it's almost
+    // always an orphaned/aborted booking. Excluding dateless rows
+    // keeps junk out of the Home pending list and lets every card
+    // deep-link to a real calendar day.
+    .filter(a => !!a.date)
     .filter(a => ticketBalance(a) > 0)
     .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
 };
