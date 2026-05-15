@@ -5192,6 +5192,16 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
     if (prefillNewAppt) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
       setEditing({ ...prefillNewAppt, status: prefillNewAppt.status || "scheduled" });
+      // When the prefill is an existing dated appointment (e.g. tapped
+      // from Home → Pending balances), jump the calendar to that day
+      // in day view so closing the sheet lands on the right date
+      // instead of today.
+      const pd = prefillNewAppt.date;
+      if (typeof pd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(pd)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-driven sync, intentional
+        setSelectedDate(pd);
+        setPrefs({ view: "day" });
+      }
       clearApptPrefill?.();
     }
   }, [prefillNewAppt]);
