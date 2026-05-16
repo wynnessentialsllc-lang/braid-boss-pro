@@ -107,6 +107,22 @@ const FUNCTIONS_URL = (() => {
   return `https://${host}.functions.supabase.co`;
 })();
 
+// Curl pattern only applies when the *selected* option/add-on
+// actually includes human curly hair — braiding hair is included on
+// every style, but human curly hair is opt-in (e.g. "Human Hair
+// Included" variation, "Boho Max (Human Hair Included)" add-on).
+// No explicit boolean exists on variations/extras today, so detect
+// by the well-established naming convention, with a metadata escape
+// hatch if one is added later.
+const isHumanHairIncludedSelection = (sel: any): boolean => {
+  if (!sel) return false;
+  if (sel.metadata && sel.metadata.human_hair_included === true) return true;
+  if (sel.human_hair_included === true) return true;
+  const txt = `${sel.name ?? ""} ${sel.label ?? ""} ${sel.title ?? ""}`.toLowerCase();
+  return txt.includes("human hair included");
+};
+
+
 export default function PublicBookingPage() {
   const params = useParams();
   const router = useRouter();
@@ -553,6 +569,15 @@ export default function PublicBookingPage() {
     return availableExtras.filter(e => selectedExtraIds.includes(e.id));
   }, [availableExtras, selectedExtraIds]);
 
+  // True when the client's CURRENT selection includes human curly
+  // hair — either the picked variation or any picked add-on. Drives
+  // curl-pattern visibility/validation only; never touches pricing.
+  const humanHairIncluded = useMemo(() => {
+    const variation = variations.find((v: any) => v.id === selectedVariationId);
+    if (isHumanHairIncludedSelection(variation)) return true;
+    return pickedExtras.some(isHumanHairIncludedSelection);
+  }, [variations, selectedVariationId, pickedExtras]);
+
   // Final resolved pricing including the picked add-ons. This is what
   // the summary box, deposit/balance lines, and the pay-button label
   // all read from.
@@ -607,6 +632,17 @@ export default function PublicBookingPage() {
     setCurlPattern("");
     setCustomCurlPattern("");
   }, [activeServiceId]);
+  // When the selection no longer includes human hair (e.g. switched
+  // from a Human-Hair-Included option back to Standard), drop any
+  // curl pattern so it doesn't get submitted while hidden, and clear
+  // a stale custom value too. Switching back re-shows the dropdown
+  // and re-requires a pick (validation gate).
+  useEffect(() => {
+    if (!humanHairIncluded) {
+      setCurlPattern("");
+      setCustomCurlPattern("");
+    }
+  }, [humanHairIncluded]);
   const activeServiceDurationHours =
     resolved?.durationHours ?? selectedCatalogService?.duration_hours ?? 0;
   const activeDurationMinutes = activeServiceId
@@ -720,7 +756,9 @@ export default function PublicBookingPage() {
           setSubmitError("Please tell your stylist the color you're looking for."); return;
         }
       }
-      if (custOn && svc?.allow_client_curl_pattern_selection) {
+      // Only require curl when the dropdown is actually visible
+      // (selection enabled AND the picked option includes human hair).
+      if (custOn && svc?.allow_client_curl_pattern_selection && humanHairIncluded) {
         if (!curlPattern.trim()) { setSubmitError("Please select your curl pattern."); return; }
         if (isOther(curlPattern) && !customCurlPattern.trim()) {
           setSubmitError("Please tell your stylist the curl pattern you're going for."); return;
@@ -2257,7 +2295,7 @@ export default function PublicBookingPage() {
               const svc: any = hasCatalog ? selectedCatalogService : null;
               if (!svc || (svc.customization_enabled ?? true) === false) return null;
               const showColor = !!svc.hair_included && !!svc.allow_client_hair_color_selection;
-              const showCurl = !!svc.allow_client_curl_pattern_selection;
+              const showCurl = !!svc.allow_client_curl_pattern_selection && humanHairIncluded;
               if (!svc.hair_included && !showColor && !showCurl) return null;
               const colors: string[] = Array.isArray(svc.allowed_hair_colors) ? svc.allowed_hair_colors : [];
               const curls: string[] = Array.isArray(svc.allowed_curl_patterns) ? svc.allowed_curl_patterns : [];
@@ -2335,7 +2373,7 @@ export default function PublicBookingPage() {
                         </select>
                       </Field>
                       <p style={{ margin: "6px 0 0", fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
-                        Curly hair is included with this service. Please select the curl pattern for your style.
+                        Human curly hair is included with your selected option. Please choose your curl pattern.
                       </p>
                       {isOther(curlPattern) && (
                         <div style={{ marginTop: 10 }}>
