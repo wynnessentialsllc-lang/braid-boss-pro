@@ -178,6 +178,8 @@ export type Service = {
   included_hair_description: string | null;
   allow_client_hair_color_selection: boolean;
   allowed_hair_colors: string[];
+  allow_client_curl_pattern_selection: boolean;
+  allowed_curl_patterns: string[];
   allow_style_notes: boolean;
   allow_inspiration_photos: boolean;
   included_details: string | null;
@@ -210,6 +212,8 @@ export type ServiceInput = Pick<
   | "included_hair_description"
   | "allow_client_hair_color_selection"
   | "allowed_hair_colors"
+  | "allow_client_curl_pattern_selection"
+  | "allowed_curl_patterns"
   | "allow_style_notes"
   | "allow_inspiration_photos"
   | "included_details"
@@ -477,6 +481,13 @@ export const useServices = (
             .filter(Boolean)
             .slice(0, 40)
         : [],
+      allow_client_curl_pattern_selection: !!draft.allow_client_curl_pattern_selection,
+      allowed_curl_patterns: Array.isArray(draft.allowed_curl_patterns)
+        ? draft.allowed_curl_patterns
+            .map(c => String(c || "").trim())
+            .filter(Boolean)
+            .slice(0, 40)
+        : [],
       allow_style_notes: draft.allow_style_notes ?? true,
       allow_inspiration_photos: draft.allow_inspiration_photos ?? true,
       included_details: draft.included_details?.trim() || null,
@@ -570,6 +581,8 @@ export type PublicService = Pick<
   | "included_hair_description"
   | "allow_client_hair_color_selection"
   | "allowed_hair_colors"
+  | "allow_client_curl_pattern_selection"
+  | "allowed_curl_patterns"
   | "allow_style_notes"
   | "allow_inspiration_photos"
   | "included_details"
@@ -606,6 +619,8 @@ export const fetchPublicServices = async (
     included_hair_description: s.included_hair_description ?? null,
     allow_client_hair_color_selection: !!s.allow_client_hair_color_selection,
     allowed_hair_colors: Array.isArray(s.allowed_hair_colors) ? s.allowed_hair_colors : [],
+    allow_client_curl_pattern_selection: !!s.allow_client_curl_pattern_selection,
+    allowed_curl_patterns: Array.isArray(s.allowed_curl_patterns) ? s.allowed_curl_patterns : [],
     allow_style_notes: s.allow_style_notes ?? true,
     allow_inspiration_photos: s.allow_inspiration_photos ?? true,
     included_details: s.included_details ?? null,

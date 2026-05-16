@@ -4632,9 +4632,24 @@ const CustomToggle = ({
   </button>
 );
 
+const DEFAULT_HAIR_COLORS = [
+  "1", "1B", "2", "4", "27", "30", "33", "350", "613",
+  "Burgundy", "Red", "Blonde", "Custom / Other",
+];
+const DEFAULT_CURL_PATTERNS = [
+  "Spanish Curl", "Deep Wave", "Water Wave", "French Curl", "Loose Wave",
+  "Body Wave", "Kinky Curly", "Human Hair Curl", "Synthetic Curl", "Custom / Other",
+];
+
 const ColorTagInput = ({
-  value, onChange,
-}: { value: string[]; onChange: (next: string[]) => void }) => {
+  value, onChange, placeholder, suggestions, suggestLabel,
+}: {
+  value: string[];
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+  suggestions?: string[];
+  suggestLabel?: string;
+}) => {
   const [draft, setDraft] = useState("");
   const add = (raw: string) => {
     const v = raw.trim();
@@ -4657,16 +4672,26 @@ const ColorTagInput = ({
           </span>
         ))}
         {value.length === 0 && (
-          <span className="text-[11px]" style={{ color: C.muted }}>No colors yet — add the shades you carry.</span>
+          <span className="text-[11px]" style={{ color: C.muted }}>Nothing yet — add your options or use the suggested set.</span>
         )}
       </div>
+      {suggestions && suggestions.length > 0 && value.length === 0 && (
+        <button
+          type="button"
+          onClick={() => onChange(suggestions.slice(0, 40))}
+          className="mb-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-semibold"
+          style={{ background: C.cream, color: C.goldDeep, border: `1px solid ${C.hairline}` }}
+        >
+          <Sparkles size={12} /> {suggestLabel || "Use suggested options"}
+        </button>
+      )}
       <div className="flex gap-2">
         <input
           type="text"
           value={draft}
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(draft); } }}
-          placeholder="e.g. 1B, 2, 27, 613, burgundy"
+          placeholder={placeholder || "Type an option, press Enter"}
           className="flex-1 p-2 rounded-lg border text-[13px]"
           style={{ borderColor: C.hairline, background: C.paper }}
         />
@@ -4758,7 +4783,7 @@ const StyleCustomizationSection = ({
               <CustomToggle
                 on={!!form.allow_client_hair_color_selection}
                 onChange={v => set({ allow_client_hair_color_selection: v })}
-                label="Let clients choose a hair color"
+                label="Let clients choose braiding hair color"
                 help="They pick from the shades you carry — no surprises at the chair."
               />
               {form.allow_client_hair_color_selection && (
@@ -4766,6 +4791,29 @@ const StyleCustomizationSection = ({
                   <ColorTagInput
                     value={Array.isArray(form.allowed_hair_colors) ? form.allowed_hair_colors : []}
                     onChange={next => set({ allowed_hair_colors: next })}
+                    placeholder="e.g. 1B, 2, 27, 613, Burgundy"
+                    suggestions={DEFAULT_HAIR_COLORS}
+                    suggestLabel="Use suggested colors"
+                  />
+                </div>
+              )}
+
+              <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
+
+              <CustomToggle
+                on={!!form.allow_client_curl_pattern_selection}
+                onChange={v => set({ allow_client_curl_pattern_selection: v })}
+                label="Let clients choose curl pattern"
+                help="For boho & curly styles where curly hair is included."
+              />
+              {form.allow_client_curl_pattern_selection && (
+                <div className="mb-3 pl-[54px]">
+                  <ColorTagInput
+                    value={Array.isArray(form.allowed_curl_patterns) ? form.allowed_curl_patterns : []}
+                    onChange={next => set({ allowed_curl_patterns: next })}
+                    placeholder="e.g. Spanish Curl, Deep Wave, French Curl"
+                    suggestions={DEFAULT_CURL_PATTERNS}
+                    suggestLabel="Use suggested patterns"
                   />
                 </div>
               )}
