@@ -13036,11 +13036,60 @@ const useCloudSync = (userId: string | null, store: any) => {
       }
     };
     const onVis = () => { void reconcile(); };
+
+    // Pull-to-refresh. The PullToRefresh component dispatches
+    // `bbp:refresh` but nothing listened for it — router.refresh()
+    // does nothing in this client-rendered app, so the gesture was
+    // cosmetic (spinner, no actual data refresh). Wire it to a real
+    // cloud re-pull of the user-visible tables (appointments +
+    // clients), replacing local state and re-seeding the diff
+    // snapshot so the follow-up push can't clobber what we pulled.
+    // Works identically in Safari and the installed PWA — it's a
+    // window event + fetch, no PWA-specific path.
+    let refreshBusy = false;
+    const onPullRefresh = async () => {
+      if (refreshBusy || !initialPullDone.current) return;
+      if (!navigator.onLine) return;
+      refreshBusy = true;
+      try {
+        const [apptsFresh, clientsFresh] = await Promise.all([
+          syncAppointments.pull(userId),
+          syncClients.pull(userId),
+        ]);
+        const next: any = {};
+        if (Array.isArray(apptsFresh)) next.appointments = apptsFresh;
+        if (Array.isArray(clientsFresh)) next.clients = clientsFresh;
+        if (Object.keys(next).length > 0) store.replaceCloudState?.(next);
+        if (Array.isArray(apptsFresh)) {
+          snap.current.appointments.clear();
+          for (const r of apptsFresh) {
+            if (r?.id) snap.current.appointments.set(r.id, JSON.stringify(r));
+          }
+        }
+        if (Array.isArray(clientsFresh)) {
+          snap.current.clients.clear();
+          for (const r of clientsFresh) {
+            if (r?.id) snap.current.clients.set(r.id, JSON.stringify(r));
+          }
+        }
+      } catch {
+        /* best-effort — the pull-to-refresh spinner still resolves */
+      } finally {
+        refreshBusy = false;
+      }
+      // Refresh the live booking-approvals queue too so the bell /
+      // pending surfaces reflect cloud truth right after the pull.
+      try { void store.approvalsApi?.refresh?.(); } catch { /* optional */ }
+    };
+    const onRefreshEvt = () => { void onPullRefresh(); };
+
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onVis);
+    window.addEventListener("bbp:refresh", onRefreshEvt);
     return () => {
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("focus", onVis);
+      window.removeEventListener("bbp:refresh", onRefreshEvt);
     };
   }, [userId, store]);
 
