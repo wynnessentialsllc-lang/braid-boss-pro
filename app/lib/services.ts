@@ -172,6 +172,18 @@ export type Service = {
   // "transformation" UI we'll ship in Phase 3.
   cover_image_url: string | null;
   before_after_image_url: string | null;
+  // Style Customization (Client Portal update, Phase 1/2). All
+  // additive + default-safe so existing services behave unchanged.
+  hair_included: boolean;
+  included_hair_description: string | null;
+  allow_client_hair_color_selection: boolean;
+  allowed_hair_colors: string[];
+  allow_client_curl_pattern_selection: boolean;
+  allowed_curl_patterns: string[];
+  allow_style_notes: boolean;
+  allow_inspiration_photos: boolean;
+  included_details: string | null;
+  customization_enabled: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -196,6 +208,16 @@ export type ServiceInput = Pick<
   | "featured"
   | "cover_image_url"
   | "before_after_image_url"
+  | "hair_included"
+  | "included_hair_description"
+  | "allow_client_hair_color_selection"
+  | "allowed_hair_colors"
+  | "allow_client_curl_pattern_selection"
+  | "allowed_curl_patterns"
+  | "allow_style_notes"
+  | "allow_inspiration_photos"
+  | "included_details"
+  | "customization_enabled"
 >;
 
 // ---- Validation -------------------------------------------------------
@@ -447,6 +469,29 @@ export const useServices = (
       featured: !!draft.featured,
       cover_image_url: draft.cover_image_url?.trim() || null,
       before_after_image_url: draft.before_after_image_url?.trim() || null,
+      // Style Customization. Default-safe: undefined → schema default
+      // (false for hair_included, true for the allow_* + enabled
+      // flags) so legacy services keep their existing behavior.
+      hair_included: !!draft.hair_included,
+      included_hair_description: draft.included_hair_description?.trim() || null,
+      allow_client_hair_color_selection: !!draft.allow_client_hair_color_selection,
+      allowed_hair_colors: Array.isArray(draft.allowed_hair_colors)
+        ? draft.allowed_hair_colors
+            .map(c => String(c || "").trim())
+            .filter(Boolean)
+            .slice(0, 40)
+        : [],
+      allow_client_curl_pattern_selection: !!draft.allow_client_curl_pattern_selection,
+      allowed_curl_patterns: Array.isArray(draft.allowed_curl_patterns)
+        ? draft.allowed_curl_patterns
+            .map(c => String(c || "").trim())
+            .filter(Boolean)
+            .slice(0, 40)
+        : [],
+      allow_style_notes: draft.allow_style_notes ?? true,
+      allow_inspiration_photos: draft.allow_inspiration_photos ?? true,
+      included_details: draft.included_details?.trim() || null,
+      customization_enabled: draft.customization_enabled ?? true,
       // Round-trip the optional add-ons. Keep null/undefined sane and
       // coerce numeric fields so we never persist NaN. Each entry is
       // stored verbatim in services.extras jsonb.
@@ -532,6 +577,16 @@ export type PublicService = Pick<
   | "featured"
   | "cover_image_url"
   | "before_after_image_url"
+  | "hair_included"
+  | "included_hair_description"
+  | "allow_client_hair_color_selection"
+  | "allowed_hair_colors"
+  | "allow_client_curl_pattern_selection"
+  | "allowed_curl_patterns"
+  | "allow_style_notes"
+  | "allow_inspiration_photos"
+  | "included_details"
+  | "customization_enabled"
 >;
 
 export const fetchPublicServices = async (
@@ -560,6 +615,16 @@ export const fetchPublicServices = async (
     featured: !!s.featured,
     cover_image_url: s.cover_image_url ?? null,
     before_after_image_url: s.before_after_image_url ?? null,
+    hair_included: !!s.hair_included,
+    included_hair_description: s.included_hair_description ?? null,
+    allow_client_hair_color_selection: !!s.allow_client_hair_color_selection,
+    allowed_hair_colors: Array.isArray(s.allowed_hair_colors) ? s.allowed_hair_colors : [],
+    allow_client_curl_pattern_selection: !!s.allow_client_curl_pattern_selection,
+    allowed_curl_patterns: Array.isArray(s.allowed_curl_patterns) ? s.allowed_curl_patterns : [],
+    allow_style_notes: s.allow_style_notes ?? true,
+    allow_inspiration_photos: s.allow_inspiration_photos ?? true,
+    included_details: s.included_details ?? null,
+    customization_enabled: s.customization_enabled ?? true,
   }));
   return { ok: true, services };
 };
