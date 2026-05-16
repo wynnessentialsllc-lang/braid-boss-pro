@@ -4595,6 +4595,310 @@ const QuickTile = ({ icon, label, onClick }) => (
 );
 
 // ============================================================
+//  STYLE CUSTOMIZATION (service editor section)
+// ============================================================
+// Premium, progressive-disclosure controls so the editor reads as
+// "this app understands how braiders work" — not a cluttered salon
+// form. Pure presentational; persists through the existing
+// serviceForm → services.upsert payload.
+
+const CustomToggle = ({
+  on, onChange, label, help,
+}: { on: boolean; onChange: (v: boolean) => void; label: string; help?: string }) => (
+  <button
+    type="button"
+    onClick={() => onChange(!on)}
+    className="w-full flex items-start gap-3 text-left"
+    style={{ background: "transparent", border: "none", padding: "10px 0" }}
+  >
+    <span
+      aria-hidden
+      style={{
+        flexShrink: 0, marginTop: 1, width: 42, height: 26, borderRadius: 999,
+        background: on ? C.gold : "rgba(21,17,26,0.14)",
+        position: "relative", transition: "background 160ms ease",
+      }}
+    >
+      <span style={{
+        position: "absolute", top: 3, left: on ? 19 : 3, width: 20, height: 20,
+        borderRadius: 999, background: "#FFFFFF",
+        boxShadow: "0 1px 3px rgba(21,17,26,0.25)", transition: "left 160ms ease",
+      }} />
+    </span>
+    <span className="flex-1 min-w-0">
+      <span className="block text-[13px] font-semibold" style={{ color: C.espresso }}>{label}</span>
+      {help && <span className="block text-[11px] mt-0.5" style={{ color: C.muted, lineHeight: 1.5 }}>{help}</span>}
+    </span>
+  </button>
+);
+
+const ColorTagInput = ({
+  value, onChange,
+}: { value: string[]; onChange: (next: string[]) => void }) => {
+  const [draft, setDraft] = useState("");
+  const add = (raw: string) => {
+    const v = raw.trim();
+    if (!v) return;
+    if (value.some(c => c.toLowerCase() === v.toLowerCase())) { setDraft(""); return; }
+    onChange([...value, v].slice(0, 40));
+    setDraft("");
+  };
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {value.map(c => (
+          <span key={c} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-semibold"
+            style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}>
+            {c}
+            <button type="button" onClick={() => onChange(value.filter(x => x !== c))}
+              aria-label={`Remove ${c}`} style={{ color: C.muted, lineHeight: 1 }}>
+              <X size={12} />
+            </button>
+          </span>
+        ))}
+        {value.length === 0 && (
+          <span className="text-[11px]" style={{ color: C.muted }}>No colors yet — add the shades you carry.</span>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(draft); } }}
+          placeholder="e.g. 1B, 2, 27, 613, burgundy"
+          className="flex-1 p-2 rounded-lg border text-[13px]"
+          style={{ borderColor: C.hairline, background: C.paper }}
+        />
+        <button type="button" onClick={() => add(draft)}
+          className="px-3 rounded-lg text-[13px] font-semibold"
+          style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}>
+          Add
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const StyleCustomizationSection = ({
+  form, onChange,
+}: { form: any; onChange: (next: any) => void }) => {
+  const [open, setOpen] = useState(false);
+  const set = (patch: any) => onChange({ ...form, ...patch });
+  const enabled = form.customization_enabled ?? true;
+  const extras: any[] = Array.isArray(form.extras) ? form.extras : [];
+  const setExtras = (next: any[]) => set({ extras: next });
+
+  const fieldLabel = "block text-[11px] font-bold uppercase tracking-wider mb-1.5";
+  const inputCls = "w-full p-2 rounded-lg border text-[13px]";
+  const inputStyle = { borderColor: C.hairline, background: C.paper } as React.CSSProperties;
+
+  return (
+    <div className="mb-3 rounded-xl border overflow-hidden" style={{ borderColor: C.hairline, background: C.paper }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-3 p-3.5"
+        style={{ background: "transparent", border: "none" }}
+      >
+        <span style={{
+          width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+          display: "grid", placeItems: "center",
+          background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`, color: "#FFFFFF",
+        }}>
+          <Sparkles size={16} />
+        </span>
+        <span className="flex-1 min-w-0 text-left">
+          <span className="block text-[14px] font-semibold" style={{ color: C.espresso }}>
+            Style Customization
+          </span>
+          <span className="block text-[11px]" style={{ color: C.muted }}>
+            Hair-included, what's included, colors, notes & add-ons
+          </span>
+        </span>
+        {open ? <ChevronUp size={18} style={{ color: C.muted }} /> : <ChevronDown size={18} style={{ color: C.muted }} />}
+      </button>
+
+      {open && (
+        <div className="px-3.5 pb-4" style={{ borderTop: `1px solid ${C.hairline}` }}>
+          <div className="pt-1">
+            <CustomToggle
+              on={enabled}
+              onChange={v => set({ customization_enabled: v })}
+              label="Enable customization for this service"
+              help="Off = a clean, no-frills booking. On = clients can personalize within your rules."
+            />
+          </div>
+
+          {enabled && (
+            <div style={{ opacity: 1 }}>
+              <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
+
+              <CustomToggle
+                on={!!form.hair_included}
+                onChange={v => set({ hair_included: v })}
+                label="Hair is included with this service"
+                help="Shows a premium “Hair included” badge to clients."
+              />
+              {form.hair_included && (
+                <div className="mb-3 pl-[54px]">
+                  <input
+                    type="text"
+                    value={form.included_hair_description || ""}
+                    onChange={e => set({ included_hair_description: e.target.value })}
+                    placeholder="Example: 1B prestretched braiding hair included"
+                    className={inputCls}
+                    style={inputStyle}
+                  />
+                </div>
+              )}
+
+              <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
+
+              <CustomToggle
+                on={!!form.allow_client_hair_color_selection}
+                onChange={v => set({ allow_client_hair_color_selection: v })}
+                label="Let clients choose a hair color"
+                help="They pick from the shades you carry — no surprises at the chair."
+              />
+              {form.allow_client_hair_color_selection && (
+                <div className="mb-3 pl-[54px]">
+                  <ColorTagInput
+                    value={Array.isArray(form.allowed_hair_colors) ? form.allowed_hair_colors : []}
+                    onChange={next => set({ allowed_hair_colors: next })}
+                  />
+                </div>
+              )}
+
+              <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "10px 0" }} />
+
+              <div className="mb-3">
+                <label className={fieldLabel} style={{ color: C.coffee }}>What's included</label>
+                <textarea
+                  value={form.included_details || ""}
+                  onChange={e => set({ included_details: e.target.value })}
+                  rows={2}
+                  placeholder="Example: Hair included, basic parting, standard length, simple finish"
+                  className={inputCls}
+                  style={inputStyle}
+                />
+              </div>
+
+              <div className="mb-3">
+                <label className={fieldLabel} style={{ color: C.coffee }}>Prep instructions</label>
+                <textarea
+                  value={form.prep_instructions || ""}
+                  onChange={e => set({ prep_instructions: e.target.value })}
+                  rows={2}
+                  placeholder="Example: Arrive detangled with clean, blow-dried hair unless wash/blow dry is booked."
+                  className={inputCls}
+                  style={inputStyle}
+                />
+              </div>
+
+              <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
+
+              <CustomToggle
+                on={form.allow_style_notes ?? true}
+                onChange={v => set({ allow_style_notes: v })}
+                label="Allow clients to leave style notes"
+                help="Length, parting, finish — in the client's own words."
+              />
+              <CustomToggle
+                on={form.allow_inspiration_photos ?? true}
+                onChange={v => set({ allow_inspiration_photos: v })}
+                label="Allow inspiration photo uploads"
+                help="Clients can attach reference looks to their booking."
+              />
+
+              <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "10px 0 8px" }} />
+
+              <div className="flex items-center justify-between mb-1.5">
+                <label className={fieldLabel} style={{ color: C.coffee, margin: 0 }}>
+                  Stylist-approved add-ons
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setExtras([...extras, {
+                    id: `extra_${Math.random().toString(36).slice(2, 8)}`,
+                    name: "", description: null, price: 0,
+                    duration_hours_delta: 0, include_in_deposit: false, active: true,
+                  }])}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-semibold"
+                  style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
+                >
+                  <Plus size={13} /> Add
+                </button>
+              </div>
+              <p className="text-[11px] mb-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+                Optional. Beads, curls, boho pieces, length upgrade, wash/blow dry — your call.
+              </p>
+              {extras.length === 0 ? (
+                <p className="text-[12px]" style={{ color: C.muted }}>No add-ons — this service stays simple.</p>
+              ) : (
+                <div className="space-y-2">
+                  {extras.map((ex, i) => (
+                    <div key={ex.id || i} className="rounded-lg border p-2.5"
+                      style={{ borderColor: C.hairline, background: C.cream }}>
+                      <div className="flex gap-2 mb-2">
+                        <input
+                          type="text"
+                          value={ex.name || ""}
+                          onChange={e => setExtras(extras.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                          placeholder="Add-on name (e.g. Curl ends)"
+                          className="flex-1 p-2 rounded-lg border text-[13px]"
+                          style={{ borderColor: C.hairline, background: C.paper }}
+                        />
+                        <button type="button"
+                          onClick={() => setExtras(extras.filter((_, j) => j !== i))}
+                          aria-label="Remove add-on" className="px-2 rounded-lg"
+                          style={{ color: C.danger, border: `1px solid ${C.hairline}`, background: C.paper }}>
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                      <div className="flex gap-2 items-center">
+                        <div className="flex-1">
+                          <span className="block text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: C.muted }}>Price</span>
+                          <input
+                            type="number" inputMode="decimal"
+                            value={ex.price ?? 0}
+                            onChange={e => setExtras(extras.map((x, j) => j === i ? { ...x, price: Number(e.target.value) } : x))}
+                            className="w-full p-1.5 rounded-lg border text-[13px]"
+                            style={{ borderColor: C.hairline, background: C.paper }}
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <span className="block text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: C.muted }}>Extra min</span>
+                          <input
+                            type="number" inputMode="numeric"
+                            value={Math.round(((ex.duration_hours_delta ?? 0) * 60))}
+                            onChange={e => setExtras(extras.map((x, j) => j === i ? { ...x, duration_hours_delta: (Number(e.target.value) || 0) / 60 } : x))}
+                            className="w-full p-1.5 rounded-lg border text-[13px]"
+                            style={{ borderColor: C.hairline, background: C.paper }}
+                          />
+                        </div>
+                        <label className="flex items-center gap-1.5 mt-4 shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={ex.active !== false}
+                            onChange={e => setExtras(extras.map((x, j) => j === i ? { ...x, active: e.target.checked } : x))}
+                          />
+                          <span className="text-[12px]" style={{ color: C.coffee }}>Active</span>
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============================================================
 //  STUDIO (Services & Contracts)
 // ============================================================
 const Studio = ({ store }) => {
@@ -4877,6 +5181,7 @@ const Studio = ({ store }) => {
               <option key={c.id} value={c.id}>{c.title}</option>
             ))}
           </select>
+          <StyleCustomizationSection form={serviceForm} onChange={setServiceForm} />
           <label className="flex items-center gap-2 mb-2">
             <input
               type="checkbox"
