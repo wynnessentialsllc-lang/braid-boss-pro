@@ -284,6 +284,13 @@ export default function PublicBookingPage() {
   const [preferredDate, setPreferredDate] = useState("");
   const [preferredTime, setPreferredTime] = useState("");
   const [notes, setNotes] = useState("");
+  // Style customization (hair color + curl pattern) — only shown
+  // when the selected service enables them. "Custom / Other" reveals
+  // a small free-text field saved to customization_summary.
+  const [hairColor, setHairColor] = useState("");
+  const [customHairColor, setCustomHairColor] = useState("");
+  const [curlPattern, setCurlPattern] = useState("");
+  const [customCurlPattern, setCustomCurlPattern] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -592,6 +599,14 @@ export default function PublicBookingPage() {
   // calendar still surfaces meaningful slot counts. With variations,
   // the resolved duration wins (e.g. human-hair install adds time).
   const activeServiceId = selectedCatalogService?.id ?? null;
+  // Clear style-customization picks when the chosen service changes
+  // so a stale color/curl can't ride onto a different service.
+  useEffect(() => {
+    setHairColor("");
+    setCustomHairColor("");
+    setCurlPattern("");
+    setCustomCurlPattern("");
+  }, [activeServiceId]);
   const activeServiceDurationHours =
     resolved?.durationHours ?? selectedCatalogService?.duration_hours ?? 0;
   const activeDurationMinutes = activeServiceId
@@ -695,6 +710,23 @@ export default function PublicBookingPage() {
     if (!phone.trim() && !email.trim()) { setSubmitError("Phone or email is required."); return; }
     if (!preferredDate) { setSubmitError("Please pick a date for your appointment."); return; }
     if (!preferredTime) { setSubmitError("Please pick a time for your appointment."); return; }
+    {
+      const svc: any = hasCatalog ? selectedCatalogService : null;
+      const custOn = svc && (svc.customization_enabled ?? true);
+      const isOther = (v: string) => v.trim().toLowerCase().replace(/\s/g, "") === "custom/other";
+      if (custOn && svc?.hair_included && svc?.allow_client_hair_color_selection) {
+        if (!hairColor.trim()) { setSubmitError("Please select your braiding hair color."); return; }
+        if (isOther(hairColor) && !customHairColor.trim()) {
+          setSubmitError("Please tell your stylist the color you're looking for."); return;
+        }
+      }
+      if (custOn && svc?.allow_client_curl_pattern_selection) {
+        if (!curlPattern.trim()) { setSubmitError("Please select your curl pattern."); return; }
+        if (isOther(curlPattern) && !customCurlPattern.trim()) {
+          setSubmitError("Please tell your stylist the curl pattern you're going for."); return;
+        }
+      }
+    }
     setSubmitting(true);
     try {
       // When catalog is in play we send the real service snapshot
@@ -800,6 +832,31 @@ export default function PublicBookingPage() {
         } catch {
           // Stylist can always resend signing links manually from
           // the Approvals queue Contracts mini-card.
+        }
+
+        // Style customization — best-effort, never blocks the
+        // booking. "Custom / Other" free text rides in
+        // customization_summary; the structured pick goes to
+        // selected_hair_color / selected_curl_pattern.
+        const isCustom = (v: string) =>
+          v.trim().toLowerCase() === "custom / other" || v.trim().toLowerCase() === "custom/other";
+        const hairPick = hairColor.trim();
+        const curlPick = curlPattern.trim();
+        if (hairPick || curlPick) {
+          try {
+            await supabase.rpc("public_attach_booking_customization", {
+              request_id_in: newRequestId,
+              hair_color_in: hairPick || null,
+              curl_pattern_in: curlPick || null,
+              style_notes_in: null,
+              custom_hair_color_in:
+                isCustom(hairPick) && customHairColor.trim() ? customHairColor.trim() : null,
+              custom_curl_in:
+                isCustom(curlPick) && customCurlPattern.trim() ? customCurlPattern.trim() : null,
+            });
+          } catch {
+            /* booking already saved — customization is non-fatal */
+          }
         }
       }
 
@@ -2196,6 +2253,104 @@ export default function PublicBookingPage() {
                 </div>
               </details>
             )}
+            {(() => {
+              const svc: any = hasCatalog ? selectedCatalogService : null;
+              if (!svc || (svc.customization_enabled ?? true) === false) return null;
+              const showColor = !!svc.hair_included && !!svc.allow_client_hair_color_selection;
+              const showCurl = !!svc.allow_client_curl_pattern_selection;
+              if (!svc.hair_included && !showColor && !showCurl) return null;
+              const colors: string[] = Array.isArray(svc.allowed_hair_colors) ? svc.allowed_hair_colors : [];
+              const curls: string[] = Array.isArray(svc.allowed_curl_patterns) ? svc.allowed_curl_patterns : [];
+              const isOther = (v: string) => v.trim().toLowerCase().replace(/\s/g, "") === "custom/other";
+              return (
+                <div style={{
+                  border: `1px solid ${C.hairline}`, borderRadius: 16, padding: 16,
+                  background: C.paper, display: "grid", gap: 14,
+                }}>
+                  <div>
+                    <p style={{ margin: 0, fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: C.goldDeep }}>
+                      Customize your booked style
+                    </p>
+                    {svc.hair_included ? (
+                      <div style={{
+                        display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
+                        padding: "6px 12px", borderRadius: 999,
+                        background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`, color: C.paper,
+                        fontSize: 12, fontWeight: 700,
+                      }}>
+                        ✓ Hair included with this service
+                      </div>
+                    ) : (
+                      <p style={{ margin: "6px 0 0", fontSize: 12, color: C.coffee }}>
+                        Hair not included unless stated by the stylist.
+                      </p>
+                    )}
+                    {svc.hair_included && svc.included_hair_description && (
+                      <p style={{ margin: "6px 0 0", fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
+                        {svc.included_hair_description}
+                      </p>
+                    )}
+                  </div>
+
+                  {svc.included_details && (
+                    <div style={{ background: C.cream, borderRadius: 12, padding: 12 }}>
+                      <span style={{ display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: C.coffee, marginBottom: 4 }}>
+                        What's included
+                      </span>
+                      <p style={{ margin: 0, fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>{svc.included_details}</p>
+                    </div>
+                  )}
+
+                  {showColor && (
+                    <div>
+                      <Field label="Braiding hair color">
+                        <select value={hairColor} onChange={e => setHairColor(e.target.value)}
+                          style={{ ...inputStyle, padding: 12 }}>
+                          <option value="">Select your braiding hair color</option>
+                          {colors.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </Field>
+                      <p style={{ margin: "6px 0 0", fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
+                        Braiding hair is included with this service. Please select the color for your style.
+                      </p>
+                      {isOther(hairColor) && (
+                        <div style={{ marginTop: 10 }}>
+                          <Field label="Custom color request">
+                            <textarea value={customHairColor} onChange={e => setCustomHairColor(e.target.value)}
+                              rows={2} placeholder="Tell your stylist the color you're looking for."
+                              style={{ ...inputStyle, padding: 12, resize: "none", lineHeight: 1.5 }} />
+                          </Field>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {showCurl && (
+                    <div>
+                      <Field label="Curl pattern">
+                        <select value={curlPattern} onChange={e => setCurlPattern(e.target.value)}
+                          style={{ ...inputStyle, padding: 12 }}>
+                          <option value="">Select your curl pattern</option>
+                          {curls.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </Field>
+                      <p style={{ margin: "6px 0 0", fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
+                        Curly hair is included with this service. Please select the curl pattern for your style.
+                      </p>
+                      {isOther(curlPattern) && (
+                        <div style={{ marginTop: 10 }}>
+                          <Field label="Custom curl pattern request">
+                            <textarea value={customCurlPattern} onChange={e => setCustomCurlPattern(e.target.value)}
+                              rows={2} placeholder="Tell your stylist the curl pattern or look you're going for."
+                              style={{ ...inputStyle, padding: 12, resize: "none", lineHeight: 1.5 }} />
+                          </Field>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <Field label="Notes">
               <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
                 placeholder="Hair length, anything you want me to know…"

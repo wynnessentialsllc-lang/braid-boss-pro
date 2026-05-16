@@ -17476,6 +17476,38 @@ const ApprovalQueueScreen = ({
                 <p className="text-[12px] italic" style={{ color: C.coffee }}>{req.notes}</p>
               )}
 
+              {(() => {
+                const cs = (req.customization_summary || {}) as Record<string, any>;
+                const hairColor = req.selected_hair_color
+                  || (cs.custom_hair_color ? `${cs.custom_hair_color} (custom)` : null);
+                const curl = req.selected_curl_pattern
+                  || (cs.custom_curl_pattern ? `${cs.custom_curl_pattern} (custom)` : null);
+                const styleNotes = req.client_style_notes;
+                if (!hairColor && !curl && !styleNotes) return null;
+                return (
+                  <div className="rounded-lg p-2.5 text-[12px]" style={{ background: C.cream, border: `1px solid ${C.hairline}` }}>
+                    <p className="font-bold uppercase tracking-wider mb-1" style={{ color: C.goldDeep, fontSize: 10, letterSpacing: "0.12em" }}>
+                      Style customization
+                    </p>
+                    {hairColor && (
+                      <p style={{ color: C.coffee }}>
+                        Selected hair color: <span style={{ color: C.espresso, fontWeight: 600 }}>{hairColor}</span>
+                      </p>
+                    )}
+                    {curl && (
+                      <p style={{ color: C.coffee }}>
+                        Curl pattern: <span style={{ color: C.espresso, fontWeight: 600 }}>{curl}</span>
+                      </p>
+                    )}
+                    {styleNotes && (
+                      <p style={{ color: C.coffee }}>
+                        Style notes: <span style={{ color: C.espresso }}>{styleNotes}</span>
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
               <ApprovalContractsBlock userId={store.userId || null} req={req} />
 
               {req.deposit_amount !== null && req.deposit_amount !== undefined && (
