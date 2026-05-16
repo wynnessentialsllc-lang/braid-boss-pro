@@ -4706,8 +4706,8 @@ const ColorTagInput = ({
 };
 
 const StyleCustomizationSection = ({
-  form, onChange,
-}: { form: any; onChange: (next: any) => void }) => {
+  form, onChange, showAddons = true,
+}: { form: any; onChange: (next: any) => void; showAddons?: boolean }) => {
   const [open, setOpen] = useState(false);
   const set = (patch: any) => onChange({ ...form, ...patch });
   const enabled = form.customization_enabled ?? true;
@@ -4859,6 +4859,7 @@ const StyleCustomizationSection = ({
                 help="Clients can attach reference looks to their booking."
               />
 
+              {showAddons && (<>
               <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "10px 0 8px" }} />
 
               <div className="flex items-center justify-between mb-1.5">
@@ -4938,6 +4939,7 @@ const StyleCustomizationSection = ({
                   ))}
                 </div>
               )}
+              </>)}
             </div>
           )}
         </div>
@@ -15965,6 +15967,12 @@ const ServicesScreen = ({
                 placeholder="Wash and blow-dry the day before. Bring bands."
               />
             </Field>
+
+            <StyleCustomizationSection
+              form={editing}
+              onChange={(next: any) => setEditing(next)}
+              showAddons={false}
+            />
 
             <Card className="p-3.5">
               <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
