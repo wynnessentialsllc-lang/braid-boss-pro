@@ -78,6 +78,15 @@ export type BookingRequestRecord = {
     duration_hours_delta: number;
     include_in_deposit: boolean;
   }> | null;
+  // Style customization + portal (Client Portal update). Present on
+  // every booking_requests row at runtime (migrations applied to
+  // prod); typed here so the confirmation payload + stylist card
+  // can read them.
+  selected_hair_color: string | null;
+  selected_curl_pattern: string | null;
+  client_style_notes: string | null;
+  customization_summary: Record<string, any> | null;
+  portal_token: string | null;
   // Client self-service: cancel + one-time reschedule.
   cancel_token: string | null;
   reschedule_token: string | null;
@@ -325,6 +334,15 @@ export const useBookingApprovalQueue = (userId: string | null): {
             preferredTime: row.preferred_time || null,
             depositPaid: depositPaid > 0 ? depositPaid : null,
             remainingBalance,
+            // Style customization + portal link (renderer skips any
+            // that are absent — fully backward compatible).
+            selectedHairColor: row.selected_hair_color
+              || (row.customization_summary as any)?.custom_hair_color || null,
+            selectedCurlPattern: row.selected_curl_pattern
+              || (row.customization_summary as any)?.custom_curl_pattern || null,
+            portalUrl: row.portal_token && typeof window !== "undefined"
+              ? `${window.location.origin}/client/appointment/${row.portal_token}`
+              : null,
           },
           // Date in the key so a re-approval after a reschedule
           // sends a fresh confirmation for the NEW time instead of
