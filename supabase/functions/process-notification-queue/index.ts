@@ -108,6 +108,29 @@ const ctaButton = (label: string, url: string): string => `
   </p>
 `;
 
+// ---- shared: style customization block + portal CTA -----------------
+// Backward-compatible: renders nothing when the optional payload
+// fields are absent, so existing enqueues are unaffected.
+const customizationBlock = (p: Record<string, any>): string => {
+  const rows: string[] = [];
+  if (p.hairIncluded) {
+    rows.push(`<tr><td style="padding:3px 0;color:${C.muted};font-size:13px;">Hair included</td><td style="padding:3px 0;text-align:right;color:${C.espresso};font-size:13px;font-weight:600;">Yes</td></tr>`);
+  }
+  if (p.selectedHairColor) {
+    rows.push(`<tr><td style="padding:3px 0;color:${C.muted};font-size:13px;">Hair color</td><td style="padding:3px 0;text-align:right;color:${C.espresso};font-size:13px;font-weight:600;">${escape(p.selectedHairColor)}</td></tr>`);
+  }
+  if (p.selectedCurlPattern) {
+    rows.push(`<tr><td style="padding:3px 0;color:${C.muted};font-size:13px;">Curl pattern</td><td style="padding:3px 0;text-align:right;color:${C.espresso};font-size:13px;font-weight:600;">${escape(p.selectedCurlPattern)}</td></tr>`);
+  }
+  if (rows.length === 0) return "";
+  return `<table style="width:100%;border-collapse:collapse;margin:14px 0;border-top:1px solid ${C.hairline};border-bottom:1px solid ${C.hairline};">${rows.join("")}</table>`;
+};
+const portalButton = (p: Record<string, any>): string => {
+  const url = String(p.portalUrl || "").trim();
+  if (!url) return "";
+  return `<p style="margin:20px 0 4px;text-align:center;"><a href="${escape(url)}" style="display:inline-block;background:transparent;color:${C.espresso};text-decoration:none;padding:12px 24px;border-radius:999px;font-weight:600;font-size:13px;letter-spacing:0.04em;border:1.5px solid ${C.espresso};">View appointment details</a></p>`;
+};
+
 // ---- booking_confirmation -------------------------------------------
 const renderBookingConfirmation = (p: Record<string, any>) => {
   const clientName  = p.clientName  || "there";
@@ -132,6 +155,9 @@ const renderBookingConfirmation = (p: Record<string, any>) => {
       Your booking request${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}${when ? ` on <strong>${escape(when)}</strong>` : ""} has been received by ${escape(studioName)}.
     </p>
     <p style="font-size:14px;line-height:22px;color:${C.coffee};">${escape(nextLine)}</p>
+    ${customizationBlock(p)}
+    ${p.prepReminder ? `<p style="font-size:13px;line-height:20px;color:${C.coffee};margin-top:12px;"><strong>Prep:</strong> ${escape(p.prepReminder)}</p>` : ""}
+    ${portalButton(p)}
     <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:18px;">
       We'll only email you about this booking. Reply to this message any time if you need to update something.
     </p>
@@ -295,9 +321,11 @@ const renderAppointmentConfirmed = (p: Record<string, any>) => {
       ${escape(studioName)} approved and scheduled your appointment${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}${when ? ` on <strong>${escape(when)}</strong>` : ""}.
     </p>
     ${balanceLine}
+    ${customizationBlock(p)}
     <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">
       We'll send a reminder closer to the day. If anything changes, reply to this email and ${escape(studioName)} will get it.
     </p>
+    ${portalButton(p)}
     <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:18px;">
       See you soon — thanks for booking with Braid Boss Pro.
     </p>
@@ -344,7 +372,10 @@ const renderAppointmentReminder = (p: Record<string, any>) => {
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Reminder</p>
     <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">See you soon, ${escape(clientName)}.</h1>
     <p style="font-size:15px;line-height:24px;margin:0 0 14px;">Your appointment with <strong>${escape(studioName)}</strong>${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}${when ? ` is on <strong>${escape(when)}</strong>` : " is coming up soon"}.</p>
-    <p style="font-size:14px;line-height:22px;margin:0 0 22px;color:${C.coffee};">If everything still looks good, no action needed — we just wanted to give you a heads up.</p>
+    ${customizationBlock(p)}
+    ${p.prepInstructions ? `<p style="font-size:13px;line-height:20px;color:${C.coffee};margin:0 0 14px;"><strong>Prep:</strong> ${escape(p.prepInstructions)}</p>` : ""}
+    <p style="font-size:14px;line-height:22px;margin:0 0 18px;color:${C.coffee};">If everything still looks good, no action needed — we just wanted to give you a heads up.</p>
+    ${portalButton(p)}
     <hr style="border:none;border-top:1px solid ${C.hairline};margin:22px 0;" />
     <p style="font-size:13px;font-weight:700;letter-spacing:0.04em;color:${C.coffee};margin:0 0 14px;text-transform:uppercase;">Need to make a change?</p>
     ${rescheduleBlock}
