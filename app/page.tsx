@@ -5996,6 +5996,22 @@ const DayCalendarView = ({
     return out;
   }, [appts]);
 
+  // An all-day availability block already reads in the top "All day"
+  // banner. Don't also draw it inside the hourly timeline — instead we
+  // grey the whole grid out (see overlay below). Mirrors the
+  // detection in computeDayStatus().
+  const allDayBlock = useMemo(
+    () => appts.find((a: any) =>
+      a
+      && (a.kind === "personal" || a.kind === "blocked")
+      && a.isAllDay === true
+      && a.blocksAvailability !== false
+      && a.status !== "cancelled"
+      && a.status !== "canceled",
+    ),
+    [appts],
+  );
+
   const dayStatusToneBg = (() => {
     switch (dayStatus.status) {
       case "fully_booked": return "rgba(91, 33, 182, 0.18)";
@@ -6095,6 +6111,9 @@ const DayCalendarView = ({
 
           {placedAppts.map(p => {
             const a = p.appt;
+            // The whole-day block is represented by the greyed overlay
+            // + top banner, so don't render it as an in-grid card.
+            if (allDayBlock && a?.id === allDayBlock.id) return null;
             const dayStartMin = TIMELINE_START_HOUR * 60;
             const dayEndMin = (TIMELINE_END_HOUR + 1) * 60;
             if (p.startMin >= dayEndMin) return null;
@@ -6203,6 +6222,35 @@ const DayCalendarView = ({
               </button>
             );
           })}
+
+          {/* Whole-day off: grey the entire grid instead of drawing a
+              second block card. Still tappable so the stylist can open
+              / remove the day-off entry. */}
+          {allDayBlock && (
+            <button
+              type="button"
+              onClick={() => onTap(allDayBlock)}
+              className="absolute inset-0 flex items-center justify-center"
+              style={{
+                background: "rgba(21, 17, 26, 0.06)",
+                backdropFilter: "saturate(0.6)",
+                WebkitBackdropFilter: "saturate(0.6)",
+              }}
+              aria-label="Unavailable all day — tap to edit"
+            >
+              <span
+                className="text-[11px] font-semibold uppercase tracking-widest px-3 py-1.5 rounded-full"
+                style={{
+                  color: C.muted,
+                  background: C.paper,
+                  border: `1px solid ${C.hairline}`,
+                  letterSpacing: "0.14em",
+                }}
+              >
+                Unavailable all day
+              </span>
+            </button>
+          )}
         </div>
       )}
     </div>
