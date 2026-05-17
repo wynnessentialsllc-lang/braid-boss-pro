@@ -237,6 +237,7 @@ import { buildCsv } from "./lib/csv";
 import ImportStudio, { IMPORT_TAGLINE } from "./components/ImportStudio";
 import { deriveClientInsights, formatLastBookedHint } from "./lib/client-insights";
 import { uploadBookingLogo, removeBookingLogo } from "./lib/booking-logo-storage";
+import { uploadServiceCover } from "./lib/service-cover-storage";
 import { uploadGalleryPhoto, removeGalleryPhoto, GALLERY_LIMITS, type GalleryPhoto } from "./lib/booking-gallery-storage";
 import { openExternal } from "./lib/open-external";
 import {
@@ -15007,6 +15008,12 @@ const ServicesScreen = ({
   const [confirmDeleteCategory, setConfirmDeleteCategory] = useState<ServiceCategory | null>(null);
   const [categoryBusy, setCategoryBusy] = useState(false);
   const [categoryError, setCategoryError] = useState<string | null>(null);
+  // Cover-image upload state. coverKeyRef stays stable for the
+  // lifetime of one editor session so a brand-new (unsaved) service
+  // uploads to a consistent storage path.
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [coverError, setCoverError] = useState<string | null>(null);
+  const coverKeyRef = useRef<string>("");
   // Which categories are expanded inline in the manager. Clicking a
   // category row toggles its services in-place; we keep a set so
   // multiple can be open at once.
@@ -15050,6 +15057,11 @@ const ServicesScreen = ({
     // Clear any recs left behind by a prior edit so the new draft
     // starts with no pinned products.
     setEditingRecsIds([]);
+    setCoverError(null);
+    coverKeyRef.current =
+      (typeof crypto !== "undefined" && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `new-${Date.now()}`;
     setEditing({
     name: "",
     description: "",
@@ -15076,6 +15088,8 @@ const ServicesScreen = ({
   const startNew = openNew;
 
   const openEdit = (s: Service) => {
+    setCoverError(null);
+    coverKeyRef.current = s.id;
     // Fetch the existing recs for this service in the background.
     // The picker UI tolerates an empty array while the fetch is in
     // flight, so the editor opens immediately.
@@ -15579,7 +15593,7 @@ const ServicesScreen = ({
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold" style={{ color: C.espresso }}>Cover image</p>
                   <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
-                    Optional. Paste an image URL — we render it on the service card and (when featured) at the top of your booking page.
+                    Optional. Upload an image (or paste a URL) — we render it on the service card and (when featured) at the top of your booking page.
                   </p>
                 </div>
                 {editing.cover_image_url ? (
@@ -15593,12 +15607,59 @@ const ServicesScreen = ({
                   </button>
                 ) : null}
               </div>
+              <div className="flex items-center gap-2 mb-2">
+                <label
+                  className="text-[12px] font-semibold px-3 py-2 rounded-lg cursor-pointer"
+                  style={{
+                    color: C.espresso,
+                    background: C.ivory,
+                    border: `1px solid ${C.hairline}`,
+                    opacity: coverUploading ? 0.6 : 1,
+                  }}
+                >
+                  {coverUploading ? "Uploading…" : "Upload image"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    disabled={coverUploading}
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!f) return;
+                      if (!store.userId) { setCoverError("Sign in required to upload."); return; }
+                      setCoverError(null);
+                      setCoverUploading(true);
+                      try {
+                        const { publicUrl } = await uploadServiceCover(
+                          store.userId,
+                          coverKeyRef.current || "cover",
+                          f,
+                        );
+                        setEditing((prev) => prev ? { ...prev, cover_image_url: publicUrl } : prev);
+                      } catch (err: any) {
+                        setCoverError(err?.message || "Upload failed.");
+                      } finally {
+                        setCoverUploading(false);
+                      }
+                    }}
+                  />
+                </label>
+                <span className="text-[11px]" style={{ color: C.muted }}>
+                  JPG or PNG, up to 12 MB
+                </span>
+              </div>
+              {coverError && (
+                <p className="text-[11px] mb-2" style={{ color: C.danger }}>
+                  {coverError}
+                </p>
+              )}
               <Input
                 type="url"
                 inputMode="url"
                 value={editing.cover_image_url || ""}
                 onChange={(e) => setEditing({ ...editing, cover_image_url: e.target.value || null })}
-                placeholder="https://…/cover.jpg"
+                placeholder="…or paste an image URL"
               />
               {editing.cover_image_url && (
                 <div
