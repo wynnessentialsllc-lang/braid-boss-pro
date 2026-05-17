@@ -51,6 +51,9 @@ export type ServiceAddOn = {
   variation_duration_hours?: number | null;
   variation_deposit_required?: boolean | null;
   variation_deposit_amount?: number | null;
+  // Shown to clients on the booking page when this variation is
+  // selected (e.g. what's included with this option).
+  variation_description?: string | null;
 };
 
 // Resolved per-variation pricing. When `addonId` is null/unknown we
@@ -456,6 +459,8 @@ export const useServices = (
           typeof a.variation_deposit_required === "boolean"
             ? a.variation_deposit_required
             : null;
+        out.variation_description =
+          (a.variation_description || "").trim().slice(0, 280) || null;
         return out;
       }),
       prep_instructions: draft.prep_instructions?.trim() || null,

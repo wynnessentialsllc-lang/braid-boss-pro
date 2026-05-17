@@ -15291,6 +15291,9 @@ const ServicesScreen = ({
         if (field === "name") {
           return { ...a, name: String(value ?? "") };
         }
+        if (field === "variation_description") {
+          return { ...a, variation_description: String(value ?? "") };
+        }
         if (field === "amount") {
           return { ...a, amount: parseMoney(value) };
         }
@@ -15911,6 +15914,16 @@ const ServicesScreen = ({
                         >
                           <Trash2 size={18} />
                         </button>
+                      </div>
+                      <div className="mb-2">
+                        <Field label="Description" hint="Shown to clients when picked">
+                          <Textarea
+                            value={a.variation_description || ""}
+                            onChange={e => updateAddOn(a.id, "variation_description", e.target.value)}
+                            placeholder="What's included with this option — e.g. human curly hair, mid-back length"
+                            rows={2}
+                          />
+                        </Field>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <Field label="Price" hint="Blank = inherit">

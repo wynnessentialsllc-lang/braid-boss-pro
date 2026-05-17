@@ -1971,18 +1971,21 @@ export default function PublicBookingPage() {
                     id: string;       // "" for base, addon id for variations
                     label: string;
                     subLabel: string | null;
+                    description: string | null;
                     resolved: ReturnType<typeof resolveVariationPricing>;
                   }> = [
                     {
                       id: "",
                       label: selectedCatalogService.name,
                       subLabel: "Standard",
+                      description: null,
                       resolved: baseResolved,
                     },
                     ...variations.map(v => ({
                       id: v.id,
                       label: (v.name || "").trim() || "Variation",
                       subLabel: null,
+                      description: ((v as any).variation_description || "").trim() || null,
                       resolved: resolveVariationPricing(selectedCatalogService, v.id),
                     })),
                   ];
@@ -2050,6 +2053,11 @@ export default function PublicBookingPage() {
                                   ? ` · Balance $${r.balanceDue.toFixed(2)}`
                                   : ""}
                               </p>
+                              {opt.description && (
+                                <p style={{ marginTop: 6, fontSize: 11.5, color: C.coffee, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>
+                                  {opt.description}
+                                </p>
+                              )}
                               {picked && (
                                 <span
                                   aria-hidden
