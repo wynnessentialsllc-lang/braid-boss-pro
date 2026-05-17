@@ -193,6 +193,9 @@ export default function PublicBookingPage() {
   // the active index into the sorted gallery_photos array so prev /
   // next swipes stay in order.
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  // Tap-to-zoom for a service cover image (single image, no gallery
+  // navigation). Holds the image URL while the popout is open.
+  const [coverZoom, setCoverZoom] = useState<string | null>(null);
 
   // Keyboard navigation when the lightbox is open. Mounted once and
   // gated on the open state inside the handler so we don't churn
@@ -211,6 +214,16 @@ export default function PublicBookingPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [lightboxIndex, link?.gallery_photos]);
+
+  // Escape closes the single-image cover popout.
+  useEffect(() => {
+    if (!coverZoom) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCoverZoom(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [coverZoom]);
 
   // Touch-swipe navigation. Tracks the initial touch X and fires
   // prev/next when the horizontal delta exceeds a small threshold
@@ -1786,7 +1799,17 @@ export default function PublicBookingPage() {
                     }}
                   >
                     {(selectedCatalogService as any).cover_image_url && (
-                      <div style={{ aspectRatio: "16 / 9", background: C.ivory }}>
+                      <button
+                        type="button"
+                        onClick={() => setCoverZoom((selectedCatalogService as any).cover_image_url)}
+                        aria-label="View full photo"
+                        style={{
+                          display: "block", width: "100%", padding: 0, border: 0,
+                          appearance: "none", WebkitAppearance: "none",
+                          aspectRatio: "16 / 9", background: C.ivory,
+                          cursor: "zoom-in", overflow: "hidden",
+                        }}
+                      >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={(selectedCatalogService as any).cover_image_url}
@@ -1794,7 +1817,7 @@ export default function PublicBookingPage() {
                           loading="lazy"
                           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                         />
-                      </div>
+                      </button>
                     )}
                     <div style={{ padding: 12 }}>
                     <strong style={{ color: C.espresso }}>{selectedCatalogService.name}</strong>
@@ -1847,7 +1870,17 @@ export default function PublicBookingPage() {
                         object-cover treatment as the featured cards
                         so the page reads as one design system. */}
                     {(selectedCatalogService as any).cover_image_url && (
-                      <div style={{ aspectRatio: "16 / 9", background: C.ivory }}>
+                      <button
+                        type="button"
+                        onClick={() => setCoverZoom((selectedCatalogService as any).cover_image_url)}
+                        aria-label="View full photo"
+                        style={{
+                          display: "block", width: "100%", padding: 0, border: 0,
+                          appearance: "none", WebkitAppearance: "none",
+                          aspectRatio: "16 / 9", background: C.ivory,
+                          cursor: "zoom-in", overflow: "hidden",
+                        }}
+                      >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={(selectedCatalogService as any).cover_image_url}
@@ -1855,7 +1888,7 @@ export default function PublicBookingPage() {
                           loading="lazy"
                           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                         />
-                      </div>
+                      </button>
                     )}
                     <div style={{ padding: 12 }}>
                     <strong style={{ color: C.espresso, fontSize: 14 }}>
@@ -2569,6 +2602,56 @@ export default function PublicBookingPage() {
       {/* Tap-to-expand lightbox. Self-contained — no portal needed
           because this page is its own scope with no parent
           transform / overflow that would trap fixed positioning. */}
+      {coverZoom && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setCoverZoom(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(26, 15, 8, 0.92)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "max(24px, env(safe-area-inset-top)) 12px max(24px, env(safe-area-inset-bottom)) 12px",
+          }}
+        >
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setCoverZoom(null); }}
+            aria-label="Close photo"
+            style={{
+              position: "absolute",
+              top: "max(20px, env(safe-area-inset-top))",
+              right: 16,
+              width: 40, height: 40, borderRadius: 999,
+              background: "rgba(0,0,0,0.5)", color: "#fff",
+              border: "1px solid rgba(255,255,255,0.2)",
+              fontSize: 22, fontWeight: 400, lineHeight: 1,
+              cursor: "pointer", padding: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            ×
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={coverZoom}
+            alt="Full photo"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: "100%",
+              maxHeight: "100%",
+              objectFit: "contain",
+              borderRadius: 8,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+            }}
+          />
+        </div>
+      )}
+
       {lightboxIndex !== null && Array.isArray(link?.gallery_photos) && (() => {
         const photos = (link!.gallery_photos || [])
           .slice()
