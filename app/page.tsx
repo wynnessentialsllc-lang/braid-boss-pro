@@ -7501,7 +7501,20 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             </Field>
           )}
           {isAppointment && <Field label="Total price"><MoneyInput value={form.totalPrice} onChange={(v) => setForm({ ...form, totalPrice: v })} /></Field>}
-          {isAppointment && <Field label="Deposit paid"><MoneyInput value={form.depositPaid} onChange={(v) => setForm({ ...form, depositPaid: v })} /></Field>}
+          {isAppointment && (() => {
+            // The stored amount doubles as "total collected" once the
+            // balance is paid (existing behavior, intentionally left in
+            // place). Relabel so a paid-in-full appointment doesn't
+            // confusingly read as a giant "deposit".
+            const tp = parseMoney(form.totalPrice);
+            const dp = parseMoney(form.depositPaid);
+            const paidInFull = form.paymentStatus === "paid" || (tp > 0 && dp >= tp);
+            return (
+              <Field label={paidInFull ? "Total paid" : "Deposit paid"}>
+                <MoneyInput value={form.depositPaid} onChange={(v) => setForm({ ...form, depositPaid: v })} />
+              </Field>
+            );
+          })()}
         </div>
 
         {isAppointment && (
