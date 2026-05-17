@@ -15068,6 +15068,18 @@ const ServicesScreen = ({
     featured: false,
     cover_image_url: null,
     before_after_image_url: null,
+    // Style Customization — must be seeded here or the editor opens
+    // with these undefined and a later save clobbers them.
+    customization_enabled: true,
+    hair_included: false,
+    included_hair_description: null,
+    allow_client_hair_color_selection: false,
+    allowed_hair_colors: [],
+    allow_client_curl_pattern_selection: false,
+    allowed_curl_patterns: [],
+    allow_style_notes: true,
+    allow_inspiration_photos: true,
+    included_details: null,
     });
   };
 
@@ -15103,6 +15115,18 @@ const ServicesScreen = ({
     featured: !!s.featured,
     cover_image_url: s.cover_image_url ?? null,
     before_after_image_url: s.before_after_image_url ?? null,
+    // Style Customization — load the saved values so the toggles
+    // reflect reality and a re-save doesn't reset them to defaults.
+    customization_enabled: (s as any).customization_enabled ?? true,
+    hair_included: !!(s as any).hair_included,
+    included_hair_description: (s as any).included_hair_description ?? null,
+    allow_client_hair_color_selection: !!(s as any).allow_client_hair_color_selection,
+    allowed_hair_colors: Array.isArray((s as any).allowed_hair_colors) ? (s as any).allowed_hair_colors : [],
+    allow_client_curl_pattern_selection: !!(s as any).allow_client_curl_pattern_selection,
+    allowed_curl_patterns: Array.isArray((s as any).allowed_curl_patterns) ? (s as any).allowed_curl_patterns : [],
+    allow_style_notes: (s as any).allow_style_notes ?? true,
+    allow_inspiration_photos: (s as any).allow_inspiration_photos ?? true,
+    included_details: (s as any).included_details ?? null,
     });
   };
 
