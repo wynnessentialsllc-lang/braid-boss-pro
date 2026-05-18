@@ -7404,6 +7404,22 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       const oldTime = appt?.time || "";
       const dateChanged = wasExisting && (oldDate !== form.date || oldTime !== form.time);
       const notCancelled = (saved.status || "") !== "cancelled" && (saved.status || "") !== "canceled";
+      // Keep the linked booking_request's schedule in sync. The
+      // client portal (public_get_booking_portal_state) reads
+      // preferred_date/preferred_time straight off booking_requests,
+      // so a stylist edit that only touched the appointment row left
+      // "View appointment details" showing the OLD time. Sync it
+      // whenever the date/time changed — independent of whether a
+      // client email goes out. Best-effort; never blocks the save.
+      if (wasExisting && isRealAppt && dateChanged && notCancelled && store.userId) {
+        try {
+          await getSupabase().rpc("sync_booking_request_schedule", {
+            appointment_id_in: saved.id,
+            new_date: form.date || null,
+            new_time: form.time || null,
+          });
+        } catch { /* portal sync is best-effort */ }
+      }
       if (
         wasExisting && isRealAppt && dateChanged && notCancelled &&
         clientEmail && store.userId
