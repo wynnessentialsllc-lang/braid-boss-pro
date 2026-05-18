@@ -283,6 +283,31 @@ const renderBalancePaid = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- review_request (post-appointment "how was it?" ask) -----------
+const renderReviewRequest = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const serviceName = p.serviceName || null;
+  const reviewUrl = String(p.reviewUrl || "").trim();
+  const subject = "How was your appointment?";
+  const cta = reviewUrl ? ctaButton("Leave a review", reviewUrl) : "";
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Thank you</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Thank you, ${escape(clientName)}.</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
+      Thanks for visiting ${escape(studioName)}${serviceName ? ` for your <strong>${escape(serviceName)}</strong>` : ""}. We'd love to hear how it went.
+    </p>
+    <p style="font-size:14px;line-height:22px;margin:0 0 4px;color:${C.coffee};">
+      It only takes 30 seconds, and it helps ${escape(studioName)} grow while helping future clients book with confidence.
+    </p>
+    ${cta}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;text-align:center;">
+      Rate your experience and share anything you'd want ${escape(studioName)} to know.
+    </p>
+  `);
+  return { subject, html };
+};
+
 // ---- appointment_confirmed (final approval — deposit already in) ---
 //
 // Distinct from `appointment_approved`, which is the earlier "please
@@ -542,6 +567,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderDepositReceived(row.payload || {});
     case "balance_paid":
       return renderBalancePaid(row.payload || {});
+    case "review_request":
+      return renderReviewRequest(row.payload || {});
     case "appointment_confirmed":
       return renderAppointmentConfirmed(row.payload || {});
     case "appointment_reminder":

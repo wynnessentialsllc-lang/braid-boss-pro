@@ -126,6 +126,8 @@ import {
 } from "./lib/publicSlug";
 import {
   usePublicReviews,
+  useClientReviews,
+  type ClientReview,
   useProducts,
   fetchServiceRecommendations,
   saveServiceRecommendations,
@@ -19025,8 +19027,71 @@ const UpgradeSheet = ({
 // REVIEWS MANAGER (Phase 3) — owner-side Client Love.
 // Minimal CRUD: list, add, edit, delete, feature/verify toggles.
 // ============================================================
+const ClientReviewCard = ({ r, api }: { r: ClientReview; api: any }) => {
+  const [busy, setBusy] = useState(false);
+  const act = async (fn: () => Promise<boolean>) => {
+    if (busy) return;
+    setBusy(true);
+    await fn();
+    setBusy(false);
+  };
+  return (
+    <Card className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap mb-1">
+            <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>
+              {r.display_name || r.client_name || "Guest"}
+            </p>
+            <span style={{ color: C.gold, fontSize: 13, letterSpacing: 1 }}>
+              {"★".repeat(r.stars)}
+              <span style={{ color: C.hairline }}>{"★".repeat(5 - r.stars)}</span>
+            </span>
+            <Pill tone={r.status === "featured" ? "gold" : "success"}>
+              {r.status === "featured" ? "Featured" : r.status === "hidden" ? "Hidden" : "Pending"}
+            </Pill>
+            {r.is_favorite && <Pill tone="gold">★ Favorite</Pill>}
+            {r.would_book_again === true && <Pill tone="success">Would rebook</Pill>}
+          </div>
+          {r.notes && (
+            <p className="text-[12px] italic" style={{ color: C.coffee, lineHeight: 1.4 }}>
+              &ldquo;{r.notes.length > 160 ? `${r.notes.slice(0, 157)}…` : r.notes}&rdquo;
+            </p>
+          )}
+          {r.private_feedback && (
+            <p className="text-[11px] mt-1.5 px-2 py-1.5 rounded" style={{ color: C.coffee, background: C.ivory }}>
+              <strong>Private to you:</strong> {r.private_feedback}
+            </p>
+          )}
+          <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+            {[r.service_name, r.appt_date].filter(Boolean).join(" · ") || "Appointment"}
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2 mt-3">
+        {r.status !== "featured" && (
+          <Button variant="primary" onClick={() => act(() => api.setStatus(r.id, "featured"))}>
+            {busy ? "…" : "Feature"}
+          </Button>
+        )}
+        {r.status !== "hidden" && (
+          <Button variant="outline" onClick={() => act(() => api.setStatus(r.id, "hidden"))}>Hide</Button>
+        )}
+        {r.status !== "pending" && (
+          <Button variant="outline" onClick={() => act(() => api.setStatus(r.id, "pending"))}>Unpublish</Button>
+        )}
+        <Button variant="outline" onClick={() => act(() => api.setFavorite(r.id, !r.is_favorite))}>
+          {r.is_favorite ? "Unfavorite" : "Mark favorite"}
+        </Button>
+      </div>
+    </Card>
+  );
+};
+
 const ReviewsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const api = store.reviewsApi;
+  const crApi = store.clientReviewsApi;
+  const clientReviews: ClientReview[] = crApi?.reviews || [];
   const reviews: PublicReview[] = api?.reviews || [];
   type Draft = Partial<{
     id: string;
@@ -19075,11 +19140,43 @@ const ReviewsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
         }
       />
       <div className="px-5 pt-2 space-y-3">
-        {api?.error && (
+        {(api?.error || crApi?.error) && (
           <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
-            <p className="text-[12px]" style={{ color: C.danger }}>{api.error}</p>
+            <p className="text-[12px]" style={{ color: C.danger }}>{api?.error || crApi?.error}</p>
           </Card>
         )}
+
+        {clientReviews.length > 0 && (
+          <div className="space-y-3">
+            <div>
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>
+                From your clients
+              </p>
+              <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+                Collected automatically after appointments. Feature the ones you love — only featured reviews show on your booking page.
+              </p>
+            </div>
+            {(["pending", "featured", "hidden"] as const).map(group => {
+              const list = clientReviews.filter(r => r.status === group);
+              if (list.length === 0) return null;
+              return (
+                <div key={group} className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.muted }}>
+                    {group === "pending" ? "Awaiting review" : group === "featured" ? "Featured" : "Hidden"} · {list.length}
+                  </p>
+                  {list.map(r => <ClientReviewCard key={r.id} r={r} api={crApi} />)}
+                </div>
+              );
+            })}
+            <div className="pt-1">
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Manual testimonials</p>
+              <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+                Add testimonials yourself for clients who didn&apos;t leave one through the link.
+              </p>
+            </div>
+          </div>
+        )}
+
         {reviews.length === 0 ? (
           <Card className="p-6 text-center">
             <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>
@@ -19087,6 +19184,9 @@ const ReviewsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
             </p>
             <p className="text-[12px] mt-2" style={{ color: C.muted, lineHeight: 1.5 }}>
               Add a testimonial from a past client. Featured reviews show first on your booking page.
+            </p>
+            <p className="text-[12px] mt-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+              Reviews can also be collected automatically after completed appointments — clients get a link by email and you choose which to feature here.
             </p>
             <div className="mt-4">
               <Button variant="primary" icon={<Plus size={16} />} fullWidth
@@ -20130,6 +20230,7 @@ export default function App() {
   const servicesApi = useServices(auth.userId);
   const serviceCategoriesApi = useServiceCategories(auth.userId);
   const reviewsApi = usePublicReviews(auth.userId);
+  const clientReviewsApi = useClientReviews(auth.userId);
   const productsApi = useProducts(auth.userId);
   const policiesApi = useBookingPolicy(auth.userId);
   const availabilityApi = useAvailability(auth.userId);
@@ -20201,6 +20302,7 @@ export default function App() {
       servicesApi,
       serviceCategoriesApi,
       reviewsApi,
+      clientReviewsApi,
       productsApi,
       policiesApi,
       availabilityApi,
@@ -20227,7 +20329,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi]);
+  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, clientReviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi]);
 
   const sync = useCloudSync(auth.userId, store);
 

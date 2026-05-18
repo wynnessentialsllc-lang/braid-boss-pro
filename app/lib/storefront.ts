@@ -24,6 +24,9 @@ export type PublicReview = {
   is_verified_booking: boolean;
   created_at: string;
   updated_at: string;
+  // Star rating when this row came from a client-submitted appointment
+  // review. Null for manually-entered testimonials.
+  stars: number | null;
 };
 
 export type PublicReviewInput = Pick<
@@ -125,8 +128,96 @@ export const fetchPublicReviews = async (
     is_verified_booking: !!r.is_verified_booking,
     created_at: r.created_at ?? "",
     updated_at: r.created_at ?? "",
+    stars: r.stars == null ? null : Number(r.stars),
   }));
   return { ok: true, reviews };
+};
+
+// ============================================================
+// Client-submitted reviews — moderation queue ("Client Love")
+// ============================================================
+
+export type ClientReview = {
+  id: string;
+  appointment_id: string;
+  stars: number;
+  notes: string | null;
+  would_book_again: boolean | null;
+  private_feedback: string | null;
+  display_name: string | null;
+  status: "pending" | "featured" | "hidden";
+  is_favorite: boolean;
+  submitted_at: string;
+  client_name: string | null;
+  service_name: string | null;
+  appt_date: string | null;
+};
+
+export const useClientReviews = (userId: string | null): {
+  reviews: ClientReview[];
+  loading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+  setStatus: (id: string, status: ClientReview["status"]) => Promise<boolean>;
+  setFavorite: (id: string, favorite: boolean) => Promise<boolean>;
+} => {
+  const [reviews, setReviews] = useState<ClientReview[]>([]);
+  const [loading, setLoading] = useState<boolean>(!!userId);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = async () => {
+    if (!userId) { setReviews([]); return; }
+    setLoading(true);
+    setError(null);
+    const supabase = getSupabase();
+    const { data, error: err } = await supabase.rpc("owner_list_client_reviews");
+    if (err) { setError(err.message); setLoading(false); return; }
+    setReviews(((data || []) as any[]).map(r => ({
+      id: String(r.id),
+      appointment_id: String(r.appointment_id),
+      stars: Number(r.stars) || 0,
+      notes: r.notes ?? null,
+      would_book_again: r.would_book_again ?? null,
+      private_feedback: r.private_feedback ?? null,
+      display_name: r.display_name ?? null,
+      status: (r.status as ClientReview["status"]) || "pending",
+      is_favorite: !!r.is_favorite,
+      submitted_at: r.submitted_at ?? "",
+      client_name: r.client_name ?? null,
+      service_name: r.service_name ?? null,
+      appt_date: r.appt_date ?? null,
+    })));
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => { if (!cancelled) await refresh(); })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  const setStatus: ReturnType<typeof useClientReviews>["setStatus"] = async (id, status) => {
+    const supabase = getSupabase();
+    const { data, error: err } = await supabase.rpc("set_client_review_status", {
+      review_id_in: id, status_in: status,
+    });
+    if (err || !(data as any)?.ok) { setError(err?.message || "Couldn't update the review."); return false; }
+    setReviews(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+    return true;
+  };
+
+  const setFavorite: ReturnType<typeof useClientReviews>["setFavorite"] = async (id, favorite) => {
+    const supabase = getSupabase();
+    const { data, error: err } = await supabase.rpc("set_client_review_favorite", {
+      review_id_in: id, favorite_in: favorite,
+    });
+    if (err || !(data as any)?.ok) { setError(err?.message || "Couldn't update the review."); return false; }
+    setReviews(prev => prev.map(r => r.id === id ? { ...r, is_favorite: favorite } : r));
+    return true;
+  };
+
+  return { reviews, loading, error, refresh, setStatus, setFavorite };
 };
 
 // ============================================================

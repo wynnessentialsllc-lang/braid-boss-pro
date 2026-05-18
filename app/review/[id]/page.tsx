@@ -1,13 +1,17 @@
 "use client";
 
-// Public review page — /review/<appointment_id>
+// Public review page — /review/<token>
 //
-// Linked from the "balance paid" transactional email. Anonymous,
-// luxury 5-star + open-notes form. Submit goes through
-// submit_appointment_review (SECURITY DEFINER, anon callable). The
-// underlying table has a UNIQUE on appointment_id so re-submits
-// update the stored row in place — the page treats a returning
-// visitor as "edit your review" rather than locking them out.
+// Linked from the post-appointment "How was your appointment?" email
+// (opaque review_request_token — no internal id exposed) and, for
+// backward compat, the older "balance paid" email that linked
+// /review/<appointment_id>. Anonymous, luxury 5-star form with an
+// open review, optional "would you book again?", private note to the
+// stylist, and a display name. Submit goes through
+// submit_review_by_token (SECURITY DEFINER, anon callable); the RPC
+// also accepts a raw appointment id so legacy links keep working.
+// appointment_reviews is UNIQUE(appointment_id) so re-submits edit
+// the stored row in place and drop back to 'pending' for re-review.
 
 import { Suspense, use, useEffect, useMemo, useState } from "react";
 import { getSupabase } from "../../lib/supabase";
@@ -32,7 +36,6 @@ const FONT_DISPLAY = "'Cormorant Garamond', 'Playfair Display', Georgia, serif";
 type ReviewInfo =
   | {
       ok: true;
-      id: string;
       studio_name: string;
       service_name: string | null;
       client_name: string | null;
@@ -40,6 +43,9 @@ type ReviewInfo =
       appt_time: string | null;
       already_submitted: boolean;
       existing_stars: number | null;
+      existing_text: string | null;
+      existing_would_book_again: boolean | null;
+      existing_display_name: string | null;
     }
   | { ok: false; reason: string };
 
@@ -110,12 +116,15 @@ const Star = ({ filled, onClick, onHover }: { filled: boolean; onClick: () => vo
   </button>
 );
 
-const ReviewInner = ({ id }: { id: string }) => {
+const ReviewInner = ({ token }: { token: string }) => {
   const [info, setInfo] = useState<ReviewInfo | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [stars, setStars] = useState<number>(0);
   const [hoverStars, setHoverStars] = useState<number>(0);
   const [notes, setNotes] = useState<string>("");
+  const [wouldBook, setWouldBook] = useState<boolean | null>(null);
+  const [privateNote, setPrivateNote] = useState<string>("");
+  const [displayName, setDisplayName] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
@@ -124,13 +133,19 @@ const ReviewInner = ({ id }: { id: string }) => {
     (async () => {
       try {
         const supabase = getSupabase();
-        const { data, error } = await supabase.rpc("public_get_appointment_for_review", { appt_id_in: id });
+        const { data, error } = await supabase.rpc("public_get_review_by_token", { token_in: token });
         if (cancelled) return;
         if (error) { setErr(error.message); return; }
         const v = data as ReviewInfo;
         setInfo(v);
-        if (v.ok && v.already_submitted && v.existing_stars) {
-          setStars(v.existing_stars);
+        if (v.ok && v.already_submitted) {
+          if (v.existing_stars) setStars(v.existing_stars);
+          if (v.existing_text) setNotes(v.existing_text);
+          if (typeof v.existing_would_book_again === "boolean") setWouldBook(v.existing_would_book_again);
+          if (v.existing_display_name) setDisplayName(v.existing_display_name);
+        }
+        if (v.ok && !v.existing_display_name && v.client_name) {
+          setDisplayName(v.client_name);
         }
         trackEvent("review_page_viewed", { category: "feature" });
       } catch (e: any) {
@@ -138,7 +153,7 @@ const ReviewInner = ({ id }: { id: string }) => {
       }
     })();
     return () => { cancelled = true; };
-  }, [id]);
+  }, [token]);
 
   const submit = async () => {
     if (stars < 1 || busy) return;
@@ -146,10 +161,13 @@ const ReviewInner = ({ id }: { id: string }) => {
     setErr(null);
     try {
       const supabase = getSupabase();
-      const { data, error } = await supabase.rpc("submit_appointment_review", {
-        appt_id_in: id,
+      const { data, error } = await supabase.rpc("submit_review_by_token", {
+        token_in: token,
         stars_in: stars,
-        notes_in: notes.trim() || null,
+        review_text_in: notes.trim() || null,
+        would_book_again_in: wouldBook,
+        private_feedback_in: privateNote.trim() || null,
+        display_name_in: displayName.trim() || null,
       });
       if (error) {
         setErr(error.message);
@@ -254,15 +272,61 @@ const ReviewInner = ({ id }: { id: string }) => {
         </p>
 
         <div style={{ marginTop: 18 }}>
-          <p style={fieldLabel}>Anything you&apos;d like to share?</p>
+          <p style={fieldLabel}>Your review</p>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value.slice(0, 4000))}
-            placeholder="Optional — what stood out, what could be better?"
+            placeholder="What stood out? This is what future clients will see."
             rows={4}
             style={textarea}
           />
         </div>
+
+        <div style={{ marginTop: 16 }}>
+          <p style={fieldLabel}>Would you book again?</p>
+          <div style={{ display: "flex", gap: 10 }}>
+            {([["Yes", true], ["No", false]] as const).map(([label, val]) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setWouldBook(wouldBook === val ? null : val)}
+                style={{
+                  ...chip,
+                  background: wouldBook === val ? C.espresso : C.cream,
+                  color: wouldBook === val ? C.cream : C.coffee,
+                  borderColor: wouldBook === val ? C.espresso : C.hairline,
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <p style={fieldLabel}>Display name</p>
+          <input
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value.slice(0, 80))}
+            placeholder="The name shown with your review"
+            style={inputStyle}
+          />
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <p style={fieldLabel}>Private note to your stylist (optional)</p>
+          <textarea
+            value={privateNote}
+            onChange={(e) => setPrivateNote(e.target.value.slice(0, 4000))}
+            placeholder="Only your stylist sees this — never shown publicly."
+            rows={3}
+            style={textarea}
+          />
+        </div>
+
+        <p style={{ ...muted, fontSize: 12, marginTop: 14 }}>
+          Your review helps your stylist grow and helps future clients book with confidence.
+        </p>
 
         {err && <p style={{ color: C.danger, fontSize: 12, marginTop: 10 }}>{err}</p>}
 
@@ -339,6 +403,31 @@ const textarea: React.CSSProperties = {
   appearance: "none",
   WebkitAppearance: "none",
 };
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  background: C.cream,
+  border: `1px solid ${C.hairline}`,
+  borderRadius: 12,
+  padding: "12px 14px",
+  fontSize: 14,
+  color: C.espresso,
+  fontFamily: "inherit",
+  appearance: "none",
+  WebkitAppearance: "none",
+};
+const chip: React.CSSProperties = {
+  flex: 1,
+  appearance: "none",
+  WebkitAppearance: "none",
+  border: `1px solid ${C.hairline}`,
+  borderRadius: 999,
+  padding: "12px 16px",
+  fontSize: 14,
+  fontWeight: 600,
+  cursor: "pointer",
+  font: "inherit",
+  transition: "background 140ms ease, color 140ms ease, border-color 140ms ease",
+};
 const primaryBtn: React.CSSProperties = {
   marginTop: 18,
   width: "100%",
@@ -360,5 +449,5 @@ const primaryBtn: React.CSSProperties = {
 
 export default function ReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  return <Suspense fallback={null}><ReviewInner id={id} /></Suspense>;
+  return <Suspense fallback={null}><ReviewInner token={id} /></Suspense>;
 }
