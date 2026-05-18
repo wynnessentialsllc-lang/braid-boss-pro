@@ -67,6 +67,81 @@ const SHADOWS = {
 const FONT_DISPLAY = `"Cormorant Garamond", Georgia, serif`;
 const FONT_BODY = `"DM Sans", "Inter", system-ui, sans-serif`;
 
+// Shown until the real booking link resolves (or when it can't).
+// Deliberately carries NO stylist data — no name, handle, avatar,
+// banner, or tabs — so the visitor never sees a fake "Welcome /
+// @randomslug" profile flash (worst inside the Instagram in-app
+// browser). Just the Braid Boss Pro wordmark + a subtle loader, or
+// a clean not-found message.
+const BookingBootScreen = ({
+  notFound = false,
+  message,
+}: { notFound?: boolean; message?: string }) => (
+  <div
+    style={{
+      minHeight: "100vh",
+      background: C.cream,
+      fontFamily: FONT_BODY,
+      color: C.espresso,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 18,
+      padding: 24,
+      textAlign: "center",
+    }}
+  >
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=DM+Sans:wght@500;600&display=swap');
+      @keyframes bbpBootPulse { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) {
+        .bbp-boot-dot { animation: none !important; opacity: .7 !important; }
+      }
+    `}</style>
+    <p
+      style={{
+        margin: 0,
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: "0.32em",
+        textTransform: "uppercase",
+        color: C.goldDeep || C.gold,
+      }}
+    >
+      Braid Boss Pro
+    </p>
+    {notFound ? (
+      <>
+        <h1 style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: C.espresso }}>
+          Profile not found
+        </h1>
+        <p style={{ margin: 0, fontSize: 14, color: C.muted, maxWidth: 320, lineHeight: 1.5 }}>
+          {message || "This booking link may be unavailable."}
+        </p>
+      </>
+    ) : (
+      <div aria-label="Loading" role="status" style={{ display: "flex", gap: 7 }}>
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="bbp-boot-dot"
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: 999,
+              background: C.gold,
+              display: "inline-block",
+              animation: "bbpBootPulse 1.1s ease-in-out infinite",
+              animationDelay: `${i * 0.18}s`,
+            }}
+          />
+        ))}
+      </div>
+    )}
+  </div>
+);
+
 type LinkConfig = {
   slug: string;
   user_id?: string | null;
@@ -1013,6 +1088,24 @@ export default function PublicBookingPage() {
   // storefront-style header. Prefers the branded slug; falls back
   // to whatever URL the visitor arrived on.
   const displayHandle = (link?.branded_slug || slug || "").replace(/^@/, "");
+
+  // Never render the profile chrome with placeholder data. Until the
+  // real booking link resolves, show only the branded loader; if it
+  // failed to resolve, show a clean not-found state. This kills the
+  // "Welcome / @randomslug / gradient" flash (worst in the Instagram
+  // in-app browser).
+  if (linkLoading && !link) {
+    return <BookingBootScreen />;
+  }
+  if (!link) {
+    return (
+      <BookingBootScreen
+        notFound
+        message={linkError || "This booking link may be unavailable."}
+      />
+    );
+  }
+
   return (
     <div style={{ minHeight: "100dvh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso }}>
       <style>{`
