@@ -238,7 +238,7 @@ import {
 import { buildCsv } from "./lib/csv";
 import ImportStudio, { IMPORT_TAGLINE } from "./components/ImportStudio";
 import { deriveClientInsights, formatLastBookedHint } from "./lib/client-insights";
-import { uploadBookingLogo, removeBookingLogo } from "./lib/booking-logo-storage";
+import { uploadBookingLogo, removeBookingLogo, uploadBookingBanner, removeBookingBanner } from "./lib/booking-logo-storage";
 import { uploadServiceCover } from "./lib/service-cover-storage";
 import { uploadGalleryPhoto, removeGalleryPhoto, GALLERY_LIMITS, type GalleryPhoto } from "./lib/booking-gallery-storage";
 import { openExternal } from "./lib/open-external";
@@ -3230,6 +3230,8 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   const [err, setErr] = useState<string | null>(null);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const bannerInputRef = useRef<HTMLInputElement | null>(null);
+  const [bannerUploading, setBannerUploading] = useState(false);
 
   // Re-hydrate when the link prop changes (e.g. after a save).
   useEffect(() => {
@@ -3535,9 +3537,84 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         <Field label="Phone for clients" hint="Powers the 'send a message' button (sms/tel).">
           <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="555-204-1839" />
         </Field>
-        <Field label="Banner image URL" hint="Optional. Wide hero image at the top of your booking page (1600×500 looks best).">
-          <Input value={bannerImageUrl} onChange={(e) => setBannerImageUrl(e.target.value)} placeholder="https://…/banner.jpg" />
-        </Field>
+        <div>
+          <p className="text-[11px] font-bold uppercase mb-1" style={{ color: C.muted, letterSpacing: "0.14em" }}>Banner image</p>
+          <p className="text-[11px] mb-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+            Optional. Wide hero photo at the top of your booking page (1600×500 looks best). Until you add one, visitors see the Braid Boss Pro banner.
+          </p>
+          {bannerImageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={bannerImageUrl}
+              alt="Banner preview"
+              style={{
+                width: "100%", height: 120, objectFit: "cover",
+                borderRadius: 14, background: C.cream,
+                border: `1px solid ${C.hairline}`, display: "block",
+              }}
+            />
+          ) : (
+            <div
+              aria-hidden
+              style={{
+                width: "100%", height: 120, borderRadius: 14,
+                border: `1px dashed ${C.caramel}`, background: C.cream,
+                display: "grid", placeItems: "center",
+                color: C.muted, fontSize: 11, letterSpacing: "0.08em",
+                textTransform: "uppercase", fontWeight: 700,
+              }}
+            >
+              No banner
+            </div>
+          )}
+          <input
+            ref={bannerInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (!f) return;
+              if (!userId) { setErr("Sign in required."); return; }
+              setErr(null);
+              setBannerUploading(true);
+              try {
+                const { publicUrl } = await uploadBookingBanner(userId, f);
+                setBannerImageUrl(publicUrl);
+              } catch (ex: any) {
+                setErr(ex?.message || "Upload failed.");
+              } finally {
+                setBannerUploading(false);
+              }
+            }}
+          />
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+            <Button
+              variant="outline"
+              icon={<Upload size={14} />}
+              onClick={() => bannerInputRef.current?.click()}
+              disabled={bannerUploading}
+            >
+              {bannerUploading ? "Uploading…" : bannerImageUrl ? "Replace banner" : "Upload banner"}
+            </Button>
+            {bannerImageUrl && (
+              <button
+                type="button"
+                onClick={async () => {
+                  if (userId) {
+                    try { await removeBookingBanner(userId); } catch { /* ignore */ }
+                  }
+                  setBannerImageUrl("");
+                }}
+                className="text-[11px] font-semibold"
+                style={{ color: C.danger, background: "transparent", border: 0, padding: "4px 0", textAlign: "left" }}
+              >
+                Remove banner
+              </button>
+            )}
+          </div>
+        </div>
         <div>
           <p className="text-[11px] font-bold uppercase mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>Social links</p>
           <div className="space-y-2">

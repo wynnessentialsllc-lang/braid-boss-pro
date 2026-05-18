@@ -88,3 +88,78 @@ export const removeBookingLogo = async (userId: string): Promise<void> => {
   const supabase = getSupabase();
   await supabase.storage.from(BUCKET).remove([`${userId}/logo.jpg`]);
 };
+
+// ---- Banner (wide hero image) --------------------------------------
+// Shares the booking-logos bucket — its RLS already pins writes to
+// {auth.uid()}/<filename> and opens reads, so a sibling banner.jpg
+// needs no new bucket or migration. Compressed to a wide hero size
+// rather than the square logo cap.
+const BANNER_MAX_W = 1600;
+const BANNER_MAX_H = 900;
+const BANNER_QUALITY = 0.82;
+
+const compressBanner = (file: File): Promise<Blob> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error("read failed"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("decode failed"));
+      img.onload = () => {
+        const ratio = Math.min(
+          1,
+          BANNER_MAX_W / img.width,
+          BANNER_MAX_H / img.height,
+        );
+        const w = Math.max(1, Math.round(img.width * ratio));
+        const h = Math.max(1, Math.round(img.height * ratio));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { reject(new Error("canvas unavailable")); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(
+          (blob) => blob ? resolve(blob) : reject(new Error("encode failed")),
+          "image/jpeg",
+          BANNER_QUALITY,
+        );
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+
+export const uploadBookingBanner = async (
+  userId: string,
+  file: File,
+): Promise<UploadLogoResult> => {
+  if (!userId) throw new Error("Sign in required.");
+  if (!file) throw new Error("No file selected.");
+  if (!/^image\//.test(file.type)) throw new Error("Please choose an image file.");
+  if (file.size > 12 * 1024 * 1024) throw new Error("Image is larger than 12 MB.");
+
+  const blob = await compressBanner(file);
+  const supabase = getSupabase();
+  const path = `${userId}/banner.jpg`;
+  const { error: upErr } = await supabase
+    .storage
+    .from(BUCKET)
+    .upload(path, blob, {
+      upsert: true,
+      contentType: "image/jpeg",
+      cacheControl: "3600",
+    });
+  if (upErr) throw upErr;
+
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  const base = data?.publicUrl;
+  if (!base) throw new Error("Couldn't resolve uploaded URL.");
+  return { publicUrl: `${base}?v=${Date.now()}`, path };
+};
+
+export const removeBookingBanner = async (userId: string): Promise<void> => {
+  if (!userId) return;
+  const supabase = getSupabase();
+  await supabase.storage.from(BUCKET).remove([`${userId}/banner.jpg`]);
+};
