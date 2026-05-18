@@ -7932,13 +7932,42 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                   page URL so the stylist can text it / DM it to the
                   client. The actual checkout session is created
                   server-side when the client taps Pay on that page. */}
-              {appt?.balanceAccessToken && (
+              {/* Always available once a balance is owed on a saved
+                  appointment. The opaque balance_access_token is a
+                  DB-only column (set by trigger, backfilled for all
+                  rows) — never gate the button on the local copy,
+                  which can be stale right after an edit. Resolve it
+                  lazily: in-memory → fresh DB read → safe owner
+                  backfill RPC. */}
+              {appt?.id && (
                 <Button
                   variant="outline"
                   icon={<Copy size={16} />}
                   fullWidth
                   onClick={async () => {
-                    const url = `${typeof window !== "undefined" ? window.location.origin : ""}/pay/balance/${appt.balanceAccessToken}`;
+                    let token: string | null =
+                      appt?.balanceAccessToken || form?.balanceAccessToken || null;
+                    if (!token) {
+                      try {
+                        const supabase = getSupabase();
+                        const { data } = await supabase
+                          .from("appointments")
+                          .select("balance_access_token")
+                          .eq("id", appt.id)
+                          .maybeSingle();
+                        token = (data as any)?.balance_access_token || null;
+                        if (!token) {
+                          const { data: gen } = await supabase
+                            .rpc("ensure_appointment_balance_token", { appt_id_in: appt.id });
+                          token = (typeof gen === "string" && gen) ? gen : null;
+                        }
+                      } catch { /* fall through to the guard below */ }
+                    }
+                    if (!token) {
+                      alert("Couldn't generate the payment link just now. Please try again in a moment.");
+                      return;
+                    }
+                    const url = `${typeof window !== "undefined" ? window.location.origin : ""}/pay/balance/${token}`;
                     try {
                       if (typeof navigator !== "undefined" && navigator.clipboard) {
                         await navigator.clipboard.writeText(url);
@@ -7948,7 +7977,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                         // stylist can long-press / copy manually.
                         window.prompt("Copy this link to share with your client:", url);
                       }
-                      trackEvent("balance_link_copied", { category: "feature", metadata: { appt: appt.id.slice(0, 8) } });
+                      trackEvent("balance_link_copied", { category: "feature", metadata: { appt: String(appt.id).slice(0, 8) } });
                     } catch {
                       window.prompt("Copy this link to share with your client:", url);
                     }
