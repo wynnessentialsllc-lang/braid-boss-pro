@@ -7321,7 +7321,19 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     // the stylist already chose a date in the form we leave it.
     const depositEntered = parseMoney(form.depositPaid) > 0;
     const paymentDateAutoFill = depositEntered && !form.paymentDate ? todayISO() : form.paymentDate;
+    // PATCH semantics — never rebuild the appointment from just the
+    // form. The form is a whitelisted subset (scheduling + payment +
+    // discount); booking-created appointments also carry a snapshot
+    // the form never surfaces: selected add-ons, style customization,
+    // service variation, booking_request_id, Stripe payment-intent /
+    // balance-token / review-token ids, deposit disposition, etc.
+    // Spreading the original record FIRST preserves all of that; the
+    // form then overlays only the fields the stylist actually edited.
+    // For brand-new manual creates `appt` is null/empty, so this is a
+    // no-op there and manual editing is unchanged.
+    const original = (appt && typeof appt === "object") ? appt : {};
     const baseAppt = {
+      ...original,
       ...form,
       paymentDate: paymentDateAutoFill,
       clientId, clientName,
