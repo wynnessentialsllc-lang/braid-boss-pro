@@ -40,16 +40,16 @@ const baseUrlOf = (req: Request): string => {
 };
 
 export async function POST(req: Request) {
-  let body: { appointment_id?: string };
+  let body: { balance_token?: string };
   try { body = await req.json(); }
   catch { return fail(400, "Invalid JSON body."); }
 
-  const apptId = body?.appointment_id?.trim();
-  // appointment.id is a text column in this schema (not a uuid) — be
-  // permissive but still reject obvious garbage so we don't waste a
-  // Stripe call on an unparseable input.
-  if (!apptId || apptId.length < 4 || apptId.length > 96 || !/^[A-Za-z0-9_-]+$/.test(apptId)) {
-    return fail(400, "Missing or malformed appointment_id.");
+  // The public page only ever holds the opaque balance_access_token,
+  // never the internal appointment id. Resolve the appointment from
+  // the token server-side (service role) below.
+  const balanceToken = body?.balance_token?.trim();
+  if (!balanceToken || balanceToken.length < 16 || balanceToken.length > 128 || !/^[A-Za-z0-9_-]+$/.test(balanceToken)) {
+    return fail(400, "Missing or malformed balance token.");
   }
 
   let stripeSecret: string;
@@ -72,10 +72,11 @@ export async function POST(req: Request) {
     .select(
       "id, user_id, style, client_name, client_email, total_price, deposit_paid, balance_due, balance_paid, status, appt_date",
     )
-    .eq("id", apptId)
+    .eq("balance_access_token", balanceToken)
     .maybeSingle();
 
   if (readErr || !row) return fail(404, "Appointment not found.");
+  const apptId = String(row.id);
   if (row.status === "cancelled" || row.status === "canceled") return fail(409, "Appointment is cancelled.");
   if (row.balance_paid) return fail(409, "Balance already paid.");
 
@@ -122,8 +123,8 @@ export async function POST(req: Request) {
   // ---------------------------------------------------------------
   const params = new URLSearchParams();
   params.set("mode", "payment");
-  params.set("success_url", `${baseUrl}/pay/balance/${apptId}?paid=1`);
-  params.set("cancel_url", `${baseUrl}/pay/balance/${apptId}?cancelled=1`);
+  params.set("success_url", `${baseUrl}/pay/balance/${balanceToken}?paid=1`);
+  params.set("cancel_url", `${baseUrl}/pay/balance/${balanceToken}?cancelled=1`);
   params.set("client_reference_id", apptId);
   params.set("metadata[appointment_id]", apptId);
   params.set("metadata[type]", "balance_payment");

@@ -226,6 +226,9 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.createdFromPublic = base.createdFromPublic ?? row.created_from_public ?? false;
       base.isAllDay = base.isAllDay ?? row.is_all_day ?? false;
       base.blocksAvailability = base.blocksAvailability ?? (row.blocks_availability ?? true);
+      // Secure token for the public /pay/balance link (DB-only column,
+      // minted by trigger; never lives in the data blob).
+      base.balanceAccessToken = row.balance_access_token ?? base.balanceAccessToken ?? null;
       break;
     case "quotes":
       base.label = base.label ?? row.label;

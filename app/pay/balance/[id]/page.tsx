@@ -113,7 +113,7 @@ const BalancePayInner = ({ id }: { id: string }) => {
     (async () => {
       try {
         const supabase = getSupabase();
-        const { data, error } = await supabase.rpc("public_get_balance_payment_info", { appt_id_in: id });
+        const { data, error } = await supabase.rpc("public_get_balance_payment_info", { token_in: id });
         if (cancelled) return;
         if (error) { setErr(error.message); return; }
         setInfo(data as PaymentInfo);
@@ -138,7 +138,7 @@ const BalancePayInner = ({ id }: { id: string }) => {
       const res = await fetch("/api/balance-payment/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ appointment_id: id }),
+        body: JSON.stringify({ balance_token: id }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || !body?.url) {

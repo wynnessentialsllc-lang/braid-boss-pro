@@ -7699,13 +7699,13 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                   page URL so the stylist can text it / DM it to the
                   client. The actual checkout session is created
                   server-side when the client taps Pay on that page. */}
-              {appt?.id && (
+              {appt?.balanceAccessToken && (
                 <Button
                   variant="outline"
                   icon={<Copy size={16} />}
                   fullWidth
                   onClick={async () => {
-                    const url = `${typeof window !== "undefined" ? window.location.origin : ""}/pay/balance/${appt.id}`;
+                    const url = `${typeof window !== "undefined" ? window.location.origin : ""}/pay/balance/${appt.balanceAccessToken}`;
                     try {
                       if (typeof navigator !== "undefined" && navigator.clipboard) {
                         await navigator.clipboard.writeText(url);
