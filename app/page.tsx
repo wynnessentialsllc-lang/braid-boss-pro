@@ -164,7 +164,6 @@ import {
   weekDepositBuckets,
   getDepositCollectedAmount,
   type WeekDepositBuckets,
-  pendingBalanceAppts,
   monthExpectedAppts,
   monthProfitBreakdown,
   type MonthProfitBreakdown,
@@ -623,15 +622,13 @@ const isIncomeAppt = (appt: any): boolean => {
 // Sum of outstanding balance across appointments whose payment is
 // pending / partially deposited / overdue. Cancelled and fully-paid
 // records are excluded.
-const calculatePendingBalance = (appts: any[], _todayIso: string): number => {
+const calculatePendingBalance = (appts: any[], todayIso: string): number => {
   // Single source of truth: the headline stat is exactly the sum of
-  // the Pending balances sheet's rows. Previously this summed the raw
-  // stored `a.balanceDue` field while the sheet/list used the
-  // computed ticketBalance (total − depositPaid), so a stale
-  // balanceDue made the card disagree with the sheet (e.g. $730 vs
-  // $655). Deriving from the same helpers guarantees they match.
+  // the dashboard Pending balances list's rows (current month only,
+  // auto-rolling), so the card and the list can never disagree.
   return roundCents(
-    pendingBalanceAppts(appts).reduce((s, a) => s + reportTicketBalance(a), 0),
+    getPendingBalanceAppointments(Array.isArray(appts) ? appts : [], todayIso)
+      .reduce((s, a) => s + reportTicketBalance(a), 0),
   );
 };
 
@@ -829,8 +826,26 @@ const getRebookingCandidates = (clients: any[], appointments: any[], todayIso: s
 // one. These helpers own the inclusion / exclusion math so the JSX
 // stays a thin renderer.
 
+// Calendar-month window [start, nextMonthStart) for a local ISO
+// date. Used to scope the dashboard to the CURRENT month only —
+// it auto-advances because callers pass the live `today`.
+const monthWindow = (iso: string): { start: string; end: string } => {
+  const base = /^\d{4}-\d{2}-\d{2}/.test(iso || "") ? iso : todayISO();
+  const d = new Date(base + "T00:00:00");
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const start = `${y}-${String(m + 1).padStart(2, "0")}-01`;
+  const nx = new Date(y, m + 1, 1);
+  const end = `${nx.getFullYear()}-${String(nx.getMonth() + 1).padStart(2, "0")}-01`;
+  return { start, end };
+};
+
 const getPendingBalanceAppointments = (appointments: any[], todayIso: string): any[] => {
   if (!Array.isArray(appointments)) return [];
+  // Dashboard shows the CURRENT month only. Balances for future
+  // months stay hidden here until that month begins (the full list
+  // is still reachable via the Pending balances detail sheet).
+  const { start, end } = monthWindow(todayIso);
   return appointments
     .filter(a => a && !isCanceledAppointment(a))
     // Personal / blocked-time entries aren't real bookings, and a
@@ -839,6 +854,7 @@ const getPendingBalanceAppointments = (appointments: any[], todayIso: string): a
     // the derived Pending Balance total — mirrors lib/reports.ts.
     .filter(isRealAppointment)
     .filter(a => !!a.date)
+    .filter(a => a.date >= start && a.date < end)
     .filter(a => parseMoney(a.balanceDue) > 0)
     .filter(a => paymentStatusOf(a, todayIso) !== "paid")
     .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
@@ -3142,7 +3158,9 @@ const KpiDetailSheet = ({
         );
       }
       case "pending": {
-        const list = pendingBalanceAppts(appointments);
+        // Current month only, matching the dashboard card + list
+        // (auto-rolls on the 1st via the live `today`).
+        const list = getPendingBalanceAppointments(appointments, today);
         const total = list.reduce((s, a) => s + reportTicketBalance(a), 0);
         return (
           <>
