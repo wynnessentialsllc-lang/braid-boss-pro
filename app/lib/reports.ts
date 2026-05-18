@@ -54,6 +54,50 @@ export const ticketBalance = (a: AppointmentLike): number => {
   return Math.max(0, ticketTotal(a) - num(a.depositPaid));
 };
 
+// CANONICAL "deposit actually collected" for an appointment.
+// Every deposit display (Home card, deposit sheet total + rows,
+// schedule card, edit sheet) must go through this so they can never
+// disagree. Rules:
+//   - refunded / denied deposits are NOT collected → 0
+//   - cancelled-but-forfeited (not refunded) still counts
+//   - never exceeds the ticket total (a full payment isn't a bigger
+//     deposit), never the ticket total itself elsewhere
+export const getDepositCollectedAmount = (a: AppointmentLike): number => {
+  if (!a) return 0;
+  const refunded =
+    a.paymentStatus === "refunded" ||
+    (a as any).depositDisposition === "refunded" ||
+    (a as any).deposit_disposition === "refunded" ||
+    num((a as any).refundAmount) > 0 ||
+    num((a as any).deposit_refund_amount) > 0;
+  if (refunded) return 0;
+  const dep = num(a.depositPaid);
+  if (dep <= 0) return 0;
+  const ticket = ticketTotal(a);
+  const v = ticket > 0 ? Math.min(dep, ticket) : dep;
+  return Number(Math.max(0, v).toFixed(2));
+};
+
+// Single source of truth for "a (partial) deposit was collected
+// within [weekStart..reference]". Shared by the Home "Deposits
+// (week)" card AND the deposit detail sheet so the two can never
+// show different numbers. Same-day deposits count; a payment that
+// equals the full ticket is a full payment, not a deposit.
+export const isDepositCollectedInRange = (
+  a: AppointmentLike,
+  weekStart: string,
+  reference: string,
+): boolean => {
+  if (!isBillable(a)) return false;
+  if (getDepositCollectedAmount(a) <= 0) return false;
+  if (!a.paymentDate || !a.date) return false;
+  if (a.paymentDate > a.date) return false;
+  if (a.paymentDate < weekStart || a.paymentDate > reference) return false;
+  const ticket = ticketTotal(a);
+  const dep = num(a.depositPaid);
+  return ticket <= 0 || dep < ticket; // partial → deposit, not full pay
+};
+
 // ---- Date helpers (local, no UTC drift) -------------------------------
 
 const localDateISO = (d: Date): string => {
@@ -153,7 +197,6 @@ export const computeDashboardRevenue = (
   for (const a of list) {
     const d = a.date || "";
     const t = ticketTotal(a);
-    const dep = num(a.depositPaid);
     if (d === today) todayRevenue += t;
     if (d >= weekStart && d <= today) {
       weekRevenue += t;
@@ -164,14 +207,11 @@ export const computeDashboardRevenue = (
     //   1. paymentDate must be set, and
     //   2. paymentDate < appointment date (paid in advance), and
     //   3. paymentDate falls in this week (Sun..today).
-    // A "paid same-day" or after-service payment isn't a deposit —
-    // it's a balance / full payment, so we exclude it. This matches
-    // the stylist's mental model: "deposits = money collected
-    // upon booking."
-    if (dep > 0 && a.paymentDate && d && a.paymentDate < d) {
-      if (a.paymentDate >= weekStart && a.paymentDate <= today) {
-        weekDeposits += dep;
-      }
+    // Deposits collected this week — uses the SAME canonical
+    // predicate + amount as the deposit detail sheet, so the Home
+    // card and the sheet can never disagree.
+    if (isDepositCollectedInRange(a, weekStart, today)) {
+      weekDeposits += getDepositCollectedAmount(a);
     }
     if (d >= thirtyDaysAgo && d <= today) {
       last30Total += t;
@@ -464,29 +504,11 @@ export const weekDepositBuckets = (
     if (!isBillable(a)) continue;
     const dep = num(a.depositPaid);
 
-    // Collected — deposit paid this week. Counts the deposit when
-    // the payment landed on or before the appointment date (same-day
-    // deposits count: a stylist who collects $25 at the chair before
-    // the appointment runs is still collecting a deposit, not a full
-    // payment). What rules this out is whether the depositPaid equals
-    // the full ticket — if so it's a full payment, not a deposit,
-    // and falls through to the regular revenue stream. Partial
-    // payments (deposit < total) always count when the paymentDate
-    // sits within this week.
-    if (
-      dep > 0
-      && a.paymentDate
-      && a.date
-      && a.paymentDate <= a.date
-      && a.paymentDate >= ws
-      && a.paymentDate <= reference
-    ) {
-      const ticket = num(a.totalPrice) - num(a.discountAmount);
-      const isPartial = ticket <= 0 || dep < ticket;
-      if (isPartial) {
-        collected.push(a);
-        continue;
-      }
+    // Collected — same canonical predicate the Home "Deposits
+    // (week)" card uses, so the two surfaces can never disagree.
+    if (isDepositCollectedInRange(a, ws, reference)) {
+      collected.push(a);
+      continue;
     }
 
     // Due / Missing — forward-looking buckets keyed to appointments
@@ -500,7 +522,8 @@ export const weekDepositBuckets = (
     if (a.date < reference) missing.push(a);
     else                    due.push(a);
   }
-  const sumDeposits = (xs: AppointmentLike[]) => xs.reduce((s, a) => s + num(a.depositPaid), 0);
+  const sumDeposits = (xs: AppointmentLike[]) =>
+    xs.reduce((s, a) => s + getDepositCollectedAmount(a), 0);
   return {
     collected: { appointments: collected, total: round2(sumDeposits(collected)) },
     due:       { appointments: due,       total: 0 },
