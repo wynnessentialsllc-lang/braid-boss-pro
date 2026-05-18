@@ -465,6 +465,69 @@ const fmtMoney = (n: number, currency: string = "USD"): string => {
   try { return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(num); } catch { return `$${num.toFixed(2)}`; }
 };
 
+// --- Style-customization snapshot -----------------------------------
+// Single source of truth for rendering the client's booked style
+// configuration in the approval card AND the Edit Appointment sheet,
+// matching the customization block in the booking emails.
+//
+// Future-proof: it surfaces the known columns first, then walks the
+// raw customization_summary jsonb so any field the booking flow adds
+// later shows up automatically without code changes here. Add-on /
+// variation / pricing keys are excluded — those have their own card.
+const CUSTOMIZATION_SKIP_KEYS = new Set([
+  "custom_hair_color", "custom_curl_pattern", "hair_included",
+  "addons", "add_ons", "addon_ids", "extras", "variation",
+  "variation_id", "variation_name", "variation_price", "price",
+  "deposit", "deposit_amount", "duration", "duration_hours",
+]);
+const prettifyKey = (k: string): string => {
+  const words = String(k)
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .trim()
+    .toLowerCase();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : k;
+};
+const customizationEntries = (
+  src: Record<string, any> | null | undefined,
+): Array<{ label: string; value: string }> => {
+  if (!src || typeof src !== "object") return [];
+  const cs = (src.summary && typeof src.summary === "object")
+    ? src.summary
+    : (src.customization_summary && typeof src.customization_summary === "object")
+      ? src.customization_summary
+      : {};
+  const entries: Array<{ label: string; value: string }> = [];
+  const push = (label: string, value: any) => {
+    if (value === null || value === undefined || value === false || value === "") return;
+    let v: string;
+    if (value === true) v = "Yes";
+    else if (Array.isArray(value)) {
+      v = value.map((x) => String(x ?? "").trim()).filter(Boolean).join(", ");
+    } else if (typeof value === "object") return; // skip nested objects
+    else v = String(value).trim();
+    if (!v) return;
+    entries.push({ label, value: v });
+  };
+
+  // Known columns first, in a sensible reading order.
+  const hairIncluded = src.hairIncluded ?? src.hair_included ?? cs.hair_included;
+  if (hairIncluded === true) push("Hair included", "Yes");
+  push("Hair color", src.hairColor ?? src.selected_hair_color ?? cs.custom_hair_color);
+  push("Curl pattern", src.curlPattern ?? src.selected_curl_pattern ?? cs.custom_curl_pattern);
+
+  // Then any future fields the booking flow stashed in the summary.
+  for (const [k, val] of Object.entries(cs)) {
+    if (CUSTOMIZATION_SKIP_KEYS.has(k)) continue;
+    push(prettifyKey(k), val);
+  }
+
+  const notes = src.styleNotes ?? src.client_style_notes ?? cs.notes;
+  push("Style notes", notes);
+  return entries;
+};
+
+
 // --- Numeric input helpers ----------------------------------------------
 // Sanitize a free-typed money/decimal string while preserving valid
 // intermediate states (e.g. "0.", "0.5"). Strips leading zeros so "0325"
@@ -7696,6 +7759,36 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             </ul>
           </Card>
         )}
+
+        {/* Style Customization — read-only snapshot from the public
+            booking flow. Same data as the booking/confirmation emails.
+            Add-ons stay in their own card above; this is hair/curl/
+            notes + any future customization fields, rendered
+            dynamically so new fields need no code change here. */}
+        {isAppointment && (() => {
+          const cust = customizationEntries((appt as any)?.customization);
+          if (cust.length === 0) return null;
+          return (
+            <Card className="p-3.5">
+              <p className="text-sm font-semibold mb-1" style={{ color: C.espresso }}>Style customization</p>
+              <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+                Selected by the client at booking.
+              </p>
+              <ul className="mt-2 space-y-1.5" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {cust.map((e, i) => (
+                  <li
+                    key={i}
+                    className="text-[12px] flex items-start justify-between gap-3"
+                    style={{ color: C.coffee, lineHeight: 1.4 }}
+                  >
+                    <span style={{ color: C.muted, whiteSpace: "nowrap" }}>{e.label}</span>
+                    <span style={{ color: C.espresso, fontWeight: 600, textAlign: "right" }}>{e.value}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          );
+        })()}
 
         {isAppointment && (
         <Field
@@ -17620,6 +17713,20 @@ const ApprovalQueueScreen = ({
         // headline totals are correct out of the box. We carry the
         // raw snapshot onto the appointment for display + audit.
         addons: Array.isArray(req.selected_addons) ? req.selected_addons : [],
+        // Style customization snapshot — same data shown in the
+        // booking/confirmation emails, carried onto the appointment
+        // so the Edit Appointment sheet can show the full booked
+        // configuration. Raw summary kept for future fields.
+        customization: {
+          hairColor: req.selected_hair_color || null,
+          curlPattern: req.selected_curl_pattern || null,
+          styleNotes: req.client_style_notes || null,
+          hairIncluded:
+            (req.customization_summary as any)?.hair_included === true || undefined,
+          summary: (req.customization_summary && typeof req.customization_summary === "object")
+            ? req.customization_summary
+            : {},
+        },
       };
       const saved = await store.upsertAppointment(newAppt);
       if (!saved) throw new Error("Couldn't create appointment");
@@ -17726,33 +17833,30 @@ const ApprovalQueueScreen = ({
               )}
 
               {(() => {
-                const cs = (req.customization_summary || {}) as Record<string, any>;
-                const hairColor = req.selected_hair_color
-                  || (cs.custom_hair_color ? `${cs.custom_hair_color} (custom)` : null);
-                const curl = req.selected_curl_pattern
-                  || (cs.custom_curl_pattern ? `${cs.custom_curl_pattern} (custom)` : null);
-                const styleNotes = req.client_style_notes;
-                if (!hairColor && !curl && !styleNotes) return null;
+                const cust = customizationEntries({
+                  hairColor: req.selected_hair_color,
+                  curlPattern: req.selected_curl_pattern,
+                  styleNotes: req.client_style_notes,
+                  hairIncluded:
+                    (req.customization_summary as any)?.hair_included === true || undefined,
+                  summary: (req.customization_summary && typeof req.customization_summary === "object")
+                    ? req.customization_summary
+                    : {},
+                });
+                if (cust.length === 0) return null;
                 return (
                   <div className="rounded-lg p-2.5 text-[12px]" style={{ background: C.cream, border: `1px solid ${C.hairline}` }}>
-                    <p className="font-bold uppercase tracking-wider mb-1" style={{ color: C.goldDeep, fontSize: 10, letterSpacing: "0.12em" }}>
+                    <p className="font-bold uppercase tracking-wider mb-1.5" style={{ color: C.goldDeep, fontSize: 10, letterSpacing: "0.12em" }}>
                       Style customization
                     </p>
-                    {hairColor && (
-                      <p style={{ color: C.coffee }}>
-                        Selected hair color: <span style={{ color: C.espresso, fontWeight: 600 }}>{hairColor}</span>
-                      </p>
-                    )}
-                    {curl && (
-                      <p style={{ color: C.coffee }}>
-                        Curl pattern: <span style={{ color: C.espresso, fontWeight: 600 }}>{curl}</span>
-                      </p>
-                    )}
-                    {styleNotes && (
-                      <p style={{ color: C.coffee }}>
-                        Style notes: <span style={{ color: C.espresso }}>{styleNotes}</span>
-                      </p>
-                    )}
+                    <ul style={{ listStyle: "none", padding: 0, margin: 0 }} className="space-y-1">
+                      {cust.map((e, i) => (
+                        <li key={i} className="flex items-start justify-between gap-3" style={{ color: C.coffee }}>
+                          <span style={{ color: C.muted, whiteSpace: "nowrap" }}>{e.label}</span>
+                          <span style={{ color: C.espresso, fontWeight: 600, textAlign: "right" }}>{e.value}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 );
               })()}
