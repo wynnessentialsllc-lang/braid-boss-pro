@@ -761,6 +761,19 @@ export default function PublicBookingPage() {
     [monthDays],
   );
 
+  // Derived empty-state gates. These keep the month-level and
+  // day-level empty states mutually exclusive so the public booking
+  // page never shows two "Join waitlist" prompts at once:
+  //   - whole month empty  → month-level card only (has waitlist CTA)
+  //   - month ok, day empty → day-level card only  (no waitlist CTA)
+  const monthHasAvailability = monthHasAnyAvailability;
+  const selectedDateHasAvailability =
+    !!preferredDate && hasFetchedSlots && !slotsError && slots.length > 0;
+  const showDateEmptyState =
+    monthHasAvailability &&
+    !!preferredDate && !slotsLoading && !slotsError &&
+    hasFetchedSlots && !selectedDateHasAvailability;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting) return;
@@ -2346,7 +2359,7 @@ export default function PublicBookingPage() {
                 {!slotsLoading && slotsError && (
                   <p style={{ fontSize: 12, color: C.danger }}>{slotsError}</p>
                 )}
-                {!slotsLoading && !slotsError && hasFetchedSlots && slots.length === 0 && (
+                {showDateEmptyState && (
                   <div
                     style={{
                       padding: 16,
@@ -2357,25 +2370,18 @@ export default function PublicBookingPage() {
                     }}
                   >
                     <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>
-                      No openings on this date.
+                      No openings on this date
                     </p>
                     <p style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>
-                      Pick another day — or join the waitlist and we&apos;ll text you when something opens.
+                      Choose another date to see available times.
                     </p>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+                    <div style={{ marginTop: 12 }}>
                       <button
                         type="button"
                         onClick={() => { setPreferredDate(""); setPreferredTime(""); }}
                         style={ghostButtonStyle}
                       >
                         Choose another date
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setWaitlistOpen(true)}
-                        style={primaryButtonStyle}
-                      >
-                        Join the waitlist
                       </button>
                     </div>
                   </div>
