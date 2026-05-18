@@ -643,6 +643,30 @@ const renderBookingRefundManualStylist = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- appointment_rescheduled (stylist moved an existing appt) ------
+// Distinct from client_booking_rescheduled (a client REQUEST awaiting
+// approval). Here the stylist already changed a confirmed
+// appointment, so the tone is "it's done, here's your new time".
+const renderAppointmentRescheduled = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const serviceName = p.serviceName || null;
+  const newWhen = [p.preferredDate || null, p.preferredTime || null].filter(Boolean).join(" · ");
+  const oldWhen = [p.fromDate || null, p.fromTime || null].filter(Boolean).join(" · ");
+  const subject = "Your appointment has been rescheduled — Braid Boss Pro";
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Appointment updated</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Your appointment has moved, ${escape(clientName)}.</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 12px;color:${C.coffee};">
+      ${escape(studioName)} rescheduled your${serviceName ? ` <strong>${escape(serviceName)}</strong>` : ""} appointment${newWhen ? ` to <strong>${escape(newWhen)}</strong>` : ""}.
+    </p>
+    ${oldWhen ? `<p style="font-size:13px;line-height:20px;margin:0 0 14px;color:${C.muted};">Previously: ${escape(oldWhen)}.</p>` : ""}
+    ${customizationBlock(p)}
+    <p style="font-size:13px;color:${C.muted};line-height:20px;margin-top:14px;">No action needed — your booking and any deposit carry over. If the new time doesn't work, reply to this email and your stylist will help.</p>
+  `);
+  return { subject, html };
+};
+
 // ---- generic fallback -----------------------------------------------
 const renderGeneric = (row: ClaimedRow) => {
   const subject = row.subject || "Notification from Braid Boss Pro";
@@ -703,6 +727,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderClientBookingRescheduled(row.payload || {});
     case "stylist_booking_rescheduled":
       return renderStylistBookingRescheduled(row.payload || {});
+    case "appointment_rescheduled":
+      return renderAppointmentRescheduled(row.payload || {});
     case "founding_welcome":
       return renderFoundingWelcome(row.payload || {});
     default:
@@ -801,6 +827,7 @@ const CUSTOMIZATION_TYPES = new Set([
   "appointment_confirmed",
   "appointment_reminder",
   "balance_paid",
+  "appointment_rescheduled",
 ]);
 
 const enrichCustomization = async (
