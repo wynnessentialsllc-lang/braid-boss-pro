@@ -137,20 +137,20 @@ export async function POST(req: Request) {
   }
 
   const baseUrl = baseUrlOf(req);
-  // Variation deposit wins when present and positive; otherwise fall
-  // back to the service-level deposit_amount stamped at submit time.
-  // The submit RPC already resolved variation → parent → none, so
-  // row.deposit_amount is normally already correct — this just keeps
-  // older rows working if the column population lags behind.
-  const variationDepositAmount = row.selected_variation_deposit_amount != null
-    ? Number(row.selected_variation_deposit_amount)
-    : 0;
-  const depositAmount = variationDepositAmount > 0
-    ? variationDepositAmount
-    : Number(row.deposit_amount);
-  const fullPrice = row.selected_variation_price != null
-    ? Number(row.selected_variation_price)
-    : (row.service_price != null ? Number(row.service_price) : depositAmount);
+  // Trust the submit RPC's resolved snapshot. public_submit_booking_
+  // request already folds variation pricing AND every picked add-on
+  // (including the include_in_deposit ones) into:
+  //   * deposit_amount  → the deposit due today
+  //   * service_price   → the full ticket price
+  // The per-variation columns (selected_variation_deposit_amount /
+  // selected_variation_price) are a RAW snapshot that EXCLUDES add-ons
+  // and must never drive the charge — doing so undercharged the
+  // deposit whenever an add-on was selected. Use the resolved columns
+  // verbatim so the Stripe amount equals the booking page exactly.
+  const depositAmount = Number(row.deposit_amount);
+  const fullPrice = row.service_price != null
+    ? Number(row.service_price)
+    : depositAmount;
   const balanceDue = Math.max(0, fullPrice - depositAmount);
   const cents = Math.round(depositAmount * 100);
   const productName = (() => {
