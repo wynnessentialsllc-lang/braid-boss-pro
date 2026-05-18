@@ -281,13 +281,33 @@ export const useBookingApprovalQueue = (userId: string | null): {
   const deny: ReturnType<typeof useBookingApprovalQueue>["deny"] = async (id, reason) => {
     if (!userId) return null;
     const supabase = getSupabase();
-    const { data, error: err } = await supabase.rpc("deny_booking_request", {
-      request_id_in: id,
-      reason_in: reason || null,
-    });
-    if (err) { setError(err.message); return null; }
-    await refresh();
-    return (data as BookingRequestRecord) || null;
+    // Denial must also make the money correct: if a deposit was
+    // collected it has to be refunded (or explicitly flagged for a
+    // manual refund). That requires Stripe, so it goes through the
+    // server route, which issues the refund and then calls
+    // deny_booking_request with the resulting disposition.
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess?.session?.access_token;
+    if (!token) { setError("Sign in required."); return null; }
+    try {
+      const res = await fetch("/api/booking-deposit/refund", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ request_id: id, reason: reason || undefined }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(body?.error || `deny_${res.status}`); return null; }
+      if (body?.disposition === "refund_failed_manual") {
+        setError(
+          "Request denied, but the deposit refund failed — issue it manually in Stripe.",
+        );
+      }
+      await refresh();
+      return (body?.request as BookingRequestRecord) || null;
+    } catch (e: any) {
+      setError(e?.message || "Couldn't deny the request.");
+      return null;
+    }
   };
 
   const confirmApproval: ReturnType<typeof useBookingApprovalQueue>["confirmApproval"] = async (id, appointmentId) => {
