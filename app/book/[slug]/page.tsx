@@ -108,18 +108,28 @@ const FUNCTIONS_URL = (() => {
 })();
 
 // Curl pattern only applies when the *selected* option/add-on
-// actually includes human curly hair — braiding hair is included on
-// every style, but human curly hair is opt-in (e.g. "Human Hair
-// Included" variation, "Boho Max (Human Hair Included)" add-on).
-// No explicit boolean exists on variations/extras today, so detect
-// by the well-established naming convention, with a metadata escape
-// hatch if one is added later.
+// actually includes human / curly / boho hair — braiding hair is
+// included on every style, but curly human hair is opt-in. Detect it
+// from the selection's NAME and DESCRIPTION (variations carry
+// `variation_description`, extras carry `description`), with a
+// metadata escape hatch. Negations ("curly hair is not included",
+// "can be added if desired") always win so add-ons that merely offer
+// curly hair as an upgrade don't trigger curl selection.
 const isHumanHairIncludedSelection = (sel: any): boolean => {
   if (!sel) return false;
   if (sel.metadata && sel.metadata.human_hair_included === true) return true;
   if (sel.human_hair_included === true) return true;
-  const txt = `${sel.name ?? ""} ${sel.label ?? ""} ${sel.title ?? ""}`.toLowerCase();
-  return txt.includes("human hair included");
+  const txt = `${sel.name ?? ""} ${sel.label ?? ""} ${sel.title ?? ""} ${sel.subLabel ?? ""} ${sel.description ?? ""} ${sel.variation_description ?? ""}`.toLowerCase();
+  if (!txt.trim()) return false;
+  // Negations take precedence — never trigger on "not included".
+  if (/not\s+included/.test(txt) || /isn'?t\s+included/.test(txt)) return false;
+  if (txt.includes("human hair included")) return true;
+  if (txt.includes("curly human hair")) return true;
+  // "<boho|human|curly> … hair … included" (e.g. "Boho Hair Included")
+  if (/\b(boho|human|curly)\b[^.]*\bhair\b[^.]*\bincluded\b/.test(txt)) return true;
+  // "includes … <curly|human|boho> … hair" (e.g. description text)
+  if (/\binclude[sd]?\b[^.]*\b(curly|human|boho)\b[^.]*\bhair\b/.test(txt)) return true;
+  return false;
 };
 
 
