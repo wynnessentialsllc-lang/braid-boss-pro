@@ -107,7 +107,7 @@ export async function POST(req: Request) {
   const { data: reqRow, error: readErr } = await admin
     .from("booking_requests")
     .select(
-      "id, user_id, approval_status, status, deposit_paid, payment_status, deposit_amount, stripe_payment_intent_id, stripe_connect_account_id",
+      "id, user_id, approval_status, status, deposit_paid, payment_status, deposit_amount, stripe_payment_intent_id, stripe_connect_account_id, client_name, client_email, service_name, service_name_snapshot, preferred_date, preferred_time, denied_email_sent_at, refund_email_sent_at, refund_manual_email_sent_at",
     )
     .eq("id", requestId)
     .eq("user_id", user.id)
@@ -171,6 +171,125 @@ export async function POST(req: Request) {
   if (rpcErr) {
     console.error("[booking-deposit/refund] deny RPC failed:", rpcErr.message);
     return fail(500, rpcErr.message);
+  }
+
+  // ---- Client-facing denial / refund email (idempotent) ----------
+  // Atomically claim the matching one-shot column (UPDATE ... WHERE
+  // col IS NULL) before enqueueing, so a re-deny / Stripe retry /
+  // double-click can't duplicate the email. Uses the existing
+  // notification_queue + Resend worker — no second email system.
+  try {
+    const clientEmail = (reqRow.client_email || "").trim();
+    const serviceName = reqRow.service_name || reqRow.service_name_snapshot || null;
+    let studioName: string | null = null;
+    try {
+      const { data: sn } = await admin.rpc("public_get_studio_name", { user_id_in: user.id });
+      studioName = typeof sn === "string" && sn.trim() ? sn.trim() : null;
+    } catch { /* studio name is best-effort */ }
+
+    const claimFlag = async (
+      col: "denied_email_sent_at" | "refund_email_sent_at" | "refund_manual_email_sent_at",
+    ): Promise<boolean> => {
+      const { data } = await admin
+        .from("booking_requests")
+        .update({ [col]: new Date().toISOString() })
+        .eq("id", requestId)
+        .eq("user_id", user.id)
+        .is(col, null)
+        .select("id")
+        .maybeSingle();
+      return !!data;
+    };
+
+    const basePayload = {
+      clientName: reqRow.client_name || "there",
+      studioName: studioName || "your stylist",
+      serviceName,
+      preferredDate: reqRow.preferred_date || null,
+      preferredTime: reqRow.preferred_time || null,
+    };
+
+    if (disposition === "no_charge" && clientEmail) {
+      if (await claimFlag("denied_email_sent_at")) {
+        await admin.rpc("queue_notification", {
+          user_id_in: user.id,
+          channel_in: "email",
+          notification_type_in: "booking_denied_no_charge",
+          body_in: "Your booking request was not approved by the stylist. No payment was collected.",
+          subject_in: "Booking request update — Braid Boss Pro",
+          recipient_email_in: clientEmail,
+          recipient_name_in: reqRow.client_name || null,
+          payload_in: basePayload,
+          dedupe_key_in: `booking_denied:${requestId}`,
+          booking_request_id_in: requestId,
+        });
+      }
+    } else if (disposition === "refunded" && clientEmail) {
+      if (await claimFlag("refund_email_sent_at")) {
+        await admin.rpc("queue_notification", {
+          user_id_in: user.id,
+          channel_in: "email",
+          notification_type_in: "booking_denied_refunded",
+          body_in: "Your booking request was not approved. Your deposit has been refunded.",
+          subject_in: "Booking request refunded — Braid Boss Pro",
+          recipient_email_in: clientEmail,
+          recipient_name_in: reqRow.client_name || null,
+          payload_in: {
+            ...basePayload,
+            refundAmount: refundedAmount ?? (Number(reqRow.deposit_amount) || null),
+          },
+          dedupe_key_in: `booking_denied:${requestId}`,
+          booking_request_id_in: requestId,
+        });
+      }
+    } else if (disposition === "refund_failed_manual") {
+      if (await claimFlag("refund_manual_email_sent_at")) {
+        if (clientEmail) {
+          await admin.rpc("queue_notification", {
+            user_id_in: user.id,
+            channel_in: "email",
+            notification_type_in: "booking_denied_refund_manual",
+            body_in: "Your booking request was not approved. The stylist has been notified to review your deposit refund manually.",
+            subject_in: "Booking request update — Braid Boss Pro",
+            recipient_email_in: clientEmail,
+            recipient_name_in: reqRow.client_name || null,
+            payload_in: basePayload,
+            dedupe_key_in: `booking_denied:${requestId}`,
+            booking_request_id_in: requestId,
+          });
+        }
+        // Stylist/admin: manual refund needed — clear, actionable.
+        let stylistEmail: string | null = null;
+        try {
+          const { data: u } = await admin.auth.admin.getUserById(user.id);
+          stylistEmail = u?.user?.email || null;
+        } catch { /* stylist email best-effort */ }
+        if (stylistEmail) {
+          await admin.rpc("queue_notification", {
+            user_id_in: user.id,
+            channel_in: "email",
+            notification_type_in: "booking_refund_manual_stylist",
+            body_in: "Manual refund needed: a denied booking's deposit could not be auto-refunded.",
+            subject_in: "Action needed: manual deposit refund — Braid Boss Pro",
+            recipient_email_in: stylistEmail,
+            recipient_name_in: null,
+            payload_in: {
+              clientName: reqRow.client_name || "the client",
+              serviceName,
+              preferredDate: reqRow.preferred_date || null,
+              preferredTime: reqRow.preferred_time || null,
+              depositAmount: Number(reqRow.deposit_amount) || null,
+              reason: failure || "refund_failed",
+            },
+            dedupe_key_in: `booking_refund_manual_stylist:${requestId}`,
+            booking_request_id_in: requestId,
+          });
+        }
+      }
+    }
+  } catch (e: any) {
+    // Email is best-effort — never fail the denial because of it.
+    console.error("[booking-deposit/refund] denial email enqueue failed:", e?.message || e);
   }
 
   return NextResponse.json({

@@ -529,6 +529,89 @@ const renderFoundingWelcome = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- booking denial / refund (client + stylist) --------------------
+const whenLine = (p: Record<string, any>): string => {
+  const d = String(p.preferredDate || "").trim();
+  const t = String(p.preferredTime || "").trim();
+  const when = [d, t].filter(Boolean).join(" · ");
+  return when
+    ? `<p style="font-size:13px;line-height:20px;margin:0 0 12px;color:${C.muted};">Requested time: ${escape(when)}</p>`
+    : "";
+};
+
+const renderBookingDeniedNoCharge = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const serviceName = p.serviceName || null;
+  const subject = "Booking request update — Braid Boss Pro";
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.muted};margin:0 0 10px;font-weight:700;">Booking update</p>
+    <h1 style="font-size:20px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Hi ${escape(clientName)},</h1>
+    <p style="font-size:14px;line-height:22px;margin:0 0 12px;color:${C.coffee};">
+      Your booking request${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""} was not approved by ${escape(studioName)}. <strong>No payment was collected.</strong>
+    </p>
+    ${whenLine(p)}
+    <p style="font-size:13px;color:${C.muted};line-height:20px;margin-top:14px;">You're welcome to submit a new request for another time.</p>
+  `);
+  return { subject, html };
+};
+
+const renderBookingDeniedRefunded = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const serviceName = p.serviceName || null;
+  const refundAmount = Number(p.refundAmount) > 0 ? Number(p.refundAmount) : null;
+  const subject = "Booking request refunded — Braid Boss Pro";
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Refund issued</p>
+    <h1 style="font-size:20px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Hi ${escape(clientName)},</h1>
+    <p style="font-size:14px;line-height:22px;margin:0 0 12px;color:${C.coffee};">
+      Your booking request${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""} with ${escape(studioName)} was not approved. <strong>Your deposit${refundAmount ? ` of $${refundAmount.toFixed(2)}` : ""} has been refunded.</strong>
+    </p>
+    ${whenLine(p)}
+    <p style="font-size:13px;color:${C.muted};line-height:20px;margin-top:14px;">Refund timing depends on your bank or card provider — it typically takes a few business days to appear.</p>
+  `);
+  return { subject, html };
+};
+
+const renderBookingDeniedRefundManual = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const serviceName = p.serviceName || null;
+  const subject = "Booking request update — Braid Boss Pro";
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.muted};margin:0 0 10px;font-weight:700;">Booking update</p>
+    <h1 style="font-size:20px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Hi ${escape(clientName)},</h1>
+    <p style="font-size:14px;line-height:22px;margin:0 0 12px;color:${C.coffee};">
+      Your booking request${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""} was not approved. ${escape(studioName)} has been notified to review your deposit refund manually.
+    </p>
+    ${whenLine(p)}
+    <p style="font-size:13px;color:${C.muted};line-height:20px;margin-top:14px;">If you have any questions about your refund, reply to this email and your stylist will follow up.</p>
+  `);
+  return { subject, html };
+};
+
+const renderBookingRefundManualStylist = (p: Record<string, any>) => {
+  const clientName = p.clientName || "A client";
+  const serviceName = p.serviceName || null;
+  const depositAmount = Number(p.depositAmount) > 0 ? Number(p.depositAmount) : null;
+  const reason = String(p.reason || "refund_failed").trim();
+  const subject = "Action needed: manual deposit refund — Braid Boss Pro";
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.danger};margin:0 0 10px;font-weight:700;">Manual refund needed</p>
+    <h1 style="font-size:20px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">A deposit refund didn't go through automatically.</h1>
+    <p style="font-size:14px;line-height:22px;margin:0 0 10px;color:${C.coffee};">
+      You denied ${escape(clientName)}'s booking${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}, but the automatic Stripe refund failed${depositAmount ? ` for the <strong>$${depositAmount.toFixed(2)}</strong> deposit` : ""}.
+    </p>
+    ${whenLine(p)}
+    <p style="font-size:14px;line-height:22px;margin:0 0 10px;color:${C.coffee};">
+      <strong>Please issue the refund manually in your Stripe dashboard.</strong> The client has been told their refund is being reviewed manually.
+    </p>
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:14px;">Reason: ${escape(reason)}</p>
+  `);
+  return { subject, html };
+};
+
 // ---- generic fallback -----------------------------------------------
 const renderGeneric = (row: ClaimedRow) => {
   const subject = row.subject || "Notification from Braid Boss Pro";
@@ -569,6 +652,14 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderBalancePaid(row.payload || {});
     case "review_request":
       return renderReviewRequest(row.payload || {});
+    case "booking_denied_no_charge":
+      return renderBookingDeniedNoCharge(row.payload || {});
+    case "booking_denied_refunded":
+      return renderBookingDeniedRefunded(row.payload || {});
+    case "booking_denied_refund_manual":
+      return renderBookingDeniedRefundManual(row.payload || {});
+    case "booking_refund_manual_stylist":
+      return renderBookingRefundManualStylist(row.payload || {});
     case "appointment_confirmed":
       return renderAppointmentConfirmed(row.payload || {});
     case "appointment_reminder":
