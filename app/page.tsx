@@ -7403,6 +7403,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             fromTime: oldTime || null,
             preferredDate: form.date || null,
             preferredTime: form.time || null,
+            // Lets the worker build the portal + cancel links against
+            // this deployment's origin (it resolves the tokens from
+            // the linked booking request).
+            appBase: typeof window !== "undefined" ? window.location.origin : null,
           },
           dedupe_key_in: `appt_rescheduled:${saved.id}:${form.date || "nodate"}:${form.time || "notime"}`,
           appointment_id_in: saved.id,
