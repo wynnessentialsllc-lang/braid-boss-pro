@@ -331,8 +331,13 @@ export const useBookingApprovalQueue = (userId: string | null): {
         const { data: studio } = await supabase
           .rpc("public_get_studio_name", { user_id_in: userId });
         const studioName = (typeof studio === "string" && studio.trim()) ? studio.trim() : "your stylist";
+        // service_price is the submit RPC's resolved total — it already
+        // includes the variation price AND every picked add-on.
+        // selected_variation_price is a raw per-variation snapshot that
+        // EXCLUDES add-ons, so it must not win here or the confirmation
+        // email understates the balance whenever an add-on was chosen.
         const servicePrice = Number(
-          (row as any).selected_variation_price ?? row.service_price ?? 0,
+          row.service_price ?? (row as any).selected_variation_price ?? 0,
         );
         const depositPaid = Number(row.deposit_amount ?? 0);
         const remainingBalance = servicePrice > 0
