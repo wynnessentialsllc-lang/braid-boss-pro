@@ -12463,9 +12463,12 @@ const buildNotifications = (store: any): NotifItem[] => {
     });
   }
 
-  // APPOINTMENT — upcoming within 7 days (action: prep / confirm)
+  // APPOINTMENT — upcoming within 7 days (action: prep / confirm).
+  // Only real client appointments — personal events and availability
+  // blocks ("Off", lunch, etc.) must never generate reminders.
   const upcoming = safeAppts.filter((a: any) =>
     a && !isCanceledAppointment(a) && a.status !== "completed" &&
+    (!a.kind || a.kind === "appointment") &&
     a.date && a.date >= today && a.date <= in7
   ).sort((a: any, b: any) =>
     ((a.date || "") + (a.time || "")).localeCompare((b.date || "") + (b.time || ""))
