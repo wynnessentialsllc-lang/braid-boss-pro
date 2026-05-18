@@ -12637,8 +12637,22 @@ const buildNotifications = (store: any): NotifItem[] => {
     const dateLabel = r.preferred_date ? fmtDate(r.preferred_date) : "no date";
     const timeLabel = r.preferred_time ? ` at ${fmtTime(r.preferred_time)}` : "";
     const isReschedule = Number(r.reschedule_count) > 0;
+    // The id must change when this becomes a NEW thing needing
+    // attention. A request the stylist already read/cleared as
+    // "paid deposit · needs approval" can come BACK as "rescheduled
+    // · needs approval" (client self-service reschedule re-enters
+    // deposit_paid_pending_approval with reschedule_count++). With a
+    // static `appr_<id>` the re-surfaced item stayed in the persisted
+    // read/dismissed lists, so the bell never re-badged. Key the
+    // reschedule variant on the reschedule count + requested slot so
+    // every distinct reschedule is a fresh unread alert; the plain
+    // deposit-paid path keeps its stable id (no read-state regression).
+    const rsCount = Number(r.reschedule_count) || 0;
+    const notifId = isReschedule
+      ? `appr_${r.id}_rs${rsCount}_${r.preferred_date || "nd"}_${r.preferred_time || "nt"}`
+      : `appr_${r.id}`;
     items.push({
-      id: `appr_${r.id}`,
+      id: notifId,
       category: "appointment",
       kind: "booking_approval_pending",
       tone: "gold",
