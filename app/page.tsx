@@ -7361,6 +7361,57 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       clientPhone: form.clientPhone, clientEmail: form.clientEmail,
     });
 
+    // Stylist-initiated reschedule notice. When the stylist changes
+    // the date or time of an EXISTING real appointment, email the
+    // client so they know it moved. Best-effort + idempotent (dedupe
+    // key carries the new slot, so re-saving the same date won't
+    // resend; moving again to a different date will). Skipped for
+    // brand-new creates, personal/blocked holds, cancelled rows, and
+    // when there's no client email.
+    try {
+      const wasExisting = !!appt?.id;
+      const isRealAppt = (form.kind || "appointment") === "appointment";
+      const clientEmail = (form.clientEmail || saved.clientEmail || "").trim();
+      const oldDate = appt?.date || "";
+      const oldTime = appt?.time || "";
+      const dateChanged = wasExisting && (oldDate !== form.date || oldTime !== form.time);
+      const notCancelled = (saved.status || "") !== "cancelled" && (saved.status || "") !== "canceled";
+      if (
+        wasExisting && isRealAppt && dateChanged && notCancelled &&
+        clientEmail && store.userId
+      ) {
+        const supabase = getSupabase();
+        let studioName = "your stylist";
+        try {
+          const { data: studio } = await supabase
+            .rpc("public_get_studio_name", { user_id_in: store.userId });
+          if (typeof studio === "string" && studio.trim()) studioName = studio.trim();
+        } catch { /* studio name best-effort */ }
+        await supabase.rpc("queue_notification", {
+          user_id_in: store.userId,
+          channel_in: "email",
+          notification_type_in: "appointment_rescheduled",
+          body_in: "Your appointment time has changed.",
+          subject_in: "Your appointment has been rescheduled — Braid Boss Pro",
+          recipient_email_in: clientEmail,
+          recipient_name_in: form.clientName || saved.clientName || null,
+          payload_in: {
+            clientName: form.clientName || saved.clientName || "there",
+            studioName,
+            serviceName: form.style || saved.style || null,
+            fromDate: oldDate || null,
+            fromTime: oldTime || null,
+            preferredDate: form.date || null,
+            preferredTime: form.time || null,
+          },
+          dedupe_key_in: `appt_rescheduled:${saved.id}:${form.date || "nodate"}:${form.time || "notime"}`,
+          appointment_id_in: saved.id,
+        });
+      }
+    } catch {
+      // Email is best-effort — never block the save on it.
+    }
+
     // Generate future occurrences for new series
     if (isFirstInNewSeries) {
       const days = cadenceDays(cadence, Number(customDays));
