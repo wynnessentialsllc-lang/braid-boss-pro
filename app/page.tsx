@@ -162,6 +162,7 @@ import {
   avgTicket30dBreakdown,
   type AvgTicketBreakdown,
   weekDepositBuckets,
+  getDepositCollectedAmount,
   type WeekDepositBuckets,
   pendingBalanceAppts,
   monthExpectedAppts,
@@ -2982,10 +2983,14 @@ const KpiDetailSheet = ({
   // Compact appointment row used by every list-style KPI. Tappable
   // unless `tappable` is false (deposit-due / missing rows still want
   // to open the booking, so default true). Real <button> for iOS.
-  const ApptRow = ({ a, rightLabel, tone }: { a: any; rightLabel?: string; tone?: "warning" | "success" | "danger" | "muted" }) => {
+  const ApptRow = ({ a, rightLabel, tone, amountOverride }: { a: any; rightLabel?: string; tone?: "warning" | "success" | "danger" | "muted"; amountOverride?: number }) => {
     const total = Number(a?.totalPrice) || 0;
     const dep = Number(a?.depositPaid) || 0;
     const balance = Math.max(0, total - dep - (Number(a?.discountAmount) || 0));
+    // Deposit views pass the canonical collected-deposit amount so
+    // the big number matches the dashboard / sheet total (not the
+    // ticket total or an expected deposit).
+    const primaryAmount = amountOverride != null ? amountOverride : total;
     const ps = paymentStatusOf(a, today);
     const rightColor = tone === "warning" ? C.warning : tone === "success" ? C.success : tone === "danger" ? C.danger : tone === "muted" ? C.muted : C.coffee;
     return (
@@ -3021,9 +3026,9 @@ const KpiDetailSheet = ({
           </div>
           <div className="text-right shrink-0">
             <p style={{ fontFamily: FONT_DISPLAY, fontSize: 16, fontWeight: 600, color: C.goldDeep, lineHeight: 1 }}>
-              {fmtMoney(total, currency)}
+              {fmtMoney(primaryAmount, currency)}
             </p>
-            {balance > 0 && (
+            {(rightLabel || balance > 0) && (
               <p className="text-[11px] mt-1" style={{ color: rightColor }}>
                 {rightLabel || `Balance ${fmtMoney(balance, currency)}`}
               </p>
@@ -3120,7 +3125,7 @@ const KpiDetailSheet = ({
             </p>
             {buckets.collected.appointments.length === 0
               ? <Card className="p-3 mb-3 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No deposits collected yet this week.</p></Card>
-              : buckets.collected.appointments.map(a => <ApptRow key={`c_${a.id}`} a={a} tone="success" rightLabel={`Deposit ${fmtMoney(Number(a.depositPaid) || 0, currency)}`} />)}
+              : buckets.collected.appointments.map(a => <ApptRow key={`c_${a.id}`} a={a} tone="success" amountOverride={getDepositCollectedAmount(a)} rightLabel="Deposit collected" />)}
             <p className="text-[10px] uppercase tracking-widest font-bold mt-3 mb-2" style={{ color: C.warning, letterSpacing: "0.14em" }}>
               Due · {buckets.due.appointments.length}
             </p>
@@ -3168,7 +3173,7 @@ const KpiDetailSheet = ({
                       <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{a.clientName || "Walk-in"}</p>
                       <p className="text-[11px] mt-0.5 truncate" style={{ color: C.muted }}>{a.style || "Service"} · {a.date ? fmtDate(a.date) : "—"}</p>
                       <p className="text-[11px] mt-1 truncate" style={{ color: C.muted }}>
-                        Total {fmtMoney(Number(a.totalPrice) || 0, currency)} · Deposit {fmtMoney(Number(a.depositPaid) || 0, currency)}
+                        Total {fmtMoney(Number(a.totalPrice) || 0, currency)} · Deposit collected {fmtMoney(getDepositCollectedAmount(a), currency)}
                       </p>
                     </div>
                   </button>
@@ -6302,7 +6307,7 @@ const DayCalendarView = ({
             const total = Number(a?.totalPrice) || 0;
             const discount = Number(a?.discountAmount) || 0;
             const net = Math.max(0, total - discount);
-            const deposit = Number(a?.depositPaid) || 0;
+            const deposit = getDepositCollectedAmount(a);
             const balance = Math.max(0, net - deposit);
             // Only flag "Deposit due" when the appointment requires
             // one — manual appts default to depositRequired=false.
