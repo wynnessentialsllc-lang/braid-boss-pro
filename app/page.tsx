@@ -7100,53 +7100,62 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
   useEffect(() => {
     if (open) {
-      const existingSeries = appt?.seriesId ? recurringSeries.find(s => s.id === appt.seriesId) : null;
+      // CRITICAL: seed from the CANONICAL stored appointment, not the
+      // prop. Several surfaces (deposit widgets, Boss Insights,
+      // dashboard rows) open the sheet with a slim/synthesized
+      // appointment object — seeding/saving from that would overwrite
+      // the real total_price / deposit_paid / add-ons / customization
+      // snapshot with partial data. Resolve the full record by id.
+      const a = (appt?.id && Array.isArray(store?.appointments))
+        ? (store.appointments.find((x: any) => x?.id === appt.id) || appt)
+        : appt;
+      const existingSeries = a?.seriesId ? recurringSeries.find(s => s.id === a.seriesId) : null;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
       setForm({
-        clientId: appt?.clientId || "",
-        clientName: appt?.clientName || "",
-        clientPhone: appt?.clientPhone || "",
-        clientEmail: appt?.clientEmail || "",
-        style: appt?.style || "",
-        date: appt?.date || todayISO(),
-        time: appt?.time || "10:00",
-        durationHours: appt?.durationHours || "",
-        depositPaid: sanitizeMoneyInput(appt?.depositPaid ?? 0),
-        totalPrice: sanitizeMoneyInput(appt?.totalPrice ?? 0),
-        status: appt?.status || "scheduled",
-        notes: appt?.notes || "",
-        paymentStatus: appt?.paymentStatus || "",
-        paymentDate: appt?.paymentDate || "",
-        paymentMethod: appt?.paymentMethod || "",
-        paymentNotes: appt?.paymentNotes || "",
+        clientId: a?.clientId || "",
+        clientName: a?.clientName || "",
+        clientPhone: a?.clientPhone || "",
+        clientEmail: a?.clientEmail || "",
+        style: a?.style || "",
+        date: a?.date || todayISO(),
+        time: a?.time || "10:00",
+        durationHours: a?.durationHours || "",
+        depositPaid: sanitizeMoneyInput(a?.depositPaid ?? 0),
+        totalPrice: sanitizeMoneyInput(a?.totalPrice ?? 0),
+        status: a?.status || "scheduled",
+        notes: a?.notes || "",
+        paymentStatus: a?.paymentStatus || "",
+        paymentDate: a?.paymentDate || "",
+        paymentMethod: a?.paymentMethod || "",
+        paymentNotes: a?.paymentNotes || "",
         // Discount snapshot — accept either camelCase (local) or
         // snake_case (cloud row) so both prefill cleanly.
-        discountId: appt?.discountId ?? appt?.discount_id ?? null,
-        discountName: appt?.discountName ?? appt?.discount_name ?? null,
-        discountAmount: sanitizeMoneyInput(appt?.discountAmount ?? appt?.discount_amount ?? 0),
+        discountId: a?.discountId ?? a?.discount_id ?? null,
+        discountName: a?.discountName ?? a?.discount_name ?? null,
+        discountAmount: sanitizeMoneyInput(a?.discountAmount ?? a?.discount_amount ?? 0),
         // Phase 2: track which service catalog row this appointment
         // came from. Snapshot only — used for picker highlight + the
         // "Replace with service defaults" affordance.
-        serviceId: appt?.serviceId ?? appt?.service_id ?? null,
+        serviceId: a?.serviceId ?? a?.service_id ?? null,
         // Deposit-by-source. Defaults to false for manual creates so
         // the dashboard's "Deposit due" filter doesn't surface
         // appointments where no deposit was ever asked for. Existing
         // public-booking-link rows carry depositRequired=true from
         // approval and we honor whatever value the appt already has.
-        depositRequired: appt?.depositRequired ?? false,
+        depositRequired: a?.depositRequired ?? false,
         // Booking provenance. New manual appts land as "manual";
         // existing rows keep whatever was previously stamped.
-        source: appt?.source ?? (appt?.id ? null : "manual"),
+        source: a?.source ?? (a?.id ? null : "manual"),
         // Calendar item kind. Default 'appointment' so existing rows
         // keep their pre-migration semantics. Personal events / blocked
         // time hide the client + payment sections in the form.
-        kind: (appt?.kind as ("appointment" | "personal" | "blocked") | undefined) || "appointment",
+        kind: (a?.kind as ("appointment" | "personal" | "blocked") | undefined) || "appointment",
         // Free-text title used by personal events and blocked time
         // (e.g. "Doctor's appointment" / "Lunch with Mom"). Stored on
         // the same record; falls back to clientName for existing rows.
-        eventTitle: appt?.eventTitle || appt?.event_title || "",
-        id: appt?.id,
-        seriesId: appt?.seriesId,
+        eventTitle: a?.eventTitle || a?.event_title || "",
+        id: a?.id,
+        seriesId: a?.seriesId,
       });
       setShowNewClient(false);
       setNewClientName("");
@@ -7154,9 +7163,12 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       setCadence(existingSeries?.cadence || "4w");
       setCustomDays(existingSeries?.customIntervalDays || 28);
       setOccurrences(existingSeries?.occurrencesPlanned || 6);
-      setRemindersEnabled(appt?.remindersEnabled !== false);
-      setReminderChannel(appt?.reminderChannel || null);
+      setRemindersEnabled(a?.remindersEnabled !== false);
+      setReminderChannel(a?.reminderChannel || null);
     }
+    // store.appointments intentionally NOT a dep — seed once per open;
+    // re-seeding mid-edit would discard the stylist's in-progress edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, appt]);
 
   // Discount picker (V1: only "applies to all" discounts surface).
@@ -7331,7 +7343,18 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     // form then overlays only the fields the stylist actually edited.
     // For brand-new manual creates `appt` is null/empty, so this is a
     // no-op there and manual editing is unchanged.
-    const original = (appt && typeof appt === "object") ? appt : {};
+    // Resolve the CANONICAL stored record by id (the sheet may have
+    // been opened from a slim/synthesized appt object). Merging onto
+    // the full record — never the partial prop — is what guarantees
+    // add-ons / customization / Stripe + balance-token snapshot and
+    // the true total_price / deposit_paid survive an edit.
+    const canonical = (form.id && Array.isArray(store?.appointments))
+      ? store.appointments.find((x: any) => x?.id === form.id)
+      : null;
+    const original =
+      (canonical && typeof canonical === "object") ? canonical
+      : (appt && typeof appt === "object") ? appt
+      : {};
     const baseAppt = {
       ...original,
       ...form,
