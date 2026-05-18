@@ -2198,6 +2198,104 @@ export default function PublicBookingPage() {
                 <Input value={serviceName} onChange={e => setServiceName(e.target.value)} placeholder="e.g. Knotless mid-back" />
               </Field>
             )}
+            {(() => {
+              const svc: any = hasCatalog ? selectedCatalogService : null;
+              if (!svc || (svc.customization_enabled ?? true) === false) return null;
+              const showColor = !!svc.hair_included && !!svc.allow_client_hair_color_selection;
+              const showCurl = !!svc.allow_client_curl_pattern_selection && humanHairIncluded;
+              if (!svc.hair_included && !showColor && !showCurl) return null;
+              const colors: string[] = Array.isArray(svc.allowed_hair_colors) ? svc.allowed_hair_colors : [];
+              const curls: string[] = Array.isArray(svc.allowed_curl_patterns) ? svc.allowed_curl_patterns : [];
+              const isOther = (v: string) => v.trim().toLowerCase().replace(/\s/g, "") === "custom/other";
+              return (
+                <div style={{
+                  border: `1px solid ${C.hairline}`, borderRadius: 16, padding: 16,
+                  background: C.paper, display: "grid", gap: 14,
+                }}>
+                  <div>
+                    <p style={{ margin: 0, fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: C.goldDeep }}>
+                      Customize your style
+                    </p>
+                    {svc.hair_included ? (
+                      <div style={{
+                        display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
+                        padding: "6px 12px", borderRadius: 999,
+                        background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`, color: C.paper,
+                        fontSize: 12, fontWeight: 700,
+                      }}>
+                        ✓ Hair included with this service
+                      </div>
+                    ) : (
+                      <p style={{ margin: "6px 0 0", fontSize: 12, color: C.coffee }}>
+                        Hair not included unless stated by the stylist.
+                      </p>
+                    )}
+                    {svc.hair_included && svc.included_hair_description && (
+                      <p style={{ margin: "6px 0 0", fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
+                        {svc.included_hair_description}
+                      </p>
+                    )}
+                  </div>
+
+                  {svc.included_details && (
+                    <div style={{ background: C.cream, borderRadius: 12, padding: 12 }}>
+                      <span style={{ display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: C.coffee, marginBottom: 4 }}>
+                        What's included
+                      </span>
+                      <p style={{ margin: 0, fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>{svc.included_details}</p>
+                    </div>
+                  )}
+
+                  {showColor && (
+                    <div>
+                      <Field label="Braiding hair color">
+                        <select value={hairColor} onChange={e => setHairColor(e.target.value)}
+                          style={{ ...inputStyle, padding: 12 }}>
+                          <option value="">Select your braiding hair color</option>
+                          {colors.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </Field>
+                      <p style={{ margin: "6px 0 0", fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
+                        Braiding hair is included with this service. Please select the color for your style.
+                      </p>
+                      {isOther(hairColor) && (
+                        <div style={{ marginTop: 10 }}>
+                          <Field label="Custom color request">
+                            <textarea value={customHairColor} onChange={e => setCustomHairColor(e.target.value)}
+                              rows={2} placeholder="Tell your stylist the color you're looking for."
+                              style={{ ...inputStyle, padding: 12, resize: "none", lineHeight: 1.5 }} />
+                          </Field>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {showCurl && (
+                    <div>
+                      <Field label="Curl pattern">
+                        <select value={curlPattern} onChange={e => setCurlPattern(e.target.value)}
+                          style={{ ...inputStyle, padding: 12 }}>
+                          <option value="">Select your curl pattern</option>
+                          {curls.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </Field>
+                      <p style={{ margin: "6px 0 0", fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
+                        Human curly hair is included with your selected option. Please choose your curl pattern.
+                      </p>
+                      {isOther(curlPattern) && (
+                        <div style={{ marginTop: 10 }}>
+                          <Field label="Custom curl pattern request">
+                            <textarea value={customCurlPattern} onChange={e => setCustomCurlPattern(e.target.value)}
+                              rows={2} placeholder="Tell your stylist the curl pattern or look you're going for."
+                              style={{ ...inputStyle, padding: 12, resize: "none", lineHeight: 1.5 }} />
+                          </Field>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <BookingCalendar
               monthCursor={monthCursor}
               setMonthCursor={setMonthCursor}
@@ -2324,104 +2422,6 @@ export default function PublicBookingPage() {
                 </div>
               </details>
             )}
-            {(() => {
-              const svc: any = hasCatalog ? selectedCatalogService : null;
-              if (!svc || (svc.customization_enabled ?? true) === false) return null;
-              const showColor = !!svc.hair_included && !!svc.allow_client_hair_color_selection;
-              const showCurl = !!svc.allow_client_curl_pattern_selection && humanHairIncluded;
-              if (!svc.hair_included && !showColor && !showCurl) return null;
-              const colors: string[] = Array.isArray(svc.allowed_hair_colors) ? svc.allowed_hair_colors : [];
-              const curls: string[] = Array.isArray(svc.allowed_curl_patterns) ? svc.allowed_curl_patterns : [];
-              const isOther = (v: string) => v.trim().toLowerCase().replace(/\s/g, "") === "custom/other";
-              return (
-                <div style={{
-                  border: `1px solid ${C.hairline}`, borderRadius: 16, padding: 16,
-                  background: C.paper, display: "grid", gap: 14,
-                }}>
-                  <div>
-                    <p style={{ margin: 0, fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: C.goldDeep }}>
-                      Customize your booked style
-                    </p>
-                    {svc.hair_included ? (
-                      <div style={{
-                        display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8,
-                        padding: "6px 12px", borderRadius: 999,
-                        background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`, color: C.paper,
-                        fontSize: 12, fontWeight: 700,
-                      }}>
-                        ✓ Hair included with this service
-                      </div>
-                    ) : (
-                      <p style={{ margin: "6px 0 0", fontSize: 12, color: C.coffee }}>
-                        Hair not included unless stated by the stylist.
-                      </p>
-                    )}
-                    {svc.hair_included && svc.included_hair_description && (
-                      <p style={{ margin: "6px 0 0", fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
-                        {svc.included_hair_description}
-                      </p>
-                    )}
-                  </div>
-
-                  {svc.included_details && (
-                    <div style={{ background: C.cream, borderRadius: 12, padding: 12 }}>
-                      <span style={{ display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: C.coffee, marginBottom: 4 }}>
-                        What's included
-                      </span>
-                      <p style={{ margin: 0, fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>{svc.included_details}</p>
-                    </div>
-                  )}
-
-                  {showColor && (
-                    <div>
-                      <Field label="Braiding hair color">
-                        <select value={hairColor} onChange={e => setHairColor(e.target.value)}
-                          style={{ ...inputStyle, padding: 12 }}>
-                          <option value="">Select your braiding hair color</option>
-                          {colors.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      </Field>
-                      <p style={{ margin: "6px 0 0", fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
-                        Braiding hair is included with this service. Please select the color for your style.
-                      </p>
-                      {isOther(hairColor) && (
-                        <div style={{ marginTop: 10 }}>
-                          <Field label="Custom color request">
-                            <textarea value={customHairColor} onChange={e => setCustomHairColor(e.target.value)}
-                              rows={2} placeholder="Tell your stylist the color you're looking for."
-                              style={{ ...inputStyle, padding: 12, resize: "none", lineHeight: 1.5 }} />
-                          </Field>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {showCurl && (
-                    <div>
-                      <Field label="Curl pattern">
-                        <select value={curlPattern} onChange={e => setCurlPattern(e.target.value)}
-                          style={{ ...inputStyle, padding: 12 }}>
-                          <option value="">Select your curl pattern</option>
-                          {curls.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      </Field>
-                      <p style={{ margin: "6px 0 0", fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
-                        Human curly hair is included with your selected option. Please choose your curl pattern.
-                      </p>
-                      {isOther(curlPattern) && (
-                        <div style={{ marginTop: 10 }}>
-                          <Field label="Custom curl pattern request">
-                            <textarea value={customCurlPattern} onChange={e => setCustomCurlPattern(e.target.value)}
-                              rows={2} placeholder="Tell your stylist the curl pattern or look you're going for."
-                              style={{ ...inputStyle, padding: 12, resize: "none", lineHeight: 1.5 }} />
-                          </Field>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
             <Field label="Notes">
               <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
                 placeholder="Hair length, anything you want me to know…"
