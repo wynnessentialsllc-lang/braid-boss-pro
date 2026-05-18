@@ -111,19 +111,47 @@ const ctaButton = (label: string, url: string): string => `
 // ---- shared: style customization block + portal CTA -----------------
 // Backward-compatible: renders nothing when the optional payload
 // fields are absent, so existing enqueues are unaffected.
+// Every row is conditional — the block disappears entirely when
+// nothing was customized, and individual rows only appear when that
+// datum exists (so a hair-included service with no curl option never
+// shows a curl row). Payload is enriched centrally from the linked
+// booking_requests row (see enrichCustomization) so every email type
+// shares one source of truth without per-RPC payload threading.
 const customizationBlock = (p: Record<string, any>): string => {
+  const trow = (label: string, value: string) =>
+    `<tr><td style="padding:4px 0;color:${C.muted};font-size:13px;vertical-align:top;">${escape(label)}</td><td style="padding:4px 0 4px 14px;text-align:right;color:${C.espresso};font-size:13px;font-weight:600;vertical-align:top;">${value}</td></tr>`;
+
   const rows: string[] = [];
-  if (p.hairIncluded) {
-    rows.push(`<tr><td style="padding:3px 0;color:${C.muted};font-size:13px;">Hair included</td><td style="padding:3px 0;text-align:right;color:${C.espresso};font-size:13px;font-weight:600;">Yes</td></tr>`);
+  if (p.hairIncluded) rows.push(trow("Hair included", "Yes"));
+  if (p.humanHairIncluded) rows.push(trow("Human hair included", "Yes"));
+  if (p.selectedHairColor) rows.push(trow("Hair color", escape(p.selectedHairColor)));
+  if (p.selectedCurlPattern) rows.push(trow("Curl pattern", escape(p.selectedCurlPattern)));
+
+  const addons: string[] = Array.isArray(p.selectedAddons)
+    ? p.selectedAddons.map((a: unknown) => String(a ?? "").trim()).filter(Boolean)
+    : [];
+  if (addons.length) rows.push(trow("Add-ons", addons.map((a) => escape(a)).join(", ")));
+
+  const notes = String(p.styleNotes ?? "").trim();
+  if (notes) rows.push(trow("Notes", escape(notes)));
+
+  const inspoCount = Number(p.inspirationCount) > 0 ? Number(p.inspirationCount) : 0;
+  if (inspoCount > 0) {
+    rows.push(trow("Inspiration", `${inspoCount} photo${inspoCount === 1 ? "" : "s"} attached`));
   }
-  if (p.selectedHairColor) {
-    rows.push(`<tr><td style="padding:3px 0;color:${C.muted};font-size:13px;">Hair color</td><td style="padding:3px 0;text-align:right;color:${C.espresso};font-size:13px;font-weight:600;">${escape(p.selectedHairColor)}</td></tr>`);
-  }
-  if (p.selectedCurlPattern) {
-    rows.push(`<tr><td style="padding:3px 0;color:${C.muted};font-size:13px;">Curl pattern</td><td style="padding:3px 0;text-align:right;color:${C.espresso};font-size:13px;font-weight:600;">${escape(p.selectedCurlPattern)}</td></tr>`);
-  }
+
   if (rows.length === 0) return "";
-  return `<table style="width:100%;border-collapse:collapse;margin:14px 0;border-top:1px solid ${C.hairline};border-bottom:1px solid ${C.hairline};">${rows.join("")}</table>`;
+
+  const whats = String(p.whatsIncluded ?? "").trim();
+  const whatsBlock = whats
+    ? `<p style="font-size:12px;line-height:18px;color:${C.coffee};margin:6px 0 0;"><strong>What's included:</strong> ${escape(whats)}</p>`
+    : "";
+
+  return `
+    <p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.goldDeep};margin:16px 0 6px;font-weight:700;">Style customization</p>
+    <table style="width:100%;border-collapse:collapse;border-top:1px solid ${C.hairline};border-bottom:1px solid ${C.hairline};">${rows.join("")}</table>
+    ${whatsBlock}
+  `;
 };
 const portalButton = (p: Record<string, any>): string => {
   const url = String(p.portalUrl || "").trim();
@@ -224,6 +252,7 @@ const renderAppointmentApproved = (p: Record<string, any>) => {
     <p style="font-size:14px;line-height:22px;">
       ${escape(studioName)} approved your${serviceName ? ` ${escape(serviceName)}` : ""} request${when ? ` for ${escape(when)}` : ""}.
     </p>
+    ${customizationBlock(p)}
     ${dep}
     ${cta}
     ${expiresLine}
@@ -245,6 +274,7 @@ const renderDepositReceived = (p: Record<string, any>) => {
     <p style="font-size:14px;line-height:22px;">
       Thanks ${escape(clientName)} — your deposit landed and ${escape(studioName)} has your${serviceName ? ` ${escape(serviceName)}` : ""} appointment locked in${when ? ` for <strong>${escape(when)}</strong>` : ""}.
     </p>
+    ${customizationBlock(p)}
     <p style="font-size:12px;color:${C.muted};line-height:18px;">
       You'll get a reminder closer to the day. Reach out if anything changes.
     </p>
@@ -272,6 +302,7 @@ const renderBalancePaid = (p: Record<string, any>) => {
       Thanks for visiting ${escape(studioName)} — your balance is paid in full.
     </p>
     ${amount}
+    ${customizationBlock(p)}
     <p style="font-size:14px;line-height:22px;margin-top:18px;">
       If you have a moment, your feedback means the world. It only takes 30 seconds.
     </p>
@@ -755,6 +786,81 @@ const failTerminal = async (
 };
 
 // =====================================================================
+// Customization enrichment — single source of truth
+// =====================================================================
+// Booking customization (hair color, curl pattern, add-ons, notes,
+// inspiration photos, what's-included) lives on the booking_requests
+// row. Rather than thread it through every enqueue path, the worker
+// pulls it once per email from the linked request (by
+// booking_request_id, falling back to appointment_id) and merges it
+// into the payload WITHOUT overriding anything the enqueuer set.
+const CUSTOMIZATION_TYPES = new Set([
+  "booking_confirmation",
+  "deposit_received",
+  "appointment_approved",
+  "appointment_confirmed",
+  "appointment_reminder",
+  "balance_paid",
+]);
+
+const enrichCustomization = async (
+  admin: ReturnType<typeof createClient>,
+  row: ClaimedRow,
+): Promise<void> => {
+  if (!CUSTOMIZATION_TYPES.has(row.notification_type)) return;
+  const cols =
+    "selected_hair_color, selected_curl_pattern, client_style_notes, inspiration_photo_urls, customization_summary, selected_addons, selected_variation_name";
+  let br: any = null;
+  try {
+    if (row.booking_request_id) {
+      const { data } = await admin
+        .from("booking_requests").select(cols)
+        .eq("id", row.booking_request_id).maybeSingle();
+      br = data;
+    }
+    if (!br && row.appointment_id) {
+      const { data } = await admin
+        .from("booking_requests").select(cols)
+        .eq("appointment_id", row.appointment_id)
+        .order("created_at", { ascending: false })
+        .limit(1).maybeSingle();
+      br = data;
+    }
+  } catch {
+    return; // enrichment is best-effort — never block the send
+  }
+  if (!br) return;
+
+  const cs = br.customization_summary && typeof br.customization_summary === "object"
+    ? br.customization_summary : {};
+  const addonNames: string[] = Array.isArray(br.selected_addons)
+    ? br.selected_addons.map((a: any) => String(a?.name ?? "").trim()).filter(Boolean)
+    : [];
+  const blob = `${br.selected_variation_name || ""} ${addonNames.join(" ")}`.toLowerCase();
+  const humanHair = !!cs.human_hair_included || /human hair/.test(blob);
+
+  const p: Record<string, any> =
+    (row.payload && typeof row.payload === "object") ? row.payload : (row.payload = {});
+  const fill = (k: string, v: any) => {
+    if (v == null || v === "" || (Array.isArray(v) && v.length === 0)) return;
+    const cur = p[k];
+    if (cur == null || cur === "" || (Array.isArray(cur) && cur.length === 0)) p[k] = v;
+  };
+  fill("selectedHairColor", br.selected_hair_color || cs.custom_hair_color || null);
+  fill("selectedCurlPattern", br.selected_curl_pattern || cs.custom_curl_pattern || null);
+  if (humanHair && !p.humanHairIncluded) p.humanHairIncluded = true;
+  fill("selectedAddons", addonNames);
+  fill("styleNotes", br.client_style_notes || (typeof cs.notes === "string" ? cs.notes : null));
+  const inspo = Array.isArray(br.inspiration_photo_urls) ? br.inspiration_photo_urls.length : 0;
+  if (inspo > 0 && !(Number(p.inspirationCount) > 0)) p.inspirationCount = inspo;
+  fill(
+    "whatsIncluded",
+    typeof cs.whats_included === "string" ? cs.whats_included
+      : (typeof cs.summary === "string" ? cs.summary : null),
+  );
+};
+
+// =====================================================================
 // HTTP handler
 // =====================================================================
 const json = (status: number, body: unknown) =>
@@ -830,6 +936,7 @@ serve(async (req) => {
         return;
       }
 
+      await enrichCustomization(admin, row);
       const rendered = renderForRow(row);
       const result = await sendViaResend(row, rendered);
 
