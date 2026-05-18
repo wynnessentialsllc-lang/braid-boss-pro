@@ -653,6 +653,7 @@ const renderAppointmentRescheduled = (p: Record<string, any>) => {
   const serviceName = p.serviceName || null;
   const newWhen = [p.preferredDate || null, p.preferredTime || null].filter(Boolean).join(" · ");
   const oldWhen = [p.fromDate || null, p.fromTime || null].filter(Boolean).join(" · ");
+  const cancelUrl = String(p.cancelUrl || "").trim();
   const subject = "Your appointment has been rescheduled — Braid Boss Pro";
   const html = wrapHtml(subject, `
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Appointment updated</p>
@@ -662,7 +663,9 @@ const renderAppointmentRescheduled = (p: Record<string, any>) => {
     </p>
     ${oldWhen ? `<p style="font-size:13px;line-height:20px;margin:0 0 14px;color:${C.muted};">Previously: ${escape(oldWhen)}.</p>` : ""}
     ${customizationBlock(p)}
-    <p style="font-size:13px;color:${C.muted};line-height:20px;margin-top:14px;">No action needed — your booking and any deposit carry over. If the new time doesn't work, reply to this email and your stylist will help.</p>
+    ${portalButton(p)}
+    <p style="font-size:13px;color:${C.muted};line-height:20px;margin:14px 0;">No action needed — your booking and any deposit carry over. If the new time doesn't work, reply to this email and your stylist will help.</p>
+    ${cancelUrl ? `<hr style="border:none;border-top:1px solid ${C.hairline};margin:18px 0;" /><p style="margin:0 0 8px;font-size:13px;font-weight:600;color:${C.espresso};">Can't make the new time?</p><p style="margin:0 0 10px;font-size:12px;line-height:18px;color:${C.coffee};">You can cancel from the link below. Your deposit is handled per your stylist's policy.</p><p style="margin:0;"><a href="${escape(cancelUrl)}" style="display:inline-block;background:transparent;color:${C.espresso};text-decoration:none;padding:10px 20px;border-radius:999px;font-weight:600;font-size:12px;letter-spacing:0.04em;border:1.5px solid ${C.espresso};">Cancel appointment</a></p>` : ""}
   `);
   return { subject, html };
 };
@@ -836,7 +839,7 @@ const enrichCustomization = async (
 ): Promise<void> => {
   if (!CUSTOMIZATION_TYPES.has(row.notification_type)) return;
   const cols =
-    "selected_hair_color, selected_curl_pattern, client_style_notes, inspiration_photo_urls, customization_summary, selected_addons, selected_variation_name";
+    "selected_hair_color, selected_curl_pattern, client_style_notes, inspiration_photo_urls, customization_summary, selected_addons, selected_variation_name, portal_token, cancel_token";
   let br: any = null;
   try {
     if (row.booking_request_id) {
@@ -885,6 +888,14 @@ const enrichCustomization = async (
     typeof cs.whats_included === "string" ? cs.whats_included
       : (typeof cs.summary === "string" ? cs.summary : null),
   );
+  // Self-service links from the linked booking request, so the
+  // reschedule email (and any enriched type lacking them) can show
+  // "View appointment details" + a cancel option. Base comes from
+  // the enqueuer when provided, else the prod default the SQL RPCs
+  // also use. cancel_token is null once a cancel has been used.
+  const base = String(p.appBase || "").replace(/\/$/, "") || "https://braidbosspro.app";
+  if (br.portal_token) fill("portalUrl", `${base}/client/appointment/${br.portal_token}`);
+  if (br.cancel_token) fill("cancelUrl", `${base}/booking-action/${br.cancel_token}/cancel`);
 };
 
 // =====================================================================
