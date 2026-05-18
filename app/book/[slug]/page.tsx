@@ -1517,6 +1517,11 @@ export default function PublicBookingPage() {
                     gap: 10,
                   }}
                 >
+                  {r.stars ? (
+                    <p aria-label={`${r.stars} out of 5 stars`} style={{ margin: 0, fontSize: 14, letterSpacing: 2, color: accent }}>
+                      {"★".repeat(r.stars)}<span style={{ color: C.hairline }}>{"★".repeat(5 - r.stars)}</span>
+                    </p>
+                  ) : null}
                   <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 18, lineHeight: 1.4, color: C.espresso, fontStyle: "italic" }}>
                     “{r.review_text}”
                   </p>
