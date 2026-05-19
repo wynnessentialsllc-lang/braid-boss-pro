@@ -146,6 +146,10 @@ export type DashboardRevenue = {
   // Counted at ticketTotal (post-discount), never deposit + balance
   // separately, so a paid booking can't double-count.
   monthExpected: number;
+  // monthEarned: only completed/paid appointments in the calendar
+  // month (month-to-date actual earnings). Same isPaidish rule as
+  // yearMade, just month-bounded.
+  monthEarned: number;
   yearMade: number;
 };
 
@@ -189,6 +193,7 @@ export const computeDashboardRevenue = (
   let last30Total = 0;
   let last30Count = 0;
   let monthExpected = 0;
+  let monthEarned = 0;
   let yearMade = 0;
 
   const month = monthBoundary(today);
@@ -222,6 +227,10 @@ export const computeDashboardRevenue = (
     // the current calendar month, paid or not. isBillable() already
     // excludes cancelled and no_show (and personal/blocked kinds).
     if (d >= month.start && d < month.end) monthExpected += t;
+    // Month Earned — completed/paid bookings in the current calendar
+    // month (month-to-date actual earnings). Same isPaidish rule as
+    // Year Made, just month-bounded.
+    if (d >= month.start && d < month.end && isPaidish(a)) monthEarned += t;
     // Year Made — only completed or paid bookings in the current
     // calendar year. ticketTotal (not deposit + balance) so paid
     // bookings can't double-count.
@@ -238,6 +247,7 @@ export const computeDashboardRevenue = (
     weekAppointmentCount,
     averageTicket30d: round2(averageTicket30d),
     monthExpected: round2(monthExpected),
+    monthEarned: round2(monthEarned),
     yearMade: round2(yearMade),
   };
 };
@@ -563,6 +573,14 @@ export const monthExpectedAppts = (
     .filter(a => a.date && a.date >= start && a.date < end)
     .sort((a, b) => ((a.date || "") + (a.time || "")).localeCompare((b.date || "") + (b.time || "")));
 };
+
+export const monthEarnedAppts = (
+  appointments: AppointmentLike[] | null | undefined,
+  reference: string = todayISO(),
+): AppointmentLike[] =>
+  // Match computeDashboardRevenue.monthEarned: completed/paid
+  // appointments in the calendar month (month-to-date earnings).
+  monthExpectedAppts(appointments, reference).filter(isPaidish);
 
 export type MonthProfitBreakdown = {
   appointments: AppointmentLike[];
