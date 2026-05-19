@@ -113,7 +113,7 @@ export async function POST(req: Request) {
   // related booking_requests row for the deposit payment_intent.
   const { data: appt, error: readErr } = await admin
     .from("appointments")
-    .select("id, user_id, status, balance_payment_intent_id, data")
+    .select("id, user_id, status, balance_payment_intent_id, data, client_email, client_name, style, appt_date, appt_time")
     .eq("id", apptId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -179,6 +179,43 @@ export async function POST(req: Request) {
   if (rpcErr) {
     console.error("[cancel-appointment] RPC failed:", rpcErr.message);
     return fail(500, rpcErr.message);
+  }
+
+  // Tell the client their appointment was cancelled (stylist-side
+  // cancel previously emailed nobody on the client side). Best-effort
+  // + idempotent via the dedupe key; never fails the cancel. Deposit
+  // was refunded above where possible, so we don't claim forfeiture.
+  const clientEmail = String(appt.client_email || "").trim();
+  if (clientEmail) {
+    try {
+      let studioName = "your stylist";
+      try {
+        const { data: studio } = await admin.rpc("public_get_studio_name", { user_id_in: user.id });
+        if (typeof studio === "string" && studio.trim()) studioName = studio.trim();
+      } catch { /* studio name best-effort */ }
+      await admin.rpc("queue_notification", {
+        user_id_in: user.id,
+        channel_in: "email",
+        notification_type_in: "client_booking_cancelled",
+        body_in: "Your appointment has been cancelled.",
+        subject_in: "Your appointment was cancelled",
+        recipient_email_in: clientEmail,
+        recipient_name_in: appt.client_name || null,
+        payload_in: {
+          clientName: appt.client_name || "there",
+          studioName,
+          serviceName: appt.style || null,
+          preferredDate: appt.appt_date || null,
+          preferredTime: appt.appt_time || null,
+          depositForfeited: false,
+          depositAmount: refundedAmount > 0 ? refundedAmount : null,
+        },
+        dedupe_key_in: `client_booking_cancelled:appt:${apptId}`,
+        appointment_id_in: apptId,
+      });
+    } catch (e: any) {
+      console.warn("[cancel-appointment] client email enqueue failed:", e?.message || e);
+    }
   }
 
   return NextResponse.json({
