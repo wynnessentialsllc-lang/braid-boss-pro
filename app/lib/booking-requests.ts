@@ -207,10 +207,23 @@ export const useBookingApprovalQueue = (userId: string | null): {
     });
     if (err) { setError(err.message); return null; }
 
-    // Best-effort: enqueue the "approval — pay deposit" email to the
-    // client. queue_notification dedupes on
-    // `appointment_approved:<id>` so a re-approve doesn't double-send.
     const row = (data as BookingRequestRecord) || null;
+
+    // Generate contracts NOW so the signing link(s) can ride embedded
+    // in the approval email — no separate contract_signing email.
+    // generate_booking_contracts is idempotent (dedupes on
+    // request+template), so a re-approve never duplicates.
+    let contractLinks: Array<{ title: string; url: string }> = [];
+    if (row?.id) {
+      try {
+        await supabase.rpc("generate_booking_contracts", {
+          booking_request_id_in: row.id,
+          appointment_id_in: row.appointment_id || null,
+        });
+        contractLinks = await fetchContractLinks(row.id);
+      } catch { /* contracts best-effort; never block approval */ }
+    }
+
     if (row?.client_email) {
       try {
         const { data: studio } = await supabase
@@ -234,6 +247,9 @@ export const useBookingApprovalQueue = (userId: string | null): {
             depositAmount: depositAmount || (row as any).deposit_amount || null,
             paymentUrl,
             expiresMinutes,
+            // Embedded "Review and sign agreement" section. Empty
+            // array → renderer omits it (no contract / already signed).
+            contracts: contractLinks,
           },
           dedupe_key_in: `appointment_approved:${row.id}`,
           booking_request_id_in: row.id,
@@ -241,13 +257,6 @@ export const useBookingApprovalQueue = (userId: string | null): {
       } catch {
         // Approval already succeeded — email failure shouldn't surface.
       }
-    }
-
-    try {
-      await generateAndSendContracts(row?.id || id, row?.appointment_id || null);
-    } catch {
-      // Approval already succeeded. Contract generation/sending can be
-      // retried from the contracts mini-card if the network flakes.
     }
 
     await refresh();
@@ -442,6 +451,12 @@ export const useBookingApprovalQueue = (userId: string | null): {
     return row;
   };
 
+  // Generate-only. The contract signing link now rides EMBEDDED in
+  // the approval / confirmation email (see approve + confirmApproval),
+  // so we no longer fire a separate contract_signing email on
+  // approval — that created redundant back-to-back emails. An
+  // unsigned-contract reminder is sent ~48h before the appointment
+  // by the enqueue_due_contract_reminders pg_cron job instead.
   const generateAndSendContracts: ReturnType<typeof useBookingApprovalQueue>["generateAndSendContracts"] = async (id, appointmentId = null) => {
     if (!userId) return 0;
     const supabase = getSupabase();
@@ -450,13 +465,34 @@ export const useBookingApprovalQueue = (userId: string | null): {
       appointment_id_in: appointmentId || null,
     });
     if (genErr) { setError(genErr.message); return 0; }
-    const { data, error: sendErr } = await supabase.rpc("enqueue_contract_signing_for_request", {
-      request_id_in: id,
-      app_base_url_in: typeof window !== "undefined" ? window.location.origin : null,
-    });
-    if (sendErr) { setError(sendErr.message); return 0; }
-    return Number((data as any)?.enqueued || 0);
+    return 0;
   };
+
+  // Pull the unsigned contract signing link(s) for a request so they
+  // can be embedded in the approval / confirmation email.
+  const fetchContractLinks = async (
+    id: string,
+  ): Promise<Array<{ title: string; url: string }>> => {
+    try {
+      const supabase = getSupabase();
+      const base = typeof window !== "undefined" ? window.location.origin : "https://braidbosspro.app";
+      const { data: bcs } = await supabase
+        .from("booking_contracts")
+        .select("id, title, public_token, status")
+        .eq("booking_request_id", id)
+        .in("status", ["sent", "pending", "pending_signature", "viewed"])
+        .order("created_at", { ascending: true });
+      return ((bcs as any[]) || [])
+        .filter(c => c?.public_token)
+        .map(c => ({
+          title: String(c.title || "Appointment agreement"),
+          url: `${base}/sign/contract/${c.public_token}`,
+        }));
+    } catch {
+      return [];
+    }
+  };
+
 
   return { requests, loading, error, refresh, approve, decline, deny, markPaid, confirmApproval, generateAndSendContracts };
 };
