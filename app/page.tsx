@@ -2633,7 +2633,7 @@ const RebookingOpportunitiesCard = ({
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <p className="font-semibold text-sm truncate" style={{ color: C.espresso }}>{op.client_name}</p>
+                  <p className="truncate" style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso, lineHeight: 1.15 }}>{op.client_name}</p>
                   <Pill tone={URGENCY_PILL_TONE[op.urgency]}>{URGENCY_LABEL[op.urgency]}</Pill>
                 </div>
                 <p className="text-[11px] mt-0.5 truncate" style={{ color: C.muted }}>
@@ -4071,8 +4071,8 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
                     <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                       <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>
                     </div>
-                    <p className="font-semibold text-sm truncate" style={{ color: C.espresso }}>{a.clientName || "Unnamed"}</p>
-                    <p className="text-[11px] truncate" style={{ color: C.muted }}>{fmtDate(a.date)} · {a.style || "Service"}</p>
+                    <p className="truncate" style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso, lineHeight: 1.15 }}>{a.clientName || "Unnamed"}</p>
+                    <p className="text-[11px] truncate mt-0.5" style={{ color: C.muted }}>{fmtDate(a.date)} · {a.style || "Service"}</p>
                   </div>
                   <div className="text-right shrink-0 flex flex-col items-end gap-1.5">
                     <span style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: ps === "overdue" ? C.danger : C.goldDeep }}>
