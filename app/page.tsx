@@ -168,6 +168,11 @@ import {
   monthEarnedAppts,
 } from "./lib/reports";
 import {
+  getSeasonGuide,
+  buildPersonalization,
+  type SeasonGuide,
+} from "./lib/growth-guide";
+import {
   type BookingPolicy,
   type BookingPolicyInput,
   EMPTY_POLICY,
@@ -11587,7 +11592,217 @@ const ImportStudioDataSheet = ({ open, onClose, store, onViewClients, onViewServ
   </Sheet>
 );
 
-const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
+// ---- Boss Growth Guide ----------------------------------------------
+// A seasonal, rules-based growth coach for braiders. Pure client-side:
+// no AI, no social integrations, no image uploads. Personalizes from
+// the stylist's services + booking history when available, and falls
+// back to general seasonal guidance when analytics are sparse.
+const SEASON_ACCENT: Record<string, { grad: string; chip: string }> = {
+  spring: { grad: "linear-gradient(160deg,#FF8FB1 0%,#B14BE0 55%,#7C3AED 100%)", chip: "#E0354F" },
+  summer: { grad: "linear-gradient(160deg,#FFB347 0%,#FF4D6D 55%,#B14BE0 100%)", chip: "#E0354F" },
+  fall:   { grad: "linear-gradient(160deg,#FF7A45 0%,#E0354F 55%,#7C3AED 100%)", chip: "#A8893F" },
+  winter: { grad: "linear-gradient(160deg,#7C3AED 0%,#B14BE0 50%,#FF4D6D 100%)", chip: "#5B21B6" },
+};
+
+const BossGrowthGuideScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
+  useEffect(() => { trackEvent("boss_growth_guide_view", { category: "feature" }); }, []);
+
+  const guide: SeasonGuide = useMemo(() => getSeasonGuide(new Date()), []);
+  const accent = SEASON_ACCENT[guide.key] || SEASON_ACCENT.spring;
+
+  const personalization = useMemo(() => {
+    const appts = Array.isArray(store?.appointments) ? store.appointments : [];
+    const serviceNames: string[] = (store?.servicesApi?.services || [])
+      .map((s: any) => String(s?.name ?? "").trim())
+      .filter(Boolean);
+
+    let busiestWeekday: string | null = null;
+    try {
+      const dow = [0, 0, 0, 0, 0, 0, 0];
+      const names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      for (const a of appts) {
+        const d = a?.date ? new Date(`${a.date}T00:00:00`) : null;
+        if (d && !Number.isNaN(d.getTime())) dow[d.getDay()] += 1;
+      }
+      const max = Math.max(...dow);
+      if (max > 0) busiestWeekday = names[dow.indexOf(max)];
+    } catch { /* fallback handled below */ }
+
+    let avgTicket: number | null = null;
+    let repeatRate: number | null = null;
+    let topStyles: { style: string; count: number }[] = [];
+    try { avgTicket = avgTicket30dBreakdown(appts).average || null; } catch { /* optional */ }
+    try { repeatRate = repeatClientStats(appts).repeatRate; } catch { /* optional */ }
+    try {
+      topStyles = topBookedStyles(appts, 5).map(s => ({ style: s.style, count: s.count }));
+    } catch { /* optional */ }
+
+    return buildPersonalization(guide, {
+      serviceNames,
+      topBookedStyles: topStyles,
+      busiestWeekday,
+      avgTicket,
+      repeatRate,
+    });
+  }, [store, guide]);
+
+  const matching = personalization.matchingServices;
+  const otherStyles = guide.styles.filter(s => !matching.some(m => m.toLowerCase() === s.toLowerCase()));
+
+  const sectionLabel = (t: string) => (
+    <p className="text-[11px] font-bold mb-2" style={{ color: accent.chip, letterSpacing: "0.14em", textTransform: "uppercase" }}>{t}</p>
+  );
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header title="Boss Growth Guide" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
+      <div className="px-5 pt-2 space-y-4">
+
+        {/* Hero */}
+        <div style={{ background: accent.grad, borderRadius: 22, padding: "22px 20px", color: "#FFFFFF", boxShadow: "0 16px 36px -18px rgba(124,58,237,0.55)" }}>
+          <span style={{ display: "inline-block", fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", background: "rgba(255,255,255,0.22)", padding: "5px 12px", borderRadius: 999 }}>
+            Current Season: {guide.name}
+          </span>
+          <h1 style={{ fontSize: 24, fontWeight: 800, margin: "14px 0 6px", lineHeight: 1.15 }}>Boss Growth Guide</h1>
+          <p style={{ fontSize: 13.5, lineHeight: 1.5, opacity: 0.95 }}>
+            Seasonal content, pricing, and booking ideas for your braid business.
+          </p>
+          <p style={{ fontSize: 12, marginTop: 10, opacity: 0.9, fontWeight: 600 }}>{guide.tagline}</p>
+        </div>
+
+        {/* For your business — personalization (optional) */}
+        {personalization.nudges.length > 0 && (
+          <Card className="p-4" style={{ borderColor: accent.chip }}>
+            {sectionLabel("For your braid business")}
+            <div className="space-y-2">
+              {personalization.nudges.map((n, i) => (
+                <div key={i} className="flex gap-2.5">
+                  <span aria-hidden style={{ width: 7, height: 7, borderRadius: 999, background: accent.chip, marginTop: 6, flexShrink: 0 }} />
+                  <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>{n}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* Section 1 — Current season */}
+        <SectionTitle>Current season</SectionTitle>
+        <Card className="p-4">
+          <p className="text-base font-bold" style={{ color: C.espresso }}>{guide.name} — {guide.tagline}</p>
+          <p className="text-[13px] mt-2" style={{ color: C.coffee, lineHeight: 1.55 }}>{guide.explanation}</p>
+          <div className="mt-3 p-3 rounded-xl" style={{ background: C.ivory }}>
+            <p className="text-[11px] font-bold mb-1" style={{ color: accent.chip, letterSpacing: "0.1em", textTransform: "uppercase" }}>Client mindset</p>
+            <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>{guide.customerMindset}</p>
+          </div>
+        </Card>
+
+        {/* Section 2 — Styles to promote */}
+        <SectionTitle>Styles to promote</SectionTitle>
+        <Card className="p-4">
+          {matching.length > 0 && (
+            <>
+              {sectionLabel("You already offer these — lead with them")}
+              <div className="flex flex-wrap gap-2 mb-3">
+                {matching.map(s => (
+                  <span key={s} className="text-[12px] font-semibold" style={{ background: accent.grad, color: "#FFFFFF", padding: "6px 12px", borderRadius: 999 }}>{s}</span>
+                ))}
+              </div>
+            </>
+          )}
+          {sectionLabel(matching.length > 0 ? "Also trending this season" : "Trending this season")}
+          <div className="flex flex-wrap gap-2">
+            {otherStyles.map(s => (
+              <span key={s} className="text-[12px] font-semibold" style={{ background: C.ivory, color: C.espresso, padding: "6px 12px", borderRadius: 999, border: `1px solid ${C.hairline}` }}>{s}</span>
+            ))}
+          </div>
+        </Card>
+
+        {/* Section 3 — Social media post ideas */}
+        <SectionTitle>Post ideas</SectionTitle>
+        <div className="space-y-2.5">
+          {guide.socialPosts.map((p, i) => (
+            <Card key={i} className="p-4">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <span className="text-[11px] font-bold" style={{ color: accent.chip, letterSpacing: "0.08em", textTransform: "uppercase" }}>{p.format}</span>
+              </div>
+              <p className="text-[14px] font-semibold" style={{ color: C.espresso, lineHeight: 1.4 }}>{p.idea}</p>
+              <p className="text-[12px] mt-2" style={{ color: C.muted }}><span style={{ fontWeight: 700, color: C.coffee }}>CTA:</span> {p.cta}</p>
+            </Card>
+          ))}
+        </div>
+
+        {/* Section 4 — Hooks + captions */}
+        <SectionTitle>Hooks &amp; captions</SectionTitle>
+        <Card className="p-4">
+          {sectionLabel("Scroll-stopping hooks")}
+          <div className="space-y-2 mb-3">
+            {guide.hooks.map((h, i) => (
+              <div key={i} className="flex gap-2.5">
+                <span aria-hidden style={{ color: accent.chip, fontWeight: 800, flexShrink: 0 }}>“</span>
+                <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>{h}</p>
+              </div>
+            ))}
+          </div>
+          {sectionLabel("Caption starters")}
+          <div className="flex flex-wrap gap-2">
+            {guide.captionStarters.map((c, i) => (
+              <span key={i} className="text-[12px]" style={{ background: C.ivory, color: C.coffee, padding: "6px 12px", borderRadius: 12, border: `1px solid ${C.hairline}` }}>{c}</span>
+            ))}
+          </div>
+        </Card>
+
+        {/* Section 5 — Smart pricing moves */}
+        <SectionTitle>Smart pricing moves</SectionTitle>
+        <Card className="p-4">
+          <div className="space-y-2.5">
+            {guide.pricingMoves.map((m, i) => (
+              <div key={i} className="flex gap-2.5">
+                <span aria-hidden style={{ width: 7, height: 7, borderRadius: 999, background: accent.chip, marginTop: 6, flexShrink: 0 }} />
+                <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>{m}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] mt-3" style={{ color: C.muted, lineHeight: 1.5 }}>
+            Ideas only — not financial or legal advice. Test what fits your business and clientele.
+          </p>
+        </Card>
+
+        {/* Section 6 — Smart deals that protect profit */}
+        <SectionTitle>Profit-safe deals</SectionTitle>
+        <Card className="p-4">
+          <div className="space-y-2.5">
+            {guide.smartDeals.map((d, i) => (
+              <div key={i} className="flex gap-2.5">
+                <span aria-hidden style={{ width: 7, height: 7, borderRadius: 999, background: accent.chip, marginTop: 6, flexShrink: 0 }} />
+                <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>{d}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] mt-3" style={{ color: C.muted, lineHeight: 1.5 }}>
+            Keep it premium — skip blanket discounts and “cheap braids” language that lowers your brand.
+          </p>
+        </Card>
+
+        {/* Section 7 — This week's action plan */}
+        <SectionTitle>This week&apos;s action plan</SectionTitle>
+        <Card className="p-4">
+          <div className="space-y-2.5">
+            {guide.weeklyActionPlan.map((step, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <span style={{ width: 22, height: 22, borderRadius: 999, background: accent.grad, color: "#FFFFFF", display: "grid", placeItems: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>{i + 1}</span>
+                <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5, paddingTop: 2 }}>{step}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+      </div>
+    </div>
+  );
+};
+
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -11703,6 +11918,34 @@ const SettingsScreen = ({ store, onBack, openReminderSettings, openCommunication
     <div className="bbp-fade pb-32">
       <Header title="Settings" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
       <div className="px-5 pt-2 space-y-5">
+        {openBossGrowthGuide && (
+          <>
+            <SectionTitle>Growth</SectionTitle>
+            <Card className="p-4 active:scale-[0.99]" onClick={openBossGrowthGuide}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div
+                    aria-hidden
+                    style={{
+                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                      background: GRADIENTS.hero, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124,58,237,0.4)",
+                    }}
+                  >
+                    <Sparkles size={15} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold" style={{ color: C.espresso }}>Boss Growth Guide</p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      Seasonal content, pricing &amp; booking ideas
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight size={18} style={{ color: C.muted }} />
+              </div>
+            </Card>
+          </>
+        )}
+
         <SectionTitle>Business</SectionTitle>
         <Card className="p-4 space-y-3">
           <Field label="Business name"><Input value={b.businessName} onChange={e => setB({ ...b, businessName: e.target.value })} /></Field>
@@ -20985,6 +21228,7 @@ export default function App() {
             <SettingsScreen
               store={store}
               onBack={() => setActive("dashboard")}
+              openBossGrowthGuide={() => setSecondary("bossGrowthGuide")}
               openReminderSettings={() => setSecondary("reminderSettings")}
               openCommunicationLog={() => setSecondary("communicationLog")}
               openAccount={() => setSecondary("account")}
@@ -21045,7 +21289,8 @@ export default function App() {
       )}
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
