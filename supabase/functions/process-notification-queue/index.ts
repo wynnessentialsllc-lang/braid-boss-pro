@@ -35,6 +35,9 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
 const RESEND_FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") || "";
+const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID") || "";
+const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN") || "";
+const TWILIO_PHONE_NUMBER = Deno.env.get("TWILIO_PHONE_NUMBER") || "";
 
 const BATCH_LIMIT = 25;
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
@@ -814,6 +817,91 @@ const sendViaResend = async (
 };
 
 // =====================================================================
+// Twilio SMS — Phase 1 foundation. Reuses the same notification_queue
+// row lifecycle as email (claim → send → mark_sent/mark_failed), so
+// duplicate sends are prevented by the existing atomic claim and the
+// idempotent mark_notification_sent terminal state. SMS rows carry
+// their text in payload.smsText (preferred) or the row's `body`.
+// =====================================================================
+const TWILIO_ENDPOINT = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+
+// Best-effort E.164 normalization. Returns null when the input can't
+// be confidently formatted, so the row is failed safely rather than
+// sending to a malformed destination. Defaults bare 10/11-digit
+// numbers to US (+1) — the only market in scope for v1.
+const toE164 = (raw: unknown): string | null => {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  const hasPlus = s.startsWith("+");
+  const digits = s.replace(/[^\d]/g, "");
+  if (!digits) return null;
+  if (hasPlus) {
+    // Already international: 8–15 digits after the +.
+    return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : null;
+  }
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  // 8–15 digits without a + is ambiguous internationally — reject.
+  return null;
+};
+
+const smsText = (row: ClaimedRow): string => {
+  const fromPayload =
+    row.payload && typeof row.payload === "object" && typeof row.payload.smsText === "string"
+      ? row.payload.smsText
+      : "";
+  const txt = String(fromPayload || row.body || "").trim();
+  // Hard cap so a bad payload can't fan out into many billed segments.
+  return txt.length > 480 ? `${txt.slice(0, 477)}...` : txt;
+};
+
+const sendViaTwilio = async (
+  row: ClaimedRow,
+): Promise<
+  | { ok: true; providerMessageId: string | null }
+  | { ok: false; retryable: boolean; error: string }
+> => {
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER) {
+    // Non-retryable: missing config won't fix itself on retry. Email
+    // rows in the same batch are unaffected (per-row dispatch).
+    return { ok: false, retryable: false, error: "twilio_env_missing" };
+  }
+  const to = toE164(row.recipient_phone);
+  if (!to) {
+    return { ok: false, retryable: false, error: "invalid_recipient_phone" };
+  }
+  const body = smsText(row);
+  if (!body) {
+    return { ok: false, retryable: false, error: "empty_sms_body" };
+  }
+  try {
+    const form = new URLSearchParams();
+    form.set("To", to);
+    form.set("From", TWILIO_PHONE_NUMBER);
+    form.set("Body", body);
+    const res = await fetch(TWILIO_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: form.toString(),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      // 5xx + 429 → transient. 4xx (bad number, opt-out, etc.) →
+      // permanent so we don't retry-spam Twilio.
+      const retryable = res.status >= 500 || res.status === 429;
+      return { ok: false, retryable, error: `twilio_${res.status}: ${text.slice(0, 240)}` };
+    }
+    const data = (await res.json().catch(() => ({}))) as { sid?: string };
+    return { ok: true, providerMessageId: data?.sid || null };
+  } catch (e: any) {
+    return { ok: false, retryable: true, error: `network: ${e?.message || e}` };
+  }
+};
+
+// =====================================================================
 // Helpers
 // =====================================================================
 const failTerminal = async (
@@ -1040,26 +1128,34 @@ serve(async (req) => {
   // 2. Per-row dispatch. Errors are contained to the row.
   await Promise.all(rows.map(async (row) => {
     try {
-      if (row.channel === "sms") {
-        await failTerminal(admin, row.id, "sms_not_implemented_in_b12_1a");
-        skipped++;
-        return;
-      }
-      if (row.channel !== "email") {
+      if (row.channel !== "email" && row.channel !== "sms") {
         await failTerminal(admin, row.id, `unsupported_channel:${row.channel}`);
         skipped++;
         return;
       }
 
-      await enrichCustomization(admin, row);
-      await enrichStudioName(admin, row);
-      const rendered = renderForRow(row);
-      const result = await sendViaResend(row, rendered);
+      let result:
+        | { ok: true; providerMessageId: string | null }
+        | { ok: false; retryable: boolean; error: string };
+      let provider: string;
+      if (row.channel === "sms") {
+        // SMS reuses the same row lifecycle as email — no separate
+        // architecture. Dedup is the existing atomic claim +
+        // idempotent mark_notification_sent.
+        result = await sendViaTwilio(row);
+        provider = "twilio";
+      } else {
+        await enrichCustomization(admin, row);
+        await enrichStudioName(admin, row);
+        const rendered = renderForRow(row);
+        result = await sendViaResend(row, rendered);
+        provider = "resend";
+      }
 
       if (result.ok) {
         const { error } = await admin.rpc("mark_notification_sent", {
           id_in: row.id,
-          provider_in: "resend",
+          provider_in: provider,
           provider_message_id_in: result.providerMessageId,
         });
         if (error) {
