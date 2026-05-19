@@ -1678,7 +1678,7 @@ const useStorage = () => {
     if (next.receipts) setReceipts(next.receipts);
     if (next.commLog) setCommLog(next.commLog);
     if (next.photos) setPhotos(next.photos);
-    if (next.business) setBusiness({ ...DEFAULT_BUSINESS, ...next.business });
+    if (next.business && Object.keys(next.business).length > 0) setBusiness({ ...DEFAULT_BUSINESS, ...next.business });
     if (next.reminderSettings) setReminderSettings({ ...DEFAULT_REMINDER_SETTINGS, ...next.reminderSettings });
   }, []);
 
@@ -13950,7 +13950,17 @@ const useCloudSync = (userId: string | null, store: any) => {
           syncCommunications.pull(userId),
           syncPhotos.pull(userId),
         ]);
-        const business = settingsRow?.data?.business || (settingsRow ? { businessName: settingsRow.business_name, currency: settingsRow.currency } : undefined);
+        // Only adopt the cloud business object when the server row
+        // actually carries a saved one (settings.data.business). The
+        // old column fallback fabricated { businessName,
+        // currency } from default columns — for users whose settings
+        // aren't cloud-synced that overwrote (and, via setBusiness →
+        // local storage, destroyed) their saved Business/Owner name
+        // on every load. Absent → leave local state untouched.
+        const cloudBiz = (settingsRow?.data as any)?.business;
+        const business = (cloudBiz && typeof cloudBiz === "object" && Object.keys(cloudBiz).length > 0)
+          ? cloudBiz
+          : undefined;
         const reminderSettings = settingsRow?.reminder_settings || undefined;
         store.replaceCloudState?.({
           clients: clients2, appointments: appts2, quotes: quotes2,
