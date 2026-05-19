@@ -212,15 +212,22 @@ const renderContractSigning = (p: Record<string, any>) => {
   const contractTitle = p.contractTitle || "Appointment agreement";
   const serviceName   = p.serviceName   || null;
   const contractUrl   = String(p.contractUrl || "").trim();
+  const isReminder    = !!p.reminder;
 
-  const subject = `Please review and sign your appointment agreement`;
+  const subject = isReminder
+    ? "Reminder: your appointment agreement is still pending"
+    : `Please review and sign your appointment agreement`;
   const cta = contractUrl
-    ? ctaButton(`Review & sign — ${contractTitle}`, contractUrl)
+    ? ctaButton("Review and sign agreement", contractUrl)
     : "";
+  const intro = isReminder
+    ? `Just a heads-up — your appointment with ${escape(studioName)}${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""} is coming up and your agreement is <strong>still unsigned</strong>.`
+    : `Your stylist at ${escape(studioName)} sent an agreement for your upcoming${serviceName ? ` <strong>${escape(serviceName)}</strong>` : ""} appointment.`;
   const html = wrapHtml(subject, `
+    ${isReminder ? `<p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Reminder</p>` : ""}
     <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">Hi ${escape(clientName)},</h1>
     <p style="font-size:14px;line-height:22px;color:${C.coffee};">
-      Your stylist at ${escape(studioName)} sent an agreement for your upcoming${serviceName ? ` <strong>${escape(serviceName)}</strong>` : ""} appointment.
+      ${intro}
     </p>
     <p style="font-size:14px;line-height:22px;color:${C.coffee};">
       Please take a minute to review and sign:
