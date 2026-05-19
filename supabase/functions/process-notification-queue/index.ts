@@ -268,15 +268,19 @@ const renderDepositReceived = (p: Record<string, any>) => {
   const date        = p.preferredDate || null;
   const time        = p.preferredTime || null;
   const when        = [date, time].filter(Boolean).join(" · ");
-  const subject = `Deposit received — your appointment with ${studioName} is confirmed`;
+  const subject = `Deposit received — pending ${studioName}'s approval`;
   const html = wrapHtml(subject, `
-    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">You're confirmed.</h1>
-    <p style="font-size:14px;line-height:22px;">
-      Thanks ${escape(clientName)} — your deposit landed and ${escape(studioName)} has your${serviceName ? ` ${escape(serviceName)}` : ""} appointment locked in${when ? ` for <strong>${escape(when)}</strong>` : ""}.
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Deposit received</p>
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">Thanks, ${escape(clientName)}.</h1>
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};">
+      We received your deposit for your${serviceName ? ` <strong>${escape(serviceName)}</strong>` : ""} request${when ? ` on <strong>${escape(when)}</strong>` : ""}.
+    </p>
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};">
+      <strong>Your appointment isn't confirmed yet.</strong> ${escape(studioName)} still needs to review and approve it — we'll email you to confirm as soon as that happens.
     </p>
     ${customizationBlock(p)}
     <p style="font-size:12px;color:${C.muted};line-height:18px;">
-      You'll get a reminder closer to the day. Reach out if anything changes.
+      No action needed right now. Reach out if anything changes.
     </p>
   `);
   return { subject, html };
