@@ -215,8 +215,8 @@ const renderContractSigning = (p: Record<string, any>) => {
   const isReminder    = !!p.reminder;
 
   const subject = isReminder
-    ? "Reminder: your appointment agreement is still pending"
-    : `Please review and sign your appointment agreement`;
+    ? `Reminder: your ${studioName} appointment agreement is still pending`
+    : `${studioName}: please review and sign your appointment agreement`;
   const cta = contractUrl
     ? ctaButton("Review and sign agreement", contractUrl)
     : "";
@@ -345,7 +345,7 @@ const renderReviewRequest = (p: Record<string, any>) => {
   const studioName = p.studioName || "your stylist";
   const serviceName = p.serviceName || null;
   const reviewUrl = String(p.reviewUrl || "").trim();
-  const subject = "How was your appointment?";
+  const subject = `How was your appointment with ${studioName}?`;
   const cta = reviewUrl ? ctaButton("Leave a review", reviewUrl) : "";
   const html = wrapHtml(subject, `
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Thank you</p>
@@ -384,7 +384,7 @@ const renderAppointmentConfirmed = (p: Record<string, any>) => {
       ? Number(p.remainingBalance)
       : null;
 
-  const subject = "Your appointment is confirmed — Braid Boss Pro";
+  const subject = `Your appointment is confirmed with ${studioName}`;
   const balanceLine = remainingBalance != null
     ? remainingBalance > 0
       ? `<p style="font-size:14px;line-height:22px;margin:0 0 12px;color:${C.coffee};">Remaining balance: <strong>$${remainingBalance.toFixed(2)}</strong>${depositPaid ? ` (deposit of $${depositPaid.toFixed(2)} received)` : ""}. Due at your appointment.</p>`
@@ -409,7 +409,7 @@ const renderAppointmentConfirmed = (p: Record<string, any>) => {
     </p>
     ${portalButton(p)}
     <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:18px;">
-      See you soon — thanks for booking with Braid Boss Pro.
+      See you soon — thanks for booking with ${escape(studioName)}.
     </p>
   `);
   return { subject, html };
@@ -476,7 +476,7 @@ const renderClientBookingCancelled = (p: Record<string, any>) => {
   const when = [date, time].filter(Boolean).join(" · ");
   const depositForfeited = !!p.depositForfeited;
   const depositAmount = Number(p.depositAmount) > 0 ? Number(p.depositAmount) : null;
-  const subject = "Your appointment was cancelled";
+  const subject = `Your appointment with ${studioName} was cancelled`;
   const html = wrapHtml(subject, `
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.muted};margin:0 0 10px;font-weight:700;">Cancelled</p>
     <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Your appointment was cancelled.</h1>
@@ -521,7 +521,7 @@ const renderClientBookingRescheduled = (p: Record<string, any>) => {
   const newWhen = [newDate, newTime].filter(Boolean).join(" · ");
   const oldWhen = [oldDate, oldTime].filter(Boolean).join(" · ");
   const depositAmount = Number(p.depositAmount) > 0 ? Number(p.depositAmount) : null;
-  const subject = "Reschedule request received";
+  const subject = `Reschedule request received — ${studioName}`;
   const html = wrapHtml(subject, `
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Reschedule requested</p>
     <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">We got your request, ${escape(clientName)}.</h1>
@@ -600,7 +600,7 @@ const renderBookingDeniedNoCharge = (p: Record<string, any>) => {
   const clientName = p.clientName || "there";
   const studioName = p.studioName || "your stylist";
   const serviceName = p.serviceName || null;
-  const subject = "Booking request update — Braid Boss Pro";
+  const subject = `Booking request update — ${studioName}`;
   const html = wrapHtml(subject, `
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.muted};margin:0 0 10px;font-weight:700;">Booking update</p>
     <h1 style="font-size:20px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Hi ${escape(clientName)},</h1>
@@ -618,7 +618,7 @@ const renderBookingDeniedRefunded = (p: Record<string, any>) => {
   const studioName = p.studioName || "your stylist";
   const serviceName = p.serviceName || null;
   const refundAmount = Number(p.refundAmount) > 0 ? Number(p.refundAmount) : null;
-  const subject = "Booking request refunded — Braid Boss Pro";
+  const subject = `Booking request refunded — ${studioName}`;
   const html = wrapHtml(subject, `
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Refund issued</p>
     <h1 style="font-size:20px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Hi ${escape(clientName)},</h1>
@@ -635,7 +635,7 @@ const renderBookingDeniedRefundManual = (p: Record<string, any>) => {
   const clientName = p.clientName || "there";
   const studioName = p.studioName || "your stylist";
   const serviceName = p.serviceName || null;
-  const subject = "Booking request update — Braid Boss Pro";
+  const subject = `Booking request update — ${studioName}`;
   const html = wrapHtml(subject, `
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.muted};margin:0 0 10px;font-weight:700;">Booking update</p>
     <h1 style="font-size:20px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Hi ${escape(clientName)},</h1>
@@ -680,7 +680,7 @@ const renderAppointmentRescheduled = (p: Record<string, any>) => {
   const newWhen = [p.preferredDate || null, p.preferredTime || null].filter(Boolean).join(" · ");
   const oldWhen = [p.fromDate || null, p.fromTime || null].filter(Boolean).join(" · ");
   const cancelUrl = String(p.cancelUrl || "").trim();
-  const subject = "Your appointment has been rescheduled — Braid Boss Pro";
+  const subject = `Your appointment with ${studioName} has been rescheduled`;
   const html = wrapHtml(subject, `
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Appointment updated</p>
     <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Your appointment has moved, ${escape(clientName)}.</h1>
@@ -925,6 +925,57 @@ const enrichCustomization = async (
 };
 
 // =====================================================================
+// Studio name enrichment — client-facing emails must feel like they
+// come from the stylist's business, not the platform. Enqueue RPCs
+// already set payload.studioName in most paths; this is a safety net
+// so a renderer never falls back to "your stylist" just because one
+// enqueue path forgot to thread it. Fallback order mirrors the app:
+// profiles.business_name → profiles.full_name → "your stylist".
+// Stylist-facing / platform emails are intentionally excluded so they
+// keep their "Braid Boss Pro" system framing.
+const STUDIO_NAME_TYPES = new Set([
+  "booking_confirmation",
+  "contract_signing",
+  "contract_signing_email",
+  "contract_invite",
+  "appointment_approved",
+  "deposit_received",
+  "balance_paid",
+  "review_request",
+  "booking_denied_no_charge",
+  "booking_denied_refunded",
+  "booking_denied_refund_manual",
+  "appointment_confirmed",
+  "appointment_reminder",
+  "client_booking_cancelled",
+  "client_booking_rescheduled",
+  "appointment_rescheduled",
+]);
+
+const enrichStudioName = async (
+  admin: ReturnType<typeof createClient>,
+  row: ClaimedRow,
+): Promise<void> => {
+  if (!STUDIO_NAME_TYPES.has(row.notification_type)) return;
+  const p: Record<string, any> =
+    (row.payload && typeof row.payload === "object") ? row.payload : (row.payload = {});
+  const cur = String(p.studioName ?? "").trim();
+  if (cur && cur.toLowerCase() !== "your stylist") return;
+  if (!row.user_id) return;
+  try {
+    const { data } = await admin
+      .from("profiles").select("business_name, full_name")
+      .eq("id", row.user_id).maybeSingle();
+    const resolved =
+      String((data as any)?.business_name ?? "").trim() ||
+      String((data as any)?.full_name ?? "").trim();
+    if (resolved) p.studioName = resolved;
+  } catch {
+    // best-effort — renderer fallback ("your stylist") still applies
+  }
+};
+
+// =====================================================================
 // HTTP handler
 // =====================================================================
 const json = (status: number, body: unknown) =>
@@ -1001,6 +1052,7 @@ serve(async (req) => {
       }
 
       await enrichCustomization(admin, row);
+      await enrichStudioName(admin, row);
       const rendered = renderForRow(row);
       const result = await sendViaResend(row, rendered);
 
