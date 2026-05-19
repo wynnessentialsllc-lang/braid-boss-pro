@@ -12082,58 +12082,6 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
     <div className="bbp-fade pb-32">
       <Header title="Settings" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
       <div className="px-5 pt-2 space-y-5">
-        {openBossGrowthGuide && (
-          <>
-            <SectionTitle>Growth</SectionTitle>
-            <Card className="p-4 active:scale-[0.99]" onClick={openBossGrowthGuide}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div
-                    aria-hidden
-                    style={{
-                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                      background: GRADIENTS.hero, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124,58,237,0.4)",
-                    }}
-                  >
-                    <Sparkles size={15} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold" style={{ color: C.espresso }}>Boss Growth Guide</p>
-                    <p className="text-[11px]" style={{ color: C.muted }}>
-                      Seasonal content, pricing &amp; booking ideas
-                    </p>
-                  </div>
-                </div>
-                <ChevronRight size={18} style={{ color: C.muted }} />
-              </div>
-            </Card>
-            {openEducationHub && (
-              <Card className="p-4 active:scale-[0.99]" onClick={openEducationHub}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.hero, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124,58,237,0.4)",
-                      }}
-                    >
-                      <ScrollText size={15} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Braider Education Hub</p>
-                      <p className="text-[11px]" style={{ color: C.muted }}>
-                        Business, client-care &amp; growth lessons
-                      </p>
-                    </div>
-                  </div>
-                  <ChevronRight size={18} style={{ color: C.muted }} />
-                </div>
-              </Card>
-            )}
-          </>
-        )}
-
         <SectionTitle>Business</SectionTitle>
         <Card className="p-4 space-y-3">
           <Field label="Business name"><Input value={b.businessName} onChange={e => setB({ ...b, businessName: e.target.value })} /></Field>
@@ -12267,6 +12215,58 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                   <ChevronRight size={18} style={{ color: C.muted }} />
                 </div>
               </Card>
+            )}
+
+            {openBossGrowthGuide && (
+              <>
+                <SectionTitle>Growth</SectionTitle>
+                <Card className="p-4 active:scale-[0.99]" onClick={openBossGrowthGuide}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div
+                        aria-hidden
+                        style={{
+                          width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                          background: GRADIENTS.hero, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124,58,237,0.4)",
+                        }}
+                      >
+                        <Sparkles size={15} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold" style={{ color: C.espresso }}>Boss Growth Guide</p>
+                        <p className="text-[11px]" style={{ color: C.muted }}>
+                          Seasonal content, pricing &amp; booking ideas
+                        </p>
+                      </div>
+                    </div>
+                    <ChevronRight size={18} style={{ color: C.muted }} />
+                  </div>
+                </Card>
+                {openEducationHub && (
+                  <Card className="p-4 active:scale-[0.99]" onClick={openEducationHub}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div
+                          aria-hidden
+                          style={{
+                            width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                            background: GRADIENTS.hero, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124,58,237,0.4)",
+                          }}
+                        >
+                          <ScrollText size={15} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold" style={{ color: C.espresso }}>Braider Education Hub</p>
+                          <p className="text-[11px]" style={{ color: C.muted }}>
+                            Business, client-care &amp; growth lessons
+                          </p>
+                        </div>
+                      </div>
+                      <ChevronRight size={18} style={{ color: C.muted }} />
+                    </div>
+                  </Card>
+                )}
+              </>
             )}
 
             {(openPolicies || openAvailability || openIntelligence || openApprovals) && <SectionTitle>Booking</SectionTitle>}
