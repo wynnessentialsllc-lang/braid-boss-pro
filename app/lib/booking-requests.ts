@@ -320,13 +320,59 @@ export const useBookingApprovalQueue = (userId: string | null): {
     if (err) { setError(err.message); return null; }
     const row = (data as BookingRequestRecord) || null;
 
+    // Resolve the client recipient. The booking_request sometimes
+    // carries no client_email (it lives on the converted appointment
+    // instead); without this the confirmation AND the contract link
+    // never reach the client.
+    let resolvedEmail = (row?.client_email || "").trim();
+    let resolvedName = (row?.client_name || "").trim();
+    if ((!resolvedEmail || !resolvedName) && appointmentId) {
+      try {
+        const { data: appt } = await supabase
+          .from("appointments")
+          .select("client_email, client_name")
+          .eq("id", appointmentId)
+          .maybeSingle();
+        if (!resolvedEmail) resolvedEmail = String((appt as any)?.client_email || "").trim();
+        if (!resolvedName) resolvedName = String((appt as any)?.client_name || "").trim();
+      } catch { /* fallback best-effort */ }
+    }
+
+    // Generate contracts NOW (before the confirmation email) so the
+    // signing link(s) can ride along inside it. generate_booking_
+    // contracts is idempotent (dedupes on request+template), so a
+    // double-tapped approve never creates duplicates. Variations
+    // inherit the parent service's template (service_id is the
+    // parent). The separate contract_signing email still goes out
+    // below as a backup.
+    let contractLinks: Array<{ title: string; url: string }> = [];
+    try {
+      await supabase.rpc("generate_booking_contracts", {
+        booking_request_id_in: id,
+        appointment_id_in: appointmentId || null,
+      });
+      const base = typeof window !== "undefined" ? window.location.origin : "https://braidbosspro.app";
+      const { data: bcs } = await supabase
+        .from("booking_contracts")
+        .select("id, title, public_token, status")
+        .eq("booking_request_id", id)
+        .in("status", ["sent", "pending", "pending_signature", "viewed"])
+        .order("created_at", { ascending: true });
+      contractLinks = ((bcs as any[]) || [])
+        .filter(c => c?.public_token)
+        .map(c => ({
+          title: String(c.title || "Appointment agreement"),
+          url: `${base}/sign/contract/${c.public_token}`,
+        }));
+    } catch { /* contracts are best-effort; never block approval */ }
+
     // Customer-facing confirmation. Distinct from the earlier
     // "appointment_approved" (pay-deposit) email — this fires once
     // after the deposit has landed AND the stylist has tapped
     // Approve & schedule, so the client gets a clean "you're
     // officially booked" message. Dedupe key is per-request id, so
     // re-tapping approve (the RPC is idempotent) won't double-send.
-    if (row?.client_email) {
+    if (resolvedEmail) {
       try {
         const { data: studio } = await supabase
           .rpc("public_get_studio_name", { user_id_in: userId });
@@ -349,10 +395,10 @@ export const useBookingApprovalQueue = (userId: string | null): {
           notification_type_in: "appointment_confirmed",
           body_in: "Your appointment has been approved and confirmed.",
           subject_in: "Your appointment is confirmed — Braid Boss Pro",
-          recipient_email_in: row.client_email,
-          recipient_name_in: row.client_name || null,
+          recipient_email_in: resolvedEmail,
+          recipient_name_in: resolvedName || null,
           payload_in: {
-            clientName: row.client_name || "there",
+            clientName: resolvedName || "there",
             studioName,
             serviceName: row.selected_variation_name || row.service_name || null,
             preferredDate: row.preferred_date || null,
@@ -368,6 +414,9 @@ export const useBookingApprovalQueue = (userId: string | null): {
             portalUrl: row.portal_token && typeof window !== "undefined"
               ? `${window.location.origin}/client/appointment/${row.portal_token}`
               : null,
+            // Contract signing link(s) — empty array → renderer skips
+            // the section entirely (no contract required).
+            contracts: contractLinks,
           },
           // Date in the key so a re-approval after a reschedule
           // sends a fresh confirmation for the NEW time instead of

@@ -153,6 +153,18 @@ const customizationBlock = (p: Record<string, any>): string => {
     ${whatsBlock}
   `;
 };
+// Contract signing section. Only renders when the approved service
+// has an active contract template attached (payload.contracts is a
+// non-empty list of {title,url}). Supports multiple agreements.
+const contractBlock = (p: Record<string, any>): string => {
+  const list: Array<{ title?: string; url?: string }> = Array.isArray(p.contracts) ? p.contracts : [];
+  const v = list.filter((c) => c && String(c.url || "").trim());
+  if (v.length === 0) return "";
+  return `<hr style="border:none;border-top:1px solid ${C.hairline};margin:22px 0;" />`
+    + `<p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 8px;font-weight:700;">${v.length > 1 ? "Agreements to sign" : "Agreement to sign"}</p>`
+    + `<p style="font-size:14px;line-height:22px;margin:0 0 6px;color:${C.coffee};">Please review and sign ${v.length > 1 ? "these agreements" : "this agreement"} to lock in your appointment.</p>`
+    + v.map((c) => ctaButton(v.length > 1 && c.title ? `Review & sign — ${c.title}` : "Review and sign agreement", String(c.url))).join("");
+};
 const portalButton = (p: Record<string, any>): string => {
   const url = String(p.portalUrl || "").trim();
   if (!url) return "";
@@ -256,6 +268,7 @@ const renderAppointmentApproved = (p: Record<string, any>) => {
     ${dep}
     ${cta}
     ${expiresLine}
+    ${contractBlock(p)}
   `);
   return { subject, html };
 };
@@ -275,6 +288,7 @@ const renderDepositReceived = (p: Record<string, any>) => {
       Thanks ${escape(clientName)} — your deposit landed and ${escape(studioName)} has your${serviceName ? ` ${escape(serviceName)}` : ""} appointment locked in${when ? ` for <strong>${escape(when)}</strong>` : ""}.
     </p>
     ${customizationBlock(p)}
+    ${contractBlock(p)}
     <p style="font-size:12px;color:${C.muted};line-height:18px;">
       You'll get a reminder closer to the day. Reach out if anything changes.
     </p>
@@ -378,6 +392,7 @@ const renderAppointmentConfirmed = (p: Record<string, any>) => {
     </p>
     ${balanceLine}
     ${customizationBlock(p)}
+    ${contractBlock(p)}
     <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">
       We'll send a reminder closer to the day. If anything changes, reply to this email and ${escape(studioName)} will get it.
     </p>
