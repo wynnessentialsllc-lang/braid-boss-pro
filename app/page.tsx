@@ -173,6 +173,10 @@ import {
   type SeasonGuide,
 } from "./lib/growth-guide";
 import {
+  EDUCATION_CATEGORIES,
+  EDUCATION_TOTAL_LESSONS,
+} from "./lib/braider-education-content";
+import {
   type BookingPolicy,
   type BookingPolicyInput,
   EMPTY_POLICY,
@@ -11853,7 +11857,116 @@ const BossGrowthGuideScreen = ({ store, onBack }: { store: any; onBack: () => vo
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
+// ---- Braider Education Hub ------------------------------------------
+// Static, content-first learning hub. No business-logic coupling:
+// reads only from lib/braider-education-content.ts. Filter chips +
+// expandable lesson cards, mobile-first.
+const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
+  useEffect(() => { trackEvent("braider_education_hub_view", { category: "feature" }); }, []);
+  const [activeCat, setActiveCat] = useState<string>("all");
+  const [openLesson, setOpenLesson] = useState<string | null>(null);
+
+  const cats = activeCat === "all"
+    ? EDUCATION_CATEGORIES
+    : EDUCATION_CATEGORIES.filter(c => c.id === activeCat);
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header title="Braider Education Hub" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
+      <div className="px-5 pt-2 space-y-4">
+
+        {/* Hero */}
+        <div style={{ background: GRADIENTS.hero, borderRadius: 22, padding: "22px 20px", color: "#FFFFFF", boxShadow: "0 16px 36px -18px rgba(124,58,237,0.55)" }}>
+          <span style={{ display: "inline-block", fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", background: "rgba(255,255,255,0.22)", padding: "5px 12px", borderRadius: 999 }}>
+            {EDUCATION_TOTAL_LESSONS} lessons
+          </span>
+          <h1 style={{ fontSize: 24, fontWeight: 800, margin: "14px 0 6px", lineHeight: 1.15 }}>Braider Education Hub</h1>
+          <p style={{ fontSize: 13.5, lineHeight: 1.5, opacity: 0.95 }}>
+            Business lessons, client-care tips, and growth guidance for braid professionals.
+          </p>
+        </div>
+
+        {/* Category chips */}
+        <div className="flex gap-2 overflow-x-auto bbp-scroll" style={{ paddingBottom: 2 }}>
+          {[{ id: "all", name: "All" }, ...EDUCATION_CATEGORIES.map(c => ({ id: c.id, name: c.name }))].map(chip => (
+            <button
+              type="button"
+              key={chip.id}
+              onClick={() => { setActiveCat(chip.id); setOpenLesson(null); }}
+              className="text-xs font-semibold whitespace-nowrap"
+              style={{
+                padding: "8px 14px", borderRadius: 999,
+                background: activeCat === chip.id ? C.espresso : "transparent",
+                color: activeCat === chip.id ? C.cream : C.coffee,
+                border: `1px solid ${activeCat === chip.id ? C.espresso : C.hairline}`,
+                flexShrink: 0,
+              }}
+            >
+              {chip.name}
+            </button>
+          ))}
+        </div>
+
+        {cats.map(cat => (
+          <div key={cat.id} className="space-y-2.5">
+            <div>
+              <SectionTitle>{cat.name}</SectionTitle>
+              <p className="text-[12px] -mt-1" style={{ color: C.muted }}>{cat.blurb}</p>
+            </div>
+            {cat.lessons.map(lesson => {
+              const isOpen = openLesson === lesson.id;
+              return (
+                <Card
+                  key={lesson.id}
+                  className="p-4 active:scale-[0.99]"
+                  onClick={() => setOpenLesson(isOpen ? null : lesson.id)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso, lineHeight: 1.35 }}>{lesson.title}</p>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <Pill tone="gold">{cat.name}</Pill>
+                        <span className="text-[11px]" style={{ color: C.muted }}>{lesson.readMinutes} min read</span>
+                      </div>
+                    </div>
+                    <ChevronRight
+                      size={18}
+                      style={{ color: C.muted, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}
+                    />
+                  </div>
+
+                  {isOpen && (
+                    <div className="mt-3 space-y-2.5" onClick={(e) => e.stopPropagation()}>
+                      {lesson.body.map((para, i) => (
+                        <p key={i} className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.55 }}>{para}</p>
+                      ))}
+                      <div className="p-3 rounded-xl" style={{ background: C.ivory }}>
+                        <p className="text-[11px] font-bold mb-1" style={{ color: C.goldDeep, letterSpacing: "0.1em", textTransform: "uppercase" }}>Try this this week</p>
+                        <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>{lesson.tryThisWeek}</p>
+                      </div>
+                      {lesson.relatedTool && (
+                        <p className="text-[11px]" style={{ color: C.muted }}>
+                          <span style={{ fontWeight: 700, color: C.coffee }}>Related Braid Boss tool:</span> {lesson.relatedTool}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        ))}
+
+        <p className="text-[11px] text-center px-4" style={{ color: C.muted, lineHeight: 1.5 }}>
+          Guidance only — pricing, tax, and policy choices depend on your situation. Check your local requirements for anything legal or financial.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -11994,6 +12107,30 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openReminderSettin
                 <ChevronRight size={18} style={{ color: C.muted }} />
               </div>
             </Card>
+            {openEducationHub && (
+              <Card className="p-4 active:scale-[0.99]" onClick={openEducationHub}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: GRADIENTS.hero, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124,58,237,0.4)",
+                      }}
+                    >
+                      <ScrollText size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Braider Education Hub</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        Business, client-care &amp; growth lessons
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
           </>
         )}
 
@@ -21290,6 +21427,7 @@ export default function App() {
               store={store}
               onBack={() => setActive("dashboard")}
               openBossGrowthGuide={() => setSecondary("bossGrowthGuide")}
+              openEducationHub={() => setSecondary("educationHub")}
               openReminderSettings={() => setSecondary("reminderSettings")}
               openCommunicationLog={() => setSecondary("communicationLog")}
               openAccount={() => setSecondary("account")}
@@ -21351,7 +21489,8 @@ export default function App() {
 
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
