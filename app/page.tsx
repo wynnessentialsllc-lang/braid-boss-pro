@@ -165,8 +165,7 @@ import {
   getDepositCollectedAmount,
   type WeekDepositBuckets,
   monthExpectedAppts,
-  monthProfitBreakdown,
-  type MonthProfitBreakdown,
+  monthEarnedAppts,
 } from "./lib/reports";
 import {
   type BookingPolicy,
@@ -2967,7 +2966,7 @@ type KpiDetailKind =
   | "deposits"
   | "pending"
   | "monthExpected"
-  | "monthProfit";
+  | "monthEarned";
 
 const KPI_TITLES: Record<KpiDetailKind, string> = {
   today: "Today's revenue",
@@ -2977,7 +2976,7 @@ const KPI_TITLES: Record<KpiDetailKind, string> = {
   deposits: "Deposits this week",
   pending: "Pending balances",
   monthExpected: "Expected this month",
-  monthProfit: "Profit this month",
+  monthEarned: "Total earned this month",
 };
 
 const KpiDetailSheet = ({
@@ -3226,35 +3225,15 @@ const KpiDetailSheet = ({
           </>
         );
       }
-      case "monthProfit": {
-        const b: MonthProfitBreakdown = monthProfitBreakdown(appointments, today);
+      case "monthEarned": {
+        const list = monthEarnedAppts(appointments, today);
+        const total = list.reduce((s, a) => s + reportTicketTotal(a), 0);
         return (
           <>
-            <Hero value={fmtMoney(b.estimatedProfit, currency)} hint={`Across ${b.appointments.length} completed booking${b.appointments.length === 1 ? "" : "s"}`} />
-            <Card className="p-3.5 mb-3 space-y-2" style={{ background: C.paper }}>
-              <div className="flex items-center justify-between">
-                <span className="text-[12px]" style={{ color: C.muted }}>Revenue (collected)</span>
-                <span className="text-[13px] font-semibold tabular-nums" style={{ color: C.espresso }}>{fmtMoney(b.revenue, currency)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[12px]" style={{ color: C.muted }}>Discounts applied</span>
-                <span className="text-[13px] font-semibold tabular-nums" style={{ color: C.goldDeep }}>− {fmtMoney(b.discounts, currency)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[12px]" style={{ color: C.muted }}>Estimated costs</span>
-                <span className="text-[13px] font-semibold tabular-nums" style={{ color: C.muted }}>—</span>
-              </div>
-              <div className="flex items-center justify-between pt-2" style={{ borderTop: `1px solid ${C.hairline}` }}>
-                <span className="text-[13px] font-semibold" style={{ color: C.espresso }}>Estimated profit</span>
-                <span className="text-[14px] font-bold tabular-nums" style={{ color: C.success }}>{fmtMoney(b.estimatedProfit, currency)}</span>
-              </div>
-              <p className="text-[10px] mt-2" style={{ color: C.muted, lineHeight: 1.5 }}>
-                Cost tracking lands in a future phase. Profit currently equals collected revenue minus 0 — discounts are surfaced so the impact is visible.
-              </p>
-            </Card>
-            {b.appointments.length === 0 ? (
+            <Hero value={fmtMoney(total, currency)} hint={`${list.length} completed/paid appointment${list.length === 1 ? "" : "s"} this month`} />
+            {list.length === 0 ? (
               <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No completed bookings this month yet.</p></Card>
-            ) : b.appointments.map(a => <ApptRow key={a.id} a={a} />)}
+            ) : list.map(a => <ApptRow key={a.id} a={a} />)}
           </>
         );
       }
@@ -4010,8 +3989,8 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
             <KpiCard label="Week clients" value={stats.weekAppts} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("weekClients")} compact riseDelay={0} />
             <KpiCard label="Avg ticket (30d)" value={fmtMoney(revenueStats.averageTicket30d, business.currency)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => openKpi("avgTicket")} compact riseDelay={40} />
             <KpiCard label="Month expected" value={fmtMoney(revenueStats.monthExpected, business.currency)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "primary" : "neutral"} onClick={() => openKpi("monthExpected")} compact riseDelay={80} />
-            <KpiCard label="Month profit" value={fmtMoney(stats.monthProfit, business.currency)} icon={<TrendingUp size={16} />} tone={stats.monthProfit >= 0 ? "success" : "danger"} onClick={() => openKpi("monthProfit")} compact riseDelay={120} />
-            <KpiCard label="Year made" value={fmtMoney(revenueStats.yearMade, business.currency)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => setActive("money")} compact riseDelay={160} />
+            <KpiCard label="Total earned" value={fmtMoney(revenueStats.monthEarned, business.currency)} icon={<TrendingUp size={16} />} tone={revenueStats.monthEarned > 0 ? "success" : "neutral"} onClick={() => openKpi("monthEarned")} compact riseDelay={120} />
+            <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={fmtMoney(revenueStats.yearMade, business.currency)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => setActive("money")} compact riseDelay={160} />
           </div>
         </div>
 
