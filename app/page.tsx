@@ -19359,6 +19359,17 @@ const DiscountsScreen = ({
   const api = store.discountsApi;
   const discounts: Discount[] = api?.discounts || [];
   const [editing, setEditing] = useState<Partial<DiscountInput> & { id?: string } | null>(null);
+  // Local string state for the amount/percent input. Without it the
+  // input was bound to the parsed number, so typing "20." re-rendered
+  // as "20" and the trailing decimal was wiped — cents (e.g. $20.26)
+  // were unreachable. Resync only when a different edit session opens
+  // (new vs. an existing row by id) so typing isn't disturbed.
+  const [valueText, setValueText] = useState<string>("");
+  const editSessionKey = editing == null ? null : (editing.id || "new");
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- session-driven sync, intentional
+  useEffect(() => {
+    setValueText(editing?.value != null ? String(editing.value) : "");
+  }, [editSessionKey]);
   const [confirmDelete, setConfirmDelete] = useState<Discount | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -19560,8 +19571,11 @@ const DiscountsScreen = ({
               <MoneyInput
                 prefix={editing.discount_type === "fixed" ? "$" : ""}
                 suffix={editing.discount_type === "percentage" ? "%" : ""}
-                value={editing.value ?? ""}
-                onChange={(v) => setEditing({ ...editing, value: parseMoney(v) })}
+                value={valueText}
+                onChange={(v) => {
+                  setValueText(v);
+                  setEditing(prev => prev ? { ...prev, value: parseMoney(v) } : prev);
+                }}
               />
             </Field>
 
