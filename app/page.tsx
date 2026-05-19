@@ -3728,7 +3728,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   );
 };
 
-const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, openAppointmentRecord }: { store: any; setActive: any; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; openAppointmentRecord?: (a: any) => void }) => {
+const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; openAppointmentRecord?: (a: any) => void }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
@@ -3990,7 +3990,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
             <KpiCard label="Avg ticket (30d)" value={fmtMoney(revenueStats.averageTicket30d, business.currency)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => openKpi("avgTicket")} compact riseDelay={40} />
             <KpiCard label="Month expected" value={fmtMoney(revenueStats.monthExpected, business.currency)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "primary" : "neutral"} onClick={() => openKpi("monthExpected")} compact riseDelay={80} />
             <KpiCard label="Total earned" value={fmtMoney(revenueStats.monthEarned, business.currency)} icon={<TrendingUp size={16} />} tone={revenueStats.monthEarned > 0 ? "success" : "neutral"} onClick={() => openKpi("monthEarned")} compact riseDelay={120} />
-            <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={fmtMoney(revenueStats.yearMade, business.currency)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => setActive("money")} compact riseDelay={160} />
+            <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={fmtMoney(revenueStats.yearMade, business.currency)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => goToMoney("all")} compact riseDelay={160} />
           </div>
         </div>
 
@@ -10005,10 +10005,15 @@ const PhotoEditSheet = ({ photo, appointments, onClose, onSave }: {
 // ============================================================
 //  MONEY + PRODUCTIVITY
 // ============================================================
-const Money = ({ store, openTxSheet, editTx, openTimerSessions, openReceipt }: { store: any; openTxSheet: any; editTx: any; openTimerSessions: any; openReceipt?: (rcp: ReceiptRecord) => void }) => {
+const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, openTimerSessions, openReceipt }: { store: any; initialPeriod?: string | null; onPeriodConsumed?: () => void; openTxSheet: any; editTx: any; openTimerSessions: any; openReceipt?: (rcp: ReceiptRecord) => void }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
-  useEffect(() => { trackEvent("money_tab_view", { category: "feature" }); }, []);
-  const [period, setPeriod] = useState("week");
+  useEffect(() => {
+    trackEvent("money_tab_view", { category: "feature" });
+    // Consume a deep-link period (e.g. Total Earnings → "all") so a
+    // later plain bottom-nav tap reverts to the default 7d range.
+    if (initialPeriod) onPeriodConsumed?.();
+  }, []);
+  const [period, setPeriod] = useState(initialPeriod || "week");
   const [tab, setTab] = useState("money"); // money | productivity
 
   const range = useMemo(() => {
@@ -20722,6 +20727,12 @@ export default function App() {
     return () => { cancelled = true; clearInterval(timer); };
   }, [auth.mode, auth.userId, store.clients, store.appointments]);
   const [active, setActive] = useState("dashboard");
+  // Deep-link target period for the Money screen. Set by dashboard
+  // cards that want a specific range (e.g. Total Earnings → "all").
+  // Cleared once Money consumes it so a plain bottom-nav tap still
+  // opens at the default 7d range.
+  const [moneyPeriod, setMoneyPeriod] = useState<string | null>(null);
+  const goToMoney = (p: string) => { setMoneyPeriod(p); setActive("money"); };
   const [secondary, setSecondary] = useState<string | null>(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
   const [calcPrefill, setCalcPrefill] = useState<EntityRecord | null>(null);
   const [calcPresetPrefill, setCalcPresetPrefill] = useState<EntityRecord | null>(null);
@@ -20945,6 +20956,7 @@ export default function App() {
           {active === "dashboard" && (
             <Dashboard store={store}
               setActive={setActive}
+              goToMoney={goToMoney}
               openQuickAppt={openQuickAppt}
               openQuickClient={openQuickClient}
               openQuickTx={openQuickTx}
@@ -21014,6 +21026,8 @@ export default function App() {
           )}
           {active === "money" && (
             <Money store={store}
+              initialPeriod={moneyPeriod}
+              onPeriodConsumed={() => setMoneyPeriod(null)}
               openTxSheet={() => { setEditingTx(null); setOpenTx(true); }}
               editTx={(t) => { setEditingTx(t); setOpenTx(true); }}
               openTimerSessions={() => setSecondary("timerSessions")}
