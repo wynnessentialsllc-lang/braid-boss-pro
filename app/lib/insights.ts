@@ -132,8 +132,8 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
         title: `${overdue.length} overdue ${overdue.length === 1 ? "balance" : "balances"} · ${fmt(overdueTotal, currency)}`,
         body: "Past-due balances on appointments that already happened.",
         why: "Overdue collections compound quietly. A short message today usually closes them.",
-        actionLabel: "View schedule",
-        actionTarget: "tab:schedule",
+        actionLabel: "View balances",
+        actionTarget: "kpi:pending",
         createdAt: now,
       });
     } else if (dueToday.length > 0) {
@@ -147,8 +147,8 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
         body: dueToday.length === 1 && first?.clientName
           ? `Collect from ${first.clientName} after the chair clears.`
           : `Across ${dueToday.length} appointment${dueToday.length === 1 ? "" : "s"} on the books for today.`,
-        actionLabel: "View schedule",
-        actionTarget: "tab:schedule",
+        actionLabel: "View balances",
+        actionTarget: "kpi:pending",
         createdAt: now,
       });
     } else if (distinctClients.size >= 2) {
@@ -159,8 +159,8 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
         title: `${distinctClients.size} clients owe a balance`,
         body: "Outstanding totals are spread across more than one client.",
         why: "Sending personal nudges in the same window keeps follow-ups easy and consistent.",
-        actionLabel: "View schedule",
-        actionTarget: "tab:schedule",
+        actionLabel: "View balances",
+        actionTarget: "kpi:pending",
         createdAt: now,
       });
     }
@@ -187,8 +187,8 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
         title: `Only ${pct}% of upcoming bookings have a deposit`,
         body: `${withDeposit} of ${upcoming.length} upcoming appointments have a deposit on file.`,
         why: "Locking in deposits up front reduces no-shows and makes the chair more predictable.",
-        actionLabel: "View schedule",
-        actionTarget: "tab:schedule",
+        actionLabel: "View deposits",
+        actionTarget: "kpi:deposits",
         createdAt: now,
       });
     }

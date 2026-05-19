@@ -4043,6 +4043,7 @@ const Dashboard = ({ store, setActive, openQuickAppt, openQuickClient, openQuick
           today={today}
           setActive={setActive}
           openAnalytics={openAnalytics}
+          openKpi={openKpi}
         />
 
         <RetentionInsights
@@ -4304,7 +4305,7 @@ const KpiCard = ({ label, value, icon, tone = "neutral", onClick, emphasized, co
   );
 };
 
-const BossInsightsCard = ({ clients, appointments, commLog, settings, today, setActive, openAnalytics }: {
+const BossInsightsCard = ({ clients, appointments, commLog, settings, today, setActive, openAnalytics, openKpi }: {
   clients: any[];
   appointments: any[];
   commLog: any[];
@@ -4312,6 +4313,7 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
   today: string;
   setActive: (tab: string) => void;
   openAnalytics?: () => void;
+  openKpi?: (k: KpiDetailKind) => void;
 }) => {
   const insights = useMemo(() =>
     generateBossInsights({ clients, appointments, communications: commLog, settings, today }),
@@ -4328,6 +4330,16 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
 
   const handleAction = (target?: string) => {
     if (!target) return;
+    // kpi:<kind> opens the matching detail-list sheet (the actual
+    // list of items — e.g. the clients who owe a balance), not just
+    // the tab. Falls back to the schedule tab if the host didn't
+    // pass an openKpi handler.
+    if (target.startsWith("kpi:")) {
+      const kind = target.slice(4) as KpiDetailKind;
+      if (openKpi) openKpi(kind);
+      else setActive("schedule");
+      return;
+    }
     if (target.startsWith("tab:")) setActive(target.slice(4));
     // client:/appointment: deep-links land on the relevant tab in V1.
     else if (target.startsWith("client:")) setActive("clients");
