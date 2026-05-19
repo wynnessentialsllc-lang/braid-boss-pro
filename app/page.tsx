@@ -1000,6 +1000,17 @@ const DEFAULT_REMINDER_SETTINGS = {
   },
   quietHours: { start: "21:00", end: "08:00" },
   signature: "— sent from Braid Boss Pro",
+  // SMS (Twilio) — Phase 2. Off by default: transactional texts only
+  // send when the stylist enables them AND the client opts in (Phase
+  // 3) AND Twilio is configured (Phase 1). No marketing.
+  sms: {
+    reminders: false,
+    bookingRequest: false,
+    cancelReschedule: false,
+    waitlist: false,
+    stylistPhone: "",
+    displayNote: "",
+  },
 };
 
 const PURPOSE_LABEL = {
@@ -10694,6 +10705,46 @@ const ReminderSettings = ({ store, onBack }: {
           <Field label="Late alert minutes">
             <MoneyInput prefix="" suffix="min" allowDecimal={false} value={s.timings.lateAlertMinutes ?? 15}
               onChange={(v) => setS({ ...s, timings: { ...s.timings, lateAlertMinutes: parseMoney(v) || 15 } })} />
+          </Field>
+        </Card>
+
+        <SectionTitle>Text message notifications</SectionTitle>
+        <Card className="p-4 space-y-3">
+          <p className="text-[12px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+            SMS helps clients remember appointments and respond faster. Carrier rates may apply.
+          </p>
+          {([
+            ["reminders", "Enable SMS reminders", "Appointment reminder texts"],
+            ["bookingRequest", "Enable booking request texts", "Texted when a request comes in"],
+            ["cancelReschedule", "Enable cancellation/reschedule texts", "Texted on cancel or reschedule"],
+            ["waitlist", "Enable waitlist texts", "Texted about waitlist openings"],
+          ] as [string, string, string][]).map(([k, label, hint]) => (
+            <div key={k} className="flex items-center justify-between py-1">
+              <div>
+                <p className="text-sm font-medium" style={{ color: C.espresso }}>{label}</p>
+                {hint && <p className="text-[11px]" style={{ color: C.muted }}>{hint}</p>}
+              </div>
+              <Toggle
+                checked={!!(s.sms || {})[k]}
+                onChange={(v) => setS({ ...s, sms: { ...(s.sms || {}), [k]: v } })}
+              />
+            </div>
+          ))}
+          <Field label="Your SMS phone number" hint="Used for stylist alerts (e.g. cancellations)">
+            <Input
+              type="tel"
+              inputMode="tel"
+              value={(s.sms || {}).stylistPhone || ""}
+              onChange={e => setS({ ...s, sms: { ...(s.sms || {}), stylistPhone: e.target.value } })}
+              placeholder="+1 555 123 4567"
+            />
+          </Field>
+          <Field label="Business SMS display note" hint="Optional context shown to clients about your texts">
+            <Input
+              value={(s.sms || {}).displayNote || ""}
+              onChange={e => setS({ ...s, sms: { ...(s.sms || {}), displayNote: e.target.value } })}
+              placeholder={`Texts from ${store.business.businessName || "your stylist"}`}
+            />
           </Field>
         </Card>
 
