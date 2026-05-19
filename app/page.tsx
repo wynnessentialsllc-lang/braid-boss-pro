@@ -2190,6 +2190,13 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
           style={{
             overflowY: "auto",
             WebkitOverflowScrolling: "touch",
+            // Flex column children default to min-height: auto, so a
+            // flex-1 child won't shrink below its content height and
+            // overflow-y: auto never engages — the sheet ends up
+            // content-sized (cut off) or the content escapes past
+            // the parent's max-height. minHeight: 0 lets this child
+            // shrink so its own overflow can scroll properly.
+            minHeight: 0,
             // Bottom padding reserves room for the tab bar (~72px),
             // the home indicator (env(safe-area-inset-bottom)), and a
             // bit of breathing space — plus enough buffer that the
