@@ -188,9 +188,13 @@ import {
   INVENTORY_CATEGORIES,
   INVENTORY_UNITS,
   type InventoryItem,
+  type InventoryMovement,
   type MovementReason,
   applyMovement,
   computeInventoryTotals,
+  computeMaterialsCostInRange,
+  groupMaterialsCostByStyle,
+  getLowStockItems,
   isLowStock,
   isActiveItem,
   itemQuantity,
@@ -3829,7 +3833,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   );
 };
 
-const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient, openQuickTx, openSettings, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; openAppointmentRecord?: (a: any) => void }) => {
+const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient, openQuickTx, openSettings, openInventory, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openInventory?: () => void; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; openAppointmentRecord?: (a: any) => void }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
@@ -4124,6 +4128,8 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
           setActive={setActive}
           openAnalytics={openAnalytics}
           openKpi={openKpi}
+          inventoryItems={store.inventoryItems}
+          openInventory={openInventory}
         />
 
         <RetentionInsights
@@ -4385,7 +4391,7 @@ const KpiCard = ({ label, value, icon, tone = "neutral", onClick, emphasized, co
   );
 };
 
-const BossInsightsCard = ({ clients, appointments, commLog, settings, today, setActive, openAnalytics, openKpi }: {
+const BossInsightsCard = ({ clients, appointments, commLog, settings, today, setActive, openAnalytics, openKpi, inventoryItems, openInventory }: {
   clients: any[];
   appointments: any[];
   commLog: any[];
@@ -4394,10 +4400,12 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
   setActive: (tab: string) => void;
   openAnalytics?: () => void;
   openKpi?: (k: KpiDetailKind) => void;
+  inventoryItems?: any[];
+  openInventory?: () => void;
 }) => {
   const insights = useMemo(() =>
-    generateBossInsights({ clients, appointments, communications: commLog, settings, today }),
-    [clients, appointments, commLog, settings, today]);
+    generateBossInsights({ clients, appointments, communications: commLog, settings, today, inventoryItems }),
+    [clients, appointments, commLog, settings, today, inventoryItems]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   // Density: cap the visible insights at 3 by default. A long
   // unfiltered list overwhelmed the dashboard; the stylist can tap
@@ -4418,6 +4426,14 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
       const kind = target.slice(4) as KpiDetailKind;
       if (openKpi) openKpi(kind);
       else setActive("schedule");
+      return;
+    }
+    // Deep-link to the Inventory secondary screen. Falls back to the
+    // Settings tab when no inventory handler is wired so the action
+    // never becomes a no-op.
+    if (target === "tab:settings:inventory") {
+      if (openInventory) openInventory();
+      else setActive("studio");
       return;
     }
     if (target.startsWith("tab:")) setActive(target.slice(4));
@@ -17723,6 +17739,37 @@ const ExpensesScreen = ({ store, onBack, initialView = "overview", initialCatego
   const profit = estimateProfit(monthRevenue, totals.monthTotal);
   const margin = profitMargin(monthRevenue, totals.monthTotal);
 
+  // Inventory-derived materials cost for the current calendar month.
+  // Surfaced informationally on the Profit view — purchases already
+  // hit Expenses via business_expenses, so we don't double-deduct
+  // them from estimated profit. Per-style breakdown only counts
+  // movements with appointment_id (service_use), so storefront /
+  // waste consumption stays out of the "what each style cost me" lens.
+  const monthBounds = useMemo(() => {
+    const t = todayISO();
+    const d = new Date(t + "T00:00:00");
+    const start = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+    const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    const end = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-01`;
+    return { start, end };
+  }, []);
+  const inventoryItems = (store.inventoryItems || []) as InventoryItem[];
+  const inventoryMovements = (store.inventoryMovements || []) as InventoryMovement[];
+  const monthMaterialsCost = useMemo(
+    () => computeMaterialsCostInRange(inventoryMovements, inventoryItems, monthBounds.start, monthBounds.end),
+    [inventoryMovements, inventoryItems, monthBounds.start, monthBounds.end],
+  );
+  const monthStyleCosts = useMemo(
+    () => groupMaterialsCostByStyle(
+      inventoryMovements,
+      inventoryItems,
+      (store.appointments || []) as any[],
+      monthBounds.start,
+      monthBounds.end,
+    ),
+    [inventoryMovements, inventoryItems, store.appointments, monthBounds.start, monthBounds.end],
+  );
+
   // Current-calendar-month expenses, used by "This month" + "Category"
   // views so the focused screens don't include older items.
   const monthExpenses = useMemo(() => {
@@ -17878,6 +17925,9 @@ const ExpensesScreen = ({ store, onBack, initialView = "overview", initialCatego
               <Tile label="Expenses (mo)"      value={fmtMoney(totals.monthTotal, currency)} tone="warning" />
               <Tile label="Estimated profit"   value={fmtMoney(profit, currency)} tone={profit >= 0 ? "positive" : "warning"} />
               <Tile label="Profit margin"      value={monthRevenue > 0 ? `${margin}%` : "—"} tone={margin >= 25 ? "positive" : "warning"} />
+              {(monthMaterialsCost > 0 || inventoryItems.length > 0) && (
+                <Tile label="Materials cost (mo)" value={fmtMoney(monthMaterialsCost, currency)} tone="warning" />
+              )}
             </div>
 
             {/* Two-bar income vs expenses visual — keeps the math
@@ -17911,6 +17961,44 @@ const ExpensesScreen = ({ store, onBack, initialView = "overview", initialCatego
                 );
               })()}
             </Card>
+
+            {/* Per-style materials cost — what each style actually
+                consumed in hair / supplies this month. Only includes
+                movements attributed to an appointment (service_use),
+                so storefront sales and one-off adjustments don't
+                muddy the per-style number. */}
+            {monthStyleCosts.length > 0 && (
+              <div>
+                <SectionTitle>Materials by style (this month)</SectionTitle>
+                <Card className="p-2">
+                  {monthStyleCosts.map((s, i) => {
+                    const perAppt = s.appointmentCount > 0
+                      ? s.totalCost / s.appointmentCount
+                      : 0;
+                    return (
+                      <div
+                        key={s.style}
+                        className="px-2 py-2.5"
+                        style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{s.style}</p>
+                            <p className="text-[11px]" style={{ color: C.muted }}>
+                              {s.appointmentCount} appt{s.appointmentCount === 1 ? "" : "s"}
+                              {perAppt > 0 ? ` · ${fmtMoney(perAppt, currency)} avg` : ""}
+                            </p>
+                          </div>
+                          <span className="text-[13px] font-semibold tabular-nums ml-3" style={{ color: C.danger }}>
+                            -{fmtMoney(s.totalCost, currency)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </Card>
+              </div>
+            )}
 
             {/* Category breakdown for the month — where the money's
                 actually going. */}
@@ -23397,6 +23485,7 @@ export default function App() {
               openQuickClient={openQuickClient}
               openQuickTx={openQuickTx}
               openSettings={() => setSecondary("settings")}
+              openInventory={() => setSecondary("inventory")}
               openPolicies={() => setSecondary("policies")}
               openSavedQuotes={() => setSecondary("savedQuotes")}
               openReminders={() => { setNotifOpen(true); notifications.markAllRead(); }}
