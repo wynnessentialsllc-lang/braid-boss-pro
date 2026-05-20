@@ -18,6 +18,14 @@ export type CsvImportRow = {
   // Parsed item. id is generated client-side now so we can link
   // products against it without round-tripping to the DB first.
   item: InventoryItem;
+  // Optional storefront product fields lifted from the same row.
+  // When present we create / refresh a linked storefront product
+  // alongside the inventory item in one pass — Square exports
+  // include all of these.
+  productFields: {
+    description: string | null;
+    retailPrice: number | null;
+  } | null;
   // Diagnostic flags surfaced in the preview UI.
   isDuplicateName: boolean;       // matches an existing inventory item by name
   errors: string[];               // hard errors — row will be skipped on import
@@ -138,6 +146,11 @@ export const parseInventoryCsv = (
     const thresholdRaw = pickField(r, ["low stock threshold", "low stock", "reorder at", "alert at", "threshold"]);
     const supplierRaw = pickField(r, ["supplier", "vendor", "brand"]);
     const productRaw = pickField(r, ["storefront product", "storefront_product", "linked product", "product link"]);
+    // Square / generic catalog exports often include a Description
+    // column. Capture it so we can refresh the linked storefront
+    // product's description in the same pass — without this the
+    // storefront stays blank even after a successful CSV.
+    const descriptionRaw = pickField(r, ["description", "details", "product description"]);
 
     const unitCost = parseNum(unitCostRaw);
     if (unitCostRaw && unitCost == null) warnings.push(`Couldn't read cost "${unitCostRaw}".`);
@@ -186,8 +199,21 @@ export const parseInventoryCsv = (
       archivedAt: null,
     };
 
+    // Build the optional product-field payload when the row carries
+    // anything we'd patch onto a storefront product. We only build
+    // it when there's actually something to apply, so the commit
+    // step can skip the product-update call entirely on rows that
+    // are pure inventory.
+    const productFields = (descriptionRaw || retailPrice != null)
+      ? {
+          description: descriptionRaw?.trim() || null,
+          retailPrice: retailPrice,
+        }
+      : null;
+
     out.push({
       item,
+      productFields,
       isDuplicateName,
       errors,
       warnings,
@@ -313,6 +339,102 @@ export const buildShopSeedSuggestions = (
   }
   // Linked rows last so the stylist's eye lands on actionable rows
   // first when they open the sheet.
+  out.sort((a, b) => Number(a.alreadyLinked) - Number(b.alreadyLinked));
+  return out;
+};
+
+// =====================================================================
+// Push to Storefront — turn inventory items into storefront products.
+//
+// Mirror of the Seed-from-Shop direction. Given a set of inventory
+// items and the user's existing storefront products, build the
+// upsert payload for each item so the caller can commit. Drafts are
+// always created INACTIVE so the stylist gets a preview pass before
+// customers see them.
+// =====================================================================
+
+// Reverse of STOREFRONT_TO_INVENTORY_CATEGORY — we map back into
+// the storefront enum so an inventory item with category
+// "Hair / bundles" becomes a storefront product in "hair_bundles".
+// Anything unrecognized falls back to "other".
+const INVENTORY_TO_STOREFRONT_CATEGORY: Record<string, string> = {
+  "Hair / bundles":  "hair_bundles",
+  "Braiding hair":   "braiding_hair",
+  "Products":        "other",
+  "Tools":           "tools",
+  "Supplies":        "accessories",
+  "Packaging":       "accessories",
+  "Other":           "other",
+};
+
+const inventoryCategoryToStorefront = (raw: string | null | undefined): string | null => {
+  if (!raw) return null;
+  return INVENTORY_TO_STOREFRONT_CATEGORY[raw.trim()] || "other";
+};
+
+export type PushToStorefrontSuggestion = {
+  itemId: string;
+  itemName: string;
+  alreadyLinked: boolean;          // item already has a storefront_product_id
+  existingProductId: string | null; // when alreadyLinked, the linked product id
+  // Payload to write — either as a new product (no productId) or
+  // as a PATCH on the existing product (productId set). The shape
+  // matches productsApi.upsert's Partial<ProductInput> & { id? }.
+  draft: {
+    id?: string;
+    title: string;
+    slug?: string;
+    description: string | null;
+    price: number | null;
+    image_url: string | null;
+    category: string | null;
+    // Omitted entirely when patching an existing product — PATCH-safe
+    // upsert (post-#313) preserves whatever the stylist had set.
+    // Defaults to false on brand-new pushes so a draft can be
+    // previewed before customers see it.
+    active?: boolean;
+    inventory_item_id: string;
+  };
+};
+
+export const buildPushToStorefrontSuggestions = (
+  items: InventoryItem[] | null | undefined,
+  existingProducts: StorefrontProductSeed[] | null | undefined,
+): PushToStorefrontSuggestion[] => {
+  const productById = new Map<string, StorefrontProductSeed>();
+  for (const p of (existingProducts || [])) productById.set(p.id, p);
+  const out: PushToStorefrontSuggestion[] = [];
+  for (const i of (items || [])) {
+    if (!i?.id || !i?.name) continue;
+    if (i.archivedAt) continue;
+    const linked = i.storefrontProductId ? productById.get(i.storefrontProductId) || null : null;
+    const retail = i.retailPrice == null ? null : Number(i.retailPrice);
+    out.push({
+      itemId: i.id,
+      itemName: i.name,
+      alreadyLinked: !!linked,
+      existingProductId: linked?.id || null,
+      draft: {
+        // Setting id only when we already have a storefront product
+        // makes productsApi.upsert do a PATCH on that row (post-#313
+        // it's PATCH-safe), so non-draft fields on the existing
+        // product survive untouched.
+        ...(linked?.id ? { id: linked.id } : {}),
+        title: i.name,
+        description: null, // inventory items don't have descriptions in V1
+        price: Number.isFinite(retail as number) ? retail : null,
+        image_url: i.photoPath || null,
+        category: inventoryCategoryToStorefront(i.category),
+        // `active` is OMITTED on PATCH so the linked product's
+        // existing visibility is preserved; on fresh creates we
+        // default to false so the listing starts as a draft.
+        ...(linked ? {} : { active: false }),
+        inventory_item_id: i.id,
+      },
+    });
+  }
+  // Already-linked items last so the stylist's eye lands on
+  // actionable rows first.
   out.sort((a, b) => Number(a.alreadyLinked) - Number(b.alreadyLinked));
   return out;
 };

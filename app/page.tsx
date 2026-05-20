@@ -207,6 +207,8 @@ import {
   parseInventoryCsv,
   INVENTORY_CSV_TEMPLATE,
   buildShopSeedSuggestions,
+  buildPushToStorefrontSuggestions,
+  type PushToStorefrontSuggestion,
   type CsvImportResult,
   type ShopSeedSuggestion,
 } from "./lib/inventory-import";
@@ -18533,6 +18535,7 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
   const [restocking, setRestocking] = useState<InventoryItem | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [shopSeedOpen, setShopSeedOpen] = useState(false);
+  const [pushToShopOpen, setPushToShopOpen] = useState(false);
 
   // Only show the "Seed from Shop" entry when there's something to
   // seed from — keeps the empty state tidy for stylists who haven't
@@ -18547,6 +18550,14 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
     );
     return storefrontProducts.filter(p => !p.inventory_item_id && !linkedIds.has(p.id)).length;
   }, [storefrontProducts, itemsRaw]);
+
+  // The mirror count: how many inventory items COULD be pushed to
+  // the storefront (not yet linked to a product, not archived). When
+  // this is 0 we hide the entry point so the hub stays tidy.
+  const pushableToShopCount = useMemo(
+    () => items.filter(i => !i.storefrontProductId).length,
+    [items],
+  );
 
   const visible = useMemo(() => {
     const base = filter === "archived" ? archived : items;
@@ -18686,6 +18697,37 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
           </button>
         )}
 
+        {pushableToShopCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setPushToShopOpen(true)}
+            className="w-full rounded-2xl p-3 text-left active:scale-[0.99] transition"
+            style={{ background: "rgba(92,124,74,0.08)", border: `1px solid rgba(92,124,74,0.25)` }}
+          >
+            <div className="flex items-center gap-3">
+              <div
+                aria-hidden
+                className="flex-shrink-0"
+                style={{
+                  width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                  background: C.success, color: "#FFFFFF",
+                }}
+              >
+                <ArrowUpRight size={14} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+                  Push to Storefront
+                </p>
+                <p className="text-[11px]" style={{ color: C.coffee }}>
+                  {pushableToShopCount} unlinked item{pushableToShopCount === 1 ? "" : "s"} can become a draft product.
+                </p>
+              </div>
+              <ChevronRight size={16} style={{ color: C.muted }} />
+            </div>
+          </button>
+        )}
+
         {/* List */}
         {visible.length === 0 ? (
           <EmptyState
@@ -18813,6 +18855,13 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
         <ShopSeedSheet
           store={store}
           onClose={() => setShopSeedOpen(false)}
+        />
+      )}
+
+      {pushToShopOpen && (
+        <PushToStorefrontSheet
+          store={store}
+          onClose={() => setPushToShopOpen(false)}
         />
       )}
     </div>
@@ -19233,15 +19282,15 @@ const InventoryImportSheet = ({ store, onClose }: { store: any; onClose: () => v
     try {
       let created = 0;
       let linked = 0;
+      let productsPatched = 0;
       // Items first so the products can reference real inventory_item_ids.
       for (const r of toImport) {
         await store.upsertInventoryItem(r.item);
         created++;
       }
-      // Then the product → inventory link pass. Uses the dedicated
-      // setInventoryLink so we ONLY touch the link column — past
-      // versions of this code ran a full upsert which blanked every
-      // other field on the product. Never again.
+      // Product link pass. Uses the dedicated setInventoryLink so we
+      // ONLY touch the link column — past versions of this code ran
+      // a full upsert which blanked every other field on the product.
       const setLink = store.productsApi?.setInventoryLink;
       if (setLink) {
         for (const r of toImport) {
@@ -19250,7 +19299,26 @@ const InventoryImportSheet = ({ store, onClose }: { store: any; onClose: () => v
           if (ok) linked++;
         }
       }
-      setDone({ created, linked });
+      // Optional: if a row carries product fields (Square's
+      // Description, Price columns) AND it's matched to an existing
+      // storefront product, PATCH those fields onto the product.
+      // upsert is PATCH-safe post-#313, so unspecified columns
+      // (image_url, gallery, variants, …) survive untouched.
+      const upsertProduct = store.productsApi?.upsert;
+      if (upsertProduct) {
+        for (const r of toImport) {
+          if (!r.matchedProductId || !r.productFields) continue;
+          const patch: any = { id: r.matchedProductId };
+          if (r.productFields.description != null) patch.description = r.productFields.description;
+          if (r.productFields.retailPrice != null) patch.price = r.productFields.retailPrice;
+          // title is required by the upsert validator even on PATCH;
+          // re-passing the inventory name keeps it stable.
+          patch.title = r.item.name;
+          const out = await upsertProduct(patch);
+          if (out) productsPatched++;
+        }
+      }
+      setDone({ created, linked: linked + productsPatched });
     } catch (e: any) {
       setErr(e?.message || "Import failed partway through. Check Inventory to see what landed.");
     } finally {
@@ -19629,6 +19697,192 @@ const ShopSeedSheet = ({ store, onClose }: { store: any; onClose: () => void }) 
               className="w-full rounded-xl px-4 py-2.5 text-[13px] font-semibold"
               style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
             >
+              Done
+            </button>
+          </>
+        )}
+      </div>
+    </Sheet>
+  );
+};
+
+// Mirror of ShopSeedSheet — push inventory items the other way.
+// New products land as DRAFTS (active:false) so the stylist can
+// preview before they're visible to customers. Updates of already-
+// linked products PATCH only the fields the inventory item has a
+// value for, never touching everything else thanks to the PATCH-
+// safe upsert from #313.
+const PushToStorefrontSheet = ({ store, onClose }: { store: any; onClose: () => void }) => {
+  const inventory = (store.inventoryItems || []) as InventoryItem[];
+  const products = (store.productsApi?.products || []) as any[];
+  const upsertProduct = store.productsApi?.upsert;
+
+  const suggestions: PushToStorefrontSuggestion[] = useMemo(
+    () => buildPushToStorefrontSuggestions(
+      inventory,
+      products.map(p => ({
+        id: p.id,
+        title: p.title,
+        slug: p.slug,
+        category: (p.category as string) || null,
+        price: typeof p.price === "number" ? p.price : null,
+        inventory_count: typeof p.inventory_count === "number" ? p.inventory_count : null,
+        image_url: p.image_url || null,
+        inventory_item_id: (p.inventory_item_id as string | null) || null,
+      })),
+    ),
+    [inventory, products],
+  );
+
+  // Default selection: every un-linked item is checked. Already-linked
+  // items are off + disabled (their fields are managed in the product
+  // editor — re-pushing would just blank descriptions to null).
+  const [selected, setSelected] = useState<Record<string, boolean>>(() => {
+    const seed: Record<string, boolean> = {};
+    for (const s of suggestions) seed[s.itemId] = !s.alreadyLinked;
+    return seed;
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState<{ created: number } | null>(null);
+
+  const selectedCount = suggestions.filter(s => selected[s.itemId] && !s.alreadyLinked).length;
+  const toggle = (id: string) => setSelected(prev => ({ ...prev, [id]: !prev[id] }));
+  const setAll = (on: boolean) => {
+    const next: Record<string, boolean> = {};
+    for (const s of suggestions) next[s.itemId] = on && !s.alreadyLinked;
+    setSelected(next);
+  };
+
+  const handleCommit = async () => {
+    setErr(null);
+    if (selectedCount === 0) { setErr("Pick at least one item."); return; }
+    if (!upsertProduct) { setErr("Storefront isn't available right now."); return; }
+    setBusy(true);
+    try {
+      let created = 0;
+      for (const s of suggestions) {
+        if (!selected[s.itemId] || s.alreadyLinked) continue;
+        const out = await upsertProduct(s.draft as any);
+        if (out) created++;
+      }
+      setDone({ created });
+    } catch (e: any) {
+      setErr(e?.message || "Push failed partway through. Check Shop to see what landed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open onClose={onClose} title="Push to Storefront">
+      <div className="space-y-4 pb-4">
+        {!done && (
+          <>
+            <p className="text-[12px]" style={{ color: C.muted }}>
+              Pick inventory items to publish as storefront products. They land as <span style={{ color: C.espresso }}>drafts</span> (hidden from customers) so you can preview and add photos / descriptions before going live.
+            </p>
+
+            {suggestions.length === 0 ? (
+              <div className="rounded-2xl p-3" style={{ background: C.cream, border: `1px solid ${C.hairline}` }}>
+                <p className="text-[12px]" style={{ color: C.muted }}>No inventory items yet.</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+                    {selectedCount} of {suggestions.filter(s => !s.alreadyLinked).length} selected
+                  </p>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setAll(true)}  className="text-[11px] font-semibold" style={{ color: C.goldDeep }}>Select all</button>
+                    <span style={{ color: C.muted }}>·</span>
+                    <button type="button" onClick={() => setAll(false)} className="text-[11px] font-semibold" style={{ color: C.coffee }}>None</button>
+                  </div>
+                </div>
+
+                <div className="space-y-2" style={{ maxHeight: 420, overflowY: "auto" }}>
+                  {suggestions.map(s => {
+                    const isOn = !!selected[s.itemId] && !s.alreadyLinked;
+                    const priceLabel = s.draft.price != null
+                      ? fmtMoney(Number(s.draft.price), store.business?.currency || "USD")
+                      : "No price";
+                    return (
+                      <button
+                        type="button"
+                        key={s.itemId}
+                        onClick={() => !s.alreadyLinked && toggle(s.itemId)}
+                        disabled={s.alreadyLinked}
+                        className="w-full text-left rounded-xl p-3 flex items-center gap-3 active:scale-[0.99] transition"
+                        style={{
+                          background: s.alreadyLinked ? "rgba(0,0,0,0.03)" : (isOn ? "rgba(92,124,74,0.06)" : "#fff"),
+                          border: `1px solid ${s.alreadyLinked ? C.hairline : (isOn ? "rgba(92,124,74,0.35)" : C.hairline)}`,
+                          opacity: s.alreadyLinked ? 0.6 : 1,
+                        }}
+                      >
+                        <div
+                          aria-hidden
+                          style={{
+                            width: 18, height: 18, borderRadius: 6, flexShrink: 0,
+                            display: "grid", placeItems: "center",
+                            background: isOn ? C.espresso : "#fff",
+                            border: `1px solid ${isOn ? C.espresso : C.hairline}`,
+                            color: "#fff",
+                          }}
+                        >
+                          {isOn && <Check size={12} />}
+                        </div>
+                        {s.draft.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={s.draft.image_url} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 8, flexShrink: 0 }} />
+                        ) : (
+                          <div style={{ width: 40, height: 40, borderRadius: 8, background: C.cream, flexShrink: 0, display: "grid", placeItems: "center" }}>
+                            <Layers size={14} style={{ color: C.muted }} />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{s.itemName}</p>
+                          <p className="text-[11px]" style={{ color: C.muted }}>{priceLabel}</p>
+                          {s.alreadyLinked && (
+                            <p className="text-[10px] mt-0.5" style={{ color: C.success }}>Already on storefront</p>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
+
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={onClose} disabled={busy}
+                className="flex-1 rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+                style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}>
+                Cancel
+              </button>
+              <button type="button" onClick={handleCommit} disabled={busy || selectedCount === 0}
+                className="flex-1 rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+                style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}>
+                {busy ? "Pushing…" : `Push ${selectedCount}`}
+              </button>
+            </div>
+          </>
+        )}
+
+        {done && (
+          <>
+            <div className="rounded-2xl p-4 text-center" style={{ background: "rgba(92,124,74,0.08)", border: `1px solid rgba(92,124,74,0.25)` }}>
+              <p className="text-[14px] font-semibold" style={{ color: C.espresso }}>
+                Pushed {done.created} item{done.created === 1 ? "" : "s"} to Storefront
+              </p>
+              <p className="text-[12px] mt-1" style={{ color: C.coffee }}>
+                They&apos;re drafts. Open Shop, add descriptions / photos, then toggle Active when you&apos;re ready.
+              </p>
+            </div>
+            <button type="button" onClick={onClose}
+              className="w-full rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+              style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}>
               Done
             </button>
           </>
