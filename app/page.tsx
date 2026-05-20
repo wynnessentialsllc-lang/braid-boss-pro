@@ -173,6 +173,7 @@ import {
   RECURRING_INTERVALS,
   computeExpenseTotals,
   estimateProfit,
+  profitMargin,
   groupExpensesForList,
   buildExpenseInsights,
   expenseAmount,
@@ -10075,7 +10076,7 @@ const PhotoEditSheet = ({ photo, appointments, onClose, onSave }: {
 // ============================================================
 //  MONEY + PRODUCTIVITY
 // ============================================================
-const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, openTimerSessions, openExpenses, openReceipt }: { store: any; initialPeriod?: string | null; onPeriodConsumed?: () => void; openTxSheet: any; editTx: any; openTimerSessions: any; openExpenses?: () => void; openReceipt?: (rcp: ReceiptRecord) => void }) => {
+const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, openTimerSessions, openProfitDetail, openReceipt }: { store: any; initialPeriod?: string | null; onPeriodConsumed?: () => void; openTxSheet: any; editTx: any; openTimerSessions: any; openProfitDetail?: (view: ProfitDetailView, category?: string) => void; openReceipt?: (rcp: ReceiptRecord) => void }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
   useEffect(() => {
     trackEvent("money_tab_view", { category: "feature" });
@@ -10157,7 +10158,7 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
           receipts={store.receipts || []}
           openReceipt={openReceipt}
           businessExpenses={store.businessExpenses || []}
-          openExpenses={openExpenses}
+          openProfitDetail={openProfitDetail}
           period={period} />
       ) : (
         <ProductivityTab sessions={sessionsInRange} appointments={store.appointments} business={store.business}
@@ -10167,7 +10168,7 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
   );
 };
 
-const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, receipts = [], openReceipt, businessExpenses = [], openExpenses, period = "week" }: {
+const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, receipts = [], openReceipt, businessExpenses = [], openProfitDetail, period = "week" }: {
   all: any[];
   income: number;
   expenses: number;
@@ -10177,7 +10178,7 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
   openTxSheet: any;
   receipts?: any[];
   businessExpenses?: ExpenseLike[];
-  openExpenses?: () => void;
+  openProfitDetail?: (view: ProfitDetailView, category?: string) => void;
   period?: string;
   openReceipt?: (rcp: ReceiptRecord) => void;
 }) => (
@@ -10240,7 +10241,7 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
       revenue={income}
       expenses={businessExpenses}
       currency={business.currency}
-      onOpen={openExpenses}
+      onSelect={openProfitDetail}
     />
 
     <div className="flex items-center justify-between mb-2">
@@ -17398,29 +17399,48 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
 // is wired through the same toCloudRow/fromCloudRow pipeline so the
 // records show up on every signed-in device.
 
-const ProfitKpiStrip = ({ revenue, expenses, currency, onOpen }: {
+// Which contextual view a Profit KPI tile opens. Each tile drives a
+// different filtered slice of the Expenses screen (or, for revenue,
+// the Reports screen) so tapping feels intelligent instead of dumping
+// every card on the same generic page.
+type ProfitDetailView =
+  | "overview"        // "View all" — full Expenses hub
+  | "revenue"         // Gross revenue → Reports (revenue + top styles + repeats)
+  | "expenses-month"  // Expenses (mo) → expenses filtered to current month
+  | "profit"          // Estimated profit → income vs expenses breakdown
+  | "subscriptions"   // Subscriptions/mo → recurring list
+  | "category";       // Top category → expenses filtered to that category
+
+const ProfitKpiStrip = ({ revenue, expenses, currency, onSelect }: {
   revenue: number;
   expenses: ExpenseLike[];
   currency: string;
-  onOpen?: () => void;
+  onSelect?: (view: ProfitDetailView, category?: string) => void;
 }) => {
   const totals = useMemo(() => computeExpenseTotals(expenses), [expenses]);
   const profit = estimateProfit(revenue, totals.monthTotal);
-  const tiles: { label: string; value: string; tone: "neutral" | "positive" | "warning" }[] = [
-    { label: "Gross revenue",     value: fmtMoney(revenue, currency),                tone: "neutral" },
-    { label: "Expenses (mo)",     value: fmtMoney(totals.monthTotal, currency),      tone: "neutral" },
-    { label: "Estimated profit",  value: fmtMoney(profit, currency),                 tone: profit >= 0 ? "positive" : "warning" },
-    { label: "Subscriptions/mo",  value: fmtMoney(totals.monthlySubscriptions, currency), tone: "neutral" },
-    { label: "Top category",      value: totals.topCategory?.category || "—",         tone: "neutral" },
+  const topCat = totals.topCategory?.category || null;
+  const tiles: {
+    label: string;
+    value: string;
+    tone: "neutral" | "positive" | "warning";
+    view: ProfitDetailView;
+    category?: string;
+  }[] = [
+    { label: "Gross revenue",     value: fmtMoney(revenue, currency),                       tone: "neutral", view: "revenue" },
+    { label: "Expenses (mo)",     value: fmtMoney(totals.monthTotal, currency),             tone: "neutral", view: "expenses-month" },
+    { label: "Estimated profit",  value: fmtMoney(profit, currency),                        tone: profit >= 0 ? "positive" : "warning", view: "profit" },
+    { label: "Subscriptions/mo",  value: fmtMoney(totals.monthlySubscriptions, currency),   tone: "neutral", view: "subscriptions" },
+    { label: "Top category",      value: topCat || "—",                                     tone: "neutral", view: "category", category: topCat ?? undefined },
   ];
   return (
     <div style={{ marginBottom: 16 }}>
       <div className="flex items-center justify-between mb-2">
         <SectionTitle>Business profit</SectionTitle>
-        {onOpen && (
+        {onSelect && (
           <button
             type="button"
-            onClick={onOpen}
+            onClick={() => onSelect("overview")}
             className="rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-[0.97] transition"
             style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}`, letterSpacing: "0.04em" }}
           >
@@ -17429,41 +17449,105 @@ const ProfitKpiStrip = ({ revenue, expenses, currency, onOpen }: {
         )}
       </div>
       <div className="grid grid-cols-2 gap-2">
-        {tiles.map(t => (
-          <button
-            type="button"
-            key={t.label}
-            onClick={onOpen}
-            className="text-left rounded-2xl p-3 active:scale-[0.99] transition"
-            style={{
-              background: "#fff",
-              border: `1px solid ${C.hairline}`,
-              boxShadow: "0 1px 0 rgba(21,17,26,0.02)",
-            }}
-          >
-            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>
-              {t.label}
-            </p>
-            <p
+        {tiles.map(t => {
+          // "Top category" is meaningless without any expenses; in
+          // that case route the tap to the overview rather than a
+          // dead category filter.
+          const disabled = t.view === "category" && !t.category;
+          const handle = () => {
+            if (!onSelect) return;
+            if (disabled) onSelect("overview");
+            else onSelect(t.view, t.category);
+          };
+          return (
+            <button
+              type="button"
+              key={t.label}
+              onClick={handle}
+              className="text-left rounded-2xl p-3 active:scale-[0.99] transition"
               style={{
-                fontFamily: FONT_DISPLAY,
-                fontSize: 18,
-                fontWeight: 600,
-                color: t.tone === "positive" ? C.success : t.tone === "warning" ? C.danger : C.espresso,
-                lineHeight: 1.15,
-                marginTop: 2,
+                background: "#fff",
+                border: `1px solid ${C.hairline}`,
+                boxShadow: "0 1px 0 rgba(21,17,26,0.02)",
+                opacity: disabled ? 0.7 : 1,
               }}
             >
-              {t.value}
-            </p>
-          </button>
-        ))}
+              <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+                {t.label}
+              </p>
+              <p
+                style={{
+                  fontFamily: FONT_DISPLAY,
+                  fontSize: 18,
+                  fontWeight: 600,
+                  color: t.tone === "positive" ? C.success : t.tone === "warning" ? C.danger : C.espresso,
+                  lineHeight: 1.15,
+                  marginTop: 2,
+                }}
+              >
+                {t.value}
+              </p>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 };
 
-const ExpensesScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+// Compact view-pill switcher inside the Expenses screen. Lets the
+// user move between contextual slices without bouncing back to Money.
+type ExpensesView = Exclude<ProfitDetailView, "revenue">;
+
+const VIEW_PILLS: { key: ExpensesView; label: string }[] = [
+  { key: "overview",        label: "Overview" },
+  { key: "profit",          label: "Profit" },
+  { key: "expenses-month",  label: "This month" },
+  { key: "subscriptions",   label: "Subs" },
+  { key: "category",        label: "Category" },
+];
+
+const SUBTITLE_FOR_VIEW: Record<ExpensesView, string> = {
+  overview:         "Outflows, subscriptions, estimated profit",
+  profit:           "Income vs expenses, profit margin",
+  "expenses-month": "Only this calendar month",
+  subscriptions:    "Recurring monthly burn",
+  category:         "Filter by expense category",
+};
+
+const ExpenseListItem = ({ e, currency, onClick }: {
+  e: ExpenseLike;
+  currency: string;
+  onClick: () => void;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="w-full text-left flex items-center gap-3 px-2 py-2.5 active:scale-[0.99] transition"
+  >
+    <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: "rgba(156,61,46,0.10)" }}>
+      {e.isRecurring
+        ? <Repeat size={16} style={{ color: C.danger }} />
+        : <ArrowDownRight size={16} style={{ color: C.danger }} />}
+    </div>
+    <div className="flex-1 min-w-0">
+      <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{e.title || e.category || "Expense"}</p>
+      <p className="text-[11px]" style={{ color: C.muted }}>
+        {[e.category, e.expenseDate ? fmtDate(e.expenseDate) : null].filter(Boolean).join(" · ") || "—"}
+      </p>
+    </div>
+    <span className="text-[13px] font-semibold tabular-nums ml-2" style={{ color: C.danger }}>
+      -{fmtMoney(expenseAmount(e), currency)}
+    </span>
+  </button>
+);
+
+const ExpensesScreen = ({ store, onBack, initialView = "overview", initialCategory = null }: {
+  store: any;
+  onBack: () => void;
+  initialView?: ProfitDetailView;
+  initialCategory?: string | null;
+}) => {
   const expenses: ExpenseLike[] = store.businessExpenses || [];
   const appointments = (store.appointments as any[]) || [];
   const currency = store.business?.currency || "USD";
@@ -17471,9 +17555,27 @@ const ExpensesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
   const [editing, setEditing] = useState<ExpenseLike | null>(null);
   const [openSheet, setOpenSheet] = useState(false);
 
-  // Revenue this calendar month — used for the Estimated Profit card
-  // and the profit-margin insight. Pulled from the same canonical
-  // dashboard helper so reports + expenses never disagree.
+  // The contextual view this screen is currently rendering. Default
+  // comes from the KPI tile that opened the screen; the pill switcher
+  // at the top lets the user move between views without leaving.
+  // "revenue" never lives in here (it routes to Reports at the
+  // parent), so we coerce it to "profit" as a safe fallback.
+  const safeInitial: ExpensesView = initialView === "revenue" ? "profit" : (initialView as ExpensesView);
+  const [view, setView] = useState<ExpensesView>(safeInitial);
+  const [category, setCategory] = useState<string | null>(initialCategory ?? null);
+
+  // Default the Category view's category to the user's actual top
+  // expense category if the caller didn't pass one. Once a real
+  // category is selected, we don't re-derive on every render.
+  useEffect(() => {
+    if (view !== "category" || category) return;
+    const top = computeExpenseTotals(expenses).topCategory?.category || null;
+    if (top) setCategory(top);
+  }, [view, category, expenses]);
+
+  // Revenue this calendar month — used for the Profit view and the
+  // profit-margin insight. Pulled from the same canonical dashboard
+  // helper so reports + expenses never disagree.
   const monthRevenue = useMemo(() => computeDashboardRevenue(appointments).monthEarned, [appointments]);
 
   const totals = useMemo(() => computeExpenseTotals(expenses), [expenses]);
@@ -17486,6 +17588,26 @@ const ExpensesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
   );
 
   const profit = estimateProfit(monthRevenue, totals.monthTotal);
+  const margin = profitMargin(monthRevenue, totals.monthTotal);
+
+  // Current-calendar-month expenses, used by "This month" + "Category"
+  // views so the focused screens don't include older items.
+  const monthExpenses = useMemo(() => {
+    const today = todayISO();
+    const d = new Date(today + "T00:00:00");
+    const start = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+    const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    const end = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-01`;
+    return (expenses || []).filter(e => e.expenseDate && e.expenseDate >= start && e.expenseDate < end)
+      .sort((a, b) => (b.expenseDate || "").localeCompare(a.expenseDate || ""));
+  }, [expenses]);
+
+  const categoryExpenses = useMemo(() => {
+    if (!category) return [];
+    return (expenses || []).filter(e => (e.category || "Other") === category)
+      .sort((a, b) => (b.expenseDate || "").localeCompare(a.expenseDate || ""));
+  }, [expenses, category]);
+  const categoryTotal = categoryExpenses.reduce((s, e) => s + expenseAmount(e), 0);
 
   const handleAdd = () => { setEditing(null); setOpenSheet(true); };
   const handleEdit = (e: ExpenseLike) => { setEditing(e); setOpenSheet(true); };
@@ -17499,143 +17621,330 @@ const ExpensesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
     await store.deleteBusinessExpense(e.id);
   };
 
+  // Single 2-up KPI tile used across views so they all read the same
+  // way; no value-shape branching at the call site.
+  const Tile = ({ label, value, tone = "neutral" as "neutral" | "positive" | "warning" }: { label: string; value: string; tone?: "neutral" | "positive" | "warning" }) => (
+    <div className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
+      <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>{label}</p>
+      <p style={{
+        fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, lineHeight: 1.15, marginTop: 2,
+        color: tone === "positive" ? C.success : tone === "warning" ? C.danger : C.espresso,
+      }}>
+        {value}
+      </p>
+    </div>
+  );
+
   return (
     <div className="bbp-fade pb-32">
       <Header
         title="Expenses"
-        subtitle="Outflows, subscriptions, estimated profit"
+        subtitle={SUBTITLE_FOR_VIEW[view]}
         leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
         rightAction={{ icon: <Plus size={20} />, onClick: handleAdd }}
       />
 
       <div className="px-5 pt-2 space-y-5">
-        {/* KPI tiles — same numbers the Money tab shows, just larger. */}
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { label: "Gross revenue (mo)",  value: fmtMoney(monthRevenue, currency),                tone: "neutral" as const },
-            { label: "Expenses (mo)",       value: fmtMoney(totals.monthTotal, currency),           tone: "neutral" as const },
-            { label: "Estimated profit",    value: fmtMoney(profit, currency),                       tone: (profit >= 0 ? "positive" : "warning") as "positive" | "warning" },
-            { label: "Subscriptions/mo",    value: fmtMoney(totals.monthlySubscriptions, currency), tone: "neutral" as const },
-            { label: "Top category",        value: totals.topCategory?.category || "—",              tone: "neutral" as const },
-            { label: "This week",           value: fmtMoney(totals.weekTotal, currency),             tone: "neutral" as const },
-          ].map(t => (
-            <div key={t.label} className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
-              <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>{t.label}</p>
-              <p style={{
-                fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, lineHeight: 1.15, marginTop: 2,
-                color: t.tone === "positive" ? C.success : t.tone === "warning" ? C.danger : C.espresso,
-              }}>
-                {t.value}
-              </p>
-            </div>
+        {/* View pills — horizontally scrollable on small screens so
+            none of the five labels clip on a 320px viewport. */}
+        <div className="flex gap-2 overflow-x-auto bbp-scroll -mx-1 px-1">
+          {VIEW_PILLS.map(p => (
+            <button
+              type="button"
+              key={p.key}
+              onClick={() => setView(p.key)}
+              className="px-3 py-1.5 rounded-full text-[11px] font-semibold whitespace-nowrap transition"
+              style={{
+                background: view === p.key ? C.espresso : "transparent",
+                color: view === p.key ? C.cream : C.coffee,
+                border: `1px solid ${view === p.key ? C.espresso : C.hairline}`,
+                letterSpacing: "0.04em",
+              }}
+            >
+              {p.label}
+            </button>
           ))}
         </div>
 
-        {/* Insights */}
-        {insights.length > 0 && (
-          <div className="space-y-2">
-            {insights.map((i, idx) => (
-              <div
-                key={idx}
-                className="rounded-2xl p-3 text-[12px]"
-                style={{
-                  background: i.kind === "positive" ? "rgba(92,124,74,0.08)" : i.kind === "warning" ? "rgba(156,61,46,0.08)" : C.cream,
-                  border: `1px solid ${i.kind === "positive" ? "rgba(92,124,74,0.25)" : i.kind === "warning" ? "rgba(156,61,46,0.25)" : C.hairline}`,
-                  color: C.espresso,
-                }}
-              >
-                {i.text}
-              </div>
-            ))}
-          </div>
-        )}
+        {/* -------- OVERVIEW -------- */}
+        {view === "overview" && (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <Tile label="Gross revenue (mo)" value={fmtMoney(monthRevenue, currency)} />
+              <Tile label="Expenses (mo)"       value={fmtMoney(totals.monthTotal, currency)} />
+              <Tile label="Estimated profit"    value={fmtMoney(profit, currency)} tone={profit >= 0 ? "positive" : "warning"} />
+              <Tile label="Subscriptions/mo"    value={fmtMoney(totals.monthlySubscriptions, currency)} />
+              <Tile label="Top category"        value={totals.topCategory?.category || "—"} />
+              <Tile label="This week"           value={fmtMoney(totals.weekTotal, currency)} />
+            </div>
 
-        {/* Recurring subscriptions */}
-        {subscriptions.length > 0 && (
-          <div>
-            <SectionTitle>Subscriptions</SectionTitle>
-            <Card className="p-2">
-              {subscriptions.map((e, i) => (
+            {insights.length > 0 && (
+              <div className="space-y-2">
+                {insights.map((i, idx) => (
+                  <div
+                    key={idx}
+                    className="rounded-2xl p-3 text-[12px]"
+                    style={{
+                      background: i.kind === "positive" ? "rgba(92,124,74,0.08)" : i.kind === "warning" ? "rgba(156,61,46,0.08)" : C.cream,
+                      border: `1px solid ${i.kind === "positive" ? "rgba(92,124,74,0.25)" : i.kind === "warning" ? "rgba(156,61,46,0.25)" : C.hairline}`,
+                      color: C.espresso,
+                    }}
+                  >
+                    {i.text}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <SectionTitle>All expenses</SectionTitle>
                 <button
                   type="button"
-                  key={e.id}
-                  onClick={() => handleEdit(e)}
-                  className="w-full text-left flex items-center justify-between px-2 py-2.5 active:scale-[0.99] transition"
-                  style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                  onClick={handleAdd}
+                  className="rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-[0.97] transition"
+                  style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}`, letterSpacing: "0.04em" }}
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{e.title || e.category || "Subscription"}</p>
-                    <p className="text-[11px]" style={{ color: C.muted }}>
-                      {e.recurringInterval || "monthly"}{e.nextBillingDate ? ` · next ${fmtDate(e.nextBillingDate)}` : ""}
-                    </p>
-                  </div>
-                  <span className="text-[12px] font-semibold tabular-nums ml-3" style={{ color: C.coffee }}>
-                    {fmtMoney(expenseAmount(e), currency)}
-                  </span>
+                  + Add expense
                 </button>
-              ))}
-            </Card>
-          </div>
+              </div>
+              {groups.length === 0 ? (
+                <EmptyState
+                  icon={<Receipt size={28} style={{ color: C.muted }} />}
+                  title="No expenses yet"
+                  body="Track hair, supplies, booth rent, subscriptions — anything that comes out of your business — to see your real profit."
+                />
+              ) : (
+                <div className="space-y-4">
+                  {groups.map(g => (
+                    <div key={g.key}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>{g.label}</p>
+                        <p className="text-[11px] font-semibold tabular-nums" style={{ color: C.coffee }}>{fmtMoney(g.total, currency)}</p>
+                      </div>
+                      <Card className="p-2">
+                        {g.items.map((e, i) => (
+                          <div key={e.id} style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+                            <ExpenseListItem e={e} currency={currency} onClick={() => handleEdit(e)} />
+                          </div>
+                        ))}
+                      </Card>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
         )}
 
-        {/* Grouped list */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <SectionTitle>All expenses</SectionTitle>
-            <button
-              type="button"
-              onClick={handleAdd}
-              className="rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-[0.97] transition"
-              style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}`, letterSpacing: "0.04em" }}
-            >
-              + Add expense
-            </button>
-          </div>
-          {groups.length === 0 ? (
-            <EmptyState
-              icon={<Receipt size={28} style={{ color: C.muted }} />}
-              title="No expenses yet"
-              body="Track hair, supplies, booth rent, subscriptions — anything that comes out of your business — to see your real profit."
-            />
-          ) : (
-            <div className="space-y-4">
-              {groups.map(g => (
-                <div key={g.key}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>{g.label}</p>
-                    <p className="text-[11px] font-semibold tabular-nums" style={{ color: C.coffee }}>{fmtMoney(g.total, currency)}</p>
-                  </div>
-                  <Card className="p-2">
-                    {g.items.map((e, i) => (
-                      <button
-                        type="button"
-                        key={e.id}
-                        onClick={() => handleEdit(e)}
-                        className="w-full text-left flex items-center gap-3 px-2 py-2.5 active:scale-[0.99] transition"
-                        style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
-                      >
-                        <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: "rgba(156,61,46,0.10)" }}>
-                          {e.isRecurring
-                            ? <Repeat size={16} style={{ color: C.danger }} />
-                            : <ArrowDownRight size={16} style={{ color: C.danger }} />}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{e.title || e.category || "Expense"}</p>
-                          <p className="text-[11px]" style={{ color: C.muted }}>
-                            {[e.category, e.expenseDate ? fmtDate(e.expenseDate) : null].filter(Boolean).join(" · ") || "—"}
-                          </p>
-                        </div>
-                        <span className="text-[13px] font-semibold tabular-nums ml-2" style={{ color: C.danger }}>
-                          -{fmtMoney(expenseAmount(e), currency)}
-                        </span>
-                      </button>
-                    ))}
-                  </Card>
-                </div>
-              ))}
+        {/* -------- PROFIT BREAKDOWN -------- */}
+        {view === "profit" && (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <Tile label="Gross revenue (mo)" value={fmtMoney(monthRevenue, currency)} tone="positive" />
+              <Tile label="Expenses (mo)"      value={fmtMoney(totals.monthTotal, currency)} tone="warning" />
+              <Tile label="Estimated profit"   value={fmtMoney(profit, currency)} tone={profit >= 0 ? "positive" : "warning"} />
+              <Tile label="Profit margin"      value={monthRevenue > 0 ? `${margin}%` : "—"} tone={margin >= 25 ? "positive" : "warning"} />
             </div>
-          )}
-        </div>
+
+            {/* Two-bar income vs expenses visual — keeps the math
+                visible without pulling in a charting dependency. */}
+            <Card className="p-4">
+              <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>This month</p>
+              {(() => {
+                const max = Math.max(1, monthRevenue, totals.monthTotal);
+                const bar = (label: string, amount: number, color: string) => (
+                  <div className="mb-2">
+                    <div className="flex items-baseline justify-between mb-1">
+                      <span className="text-[12px]" style={{ color: C.coffee }}>{label}</span>
+                      <span className="text-[12px] font-semibold tabular-nums" style={{ color: C.espresso }}>{fmtMoney(amount, currency)}</span>
+                    </div>
+                    <div className="rounded-full overflow-hidden" style={{ height: 10, background: C.cream }}>
+                      <div style={{ width: `${Math.round((amount / max) * 100)}%`, height: "100%", background: color }} />
+                    </div>
+                  </div>
+                );
+                return (
+                  <>
+                    {bar("Income",   monthRevenue,        C.success)}
+                    {bar("Expenses", totals.monthTotal,   C.danger)}
+                    <div className="pt-2 mt-2" style={{ borderTop: `1px solid ${C.hairline}` }}>
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-[12px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Profit</span>
+                        <span className="text-[16px] font-semibold tabular-nums" style={{ color: profit >= 0 ? C.success : C.danger }}>{fmtMoney(profit, currency)}</span>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </Card>
+
+            {/* Category breakdown for the month — where the money's
+                actually going. */}
+            {totals.byCategory.length > 0 && (
+              <div>
+                <SectionTitle>By category (this month)</SectionTitle>
+                <Card className="p-2">
+                  {totals.byCategory.map((c, i) => (
+                    <button
+                      type="button"
+                      key={c.category}
+                      onClick={() => { setCategory(c.category); setView("category"); }}
+                      className="w-full text-left flex items-center justify-between px-2 py-2.5 active:scale-[0.99] transition"
+                      style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{c.category}</p>
+                        <p className="text-[11px]" style={{ color: C.muted }}>{c.count} expense{c.count === 1 ? "" : "s"}</p>
+                      </div>
+                      <span className="text-[13px] font-semibold tabular-nums ml-3" style={{ color: C.danger }}>
+                        -{fmtMoney(c.amount, currency)}
+                      </span>
+                    </button>
+                  ))}
+                </Card>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* -------- EXPENSES THIS MONTH -------- */}
+        {view === "expenses-month" && (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <Tile label="Expenses (mo)" value={fmtMoney(totals.monthTotal, currency)} />
+              <Tile label="This week"     value={fmtMoney(totals.weekTotal, currency)} />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <SectionTitle>This month</SectionTitle>
+                <button
+                  type="button"
+                  onClick={handleAdd}
+                  className="rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-[0.97] transition"
+                  style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}`, letterSpacing: "0.04em" }}
+                >
+                  + Add expense
+                </button>
+              </div>
+              {monthExpenses.length === 0 ? (
+                <EmptyState
+                  icon={<Receipt size={28} style={{ color: C.muted }} />}
+                  title="No expenses this month"
+                  body="Anything you spend on the business this month will show up here."
+                />
+              ) : (
+                <Card className="p-2">
+                  {monthExpenses.map((e, i) => (
+                    <div key={e.id} style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+                      <ExpenseListItem e={e} currency={currency} onClick={() => handleEdit(e)} />
+                    </div>
+                  ))}
+                </Card>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* -------- SUBSCRIPTIONS -------- */}
+        {view === "subscriptions" && (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <Tile label="Subscriptions/mo" value={fmtMoney(totals.monthlySubscriptions, currency)} />
+              <Tile label="Active"           value={String(subscriptions.length)} />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <SectionTitle>Recurring</SectionTitle>
+                <button
+                  type="button"
+                  onClick={handleAdd}
+                  className="rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-[0.97] transition"
+                  style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}`, letterSpacing: "0.04em" }}
+                >
+                  + Add subscription
+                </button>
+              </div>
+              {subscriptions.length === 0 ? (
+                <EmptyState
+                  icon={<Repeat size={28} style={{ color: C.muted }} />}
+                  title="No subscriptions yet"
+                  body="Add booking software, scheduling SMS, supply boxes — anything billed monthly — to see your true monthly burn."
+                />
+              ) : (
+                <Card className="p-2">
+                  {subscriptions.map((e, i) => (
+                    <button
+                      type="button"
+                      key={e.id}
+                      onClick={() => handleEdit(e)}
+                      className="w-full text-left flex items-center justify-between px-2 py-2.5 active:scale-[0.99] transition"
+                      style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{e.title || e.category || "Subscription"}</p>
+                        <p className="text-[11px]" style={{ color: C.muted }}>
+                          {e.recurringInterval || "monthly"}{e.nextBillingDate ? ` · next ${fmtDate(e.nextBillingDate)}` : ""}
+                        </p>
+                      </div>
+                      <span className="text-[12px] font-semibold tabular-nums ml-3" style={{ color: C.coffee }}>
+                        {fmtMoney(expenseAmount(e), currency)}
+                      </span>
+                    </button>
+                  ))}
+                </Card>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* -------- CATEGORY FILTER -------- */}
+        {view === "category" && (
+          <>
+            <div>
+              <label className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Category</label>
+              <select
+                value={category || ""}
+                onChange={e => setCategory(e.target.value || null)}
+                className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px]"
+                style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+              >
+                <option value="">— Pick a category —</option>
+                {EXPENSE_CATEGORIES.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Tile label="Total in category" value={fmtMoney(categoryTotal, currency)} />
+              <Tile label="Entries"           value={String(categoryExpenses.length)} />
+            </div>
+            <div>
+              <SectionTitle>{category || "Pick a category"}</SectionTitle>
+              {!category ? (
+                <EmptyState
+                  icon={<Filter size={28} style={{ color: C.muted }} />}
+                  title="Pick a category above"
+                  body="Filter your expenses by category to see exactly where the money's going."
+                />
+              ) : categoryExpenses.length === 0 ? (
+                <EmptyState
+                  icon={<Receipt size={28} style={{ color: C.muted }} />}
+                  title={`No expenses in ${category}`}
+                  body="Add an expense in this category to start tracking it."
+                />
+              ) : (
+                <Card className="p-2">
+                  {categoryExpenses.map((e, i) => (
+                    <div key={e.id} style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+                      <ExpenseListItem e={e} currency={currency} onClick={() => handleEdit(e)} />
+                    </div>
+                  ))}
+                </Card>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {openSheet && (
@@ -21850,6 +22159,22 @@ export default function App() {
   const [moneyPeriod, setMoneyPeriod] = useState<string | null>(null);
   const goToMoney = (p: string) => { setMoneyPeriod(p); setActive("money"); };
   const [secondary, setSecondary] = useState<string | null>(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
+  // Which contextual slice the Expenses screen opens on. Set by the
+  // Money tab's Profit KPI tiles so each tile lands on a focused view
+  // instead of all of them dumping to the same overview.
+  const [expensesView, setExpensesView] = useState<ProfitDetailView>("overview");
+  const [expensesCategory, setExpensesCategory] = useState<string | null>(null);
+  const openProfitDetail = useCallback((view: ProfitDetailView, category?: string) => {
+    if (view === "revenue") {
+      // Gross revenue lives on the Reports screen — no need to
+      // duplicate the chart and top-styles widgets inside Expenses.
+      setSecondary("reports");
+      return;
+    }
+    setExpensesView(view);
+    setExpensesCategory(category ?? null);
+    setSecondary("expenses");
+  }, []);
   const [calcPrefill, setCalcPrefill] = useState<EntityRecord | null>(null);
   const [calcPresetPrefill, setCalcPresetPrefill] = useState<EntityRecord | null>(null);
   const [apptPrefill, setApptPrefill] = useState<EntityRecord | null>(null);
@@ -22149,7 +22474,7 @@ export default function App() {
               openTxSheet={() => { setEditingTx(null); setOpenTx(true); }}
               editTx={(t) => { setEditingTx(t); setOpenTx(true); }}
               openTimerSessions={() => setSecondary("timerSessions")}
-              openExpenses={() => setSecondary("expenses")}
+              openProfitDetail={openProfitDetail}
               openReceipt={openReceipt} />
           )}
           {active === "rebooking" && (
@@ -22236,7 +22561,14 @@ export default function App() {
       )}
       {secondary === "services" && <ServicesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "reports" && <ReportsScreen store={store} onBack={() => setSecondary("settings")} />}
-      {secondary === "expenses" && <ExpensesScreen store={store} onBack={() => { setSecondary(null); setActive("money"); }} />}
+      {secondary === "expenses" && (
+        <ExpensesScreen
+          store={store}
+          initialView={expensesView}
+          initialCategory={expensesCategory}
+          onBack={() => { setSecondary(null); setExpensesView("overview"); setExpensesCategory(null); setActive("money"); }}
+        />
+      )}
       {secondary === "discounts" && <DiscountsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "reviews" && <ReviewsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "products" && (
