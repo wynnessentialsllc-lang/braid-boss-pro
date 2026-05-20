@@ -22236,7 +22236,7 @@ export default function App() {
       )}
       {secondary === "services" && <ServicesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "reports" && <ReportsScreen store={store} onBack={() => setSecondary("settings")} />}
-      {secondary === "expenses" && <ExpensesScreen store={store} onBack={() => setActive("money")} />}
+      {secondary === "expenses" && <ExpensesScreen store={store} onBack={() => { setSecondary(null); setActive("money"); }} />}
       {secondary === "discounts" && <DiscountsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "reviews" && <ReviewsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "products" && (
