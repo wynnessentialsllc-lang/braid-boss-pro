@@ -23120,6 +23120,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
     variants: ProductVariant[];
     active: boolean;
     inventory_item_id: string | null;
+    reorder_after_weeks: number | null;
   }>;
   const [editing, setEditing] = useState<Draft | null>(null);
   // Raw textarea content for the variants list. Decoupled from
@@ -23243,6 +23244,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                 variants: p.variants || [],
                 active: p.active,
                 inventory_item_id: (p as any).inventory_item_id ?? null,
+                reorder_after_weeks: (p as any).reorder_after_weeks ?? null,
               });
               // Seed the textarea with the existing variant names so
               // editing keeps them visible; new picks tack on as the
@@ -23391,6 +23393,28 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                     </option>
                   ))}
               </select>
+            </Field>
+            {/* Re-order nudge window — drives the daily reorder cron.
+                Empty = no auto-nudge for this product. Best fit for
+                consumables (oils, edge controls, sprays). Skipped
+                for one-off items like bonnets / tools. */}
+            <Field label="Re-order nudge" hint="Email past buyers to restock after this many weeks. Leave blank to skip.">
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  value={(editing as any).reorder_after_weeks == null ? "" : String((editing as any).reorder_after_weeks)}
+                  onChange={e => {
+                    const raw = e.target.value;
+                    setEditing({
+                      ...(editing as any),
+                      reorder_after_weeks: raw === "" ? null : Math.max(1, Math.min(52, Math.floor(Number(raw) || 0))),
+                    });
+                  }}
+                  placeholder="e.g. 6"
+                />
+                <span className="text-[12px] whitespace-nowrap" style={{ color: C.coffee }}>weeks</span>
+              </div>
             </Field>
             <Field label="Featured image" hint="Main photo shown on the storefront grid.">
               <ProductImageUploader
@@ -24256,8 +24280,9 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
     birthday: boolean;
     winback: boolean;
     welcome: boolean;
+    reorder: boolean;
   };
-  const [toggles, setToggles] = useState<Toggles>({ rebook: true, birthday: true, winback: true, welcome: true });
+  const [toggles, setToggles] = useState<Toggles>({ rebook: true, birthday: true, winback: true, welcome: true, reorder: true });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -24266,7 +24291,7 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
     (async () => {
       const { data } = await getSupabase()
         .from("shop_settings")
-        .select("marketing_rebook_nudges_enabled, marketing_birthday_enabled, marketing_winback_enabled, marketing_welcome_enabled")
+        .select("marketing_rebook_nudges_enabled, marketing_birthday_enabled, marketing_winback_enabled, marketing_welcome_enabled, marketing_reorder_enabled")
         .eq("user_id", userId)
         .maybeSingle();
       if (cancelled) return;
@@ -24275,6 +24300,7 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
         birthday: data?.marketing_birthday_enabled      ?? true,
         winback:  data?.marketing_winback_enabled       ?? true,
         welcome:  data?.marketing_welcome_enabled       ?? true,
+        reorder:  data?.marketing_reorder_enabled       ?? true,
       });
       setLoading(false);
     })();
@@ -24292,6 +24318,7 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
       birthday: "marketing_birthday_enabled",
       winback:  "marketing_winback_enabled",
       welcome:  "marketing_welcome_enabled",
+      reorder:  "marketing_reorder_enabled",
     }[key];
     const { error: err } = await getSupabase()
       .from("shop_settings")
@@ -24376,6 +24403,7 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
             { key: "birthday" as const, title: "Birthday greetings",  hint: "Personal birthday email each year (no discount)" },
             { key: "winback"  as const, title: "Win-back",            hint: "Client hasn't booked in 90+ days" },
             { key: "welcome"  as const, title: "New-client welcome",  hint: "Day after their first completed appointment" },
+            { key: "reorder"  as const, title: "Product re-order",    hint: "Storefront product hit its reorder window" },
           ]).map((t, i) => (
             <div
               key={t.key}

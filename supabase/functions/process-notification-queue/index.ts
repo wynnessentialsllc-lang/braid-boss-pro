@@ -54,6 +54,7 @@ const MARKETING_NOTIFICATION_TYPES = new Set<string>([
   "winback",
   "new_client_welcome",
   "marketing_campaign",
+  "reorder_nudge",
 ]);
 const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID") || "";
 const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN") || "";
@@ -1118,6 +1119,51 @@ const renderMarketingCampaign = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- reorder_nudge (marketing) -------------------------------------
+// Fires when a paid product order's reorder window has passed. Payload:
+//   { clientName, studioName, productTitle, productSlug, productImage,
+//     weeksSince, reorderAfterWeeks, bookingSlug, unsubscribeToken }
+// CTA points at the public product page when slug is available,
+// else at the shop landing page. Image rendered when present.
+const renderReorderNudge = (p: Record<string, any>) => {
+  const clientName     = p.clientName     || "there";
+  const studioName     = p.studioName     || "your stylist";
+  const productTitle   = p.productTitle   || "your product";
+  const productSlug    = String(p.productSlug || "").trim();
+  const productImage   = String(p.productImage || "").trim();
+  const weeksSince     = Number(p.weeksSince) || null;
+  const bookingSlug    = String(p.bookingSlug || "").trim();
+  const baseUrl = (Deno.env.get("NEXT_PUBLIC_SITE_URL") || "https://braidbosspro.app").replace(/\/$/, "");
+  // Product page slug pattern lives at /u/<handle>/products/<slug>.
+  // If we don't have the handle in the payload (the SQL processor
+  // doesn't pull it today), fall back to the public shop landing
+  // which uses the same slug. Both URLs surface the buy button.
+  const productUrl = bookingSlug && productSlug
+    ? `${baseUrl}/u/${encodeURIComponent(bookingSlug)}/products/${encodeURIComponent(productSlug)}`
+    : bookingSlug
+      ? `${baseUrl}/u/${encodeURIComponent(bookingSlug)}/shop`
+      : "";
+  const subject = `Time to restock your ${productTitle}?`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Time to restock</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">Running low, ${escape(clientName)}?</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
+      ${weeksSince ? `It's been <strong>${weeksSince} weeks</strong> since` : "It's been a while since"}
+      you picked up your <strong>${escape(productTitle)}</strong> from ${escape(studioName)} — should be running low about now.
+    </p>
+    ${productImage ? `
+      <div style="text-align:center;margin:0 0 16px;">
+        <img src="${escape(productImage)}" alt="${escape(productTitle)}" style="max-width:240px;width:100%;height:auto;border-radius:12px;border:1px solid ${C.hairline};" />
+      </div>` : ""}
+    ${productUrl ? ctaButton("Buy again", productUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:18px 0 0;">
+      Reply to this email if you have any questions.
+    </p>
+    ${marketingFooter(p, studioName)}
+  `);
+  return { subject, html };
+};
+
 // ---- generic fallback -----------------------------------------------
 const renderGeneric = (row: ClaimedRow) => {
   const subject = row.subject || "Notification from Braid Boss Pro";
@@ -1198,6 +1244,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderNewClientWelcome(row.payload || {});
     case "marketing_campaign":
       return renderMarketingCampaign(row.payload || {});
+    case "reorder_nudge":
+      return renderReorderNudge(row.payload || {});
     default:
       return renderGeneric(row);
   }
