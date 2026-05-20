@@ -6217,42 +6217,54 @@ const DayCalendarView = ({
 
   return (
     <div className="space-y-3">
-      <Card className="px-4 py-3 flex items-center justify-between" style={{ background: dayStatusToneBg, border: `1px solid ${C.hairline}` }}>
-        <div>
+      <Card
+        className={`px-4 py-3 flex items-center justify-between ${allDayBlock ? "active:scale-[0.99]" : ""}`}
+        style={{ background: dayStatusToneBg, border: `1px solid ${C.hairline}` }}
+        onClick={allDayBlock ? () => onTap(allDayBlock) : undefined}
+      >
+        <div className="flex-1 min-w-0">
           <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>All day</p>
           <p className="text-sm font-semibold mt-0.5" style={{ color: dayStatusToneFg }}>{dayStatus.label}</p>
+          {allDayBlock && (
+            <p className="text-[11px] mt-1 truncate" style={{ color: C.muted }}>
+              {allDayBlock.kind === "blocked" ? "Unavailable" : "Personal"} · {(allDayBlock as any).eventTitle || (allDayBlock.kind === "blocked" ? "Unavailable" : "Personal event")}
+            </p>
+          )}
         </div>
         {/* Split the count so personal/blocked rows never read as
             client bookings. Hidden labels stay out of the way when
             there's nothing of that kind. */}
-        <div className="text-right" style={{ minWidth: 0 }}>
-          {(() => {
-            const billable = appts.filter((a: any) =>
-              a && (!a.kind || a.kind === "appointment")
-              && a.status !== "cancelled" && a.status !== "canceled",
-            );
-            const blocks = appts.filter((a: any) =>
-              a && (a.kind === "personal" || a.kind === "blocked")
-              && a.status !== "cancelled" && a.status !== "canceled",
-            );
-            if (billable.length === 0 && blocks.length === 0) {
-              return (
-                <span className="text-[11px] font-semibold" style={{ color: C.muted }}>0 bookings</span>
+        <div className="flex items-center gap-2 ml-3" style={{ flexShrink: 0 }}>
+          <div className="text-right" style={{ minWidth: 0 }}>
+            {(() => {
+              const billable = appts.filter((a: any) =>
+                a && (!a.kind || a.kind === "appointment")
+                && a.status !== "cancelled" && a.status !== "canceled",
               );
-            }
-            return (
-              <>
-                <p className="text-[11px] font-semibold" style={{ color: C.muted }}>
-                  {billable.length} {billable.length === 1 ? "booking" : "bookings"}
-                </p>
-                {blocks.length > 0 && (
-                  <p className="text-[10.5px]" style={{ color: C.muted, marginTop: 1 }}>
-                    {blocks.length} {blocks.length === 1 ? "block" : "blocks"}
+              const blocks = appts.filter((a: any) =>
+                a && (a.kind === "personal" || a.kind === "blocked")
+                && a.status !== "cancelled" && a.status !== "canceled",
+              );
+              if (billable.length === 0 && blocks.length === 0) {
+                return (
+                  <span className="text-[11px] font-semibold" style={{ color: C.muted }}>0 bookings</span>
+                );
+              }
+              return (
+                <>
+                  <p className="text-[11px] font-semibold" style={{ color: C.muted }}>
+                    {billable.length} {billable.length === 1 ? "booking" : "bookings"}
                   </p>
-                )}
-              </>
-            );
-          })()}
+                  {blocks.length > 0 && (
+                    <p className="text-[10.5px]" style={{ color: C.muted, marginTop: 1 }}>
+                      {blocks.length} {blocks.length === 1 ? "block" : "blocks"}
+                    </p>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+          {allDayBlock && <ChevronRight size={16} style={{ color: C.muted }} />}
         </div>
       </Card>
 
@@ -6407,33 +6419,23 @@ const DayCalendarView = ({
             );
           })}
 
-          {/* Whole-day off: grey the entire grid instead of drawing a
-              second block card. Still tappable so the stylist can open
-              / remove the day-off entry. */}
+          {/* Whole-day off: grey the entire grid as a visual cue.
+              Purely decorative — pointer-events: none so the
+              underlying appointment cards stay tappable. The
+              all-day block itself is opened from the top "All day"
+              header card (which becomes a tap target when an
+              allDayBlock exists). */}
           {allDayBlock && (
-            <button
-              type="button"
-              onClick={() => onTap(allDayBlock)}
-              className="absolute inset-0 flex items-center justify-center"
+            <div
+              aria-hidden
+              className="absolute inset-0"
               style={{
                 background: "rgba(21, 17, 26, 0.06)",
                 backdropFilter: "saturate(0.6)",
                 WebkitBackdropFilter: "saturate(0.6)",
+                pointerEvents: "none",
               }}
-              aria-label="Unavailable all day — tap to edit"
-            >
-              <span
-                className="text-[11px] font-semibold uppercase tracking-widest px-3 py-1.5 rounded-full"
-                style={{
-                  color: C.muted,
-                  background: C.paper,
-                  border: `1px solid ${C.hairline}`,
-                  letterSpacing: "0.14em",
-                }}
-              >
-                Unavailable all day
-              </span>
-            </button>
+            />
           )}
         </div>
       )}
