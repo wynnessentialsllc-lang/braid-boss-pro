@@ -206,7 +206,9 @@ import {
 import {
   parseInventoryCsv,
   INVENTORY_CSV_TEMPLATE,
+  buildShopSeedSuggestions,
   type CsvImportResult,
+  type ShopSeedSuggestion,
 } from "./lib/inventory-import";
 import {
   getSeasonGuide,
@@ -18492,6 +18494,21 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
   const [openSheet, setOpenSheet] = useState(false);
   const [restocking, setRestocking] = useState<InventoryItem | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [shopSeedOpen, setShopSeedOpen] = useState(false);
+
+  // Only show the "Seed from Shop" entry when there's something to
+  // seed from — keeps the empty state tidy for stylists who haven't
+  // listed any products. Includes already-linked products so the
+  // preview can still show their status.
+  const storefrontProducts = (store.productsApi?.products || []) as any[];
+  const unlinkedProductCount = useMemo(() => {
+    const linkedIds = new Set(
+      itemsRaw
+        .map(i => (i.storefrontProductId || "").trim())
+        .filter(Boolean),
+    );
+    return storefrontProducts.filter(p => !p.inventory_item_id && !linkedIds.has(p.id)).length;
+  }, [storefrontProducts, itemsRaw]);
 
   const visible = useMemo(() => {
     const base = filter === "archived" ? archived : items;
@@ -18600,6 +18617,37 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
           </button>
         </div>
 
+        {unlinkedProductCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setShopSeedOpen(true)}
+            className="w-full rounded-2xl p-3 text-left active:scale-[0.99] transition"
+            style={{ background: "rgba(124,58,237,0.08)", border: `1px solid rgba(124,58,237,0.25)` }}
+          >
+            <div className="flex items-center gap-3">
+              <div
+                aria-hidden
+                className="flex-shrink-0"
+                style={{
+                  width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                  background: GRADIENTS.hero, color: "#FFFFFF",
+                }}
+              >
+                <Sparkles size={14} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+                  Pull inventory from your Shop
+                </p>
+                <p className="text-[11px]" style={{ color: C.coffee }}>
+                  {unlinkedProductCount} product{unlinkedProductCount === 1 ? "" : "s"} ready to import + auto-link.
+                </p>
+              </div>
+              <ChevronRight size={16} style={{ color: C.muted }} />
+            </div>
+          </button>
+        )}
+
         {/* List */}
         {visible.length === 0 ? (
           <EmptyState
@@ -18613,7 +18661,7 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
                   : "Add the hair, bundles, tools, and supplies you actually use. Restocks become expenses, on-client use becomes cost-of-goods."
             }
             cta={filter === "all" ? (
-              <div className="flex gap-2 items-center">
+              <div className="flex gap-2 items-center flex-wrap justify-center">
                 <button
                   type="button"
                   onClick={handleAdd}
@@ -18622,6 +18670,16 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
                 >
                   + Add first item
                 </button>
+                {unlinkedProductCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShopSeedOpen(true)}
+                    className="rounded-full px-4 py-2 text-[12px] font-semibold active:scale-[0.97] transition"
+                    style={{ background: GRADIENTS.hero, color: "#FFFFFF", border: 0, letterSpacing: "0.04em" }}
+                  >
+                    Pull from Shop ({unlinkedProductCount})
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setImportOpen(true)}
@@ -18710,6 +18768,13 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
         <InventoryImportSheet
           store={store}
           onClose={() => setImportOpen(false)}
+        />
+      )}
+
+      {shopSeedOpen && (
+        <ShopSeedSheet
+          store={store}
+          onClose={() => setShopSeedOpen(false)}
         />
       )}
     </div>
@@ -19302,6 +19367,237 @@ const InventoryImportSheet = ({ store, onClose }: { store: any; onClose: () => v
                   Linked {done.linked} storefront product{done.linked === 1 ? "" : "s"}.
                 </p>
               )}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+              style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+            >
+              Done
+            </button>
+          </>
+        )}
+      </div>
+    </Sheet>
+  );
+};
+
+// Seed-from-Shop: turn existing storefront products into inventory
+// items in one tap, and set the product's inventory_item_id at the
+// same time so storefront sales start decrementing immediately.
+// All-rows-selected by default — the stylist usually wants everything,
+// and unchecking a row is faster than checking every row.
+const ShopSeedSheet = ({ store, onClose }: { store: any; onClose: () => void }) => {
+  const products = (store.productsApi?.products || []) as any[];
+  const existingItems = (store.inventoryItems || []) as InventoryItem[];
+  const upsertProduct = store.productsApi?.upsert;
+  const suggestions = useMemo(
+    () => buildShopSeedSuggestions(
+      products.map(p => ({
+        id: p.id,
+        title: p.title,
+        slug: p.slug,
+        category: (p.category as string) || null,
+        price: typeof p.price === "number" ? p.price : null,
+        inventory_count: typeof p.inventory_count === "number" ? p.inventory_count : null,
+        image_url: p.image_url || null,
+        inventory_item_id: (p.inventory_item_id as string | null) || null,
+      })),
+      existingItems,
+    ),
+    [products, existingItems],
+  );
+
+  // Selection map keyed by productId. Defaults: every actionable
+  // (un-linked) row is on; linked rows are off and disabled.
+  const [selected, setSelected] = useState<Record<string, boolean>>(() => {
+    const seed: Record<string, boolean> = {};
+    for (const s of suggestions) seed[s.productId] = !s.alreadyLinked;
+    return seed;
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState<{ created: number; linked: number } | null>(null);
+
+  const toggle = (id: string) =>
+    setSelected(prev => ({ ...prev, [id]: !prev[id] }));
+
+  const selectedCount = suggestions.filter(s => selected[s.productId] && !s.alreadyLinked).length;
+  const setAll = (on: boolean) => {
+    const next: Record<string, boolean> = {};
+    for (const s of suggestions) next[s.productId] = on && !s.alreadyLinked;
+    setSelected(next);
+  };
+
+  const handleCommit = async () => {
+    setErr(null);
+    if (selectedCount === 0) { setErr("Pick at least one product to import."); return; }
+    if (!upsertProduct) { setErr("Storefront isn't available right now."); return; }
+    setBusy(true);
+    try {
+      let created = 0;
+      let linked = 0;
+      for (const s of suggestions) {
+        if (!selected[s.productId] || s.alreadyLinked) continue;
+        // Items first so the product link points at a real id.
+        await store.upsertInventoryItem(s.item);
+        created++;
+        const p = products.find(x => x.id === s.productId);
+        if (!p) continue;
+        // Patch only inventory_item_id; re-pass title to satisfy the
+        // upsert path's not-empty validation, leave every other field
+        // untouched so we don't clobber pricing / images / variants.
+        await upsertProduct({
+          id: s.productId,
+          title: p.title,
+          inventory_item_id: s.item.id,
+        } as any);
+        linked++;
+      }
+      setDone({ created, linked });
+    } catch (e: any) {
+      setErr(e?.message || "Import failed partway through. Check Inventory to see what landed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open onClose={onClose} title="Pull inventory from Shop">
+      <div className="space-y-4 pb-4">
+        {!done && (
+          <>
+            <p className="text-[12px]" style={{ color: C.muted }}>
+              We'll create an inventory item for each product you pick and link them so every storefront sale auto-deducts stock. Cost-per-unit isn't on your product listings, so we'll leave it at $0 — set it after import to start seeing materials cost in Reports.
+            </p>
+
+            {suggestions.length === 0 ? (
+              <div className="rounded-2xl p-3" style={{ background: C.cream, border: `1px solid ${C.hairline}` }}>
+                <p className="text-[12px]" style={{ color: C.muted }}>You don't have any storefront products yet.</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+                    {selectedCount} of {suggestions.filter(s => !s.alreadyLinked).length} selected
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAll(true)}
+                      className="text-[11px] font-semibold"
+                      style={{ color: C.goldDeep }}
+                    >
+                      Select all
+                    </button>
+                    <span style={{ color: C.muted }}>·</span>
+                    <button
+                      type="button"
+                      onClick={() => setAll(false)}
+                      className="text-[11px] font-semibold"
+                      style={{ color: C.coffee }}
+                    >
+                      None
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2" style={{ maxHeight: 420, overflowY: "auto" }}>
+                  {suggestions.map(s => {
+                    const isOn = !!selected[s.productId] && !s.alreadyLinked;
+                    return (
+                      <button
+                        type="button"
+                        key={s.productId}
+                        onClick={() => !s.alreadyLinked && toggle(s.productId)}
+                        disabled={s.alreadyLinked}
+                        className="w-full text-left rounded-xl p-3 flex items-center gap-3 active:scale-[0.99] transition"
+                        style={{
+                          background: s.alreadyLinked ? "rgba(0,0,0,0.03)" : (isOn ? "rgba(124,58,237,0.06)" : "#fff"),
+                          border: `1px solid ${s.alreadyLinked ? C.hairline : (isOn ? "rgba(124,58,237,0.35)" : C.hairline)}`,
+                          opacity: s.alreadyLinked ? 0.6 : 1,
+                        }}
+                      >
+                        <div
+                          aria-hidden
+                          style={{
+                            width: 18, height: 18, borderRadius: 6, flexShrink: 0,
+                            display: "grid", placeItems: "center",
+                            background: isOn ? C.espresso : "#fff",
+                            border: `1px solid ${isOn ? C.espresso : C.hairline}`,
+                            color: "#fff",
+                          }}
+                        >
+                          {isOn && <Check size={12} />}
+                        </div>
+                        {s.item.photoPath ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={s.item.photoPath}
+                            alt=""
+                            style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 8, flexShrink: 0 }}
+                          />
+                        ) : (
+                          <div style={{ width: 40, height: 40, borderRadius: 8, background: C.cream, flexShrink: 0, display: "grid", placeItems: "center" }}>
+                            <Layers size={14} style={{ color: C.muted }} />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{s.productTitle}</p>
+                          <p className="text-[11px]" style={{ color: C.muted }}>
+                            {[s.item.category, s.item.retailPrice != null ? fmtMoney(Number(s.item.retailPrice), store.business?.currency || "USD") : null]
+                              .filter(Boolean)
+                              .join(" · ") || "—"}
+                          </p>
+                          {s.alreadyLinked && (
+                            <p className="text-[10px] mt-0.5" style={{ color: C.success }}>Already linked</p>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={busy}
+                className="flex-1 rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+                style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCommit}
+                disabled={busy || selectedCount === 0}
+                className="flex-1 rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+                style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+              >
+                {busy ? "Importing…" : `Import ${selectedCount}`}
+              </button>
+            </div>
+          </>
+        )}
+
+        {done && (
+          <>
+            <div className="rounded-2xl p-4 text-center" style={{ background: "rgba(92,124,74,0.08)", border: `1px solid rgba(92,124,74,0.25)` }}>
+              <p className="text-[14px] font-semibold" style={{ color: C.espresso }}>
+                Imported {done.created} item{done.created === 1 ? "" : "s"}
+              </p>
+              <p className="text-[12px] mt-1" style={{ color: C.coffee }}>
+                Linked to {done.linked} storefront product{done.linked === 1 ? "" : "s"}. Storefront sales will start auto-deducting stock.
+              </p>
+              <p className="text-[11px] mt-2" style={{ color: C.muted }}>
+                Add cost-per-unit on each item to see materials cost in Reports.
+              </p>
             </div>
             <button
               type="button"
@@ -22394,7 +22690,7 @@ const ReviewsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
 // ============================================================
 // PRODUCTS MANAGER (Phase 4) — lightweight retail catalog.
 // ============================================================
-const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings }: { store: any; onBack: () => void; openOrders?: () => void; openShippingSettings?: () => void }) => {
+const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openInventory }: { store: any; onBack: () => void; openOrders?: () => void; openShippingSettings?: () => void; openInventory?: () => void }) => {
   const api = store.productsApi;
   const items: StorefrontProduct[] = api?.products || [];
   const currency = store.business?.currency || "USD";
@@ -22478,12 +22774,26 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings }: { s
         {/* Shop sub-nav: Orders + Shipping live above the product
             list so the stylist sees their commerce surface at a
             glance. Tapping either routes to a dedicated screen. */}
-        {(openOrders || openShippingSettings) && (
+        {(openOrders || openShippingSettings || openInventory) && (
           <div className="grid grid-cols-2 gap-2 mb-2">
             {openOrders && (
               <Card className="p-3 active:scale-[0.99] cursor-pointer" onClick={openOrders}>
                 <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.brandPrimary, letterSpacing: "0.14em" }}>Orders</p>
                 <p className="text-[13px] font-semibold mt-1" style={{ color: C.espresso }}>Manage + fulfill</p>
+              </Card>
+            )}
+            {openInventory && (
+              <Card className="p-3 active:scale-[0.99] cursor-pointer" onClick={openInventory}>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.brandPrimary, letterSpacing: "0.14em" }}>Inventory</p>
+                <p className="text-[13px] font-semibold mt-1" style={{ color: C.espresso }}>
+                  {(() => {
+                    const inv = (store.inventoryItems || []) as InventoryItem[];
+                    const active = inv.filter(isActiveItem);
+                    if (active.length === 0) return "Track hair & supplies";
+                    const low = active.filter(isLowStock).length;
+                    return low > 0 ? `${active.length} items · ${low} low` : `${active.length} items`;
+                  })()}
+                </p>
               </Card>
             )}
             {openShippingSettings && (
@@ -23518,6 +23828,10 @@ export default function App() {
   const [moneyPeriod, setMoneyPeriod] = useState<string | null>(null);
   const goToMoney = (p: string) => { setMoneyPeriod(p); setActive("money"); };
   const [secondary, setSecondary] = useState<string | null>(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
+  // Inventory can be reached from two surfaces (Settings → Catalog
+  // and Shop). The back button should return to the screen the user
+  // came from, so we remember the origin when navigating in.
+  const [inventoryBack, setInventoryBack] = useState<"settings" | "products">("settings");
   // Which contextual slice the Expenses screen opens on. Set by the
   // Money tab's Profit KPI tiles so each tile lands on a focused view
   // instead of all of them dumping to the same overview.
@@ -23761,7 +24075,7 @@ export default function App() {
               openQuickClient={openQuickClient}
               openQuickTx={openQuickTx}
               openSettings={() => setSecondary("settings")}
-              openInventory={() => setSecondary("inventory")}
+              openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }}
               openPolicies={() => setSecondary("policies")}
               openSavedQuotes={() => setSecondary("savedQuotes")}
               openReminders={() => { setNotifOpen(true); notifications.markAllRead(); }}
@@ -23851,8 +24165,8 @@ export default function App() {
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => setSecondary("inventory")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
-      {secondary === "inventory" && <InventoryScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "inventory" && <InventoryScreen store={store} onBack={() => setSecondary(inventoryBack)} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
@@ -23938,6 +24252,7 @@ export default function App() {
           onBack={() => setSecondary("settings")}
           openOrders={() => setSecondary("orders")}
           openShippingSettings={() => setSecondary("shippingSettings")}
+          openInventory={() => { setInventoryBack("products"); setSecondary("inventory"); }}
         />
       )}
       {secondary === "orders" && <OrdersScreen store={store} onBack={() => setSecondary("products")} />}
