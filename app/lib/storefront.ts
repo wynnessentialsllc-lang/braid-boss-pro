@@ -470,8 +470,11 @@ export const useProducts = (userId: string | null): {
       .select("*")
       .eq("user_id", userId)
       .order("is_featured", { ascending: false })
-      .order("sort_order", { ascending: true })
-      .order("created_at", { ascending: false });
+      // Featured first (stylist's explicit pin), then alphabetical
+      // by title so the catalog reads predictably. Pre-#314 we sorted
+      // by sort_order + created_at, which was effectively "newest first"
+      // — confusing once the catalog grew past a few items.
+      .order("title", { ascending: true });
     if (err) { setError(err.message); setLoading(false); return; }
     // Normalize gallery_images — the DB stores jsonb, the type
     // exposes string[] so consumers don't need to handle either
