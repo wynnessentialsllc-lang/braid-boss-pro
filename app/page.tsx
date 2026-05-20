@@ -204,6 +204,11 @@ import {
   itemValue,
 } from "./lib/inventory";
 import {
+  parseInventoryCsv,
+  INVENTORY_CSV_TEMPLATE,
+  type CsvImportResult,
+} from "./lib/inventory-import";
+import {
   getSeasonGuide,
   buildPersonalization,
   type SeasonGuide,
@@ -18486,6 +18491,7 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
   const [editing, setEditing] = useState<InventoryItem | null>(null);
   const [openSheet, setOpenSheet] = useState(false);
   const [restocking, setRestocking] = useState<InventoryItem | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const visible = useMemo(() => {
     const base = filter === "archived" ? archived : items;
@@ -18575,14 +18581,24 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
           ))}
         </div>
 
-        <input
-          type="search"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="Search items, SKU, supplier…"
-          className="w-full px-3 py-2.5 rounded-xl text-[14px]"
-          style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
-        />
+        <div className="flex gap-2 items-center">
+          <input
+            type="search"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search items, SKU, supplier…"
+            className="flex-1 px-3 py-2.5 rounded-xl text-[14px]"
+            style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+          />
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            className="rounded-xl px-3 py-2.5 text-[12px] font-semibold whitespace-nowrap active:scale-[0.97] transition flex items-center gap-1.5"
+            style={{ background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}` }}
+          >
+            <Upload size={13} /> Import CSV
+          </button>
+        </div>
 
         {/* List */}
         {visible.length === 0 ? (
@@ -18597,14 +18613,24 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
                   : "Add the hair, bundles, tools, and supplies you actually use. Restocks become expenses, on-client use becomes cost-of-goods."
             }
             cta={filter === "all" ? (
-              <button
-                type="button"
-                onClick={handleAdd}
-                className="rounded-full px-4 py-2 text-[12px] font-semibold active:scale-[0.97] transition"
-                style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}`, letterSpacing: "0.04em" }}
-              >
-                + Add first item
-              </button>
+              <div className="flex gap-2 items-center">
+                <button
+                  type="button"
+                  onClick={handleAdd}
+                  className="rounded-full px-4 py-2 text-[12px] font-semibold active:scale-[0.97] transition"
+                  style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}`, letterSpacing: "0.04em" }}
+                >
+                  + Add first item
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportOpen(true)}
+                  className="rounded-full px-4 py-2 text-[12px] font-semibold active:scale-[0.97] transition"
+                  style={{ background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}`, letterSpacing: "0.04em" }}
+                >
+                  Import CSV
+                </button>
+              </div>
             ) : undefined}
           />
         ) : (
@@ -18677,6 +18703,13 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
             try { await store.setInventoryItemQuantity(movement.itemId, movement.quantityOnHand); } catch { /* best-effort */ }
             setRestocking(null);
           }}
+        />
+      )}
+
+      {importOpen && (
+        <InventoryImportSheet
+          store={store}
+          onClose={() => setImportOpen(false)}
         />
       )}
     </div>
@@ -19037,6 +19070,249 @@ const InventoryMovementSheet = ({ item, currency, onClose, onApplied }: {
             {busy ? "Applying…" : "Apply"}
           </button>
         </div>
+      </div>
+    </Sheet>
+  );
+};
+
+// Bulk CSV importer for inventory items. Two-step: pick a file →
+// preview → commit. Preview surfaces row-level errors / warnings and
+// shows which storefront products will get linked in the same pass.
+// All upserts (and product-link updates) happen client-side via the
+// existing useStorage + useProducts paths, so nothing here needs a
+// new server endpoint.
+const InventoryImportSheet = ({ store, onClose }: { store: any; onClose: () => void }) => {
+  const [result, setResult] = useState<CsvImportResult | null>(null);
+  const [filename, setFilename] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState<{ created: number; linked: number } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const products = (store.productsApi?.products || []) as Array<{ id: string; title: string; slug: string }>;
+
+  const handleFile = async (file: File) => {
+    setErr(null);
+    try {
+      const text = await file.text();
+      const parsed = parseInventoryCsv(text, {
+        items: (store.inventoryItems || []) as InventoryItem[],
+        products,
+      });
+      setResult(parsed);
+      setFilename(file.name);
+    } catch (e: any) {
+      setErr(e?.message || "Couldn't read this file.");
+    }
+  };
+
+  const handlePick = () => fileInputRef.current?.click();
+  const handleReset = () => { setResult(null); setFilename(null); setErr(null); setDone(null); };
+
+  const handleDownloadTemplate = () => {
+    const blob = new Blob([INVENTORY_CSV_TEMPLATE], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "inventory-template.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCommit = async () => {
+    if (!result) return;
+    const toImport = result.rows.filter(r => r.errors.length === 0);
+    if (toImport.length === 0) { setErr("Nothing to import — every row has an error."); return; }
+    setBusy(true);
+    setErr(null);
+    try {
+      let created = 0;
+      let linked = 0;
+      // Items first so the products can reference real inventory_item_ids.
+      for (const r of toImport) {
+        await store.upsertInventoryItem(r.item);
+        created++;
+      }
+      // Then the product → inventory link pass. Only touch products
+      // the CSV actually pointed at, and only set the link (no other
+      // fields) so we don't accidentally overwrite the stylist's
+      // copy or pricing.
+      const upsertProduct = store.productsApi?.upsert;
+      if (upsertProduct) {
+        for (const r of toImport) {
+          if (!r.matchedProductId) continue;
+          const p = products.find(x => x.id === r.matchedProductId);
+          if (!p) continue;
+          await upsertProduct({
+            id: r.matchedProductId,
+            // upsert is a PATCH on existing rows when id is set, but
+            // it requires the title to satisfy validation. Re-pass
+            // the current title so we never blank it.
+            title: p.title,
+            inventory_item_id: r.item.id,
+          } as any);
+          linked++;
+        }
+      }
+      setDone({ created, linked });
+    } catch (e: any) {
+      setErr(e?.message || "Import failed partway through. Check Inventory to see what landed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open onClose={onClose} title="Import inventory">
+      <div className="space-y-4 pb-4">
+        {!result && !done && (
+          <>
+            <p className="text-[12px]" style={{ color: C.muted }}>
+              Drop in a CSV with one row per item. Columns can be in any order, and we'll match common header names (Name, Item, Qty, Cost, etc.). To link a row to one of your storefront products, add a <span style={{ color: C.espresso }}>storefront_product</span> column with the product's slug or title.
+            </p>
+
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              className="w-full rounded-xl px-3 py-2.5 text-[13px] font-semibold"
+              style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
+            >
+              Download template
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePick}
+              className="w-full rounded-xl px-3 py-3 text-[13px] font-semibold"
+              style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+            >
+              Choose CSV file
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              style={{ display: "none" }}
+              onChange={async e => {
+                const f = e.target.files?.[0];
+                if (f) await handleFile(f);
+                // Allow re-picking the same file twice in a row.
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+            />
+
+            {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
+          </>
+        )}
+
+        {result && !done && (
+          <>
+            <div className="rounded-2xl p-3" style={{ background: C.cream, border: `1px solid ${C.hairline}` }}>
+              <p className="text-[11px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+                {filename || "Pasted CSV"}
+              </p>
+              <p className="text-[13px] mt-1" style={{ color: C.espresso }}>
+                <span className="font-semibold">{result.summary.valid}</span> row{result.summary.valid === 1 ? "" : "s"} ready
+                {result.summary.skipped > 0 ? ` · ${result.summary.skipped} will skip` : ""}
+                {result.summary.duplicates > 0 ? ` · ${result.summary.duplicates} duplicate name${result.summary.duplicates === 1 ? "" : "s"}` : ""}
+                {result.summary.productsToLink > 0 ? ` · ${result.summary.productsToLink} product link${result.summary.productsToLink === 1 ? "" : "s"}` : ""}
+              </p>
+            </div>
+
+            {result.rows.length === 0 ? (
+              <p className="text-[12px]" style={{ color: C.muted }}>
+                We couldn't find any rows in this file. Check that there's a header line and at least one data row.
+              </p>
+            ) : (
+              <div className="space-y-2" style={{ maxHeight: 380, overflowY: "auto" }}>
+                {result.rows.map((r, i) => {
+                  const hasErr = r.errors.length > 0;
+                  return (
+                    <div
+                      key={i}
+                      className="rounded-xl p-3"
+                      style={{
+                        background: hasErr ? "rgba(156,61,46,0.06)" : "#fff",
+                        border: `1px solid ${hasErr ? "rgba(156,61,46,0.25)" : C.hairline}`,
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>
+                          {r.item.name || <span style={{ color: C.danger }}>(no name)</span>}
+                        </p>
+                        <p className="text-[11px] tabular-nums" style={{ color: C.muted }}>
+                          {Number(r.item.quantityOnHand) || 0}{r.item.unit ? ` ${r.item.unit}` : ""}
+                        </p>
+                      </div>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        {[r.item.category, r.item.supplier].filter(Boolean).join(" · ") || "—"}
+                      </p>
+                      {r.matchedProductTitle && (
+                        <p className="text-[11px] mt-1" style={{ color: C.success }}>
+                          ↳ links to “{r.matchedProductTitle}”
+                        </p>
+                      )}
+                      {r.errors.map((e, j) => (
+                        <p key={`e${j}`} className="text-[11px] mt-1" style={{ color: C.danger }}>• {e}</p>
+                      ))}
+                      {r.warnings.map((w, j) => (
+                        <p key={`w${j}`} className="text-[11px] mt-1" style={{ color: C.muted }}>• {w}</p>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={handleReset}
+                disabled={busy}
+                className="flex-1 rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+                style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
+              >
+                Pick another file
+              </button>
+              <button
+                type="button"
+                onClick={handleCommit}
+                disabled={busy || result.summary.valid === 0}
+                className="flex-1 rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+                style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+              >
+                {busy ? "Importing…" : `Import ${result.summary.valid}`}
+              </button>
+            </div>
+          </>
+        )}
+
+        {done && (
+          <>
+            <div className="rounded-2xl p-4 text-center" style={{ background: "rgba(92,124,74,0.08)", border: `1px solid rgba(92,124,74,0.25)` }}>
+              <p className="text-[14px] font-semibold" style={{ color: C.espresso }}>
+                Imported {done.created} item{done.created === 1 ? "" : "s"}
+              </p>
+              {done.linked > 0 && (
+                <p className="text-[12px] mt-1" style={{ color: C.coffee }}>
+                  Linked {done.linked} storefront product{done.linked === 1 ? "" : "s"}.
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+              style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+            >
+              Done
+            </button>
+          </>
+        )}
       </div>
     </Sheet>
   );
