@@ -43,7 +43,9 @@ export type SyncTable =
   | "communications"
   | "notifications"
   | "photos"
-  | "business_expenses";
+  | "business_expenses"
+  | "inventory_items"
+  | "inventory_movements";
 
 // What columns each table has beyond the standard (user_id, id,
 // data, created_at, updated_at). Used to build the upsert payload.
@@ -163,6 +165,37 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     recurring_interval: r => cleanString(r.recurringInterval),
     next_billing_date: r => cleanDate(r.nextBillingDate),
     receipt_path: r => cleanString(r.receiptPath),
+  },
+  // Inventory items get their on-hand quantity here for fast reads,
+  // but the canonical mutation path for quantity is the
+  // inventory_apply_movement RPC — never edit quantity_on_hand from
+  // the upsert payload at runtime; only the RPC bumps it.
+  inventory_items: {
+    name: r => cleanString(r.name),
+    sku: r => cleanString(r.sku),
+    category: r => cleanString(r.category),
+    unit: r => cleanString(r.unit),
+    unit_cost: r => cleanNumber(r.unitCost),
+    retail_price: r => (r.retailPrice == null || r.retailPrice === "" ? null : cleanNumber(r.retailPrice)),
+    quantity_on_hand: r => cleanNumber(r.quantityOnHand),
+    low_stock_threshold: r => cleanNumber(r.lowStockThreshold),
+    supplier: r => cleanString(r.supplier),
+    photo_path: r => cleanString(r.photoPath),
+    storefront_product_id: r => cleanString(r.storefrontProductId),
+    archived_at: r => cleanString(r.archivedAt),
+  },
+  // Movements are append-only — we never round-trip an update on
+  // them. The promoted columns mirror the table so list views can
+  // filter by reason or item without parsing data jsonb.
+  inventory_movements: {
+    item_id: r => cleanString(r.itemId),
+    delta: r => cleanNumber(r.delta),
+    reason: r => cleanString(r.reason),
+    appointment_id: r => cleanString(r.appointmentId),
+    storefront_order_id: r => cleanString(r.storefrontOrderId),
+    business_expense_id: r => cleanString(r.businessExpenseId),
+    unit_cost_snapshot: r => (r.unitCostSnapshot == null ? null : cleanNumber(r.unitCostSnapshot)),
+    note: r => cleanString(r.note),
   },
 };
 
@@ -300,6 +333,30 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.nextBillingDate = base.nextBillingDate ?? row.next_billing_date;
       base.receiptPath = base.receiptPath ?? row.receipt_path;
       break;
+    case "inventory_items":
+      base.name = base.name ?? row.name;
+      base.sku = base.sku ?? row.sku;
+      base.category = base.category ?? row.category;
+      base.unit = base.unit ?? row.unit;
+      base.unitCost = base.unitCost ?? row.unit_cost;
+      base.retailPrice = base.retailPrice ?? row.retail_price;
+      base.quantityOnHand = base.quantityOnHand ?? row.quantity_on_hand;
+      base.lowStockThreshold = base.lowStockThreshold ?? row.low_stock_threshold;
+      base.supplier = base.supplier ?? row.supplier;
+      base.photoPath = base.photoPath ?? row.photo_path;
+      base.storefrontProductId = base.storefrontProductId ?? row.storefront_product_id;
+      base.archivedAt = base.archivedAt ?? row.archived_at;
+      break;
+    case "inventory_movements":
+      base.itemId = base.itemId ?? row.item_id;
+      base.delta = base.delta ?? row.delta;
+      base.reason = base.reason ?? row.reason;
+      base.appointmentId = base.appointmentId ?? row.appointment_id;
+      base.storefrontOrderId = base.storefrontOrderId ?? row.storefront_order_id;
+      base.businessExpenseId = base.businessExpenseId ?? row.business_expense_id;
+      base.unitCostSnapshot = base.unitCostSnapshot ?? row.unit_cost_snapshot;
+      base.note = base.note ?? row.note;
+      break;
   }
   return base;
 };
@@ -375,6 +432,19 @@ export const syncBusinessExpenses = {
   upsert: (userId: string, record: any) => upsertOne("business_expenses", userId, record),
   delete: (userId: string, id: string) => deleteOne("business_expenses", userId, id),
   pull: (userId: string) => pullAll("business_expenses", userId),
+};
+
+export const syncInventoryItems = {
+  upsert: (userId: string, record: any) => upsertOne("inventory_items", userId, record),
+  delete: (userId: string, id: string) => deleteOne("inventory_items", userId, id),
+  pull: (userId: string) => pullAll("inventory_items", userId),
+};
+
+// Movements are append-only — there's no delete and the only writes
+// happen via the inventory_apply_movement RPC. We still expose pull
+// so the local store can render the ledger.
+export const syncInventoryMovements = {
+  pull: (userId: string) => pullAll("inventory_movements", userId),
 };
 
 // ---- Settings (singleton row per user) ---------------------------------
