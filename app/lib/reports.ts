@@ -29,6 +29,10 @@ export type AppointmentLike = {
   // deposit_required setting at approval time.
   depositRequired?: boolean | null;
   source?: string | null;   // "public_booking" | "manual" | "owner_created" | ...
+  cancelledAt?: string | null;
+  cancelled_at?: string | null;
+  canceledAt?: string | null;
+  canceled_at?: string | null;
 };
 
 const num = (v: unknown): number => {
@@ -36,12 +40,28 @@ const num = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
-const isCanceledStatus = (status: unknown): boolean =>
-  status === "cancelled" || status === "canceled";
+const isCanceledStatus = (status: unknown): boolean => {
+  const s = String(status || "").toLowerCase();
+  return s === "cancelled" || s === "canceled";
+};
+
+const isCanceledAppointment = (a: AppointmentLike): boolean => {
+  if (!a) return false;
+  if (isCanceledStatus(a.status)) return true;
+  // A cancellation timestamp from any source (server cancel route,
+  // legacy migration, public-booking cancel) means the row is
+  // cancelled even if the status field wasn't flipped cleanly. Without
+  // this fallback, partially-updated rows kept inflating reports.
+  if (a.cancelledAt || a.cancelled_at || a.canceledAt || a.canceled_at) return true;
+  return false;
+};
+
+const isNoShowStatus = (status: unknown): boolean =>
+  String(status || "").toLowerCase() === "no_show";
 
 const isBillable = (a: AppointmentLike): boolean => {
   if (!a) return false;
-  if (isCanceledStatus(a.status) || a.status === "no_show") return false;
+  if (isCanceledAppointment(a) || isNoShowStatus(a.status)) return false;
   if (a.kind && a.kind !== "appointment") return false;
   return true;
 };
