@@ -34,4 +34,16 @@ body {
   /* Per-screen bottom padding (e.g. tab bar) already adds
      env(safe-area-inset-bottom, 0px); not adding it here would
      double-pad. Same for left/right — we never use landscape. */
+  /* Disable the browser-native pull-to-refresh (Chrome Android +
+     installed PWA). Without this, the OS swipe-down triggers a hard
+     page reload that fights our own PullToRefresh and kills client
+     state. `contain` blocks the chain to the viewport but still
+     allows inner scroll containers to behave normally. */
+  overscroll-behavior-y: contain;
+}
+html {
+  /* Same reasoning as body — Chrome reads overscroll-behavior off
+     the viewport root, so setting it on body alone isn't always
+     enough on Android PWA. */
+  overscroll-behavior-y: contain;
 }
