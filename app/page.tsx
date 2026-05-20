@@ -19238,25 +19238,16 @@ const InventoryImportSheet = ({ store, onClose }: { store: any; onClose: () => v
         await store.upsertInventoryItem(r.item);
         created++;
       }
-      // Then the product → inventory link pass. Only touch products
-      // the CSV actually pointed at, and only set the link (no other
-      // fields) so we don't accidentally overwrite the stylist's
-      // copy or pricing.
-      const upsertProduct = store.productsApi?.upsert;
-      if (upsertProduct) {
+      // Then the product → inventory link pass. Uses the dedicated
+      // setInventoryLink so we ONLY touch the link column — past
+      // versions of this code ran a full upsert which blanked every
+      // other field on the product. Never again.
+      const setLink = store.productsApi?.setInventoryLink;
+      if (setLink) {
         for (const r of toImport) {
           if (!r.matchedProductId) continue;
-          const p = products.find(x => x.id === r.matchedProductId);
-          if (!p) continue;
-          await upsertProduct({
-            id: r.matchedProductId,
-            // upsert is a PATCH on existing rows when id is set, but
-            // it requires the title to satisfy validation. Re-pass
-            // the current title so we never blank it.
-            title: p.title,
-            inventory_item_id: r.item.id,
-          } as any);
-          linked++;
+          const ok = await setLink(r.matchedProductId, r.item.id);
+          if (ok) linked++;
         }
       }
       setDone({ created, linked });
@@ -19429,7 +19420,7 @@ const InventoryImportSheet = ({ store, onClose }: { store: any; onClose: () => v
 const ShopSeedSheet = ({ store, onClose }: { store: any; onClose: () => void }) => {
   const products = (store.productsApi?.products || []) as any[];
   const existingItems = (store.inventoryItems || []) as InventoryItem[];
-  const upsertProduct = store.productsApi?.upsert;
+  const setLink = store.productsApi?.setInventoryLink;
   const suggestions = useMemo(
     () => buildShopSeedSuggestions(
       products.map(p => ({
@@ -19471,7 +19462,7 @@ const ShopSeedSheet = ({ store, onClose }: { store: any; onClose: () => void }) 
   const handleCommit = async () => {
     setErr(null);
     if (selectedCount === 0) { setErr("Pick at least one product to import."); return; }
-    if (!upsertProduct) { setErr("Storefront isn't available right now."); return; }
+    if (!setLink) { setErr("Storefront isn't available right now."); return; }
     setBusy(true);
     try {
       let created = 0;
@@ -19481,17 +19472,12 @@ const ShopSeedSheet = ({ store, onClose }: { store: any; onClose: () => void }) 
         // Items first so the product link points at a real id.
         await store.upsertInventoryItem(s.item);
         created++;
-        const p = products.find(x => x.id === s.productId);
-        if (!p) continue;
-        // Patch only inventory_item_id; re-pass title to satisfy the
-        // upsert path's not-empty validation, leave every other field
-        // untouched so we don't clobber pricing / images / variants.
-        await upsertProduct({
-          id: s.productId,
-          title: p.title,
-          inventory_item_id: s.item.id,
-        } as any);
-        linked++;
+        // Targeted column update — CANNOT touch image_url, price,
+        // description, variants, etc. even if anything else here goes
+        // wrong. This is the fix for the May 14 incident where a
+        // full upsert wiped every product's images + info.
+        const ok = await setLink(s.productId, s.item.id);
+        if (ok) linked++;
       }
       setDone({ created, linked });
     } catch (e: any) {
