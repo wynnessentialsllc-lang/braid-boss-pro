@@ -61,6 +61,9 @@ export type InsightInput = {
   appointments: any[];
   receipts?: any[];
   communications?: any[];
+  // Optional. When passed, generateBossInsights surfaces a low-stock
+  // productivity insight that deep-links the stylist to Inventory.
+  inventoryItems?: any[];
   settings?: { business?: any };
   today: string;
 };
@@ -361,6 +364,46 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
       actionTarget: "tab:clients",
       createdAt: now,
     });
+  }
+
+  // ---- INVENTORY: low-stock heads-up ---------------------------------
+  //
+  // Only fires when the stylist actually uses inventory AND something
+  // is at/below threshold. Items with threshold 0 are opted out by
+  // design — that's the "don't alert me" signal from the editor.
+  // Priority climbs with severity: any out-of-stock active item bumps
+  // the insight to "high"; otherwise it stays "low" so the dashboard
+  // doesn't shout about a normal restock cue.
+  const inv = safeArr(input.inventoryItems);
+  if (inv.length > 0) {
+    const low = inv.filter((i: any) => {
+      if (!i || i.archivedAt) return false;
+      const t = num(i.lowStockThreshold);
+      if (t <= 0) return false;
+      return num(i.quantityOnHand) <= t;
+    });
+    if (low.length > 0) {
+      low.sort((a: any, b: any) =>
+        (num(a.lowStockThreshold) - num(a.quantityOnHand) >
+         num(b.lowStockThreshold) - num(b.quantityOnHand) ? -1 : 1));
+      const outOfStock = low.filter((i: any) => num(i.quantityOnHand) <= 0).length;
+      const sample = low.slice(0, 3).map((i: any) => i.name).filter(Boolean).join(", ");
+      const more = Math.max(0, low.length - 3);
+      out.push({
+        id: "inventory_low_stock",
+        category: "productivity",
+        title: outOfStock > 0
+          ? `${outOfStock === 1 ? "1 item is" : `${outOfStock} items are`} out of stock`
+          : `${low.length} ${low.length === 1 ? "item is" : "items are"} low on stock`,
+        body: sample
+          ? `${sample}${more > 0 ? ` and ${more} more` : ""} — restock before your next booking.`
+          : "Some inventory dipped below your alert threshold.",
+        priority: outOfStock > 0 ? "high" : "low",
+        actionLabel: "View inventory",
+        actionTarget: "tab:settings:inventory",
+        createdAt: now,
+      });
+    }
   }
 
   return out

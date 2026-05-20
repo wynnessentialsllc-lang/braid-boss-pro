@@ -134,6 +134,115 @@ export const computeInventoryTotals = (
   };
 };
 
+// ---- Reports helpers --------------------------------------------------
+
+// Items currently at or below their low-stock threshold (active only).
+// Sorted by "how far below" so the loudest signals lead the list.
+export const getLowStockItems = (items: InventoryItem[] | null | undefined): InventoryItem[] => {
+  const out = (items || []).filter(isLowStock);
+  out.sort((a, b) => {
+    const ga = itemThreshold(a) - itemQuantity(a);
+    const gb = itemThreshold(b) - itemQuantity(b);
+    return gb - ga;
+  });
+  return out;
+};
+
+// Movement-level cost basis. Prefers the snapshot (locked in at the
+// time of the movement) so historical figures don't shift when a
+// stylist later edits the master unit_cost. Falls back to the
+// current master cost only when no snapshot exists.
+const movementUnitCost = (
+  m: InventoryMovement,
+  itemById: Map<string, InventoryItem>,
+): number => {
+  if (m?.unitCostSnapshot != null && Number.isFinite(Number(m.unitCostSnapshot))) {
+    return Number(m.unitCostSnapshot);
+  }
+  const item = itemById.get(m?.itemId || "");
+  return item ? itemUnitCost(item) : 0;
+};
+
+// Consumption reasons — anything that takes stock OUT for a real
+// purpose (used on a client, sold, wasted). Excludes 'adjustment'
+// because adjustments are corrections, not consumption; including
+// them would let a typo-fix look like cost-of-goods.
+const CONSUMPTION_REASONS: ReadonlySet<MovementReason> = new Set([
+  "service_use",
+  "storefront_sale",
+  "waste",
+]);
+
+// Total cost of materials consumed in [startISO, endISO). Date
+// comparison is on the YYYY-MM-DD prefix of createdAt so callers can
+// pass calendar boundaries without needing the original timezone.
+export const computeMaterialsCostInRange = (
+  movements: InventoryMovement[] | null | undefined,
+  items: InventoryItem[] | null | undefined,
+  startISO: string,
+  endISO: string,
+): number => {
+  if (!startISO || !endISO) return 0;
+  const itemById = new Map<string, InventoryItem>();
+  for (const i of (items || [])) itemById.set(i.id, i);
+  let total = 0;
+  for (const m of (movements || [])) {
+    if (!m) continue;
+    if (!CONSUMPTION_REASONS.has(m.reason)) continue;
+    const day = String(m.createdAt || "").slice(0, 10);
+    if (!day || day < startISO || day >= endISO) continue;
+    const qty = Math.abs(Number(m.delta) || 0);
+    if (qty <= 0) continue;
+    total += qty * movementUnitCost(m, itemById);
+  }
+  return round2(total);
+};
+
+export type StyleMaterialsCost = {
+  style: string;
+  appointmentCount: number;
+  totalCost: number;
+};
+
+// Group consumption movements by appointment → style. Used by the
+// Profit view to answer "which styles are eating the most material".
+// Movements without an appointment_id (storefront sales, waste,
+// manual deductions) are excluded — they don't belong to a style.
+export const groupMaterialsCostByStyle = (
+  movements: InventoryMovement[] | null | undefined,
+  items: InventoryItem[] | null | undefined,
+  appointments: Array<{ id: string; style?: string | null }> | null | undefined,
+  startISO?: string,
+  endISO?: string,
+): StyleMaterialsCost[] => {
+  const itemById = new Map<string, InventoryItem>();
+  for (const i of (items || [])) itemById.set(i.id, i);
+  const apptStyle = new Map<string, string>();
+  for (const a of (appointments || [])) {
+    if (a?.id) apptStyle.set(a.id, (a.style || "").trim() || "Unspecified");
+  }
+  const byStyle = new Map<string, { totalCost: number; appts: Set<string> }>();
+  for (const m of (movements || [])) {
+    if (!m || m.reason !== "service_use") continue;
+    if (!m.appointmentId) continue;
+    if (startISO && endISO) {
+      const day = String(m.createdAt || "").slice(0, 10);
+      if (!day || day < startISO || day >= endISO) continue;
+    }
+    const style = apptStyle.get(m.appointmentId) || "Unspecified";
+    const qty = Math.abs(Number(m.delta) || 0);
+    if (qty <= 0) continue;
+    const cost = qty * movementUnitCost(m, itemById);
+    const cur = byStyle.get(style) || { totalCost: 0, appts: new Set<string>() };
+    cur.totalCost += cost;
+    cur.appts.add(m.appointmentId);
+    byStyle.set(style, cur);
+  }
+  return Array.from(byStyle.entries())
+    .map(([style, v]) => ({ style, appointmentCount: v.appts.size, totalCost: round2(v.totalCost) }))
+    .sort((a, b) => b.totalCost - a.totalCost);
+};
+
 // ---- RPC wrapper ------------------------------------------------------
 
 const uid = (): string => {
