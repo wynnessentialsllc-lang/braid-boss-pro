@@ -14468,51 +14468,89 @@ const useCloudSync = (userId: string | null, store: any) => {
     };
     const onVis = () => { void reconcile(); };
 
-    // Pull-to-refresh. The PullToRefresh component dispatches
-    // `bbp:refresh` but nothing listened for it — router.refresh()
-    // does nothing in this client-rendered app, so the gesture was
-    // cosmetic (spinner, no actual data refresh). Wire it to a real
-    // cloud re-pull of the user-visible tables (appointments +
-    // clients), replacing local state and re-seeding the diff
-    // snapshot so the follow-up push can't clobber what we pulled.
+    // Pull-to-refresh. PullToRefresh dispatches `bbp:refresh` with a
+    // `waitFor(promise)` on event.detail so the spinner can stay up
+    // until the refetch actually finishes (capped by the component's
+    // MAX_REFRESH_MS). We pull every user-visible table — a stylist
+    // who swiped down expects EVERYTHING to be current, not just
+    // appts + clients: inventory restocked on another device, a new
+    // storefront order, a recently-saved expense, etc.
+    //
     // Works identically in Safari and the installed PWA — it's a
     // window event + fetch, no PWA-specific path.
     let refreshBusy = false;
-    const onPullRefresh = async () => {
-      if (refreshBusy || !initialPullDone.current) return;
-      if (!navigator.onLine) return;
+    const onPullRefresh = async (): Promise<void> => {
+      if (refreshBusy) return;
+      if (!initialPullDone.current) return;
+      if (typeof navigator !== "undefined" && !navigator.onLine) return;
       refreshBusy = true;
       try {
-        const [apptsFresh, clientsFresh] = await Promise.all([
-          syncAppointments.pull(userId),
-          syncClients.pull(userId),
+        // Wrap each pull so a single offline / 500 can't take down
+        // the whole refresh — the others still update local state.
+        const safe = <T,>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
+
+        const [
+          apptsFresh, clientsFresh, quotesFresh, receiptsFresh,
+          commsFresh, photosFresh, expensesFresh,
+          inventoryFresh, movementsFresh,
+        ] = await Promise.all([
+          safe(syncAppointments.pull(userId)),
+          safe(syncClients.pull(userId)),
+          safe(syncQuotes.pull(userId)),
+          safe(syncReceipts.pull(userId)),
+          safe(syncCommunications.pull(userId)),
+          safe(syncPhotos.pull(userId)),
+          safe(syncBusinessExpenses.pull(userId)),
+          safe(syncInventoryItems.pull(userId)),
+          safe(syncInventoryMovements.pull(userId)),
         ]);
+
         const next: any = {};
-        if (Array.isArray(apptsFresh)) next.appointments = apptsFresh;
-        if (Array.isArray(clientsFresh)) next.clients = clientsFresh;
+        if (Array.isArray(apptsFresh))      next.appointments       = apptsFresh;
+        if (Array.isArray(clientsFresh))    next.clients            = clientsFresh;
+        if (Array.isArray(quotesFresh))     next.quotes             = quotesFresh;
+        if (Array.isArray(receiptsFresh))   next.receipts           = receiptsFresh;
+        if (Array.isArray(commsFresh))      next.commLog            = commsFresh;
+        if (Array.isArray(photosFresh))     next.photos             = photosFresh;
+        if (Array.isArray(expensesFresh))   next.businessExpenses   = expensesFresh;
+        if (Array.isArray(inventoryFresh))  next.inventoryItems     = inventoryFresh;
+        if (Array.isArray(movementsFresh))  next.inventoryMovements = movementsFresh;
         if (Object.keys(next).length > 0) store.replaceCloudState?.(next);
-        if (Array.isArray(apptsFresh)) {
-          snap.current.appointments.clear();
-          for (const r of apptsFresh) {
-            if (r?.id) snap.current.appointments.set(r.id, JSON.stringify(r));
+
+        // Re-seed the diff snapshot so the follow-up push can't push
+        // stale fields back up over the fresh cloud state.
+        const seed = (table: string, arr: any[] | null) => {
+          if (!Array.isArray(arr)) return;
+          snap.current[table].clear();
+          for (const r of arr) {
+            if (r?.id) snap.current[table].set(r.id, JSON.stringify(r));
           }
-        }
-        if (Array.isArray(clientsFresh)) {
-          snap.current.clients.clear();
-          for (const r of clientsFresh) {
-            if (r?.id) snap.current.clients.set(r.id, JSON.stringify(r));
-          }
-        }
-      } catch {
-        /* best-effort — the pull-to-refresh spinner still resolves */
+        };
+        seed("appointments", apptsFresh);
+        seed("clients", clientsFresh);
+        seed("quotes", quotesFresh);
+        seed("receipts", receiptsFresh);
+        seed("communications", commsFresh);
+        seed("photos", photosFresh);
+        seed("business_expenses", expensesFresh);
+        seed("inventory_items", inventoryFresh);
       } finally {
         refreshBusy = false;
       }
-      // Refresh the live booking-approvals queue too so the bell /
-      // pending surfaces reflect cloud truth right after the pull.
+      // Domain APIs that own their own fetch loops — kick in parallel.
+      try { void store.servicesApi?.refresh?.(); } catch { /* optional */ }
+      try { void store.productsApi?.refresh?.(); } catch { /* optional */ }
       try { void store.approvalsApi?.refresh?.(); } catch { /* optional */ }
+      try { void store.waitlistApi?.refresh?.(); } catch { /* optional */ }
+      try { void store.reviewsApi?.refresh?.(); } catch { /* optional */ }
     };
-    const onRefreshEvt = () => { void onPullRefresh(); };
+    // Register the refetch promise on the event so the indicator stays
+    // on screen until the work is actually done.
+    const onRefreshEvt = (e: Event) => {
+      const p = onPullRefresh();
+      const detail = (e as CustomEvent).detail;
+      try { detail?.waitFor?.(p); } catch { /* optional protocol */ }
+    };
 
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onVis);

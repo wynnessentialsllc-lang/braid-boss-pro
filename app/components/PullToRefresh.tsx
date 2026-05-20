@@ -12,6 +12,10 @@
 //      app-side hook (cloud sync, store re-hydrate) can subscribe
 //      with `window.addEventListener("bbp:refresh", ...)` and do
 //      its own targeted refetch. This is the preferred path.
+//      Listeners can register their fetch promise via
+//      `e.detail.waitFor(promise)` so the spinner stays on screen
+//      until the work actually finishes (capped by MAX_REFRESH_MS
+//      so a stuck network can't lock the indicator forever).
 //   2. call router.refresh() from next/navigation as a fallback so
 //      any Server Component subtree gets re-evaluated.
 //   3. NEVER falls back to window.location.reload — too heavy and
@@ -33,7 +37,11 @@ import { useRouter } from "next/navigation";
 const PULL_THRESHOLD = 70;
 const MAX_PULL = 120;
 const RESIST_FACTOR = 1.6;
-const REFRESH_HOLD_MS = 700;
+// Minimum hold so a near-instant cache hit still reads as "I did
+// something" instead of a flicker; maximum cap so a stuck request
+// can't lock the indicator on screen.
+const MIN_REFRESH_HOLD_MS = 450;
+const MAX_REFRESH_MS = 8000;
 
 type Phase = "idle" | "pulling" | "ready" | "refreshing";
 
@@ -139,8 +147,20 @@ const PullToRefresh = () => {
       setPhase("refreshing");
       setDistance(PULL_THRESHOLD);
 
+      // Collect any promises listeners want us to wait for. The event
+      // is mutated synchronously by listeners (waitFor pushes into the
+      // array), so by the time dispatchEvent returns we have the full
+      // set of in-flight refetches to await.
+      const refreshPromises: Promise<unknown>[] = [];
       try {
-        window.dispatchEvent(new CustomEvent("bbp:refresh"));
+        const evt = new CustomEvent("bbp:refresh", {
+          detail: {
+            waitFor: (p: Promise<unknown>) => {
+              if (p && typeof (p as any).then === "function") refreshPromises.push(p);
+            },
+          },
+        });
+        window.dispatchEvent(evt);
       } catch {
         /* CustomEvent unsupported — extremely rare */
       }
@@ -150,11 +170,22 @@ const PullToRefresh = () => {
         /* router not available — silent */
       }
 
-      window.setTimeout(() => {
-        refreshing.current = false;
-        setPhase("idle");
-        setDistance(0);
-      }, REFRESH_HOLD_MS);
+      const startedAt = Date.now();
+      const finish = () => {
+        const elapsed = Date.now() - startedAt;
+        const remaining = Math.max(0, MIN_REFRESH_HOLD_MS - elapsed);
+        window.setTimeout(() => {
+          refreshing.current = false;
+          setPhase("idle");
+          setDistance(0);
+        }, remaining);
+      };
+      // Wait for whatever the app told us to wait for, but cap so a
+      // dead network can't park the spinner forever.
+      Promise.race([
+        refreshPromises.length > 0 ? Promise.allSettled(refreshPromises) : Promise.resolve(),
+        new Promise(r => window.setTimeout(r, MAX_REFRESH_MS)),
+      ]).then(finish, finish);
     };
 
     const onTouchCancel = () => {
