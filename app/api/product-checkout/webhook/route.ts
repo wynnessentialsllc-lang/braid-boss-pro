@@ -176,6 +176,83 @@ export async function POST(req: Request) {
     return NextResponse.json({ received: true, ignored: "no_matching_order" }, { status: 200 });
   }
 
+  // Order-confirmation email. Best-effort: a queue-failure here
+  // never undoes the order. The notification processor renders
+  // and sends via Resend; we just enqueue the row with the data
+  // the renderer needs. Dedupe key keys off the order id so a
+  // Stripe replay doesn't re-send the receipt.
+  try {
+    const { data: orderForEmail } = await admin
+      .from("product_orders")
+      .select("id, user_id, customer_email, customer_name, amount_total, currency, line_items, shipping_required")
+      .eq("stripe_session_id", sessionId || "")
+      .maybeSingle();
+    if (orderForEmail?.customer_email) {
+      // Studio name + storefront slug for the "View order" link.
+      let studioName: string | null = null;
+      let slug: string | null = null;
+      try {
+        const { data: profile } = await admin
+          .from("profiles")
+          .select("studio_name, business_name, slug")
+          .eq("id", orderForEmail.user_id)
+          .maybeSingle();
+        studioName = (profile?.studio_name || profile?.business_name || "").toString().trim() || null;
+        slug = (profile?.slug || "").toString().trim() || null;
+      } catch { /* best-effort */ }
+
+      const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || "").replace(/\/$/, "");
+      const orderRefShort = String(orderForEmail.id).slice(0, 8).toUpperCase();
+      const items = Array.isArray(orderForEmail.line_items)
+        ? (orderForEmail.line_items as any[]).map(li => ({
+            title: li?.title,
+            variant: [li?.variant_label, li?.variant_name].filter(Boolean).join(" · ") || null,
+            quantity: Number(li?.quantity) || 1,
+            unitAmount: Number(li?.unit_amount) || 0,
+            imageUrl: li?.image_url || null,
+          }))
+        : [];
+
+      const subtotal = items.reduce((s, i) => s + i.unitAmount * i.quantity, 0);
+      const total = Number(orderForEmail.amount_total) || subtotal;
+      const isPickup = !orderForEmail.shipping_required;
+      const customerToken = (await admin
+        .from("product_orders")
+        .select("customer_token")
+        .eq("id", orderForEmail.id)
+        .maybeSingle()).data?.customer_token;
+      const viewOrderUrl = baseUrl && customerToken
+        ? `${baseUrl}/order/${customerToken}`
+        : "";
+
+      await admin.rpc("queue_notification", {
+        user_id_in: orderForEmail.user_id,
+        channel_in: "email",
+        notification_type_in: "order_confirmation",
+        body_in: `Your order from ${studioName || "the boutique"} is confirmed.`,
+        subject_in: `Your order is confirmed · #${orderRefShort}`,
+        recipient_email_in: orderForEmail.customer_email,
+        recipient_name_in: orderForEmail.customer_name || null,
+        payload_in: {
+          customerName: orderForEmail.customer_name || null,
+          studioName: studioName || "your boutique",
+          orderRef: orderRefShort,
+          currency: orderForEmail.currency || "USD",
+          items,
+          subtotal,
+          total,
+          isPickup,
+          viewOrderUrl,
+        },
+        // Dedupe on order id so a Stripe webhook replay can't send
+        // two confirmations. queue_notification respects this key.
+        dedupe_key_in: `order_confirmation:${orderForEmail.id}`,
+      });
+    }
+  } catch (e: any) {
+    console.warn("[product-checkout/webhook] order_confirmation enqueue failed:", e?.message || e);
+  }
+
   // Inventory V1 — decrement any linked items. Best-effort: a
   // failure here doesn't undo the order, but is logged so a manual
   // adjustment can square the books. The legacy product.inventory_count
