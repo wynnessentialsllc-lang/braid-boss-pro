@@ -166,11 +166,44 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: rpcErr.message }, { status: 500 });
   }
 
+  // Capture the tip into the appointment's data jsonb so reports can
+  // surface "tips collected" separately from service revenue. We do
+  // this as a follow-up update rather than changing the RPC so the
+  // schema migration stays in this PR alone.
+  const tipCentsRaw = Number(
+    session?.metadata?.tip_cents
+    ?? session?.payment_intent_data?.metadata?.tip_cents
+    ?? 0,
+  );
+  const tipCents = Number.isFinite(tipCentsRaw) && tipCentsRaw > 0 ? Math.floor(tipCentsRaw) : 0;
+  if (tipCents > 0) {
+    try {
+      const { data: row, error: readErr } = await admin
+        .from("appointments")
+        .select("data")
+        .eq("id", apptId)
+        .maybeSingle();
+      if (!readErr) {
+        const nextData = { ...(row?.data || {}), tipAmount: tipCents / 100 };
+        await admin
+          .from("appointments")
+          .update({ data: nextData, updated_at: new Date().toISOString() })
+          .eq("id", apptId);
+      }
+    } catch (e: any) {
+      console.warn("[balance-payment/webhook] tip persist failed:", e?.message || e);
+    }
+  }
+
   try {
     await admin.from("analytics_events").insert({
       event_name: "balance_payment_completed",
       event_category: "feature",
-      metadata: { appt: apptId.slice(0, 8), amount_cents: amountTotalCents ?? null },
+      metadata: {
+        appt: apptId.slice(0, 8),
+        amount_cents: amountTotalCents ?? null,
+        tip_cents: tipCents || null,
+      },
     });
   } catch { /* analytics best-effort */ }
 
