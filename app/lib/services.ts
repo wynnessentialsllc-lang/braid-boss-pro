@@ -187,8 +187,18 @@ export type Service = {
   allow_inspiration_photos: boolean;
   included_details: string | null;
   customization_enabled: boolean;
+  // Inventory V1 — typical materials consumed by this service.
+  // Pre-fills the "Materials used" sheet on appointment completion;
+  // stylist can confirm or edit before the inventory_apply_movement
+  // RPC fires. Stored in services.default_materials jsonb.
+  default_materials: ServiceMaterial[];
   created_at: string;
   updated_at: string;
+};
+
+export type ServiceMaterial = {
+  inventory_item_id: string;
+  quantity: number;
 };
 
 export type ServiceInput = Pick<
@@ -221,6 +231,7 @@ export type ServiceInput = Pick<
   | "allow_inspiration_photos"
   | "included_details"
   | "customization_enabled"
+  | "default_materials"
 >;
 
 // ---- Validation -------------------------------------------------------
@@ -497,6 +508,18 @@ export const useServices = (
       allow_inspiration_photos: draft.allow_inspiration_photos ?? true,
       included_details: draft.included_details?.trim() || null,
       customization_enabled: draft.customization_enabled ?? true,
+      // Default materials — array of { inventory_item_id, quantity }.
+      // Drop rows missing an id or with a non-positive quantity so the
+      // appointment-completion sheet never tries to deduct against a
+      // ghost row.
+      default_materials: Array.isArray(draft.default_materials)
+        ? draft.default_materials
+            .map(m => ({
+              inventory_item_id: String((m as any)?.inventory_item_id || "").trim(),
+              quantity: Number((m as any)?.quantity) || 0,
+            }))
+            .filter(m => m.inventory_item_id && m.quantity > 0)
+        : [],
       // Round-trip the optional add-ons. Keep null/undefined sane and
       // coerce numeric fields so we never persist NaN. Each entry is
       // stored verbatim in services.extras jsonb.

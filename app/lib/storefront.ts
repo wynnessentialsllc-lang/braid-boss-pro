@@ -412,6 +412,11 @@ export type Product = {
   stripe_price_id: string | null;
   sort_order: number;
   active: boolean;
+  // Optional link to an inventory_items row (Inventory V1). When set,
+  // the storefront purchase webhook fires inventory_apply_movement on
+  // checkout.session.completed so the underlying stock decrements in
+  // lockstep with the sale.
+  inventory_item_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -423,6 +428,7 @@ export type ProductInput = Pick<
   | "price" | "compare_at_price" | "inventory_count" | "category"
   | "is_featured" | "local_pickup_available" | "external_checkout_url"
   | "requires_shipping" | "sort_order" | "active"
+  | "inventory_item_id"
 >;
 
 // URL-friendly slug from a free-form title. Mirrors the DB
@@ -546,6 +552,12 @@ export const useProducts = (userId: string | null): {
         : [],
       sort_order: Number.isFinite(draft.sort_order) ? Number(draft.sort_order) : 0,
       active: draft.active === false ? false : true,
+      // Pass through — null clears the link, empty string is treated
+      // the same as not-set so the picker's "— Not linked —" option
+      // does what the stylist expects.
+      inventory_item_id: draft.inventory_item_id && String(draft.inventory_item_id).trim()
+        ? String(draft.inventory_item_id).trim()
+        : null,
     };
     const supabase = getSupabase();
     const { data, error: err } = draft.id
