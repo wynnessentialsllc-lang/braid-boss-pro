@@ -11,6 +11,8 @@ import {
   syncClients,
   syncAppointments,
   syncBusinessExpenses,
+  syncInventoryItems,
+  syncInventoryMovements,
   syncQuotes,
   syncReceipts,
   syncCommunications,
@@ -181,6 +183,21 @@ import {
   type RecurringInterval,
 } from "./lib/expenses";
 import { uploadReceipt, deleteReceipt as deleteReceiptObject, getReceiptUrl } from "./lib/receipt-storage";
+import {
+  INVENTORY_CATEGORIES,
+  INVENTORY_UNITS,
+  type InventoryItem,
+  type MovementReason,
+  applyMovement,
+  computeInventoryTotals,
+  isLowStock,
+  isActiveItem,
+  itemQuantity,
+  itemUnitCost,
+  itemRetailPrice,
+  itemThreshold,
+  itemValue,
+} from "./lib/inventory";
 import {
   getSeasonGuide,
   buildPersonalization,
@@ -1467,6 +1484,8 @@ const useStorage = () => {
   const [commLog, setCommLog] = useState<EntityRecord[]>([]);
   const [receipts, setReceipts] = useState<EntityRecord[]>([]);
   const [businessExpenses, setBusinessExpenses] = useState<EntityRecord[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<EntityRecord[]>([]);
+  const [inventoryMovements, setInventoryMovements] = useState<EntityRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1504,6 +1523,8 @@ const useStorage = () => {
       setCommLog(await safeStorage.getAllByPrefix("commLog:"));
       setReceipts(await safeStorage.getAllByPrefix("receipts:"));
       setBusinessExpenses(await safeStorage.getAllByPrefix("businessExpenses:"));
+      setInventoryItems(await safeStorage.getAllByPrefix("inventoryItems:"));
+      setInventoryMovements(await safeStorage.getAllByPrefix("inventoryMovements:"));
 
       let pols = await safeStorage.getAllByPrefix("policies:");
       if (pols.length === 0) {
@@ -1591,6 +1612,29 @@ const useStorage = () => {
 
   const upsertBusinessExpense = useCallback((record: any) => upsertEntity("businessExpenses", setBusinessExpenses, record), []);
   const deleteBusinessExpense = useCallback((id: string) => deleteEntity("businessExpenses", setBusinessExpenses, id), []);
+
+  const upsertInventoryItem = useCallback((record: any) => upsertEntity("inventoryItems", setInventoryItems, record), []);
+  const deleteInventoryItem = useCallback((id: string) => deleteEntity("inventoryItems", setInventoryItems, id), []);
+  // Movements are append-only — they're written server-side by the
+  // inventory_apply_movement RPC. The local helper just records the
+  // row the RPC reported so the ledger view doesn't have to wait
+  // for the next pull to surface it.
+  const recordInventoryMovement = useCallback(async (record: any) => {
+    if (!record?.id) return;
+    await safeStorage.set(`inventoryMovements:${record.id}`, record);
+    setInventoryMovements(prev => [...prev.filter(x => x.id !== record.id), record]);
+  }, []);
+  // Centralised on-hand update for the local store: keeps the
+  // optimistic write the RPC-caller does in sync with the entity
+  // record without re-running the whole upsert pipeline.
+  const setInventoryItemQuantity = useCallback(async (id: string, quantity: number) => {
+    const raw = await safeStorage.get(`inventoryItems:${id}`);
+    const parsed = safeParse<EntityRecord | null>(raw, null);
+    if (!parsed) return;
+    const next = { ...parsed, quantityOnHand: quantity };
+    await safeStorage.set(`inventoryItems:${id}`, next);
+    setInventoryItems(prev => prev.map(x => x.id === id ? next : x));
+  }, []);
 
   const upsertPreset = useCallback(async (p) => {
     const r = { ...p, updatedAt: new Date().toISOString() };
@@ -1694,6 +1738,7 @@ const useStorage = () => {
   const replaceCloudState = useCallback((next: {
     clients?: any[]; appointments?: any[]; quotes?: any[]; receipts?: any[];
     commLog?: any[]; photos?: any[]; businessExpenses?: any[];
+    inventoryItems?: any[]; inventoryMovements?: any[];
     business?: any; reminderSettings?: any;
   }) => {
     if (next.clients) setClients(next.clients);
@@ -1703,6 +1748,8 @@ const useStorage = () => {
     if (next.commLog) setCommLog(next.commLog);
     if (next.photos) setPhotos(next.photos);
     if (next.businessExpenses) setBusinessExpenses(next.businessExpenses);
+    if (next.inventoryItems) setInventoryItems(next.inventoryItems);
+    if (next.inventoryMovements) setInventoryMovements(next.inventoryMovements);
     if (next.business && Object.keys(next.business).length > 0) setBusiness({ ...DEFAULT_BUSINESS, ...next.business });
     if (next.reminderSettings) setReminderSettings({ ...DEFAULT_REMINDER_SETTINGS, ...next.reminderSettings });
   }, []);
@@ -1728,6 +1775,10 @@ const useStorage = () => {
     commLog, upsertCommLogEntry, deleteCommLogEntry,
     receipts, upsertReceipt, deleteReceipt,
     businessExpenses, expenses: businessExpenses, upsertBusinessExpense, deleteBusinessExpense,
+    inventoryItems, inventory: inventoryItems,
+    upsertInventoryItem, deleteInventoryItem,
+    inventoryMovements,
+    recordInventoryMovement, setInventoryItemQuantity,
     replaceCloudState,
   };
 };
@@ -12031,7 +12082,7 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -12251,6 +12302,38 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                           const active = list.filter(s => s.is_active).length;
                           if (list.length === 0) return "Define what you offer to book faster";
                           return `${active} active · ${list.length} total`;
+                        })()}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openInventory && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openInventory}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <Layers size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Inventory</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        {(() => {
+                          const list = (store.inventoryItems || []) as InventoryItem[];
+                          const active = list.filter(isActiveItem);
+                          if (active.length === 0) return "Track hair, products & supplies";
+                          const low = active.filter(isLowStock).length;
+                          return low > 0
+                            ? `${active.length} items · ${low} low`
+                            : `${active.length} items`;
                         })()}
                       </p>
                     </div>
@@ -14094,6 +14177,7 @@ const useCloudSync = (userId: string | null, store: any) => {
     clients: new Map(), appointments: new Map(), quotes: new Map(),
     receipts: new Map(), communications: new Map(), photos: new Map(),
     business_expenses: new Map(),
+    inventory_items: new Map(),
   });
 
   const stamp = () => {
@@ -14112,7 +14196,7 @@ const useCloudSync = (userId: string | null, store: any) => {
     (async () => {
       setState("syncing");
       try {
-        const [clientsCloud, apptsCloud, quotesCloud, receiptsCloud, commsCloud, photosCloud, expensesCloud, settingsRow] = await Promise.all([
+        const [clientsCloud, apptsCloud, quotesCloud, receiptsCloud, commsCloud, photosCloud, expensesCloud, inventoryItemsCloud, inventoryMovementsCloud, settingsRow] = await Promise.all([
           syncClients.pull(userId),
           syncAppointments.pull(userId),
           syncQuotes.pull(userId),
@@ -14120,6 +14204,8 @@ const useCloudSync = (userId: string | null, store: any) => {
           syncCommunications.pull(userId),
           syncPhotos.pull(userId),
           syncBusinessExpenses.pull(userId).catch(() => [] as any[]),
+          syncInventoryItems.pull(userId).catch(() => [] as any[]),
+          syncInventoryMovements.pull(userId).catch(() => [] as any[]),
           syncSettings.pull(userId),
         ]);
 
@@ -14145,10 +14231,15 @@ const useCloudSync = (userId: string | null, store: any) => {
           pushQueue.push(syncPhotos.upsert(userId, r).catch(() => null));
         for (const r of newOnly(store.businessExpenses || store.expenses || [], expensesCloud))
           pushQueue.push(syncBusinessExpenses.upsert(userId, r).catch(() => null));
+        for (const r of newOnly(store.inventoryItems || [], inventoryItemsCloud))
+          pushQueue.push(syncInventoryItems.upsert(userId, r).catch(() => null));
+        // Inventory movements are written server-side by the RPC, so
+        // there's no "local-only" migration push for them; the pull
+        // below brings them in.
         await Promise.all(pushQueue);
 
         // Re-pull so the local state mirrors what's now in the cloud.
-        const [clients2, appts2, quotes2, receipts2, comms2, photos2, expenses2] = await Promise.all([
+        const [clients2, appts2, quotes2, receipts2, comms2, photos2, expenses2, inventoryItems2, inventoryMovements2] = await Promise.all([
           syncClients.pull(userId),
           syncAppointments.pull(userId),
           syncQuotes.pull(userId),
@@ -14156,6 +14247,8 @@ const useCloudSync = (userId: string | null, store: any) => {
           syncCommunications.pull(userId),
           syncPhotos.pull(userId),
           syncBusinessExpenses.pull(userId).catch(() => [] as any[]),
+          syncInventoryItems.pull(userId).catch(() => [] as any[]),
+          syncInventoryMovements.pull(userId).catch(() => [] as any[]),
         ]);
         // Only adopt the cloud business object when the server row
         // actually carries a saved one (settings.data.business). The
@@ -14173,6 +14266,8 @@ const useCloudSync = (userId: string | null, store: any) => {
           clients: clients2, appointments: appts2, quotes: quotes2,
           receipts: receipts2, commLog: comms2, photos: photos2,
           businessExpenses: expenses2,
+          inventoryItems: inventoryItems2,
+          inventoryMovements: inventoryMovements2,
           business, reminderSettings,
         });
         // Seed the diff snapshot.
@@ -14187,6 +14282,7 @@ const useCloudSync = (userId: string | null, store: any) => {
         seed("communications", comms2);
         seed("photos", photos2);
         seed("business_expenses", expenses2 || []);
+        seed("inventory_items", inventoryItems2 || []);
 
         stamp();
         setState("idle");
@@ -14212,6 +14308,10 @@ const useCloudSync = (userId: string | null, store: any) => {
       // dataUrl-only records get migrated on next gallery interaction.
       { table: "photos", arr: (store.photos || []).filter((p: any) => p?.storagePath), api: syncPhotos },
       { table: "business_expenses", arr: store.businessExpenses || [], api: syncBusinessExpenses },
+      // Inventory items diff-sync exactly like the others. Movements
+      // never round-trip through this path (server is canonical via
+      // the RPC), so they're intentionally absent here.
+      { table: "inventory_items", arr: store.inventoryItems || [], api: syncInventoryItems },
     ];
     let dirty = false;
     setState("syncing");
@@ -14273,7 +14373,7 @@ const useCloudSync = (userId: string | null, store: any) => {
       if (dirty) stamp();
       setState(navigator.onLine ? "idle" : "offline");
     })().catch(() => setState("error"));
-  }, [userId, store.clients, store.appointments, store.quotes, store.receipts, store.commLog, store.photos, store.businessExpenses, store.business, store.reminderSettings]);
+  }, [userId, store.clients, store.appointments, store.quotes, store.receipts, store.commLog, store.photos, store.businessExpenses, store.inventoryItems, store.business, store.reminderSettings]);
 
   // Re-pull appointments when the app returns to the foreground.
   //
@@ -18227,6 +18327,593 @@ const ExpenseEditorSheet = ({ expense, currency, userId, onClose, onSave, onDele
             style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
           >
             {busy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </Sheet>
+  );
+};
+
+// ============================================================
+//  INVENTORY — hair / products / supplies
+// ============================================================
+//
+// V1: one items list, restock + adjust via the inventory_apply_movement
+// RPC. Storefront and service-use consumption land in PR #3.
+// Items archive (soft delete) so the movement ledger keeps its FK
+// integrity; hard-delete is only available on items that never had
+// a movement.
+
+const REASON_LABEL: Record<MovementReason, string> = {
+  purchase:        "Restock",
+  service_use:     "Used on client",
+  storefront_sale: "Storefront sale",
+  adjustment:      "Adjustment",
+  waste:           "Waste / damaged",
+  return:          "Return",
+};
+
+const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const itemsRaw: InventoryItem[] = store.inventoryItems || [];
+  const currency = store.business?.currency || "USD";
+  const items = useMemo(() => itemsRaw.filter(isActiveItem), [itemsRaw]);
+  const archived = useMemo(() => itemsRaw.filter(i => !isActiveItem(i)), [itemsRaw]);
+  const totals = useMemo(() => computeInventoryTotals(items), [items]);
+
+  const [filter, setFilter] = useState<"all" | "low" | "archived">("all");
+  const [query, setQuery] = useState("");
+  const [editing, setEditing] = useState<InventoryItem | null>(null);
+  const [openSheet, setOpenSheet] = useState(false);
+  const [restocking, setRestocking] = useState<InventoryItem | null>(null);
+
+  const visible = useMemo(() => {
+    const base = filter === "archived" ? archived : items;
+    const q = query.trim().toLowerCase();
+    return base
+      .filter(i => filter !== "low" || isLowStock(i))
+      .filter(i => !q || [i.name, i.sku, i.category, i.supplier]
+        .filter(Boolean)
+        .some(v => String(v).toLowerCase().includes(q)))
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }, [items, archived, filter, query]);
+
+  const handleAdd = () => { setEditing(null); setOpenSheet(true); };
+  const handleEdit = (i: InventoryItem) => { setEditing(i); setOpenSheet(true); };
+
+  // Toggle archive (soft delete) — preserves the movement ledger.
+  // Hard delete is only available on items with zero movements; the
+  // FK from inventory_movements would block it otherwise.
+  const handleArchive = async (i: InventoryItem) => {
+    if (!i?.id) return;
+    const verb = i.archivedAt ? "Restore" : "Archive";
+    if (!window.confirm(`${verb} "${i.name}"?`)) return;
+    await store.upsertInventoryItem({
+      ...i,
+      archivedAt: i.archivedAt ? null : new Date().toISOString(),
+    });
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Inventory"
+        subtitle="Hair, products & supplies"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        rightAction={{ icon: <Plus size={20} />, onClick: handleAdd }}
+      />
+
+      <div className="px-5 pt-2 space-y-5">
+        {/* KPI strip — same visual language as the Expenses screen. */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
+            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Items</p>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso, marginTop: 2 }}>{totals.itemCount}</p>
+          </div>
+          <div className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
+            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Stock value</p>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso, marginTop: 2 }}>{fmtMoney(totals.totalValue, currency)}</p>
+          </div>
+          <div className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
+            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Low stock</p>
+            <p style={{
+              fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, marginTop: 2,
+              color: totals.lowStockCount > 0 ? C.danger : C.espresso,
+            }}>
+              {totals.lowStockCount}
+            </p>
+          </div>
+          <div className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
+            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Top category</p>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso, marginTop: 2, lineHeight: 1.15 }}>
+              {totals.byCategory[0]?.category || "—"}
+            </p>
+          </div>
+        </div>
+
+        {/* Filter pills + search */}
+        <div className="flex gap-2 overflow-x-auto bbp-scroll -mx-1 px-1">
+          {([
+            { key: "all" as const,      label: "All" },
+            { key: "low" as const,      label: `Low${totals.lowStockCount ? ` · ${totals.lowStockCount}` : ""}` },
+            { key: "archived" as const, label: `Archived${archived.length ? ` · ${archived.length}` : ""}` },
+          ]).map(p => (
+            <button
+              type="button"
+              key={p.key}
+              onClick={() => setFilter(p.key)}
+              className="px-3 py-1.5 rounded-full text-[11px] font-semibold whitespace-nowrap transition"
+              style={{
+                background: filter === p.key ? C.espresso : "transparent",
+                color: filter === p.key ? C.cream : C.coffee,
+                border: `1px solid ${filter === p.key ? C.espresso : C.hairline}`,
+                letterSpacing: "0.04em",
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        <input
+          type="search"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search items, SKU, supplier…"
+          className="w-full px-3 py-2.5 rounded-xl text-[14px]"
+          style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+        />
+
+        {/* List */}
+        {visible.length === 0 ? (
+          <EmptyState
+            icon={<Layers size={28} style={{ color: C.muted }} />}
+            title={filter === "low" ? "Nothing's low" : filter === "archived" ? "No archived items" : "No items yet"}
+            body={
+              filter === "low"
+                ? "When stock dips at or below an item's low-stock threshold, it'll surface here."
+                : filter === "archived"
+                  ? "Archived items keep their movement history but stop showing up everywhere else."
+                  : "Add the hair, bundles, tools, and supplies you actually use. Restocks become expenses, on-client use becomes cost-of-goods."
+            }
+            cta={filter === "all" ? (
+              <button
+                type="button"
+                onClick={handleAdd}
+                className="rounded-full px-4 py-2 text-[12px] font-semibold active:scale-[0.97] transition"
+                style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}`, letterSpacing: "0.04em" }}
+              >
+                + Add first item
+              </button>
+            ) : undefined}
+          />
+        ) : (
+          <Card className="p-2">
+            {visible.map((i, idx) => {
+              const qty = itemQuantity(i);
+              const threshold = itemThreshold(i);
+              const low = isLowStock(i);
+              return (
+                <div key={i.id} style={{ borderTop: idx === 0 ? "none" : `1px solid ${C.hairline}` }} className="flex items-stretch">
+                  <button
+                    type="button"
+                    onClick={() => handleEdit(i)}
+                    className="flex-1 text-left flex items-center gap-3 px-2 py-2.5 active:scale-[0.99] transition min-w-0"
+                  >
+                    <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: low ? "rgba(156,61,46,0.10)" : "rgba(124,58,237,0.10)" }}>
+                      <Layers size={16} style={{ color: low ? C.danger : C.goldDeep }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{i.name}</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        {[i.category, i.unit ? `per ${i.unit}` : null, i.sku ? `SKU ${i.sku}` : null].filter(Boolean).join(" · ") || "—"}
+                      </p>
+                    </div>
+                    <div className="text-right ml-2 flex-shrink-0">
+                      <p className="text-[13px] font-semibold tabular-nums" style={{ color: low ? C.danger : C.espresso }}>
+                        {qty}{i.unit ? ` ${i.unit}` : ""}
+                      </p>
+                      <p className="text-[10px] tabular-nums" style={{ color: C.muted }}>
+                        {threshold > 0 ? `min ${threshold}` : fmtMoney(itemValue(i), currency)}
+                      </p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRestocking(i)}
+                    aria-label="Restock"
+                    className="px-3 active:scale-[0.97] transition"
+                    style={{ color: C.coffee, borderLeft: `1px solid ${C.hairline}` }}
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+              );
+            })}
+          </Card>
+        )}
+      </div>
+
+      {openSheet && (
+        <InventoryItemEditorSheet
+          item={editing}
+          currency={currency}
+          onClose={() => { setOpenSheet(false); setEditing(null); }}
+          onSave={async (rec) => { await store.upsertInventoryItem(rec); setOpenSheet(false); setEditing(null); }}
+          onArchive={editing ? () => handleArchive(editing) : undefined}
+        />
+      )}
+
+      {restocking && (
+        <InventoryMovementSheet
+          item={restocking}
+          currency={currency}
+          onClose={() => setRestocking(null)}
+          onApplied={async (movement) => {
+            // RPC succeeded — record locally for the ledger view, and
+            // bump the on-hand count optimistically so the list
+            // updates before the next pull.
+            try { await store.recordInventoryMovement(movement.row); } catch { /* best-effort */ }
+            try { await store.setInventoryItemQuantity(movement.itemId, movement.quantityOnHand); } catch { /* best-effort */ }
+            setRestocking(null);
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }: {
+  item: InventoryItem | null;
+  currency: string;
+  onClose: () => void;
+  onSave: (rec: InventoryItem) => Promise<void> | void;
+  onArchive?: () => Promise<void> | void;
+}) => {
+  const isEdit = !!item?.id;
+  const [name, setName] = useState(item?.name || "");
+  const [sku, setSku] = useState(item?.sku || "");
+  const [category, setCategory] = useState<string>(item?.category || INVENTORY_CATEGORIES[0]);
+  const [unit, setUnit] = useState<string>(item?.unit || INVENTORY_UNITS[0]);
+  const [unitCost, setUnitCost] = useState(item?.unitCost != null ? String(item.unitCost) : "");
+  const [retailPrice, setRetailPrice] = useState(item?.retailPrice != null && item?.retailPrice !== "" ? String(item.retailPrice) : "");
+  const [quantity, setQuantity] = useState(item?.quantityOnHand != null ? String(item.quantityOnHand) : "0");
+  const [threshold, setThreshold] = useState(item?.lowStockThreshold != null ? String(item.lowStockThreshold) : "0");
+  const [supplier, setSupplier] = useState(item?.supplier || "");
+  const [busy, setBusy] = useState(false);
+
+  // Editing the on-hand quantity directly is rare — most changes go
+  // through the +/− movement sheet. We expose it on initial creation
+  // (so the user can seed their starting count) and hide it on edit,
+  // pointing the user to the restock sheet instead.
+  const showRawQuantity = !isEdit;
+
+  const handleSave = async () => {
+    if (!name.trim()) { alert("Name is required."); return; }
+    setBusy(true);
+    try {
+      const rec: InventoryItem = {
+        id: item?.id || `inv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+        name: name.trim(),
+        sku: sku.trim() || null,
+        category,
+        unit,
+        unitCost: parseMoney(unitCost),
+        retailPrice: retailPrice ? parseMoney(retailPrice) : null,
+        quantityOnHand: isEdit ? Number(item?.quantityOnHand) || 0 : parseMoney(quantity),
+        lowStockThreshold: parseMoney(threshold),
+        supplier: supplier.trim() || null,
+        photoPath: item?.photoPath ?? null,
+        storefrontProductId: item?.storefrontProductId ?? null,
+        archivedAt: item?.archivedAt ?? null,
+      };
+      await onSave(rec);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open onClose={onClose} title={isEdit ? "Edit item" : "Add item"}>
+      <div className="space-y-4 pb-4">
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Name</label>
+          <input
+            type="text"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="e.g. Outre X-Pression Pre-Stretched 24in"
+            className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px]"
+            style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Category</label>
+            <select
+              value={category}
+              onChange={e => setCategory(e.target.value)}
+              className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px]"
+              style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+            >
+              {INVENTORY_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Unit</label>
+            <select
+              value={unit}
+              onChange={e => setUnit(e.target.value)}
+              className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px]"
+              style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+            >
+              {INVENTORY_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Cost / {unit || "unit"}</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={unitCost}
+              onChange={e => setUnitCost(sanitizeMoneyInput(e.target.value))}
+              placeholder="0.00"
+              className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px] tabular-nums"
+              style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Retail price</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={retailPrice}
+              onChange={e => setRetailPrice(sanitizeMoneyInput(e.target.value))}
+              placeholder="Optional"
+              className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px] tabular-nums"
+              style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          {showRawQuantity && (
+            <div>
+              <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Starting qty</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={quantity}
+                onChange={e => setQuantity(sanitizeMoneyInput(e.target.value))}
+                placeholder="0"
+                className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px] tabular-nums"
+                style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+              />
+            </div>
+          )}
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Low-stock alert at</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={threshold}
+              onChange={e => setThreshold(sanitizeMoneyInput(e.target.value))}
+              placeholder="0 = no alert"
+              className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px] tabular-nums"
+              style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>SKU / supplier</label>
+          <div className="grid grid-cols-2 gap-3 mt-1">
+            <input
+              type="text"
+              value={sku}
+              onChange={e => setSku(e.target.value)}
+              placeholder="SKU (optional)"
+              className="px-3 py-2.5 rounded-xl text-[14px]"
+              style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+            />
+            <input
+              type="text"
+              value={supplier}
+              onChange={e => setSupplier(e.target.value)}
+              placeholder="Supplier (optional)"
+              className="px-3 py-2.5 rounded-xl text-[14px]"
+              style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-2">
+          {onArchive && (
+            <button
+              type="button"
+              onClick={onArchive}
+              disabled={busy}
+              className="rounded-xl px-3 py-2.5 text-[13px] font-semibold flex items-center gap-1.5"
+              style={{ background: "transparent", color: C.danger, border: `1px solid ${C.hairline}` }}
+            >
+              {item?.archivedAt ? <RefreshCw size={14} /> : <Trash2 size={14} />} {item?.archivedAt ? "Restore" : "Archive"}
+            </button>
+          )}
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+            style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={busy}
+            className="rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+            style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </Sheet>
+  );
+};
+
+// Restock / adjust sheet — the front door to inventory_apply_movement.
+// V1 supports purchase (+), waste (−), adjustment (±). service_use
+// and storefront_sale arrive in PR #3 from their own surfaces.
+const InventoryMovementSheet = ({ item, currency, onClose, onApplied }: {
+  item: InventoryItem;
+  currency: string;
+  onClose: () => void;
+  onApplied: (m: { row: any; itemId: string; quantityOnHand: number }) => void | Promise<void>;
+}) => {
+  const [reason, setReason] = useState<MovementReason>("purchase");
+  const [qty, setQty] = useState("");
+  const [unitCost, setUnitCost] = useState(item.unitCost != null ? String(item.unitCost) : "");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const isIn = reason === "purchase" || reason === "return";
+  const showCost = reason === "purchase"; // only meaningful for restocks
+
+  const handleApply = async () => {
+    setErr(null);
+    const q = parseMoney(qty);
+    if (!Number.isFinite(q) || q <= 0) { setErr("Quantity must be greater than zero."); return; }
+    const delta = isIn ? q : -q;
+    setBusy(true);
+    try {
+      const res = await applyMovement({
+        itemId: item.id,
+        delta,
+        reason,
+        unitCostSnapshot: showCost && unitCost ? parseMoney(unitCost) : null,
+        note: note.trim() || null,
+      });
+      onApplied({
+        row: {
+          id: `mov_local_${Date.now().toString(36)}`, // server has the real id; this is for optimistic ledger
+          itemId: item.id,
+          delta,
+          reason,
+          unitCostSnapshot: showCost && unitCost ? parseMoney(unitCost) : null,
+          note: note.trim() || null,
+          createdAt: new Date().toISOString(),
+        },
+        itemId: res.itemId,
+        quantityOnHand: res.quantityOnHand,
+      });
+    } catch (e: any) {
+      console.error("[inventory] apply movement failed", e);
+      setErr(e?.message || "Couldn't apply this movement. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open onClose={onClose} title={item.name}>
+      <div className="space-y-4 pb-4">
+        <p className="text-[12px]" style={{ color: C.muted }}>
+          On hand: <span className="font-semibold tabular-nums" style={{ color: C.espresso }}>
+            {itemQuantity(item)}{item.unit ? ` ${item.unit}` : ""}
+          </span>
+        </p>
+
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Reason</label>
+          <div className="grid grid-cols-2 gap-2 mt-1">
+            {(["purchase", "waste", "adjustment", "return"] as MovementReason[]).map(r => (
+              <button
+                type="button"
+                key={r}
+                onClick={() => setReason(r)}
+                className="px-3 py-2 rounded-xl text-[13px] font-semibold"
+                style={{
+                  background: reason === r ? C.espresso : "#fff",
+                  color: reason === r ? C.cream : C.coffee,
+                  border: `1px solid ${reason === r ? C.espresso : C.hairline}`,
+                }}
+              >
+                {REASON_LABEL[r]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+              {isIn ? "Add" : "Remove"} qty
+            </label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={qty}
+              onChange={e => setQty(sanitizeMoneyInput(e.target.value))}
+              placeholder="0"
+              className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px] tabular-nums"
+              style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+            />
+          </div>
+          {showCost && (
+            <div>
+              <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Cost / unit</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={unitCost}
+                onChange={e => setUnitCost(sanitizeMoneyInput(e.target.value))}
+                placeholder="0.00"
+                className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px] tabular-nums"
+                style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+              />
+            </div>
+          )}
+        </div>
+
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Note (optional)</label>
+          <input
+            type="text"
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="e.g. Amazon order #12345"
+            className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px]"
+            style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+          />
+        </div>
+
+        {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
+
+        <div className="flex gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="flex-1 rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+            style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleApply}
+            disabled={busy}
+            className="flex-1 rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+            style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+          >
+            {busy ? "Applying…" : "Apply"}
           </button>
         </div>
       </div>
@@ -22491,7 +23178,8 @@ export default function App() {
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => setSecondary("inventory")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "inventory" && <InventoryScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
