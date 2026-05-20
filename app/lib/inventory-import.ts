@@ -212,6 +212,111 @@ export const parseInventoryCsv = (
   };
 };
 
+// =====================================================================
+// Seed from Shop — turn storefront products into inventory items.
+//
+// Same destination as the CSV flow (one new inventory_items row +
+// products.inventory_item_id link per selected product), but the
+// source is the stylist's existing storefront. No retyping, no
+// CSV — just preview the suggested rows and commit.
+// =====================================================================
+
+export type StorefrontProductSeed = {
+  id: string;
+  title: string;
+  slug: string;
+  category: string | null;        // storefront product category enum value
+  price: number | null;
+  inventory_count: number | null;
+  image_url: string | null;
+  inventory_item_id: string | null;
+};
+
+export type ShopSeedSuggestion = {
+  productId: string;
+  productTitle: string;
+  alreadyLinked: boolean;
+  // Pre-built inventory item the commit step will upsert if the
+  // stylist keeps this row selected. Fields default-safe — unit_cost
+  // is 0 because the storefront doesn't track cost-of-goods (stylist
+  // can fill it in later); quantity comes from inventory_count when
+  // present, otherwise 0.
+  item: InventoryItem;
+};
+
+// Storefront category enum → inventory category label. Best effort
+// only — anything unknown falls back to "Other" so the import never
+// blocks on an exotic category.
+const STOREFRONT_TO_INVENTORY_CATEGORY: Record<string, string> = {
+  hair_bundles:  "Hair / bundles",
+  braiding_hair: "Braiding hair",
+  oils:          "Products",
+  edge_control:  "Products",
+  bonnets:       "Products",
+  accessories:   "Supplies",
+  tools:         "Tools",
+  maintenance:   "Products",
+  digital:       "Other",
+  other:         "Other",
+};
+
+const mapStorefrontCategory = (raw: string | null | undefined): string => {
+  if (!raw) return "Other";
+  return STOREFRONT_TO_INVENTORY_CATEGORY[raw] || "Other";
+};
+
+/**
+ * Build the seed suggestions for the "Seed from Shop" sheet. Pure —
+ * the caller picks which suggestions to commit and runs the upserts
+ * themselves so the wiring stays in one place (page.tsx).
+ *
+ * Products already linked to inventory show up so the stylist can
+ * see them, but they're flagged so the UI can disable them.
+ */
+export const buildShopSeedSuggestions = (
+  products: StorefrontProductSeed[] | null | undefined,
+  existingItems: InventoryItem[] | null | undefined,
+): ShopSeedSuggestion[] => {
+  const linkedItemIds = new Set(
+    (products || [])
+      .map(p => (p?.inventory_item_id || "").trim())
+      .filter(Boolean),
+  );
+  const itemById = new Map<string, InventoryItem>();
+  for (const i of (existingItems || [])) itemById.set(i.id, i);
+
+  const out: ShopSeedSuggestion[] = [];
+  for (const p of (products || [])) {
+    if (!p?.id || !p?.title) continue;
+    const alreadyLinked = !!p.inventory_item_id && itemById.has(p.inventory_item_id);
+    const item: InventoryItem = {
+      id: genId(),
+      name: p.title.trim(),
+      sku: p.slug || null,
+      category: mapStorefrontCategory(p.category),
+      unit: "each",
+      unitCost: 0,
+      retailPrice: p.price ?? null,
+      quantityOnHand: Number.isFinite(p.inventory_count as number) ? Number(p.inventory_count) : 0,
+      lowStockThreshold: 0,
+      supplier: null,
+      photoPath: p.image_url || null,
+      storefrontProductId: p.id,
+      archivedAt: null,
+    };
+    out.push({
+      productId: p.id,
+      productTitle: p.title,
+      alreadyLinked,
+      item,
+    });
+  }
+  // Linked rows last so the stylist's eye lands on actionable rows
+  // first when they open the sheet.
+  out.sort((a, b) => Number(a.alreadyLinked) - Number(b.alreadyLinked));
+  return out;
+};
+
 // Sample CSV the "Download template" button serves. Headers match
 // the primary aliases parseInventoryCsv looks for, so a stylist who
 // fills this in and re-imports is guaranteed to round-trip.
