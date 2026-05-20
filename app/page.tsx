@@ -10,6 +10,7 @@ import {
   queueLength,
   syncClients,
   syncAppointments,
+  syncBusinessExpenses,
   syncQuotes,
   syncReceipts,
   syncCommunications,
@@ -167,6 +168,18 @@ import {
   monthExpectedAppts,
   monthEarnedAppts,
 } from "./lib/reports";
+import {
+  EXPENSE_CATEGORIES,
+  RECURRING_INTERVALS,
+  computeExpenseTotals,
+  estimateProfit,
+  groupExpensesForList,
+  buildExpenseInsights,
+  expenseAmount,
+  type ExpenseLike,
+  type RecurringInterval,
+} from "./lib/expenses";
+import { uploadReceipt, deleteReceipt as deleteReceiptObject, getReceiptUrl } from "./lib/receipt-storage";
 import {
   getSeasonGuide,
   buildPersonalization,
@@ -1452,6 +1465,7 @@ const useStorage = () => {
   const [timerSessions, setTimerSessions] = useState<EntityRecord[]>([]);
   const [commLog, setCommLog] = useState<EntityRecord[]>([]);
   const [receipts, setReceipts] = useState<EntityRecord[]>([]);
+  const [businessExpenses, setBusinessExpenses] = useState<EntityRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1488,6 +1502,7 @@ const useStorage = () => {
       setTimerSessions(await safeStorage.getAllByPrefix("timerSessions:"));
       setCommLog(await safeStorage.getAllByPrefix("commLog:"));
       setReceipts(await safeStorage.getAllByPrefix("receipts:"));
+      setBusinessExpenses(await safeStorage.getAllByPrefix("businessExpenses:"));
 
       let pols = await safeStorage.getAllByPrefix("policies:");
       if (pols.length === 0) {
@@ -1572,6 +1587,9 @@ const useStorage = () => {
 
   const upsertPhoto = useCallback((record: any) => upsertEntity("photos", setPhotos, record), []);
   const deletePhoto = useCallback((id: string) => deleteEntity("photos", setPhotos, id), []);
+
+  const upsertBusinessExpense = useCallback((record: any) => upsertEntity("businessExpenses", setBusinessExpenses, record), []);
+  const deleteBusinessExpense = useCallback((id: string) => deleteEntity("businessExpenses", setBusinessExpenses, id), []);
 
   const upsertPreset = useCallback(async (p) => {
     const r = { ...p, updatedAt: new Date().toISOString() };
@@ -1674,7 +1692,8 @@ const useStorage = () => {
   // replaced; everything else is left alone.
   const replaceCloudState = useCallback((next: {
     clients?: any[]; appointments?: any[]; quotes?: any[]; receipts?: any[];
-    commLog?: any[]; photos?: any[]; business?: any; reminderSettings?: any;
+    commLog?: any[]; photos?: any[]; businessExpenses?: any[];
+    business?: any; reminderSettings?: any;
   }) => {
     if (next.clients) setClients(next.clients);
     if (next.appointments) setAppointments(next.appointments.map(normalizeAppointment));
@@ -1682,6 +1701,7 @@ const useStorage = () => {
     if (next.receipts) setReceipts(next.receipts);
     if (next.commLog) setCommLog(next.commLog);
     if (next.photos) setPhotos(next.photos);
+    if (next.businessExpenses) setBusinessExpenses(next.businessExpenses);
     if (next.business && Object.keys(next.business).length > 0) setBusiness({ ...DEFAULT_BUSINESS, ...next.business });
     if (next.reminderSettings) setReminderSettings({ ...DEFAULT_REMINDER_SETTINGS, ...next.reminderSettings });
   }, []);
@@ -1706,6 +1726,7 @@ const useStorage = () => {
     timerSessions, upsertTimerSession, addTimerSession: upsertTimerSession,
     commLog, upsertCommLogEntry, deleteCommLogEntry,
     receipts, upsertReceipt, deleteReceipt,
+    businessExpenses, expenses: businessExpenses, upsertBusinessExpense, deleteBusinessExpense,
     replaceCloudState,
   };
 };
@@ -10054,7 +10075,7 @@ const PhotoEditSheet = ({ photo, appointments, onClose, onSave }: {
 // ============================================================
 //  MONEY + PRODUCTIVITY
 // ============================================================
-const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, openTimerSessions, openReceipt }: { store: any; initialPeriod?: string | null; onPeriodConsumed?: () => void; openTxSheet: any; editTx: any; openTimerSessions: any; openReceipt?: (rcp: ReceiptRecord) => void }) => {
+const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, openTimerSessions, openExpenses, openReceipt }: { store: any; initialPeriod?: string | null; onPeriodConsumed?: () => void; openTxSheet: any; editTx: any; openTimerSessions: any; openExpenses?: () => void; openReceipt?: (rcp: ReceiptRecord) => void }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
   useEffect(() => {
     trackEvent("money_tab_view", { category: "feature" });
@@ -10135,6 +10156,8 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
           editTx={editTx} openTxSheet={openTxSheet}
           receipts={store.receipts || []}
           openReceipt={openReceipt}
+          businessExpenses={store.businessExpenses || []}
+          openExpenses={openExpenses}
           period={period} />
       ) : (
         <ProductivityTab sessions={sessionsInRange} appointments={store.appointments} business={store.business}
@@ -10144,7 +10167,7 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
   );
 };
 
-const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, receipts = [], openReceipt, period = "week" }: {
+const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, receipts = [], openReceipt, businessExpenses = [], openExpenses, period = "week" }: {
   all: any[];
   income: number;
   expenses: number;
@@ -10153,6 +10176,8 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
   editTx: any;
   openTxSheet: any;
   receipts?: any[];
+  businessExpenses?: ExpenseLike[];
+  openExpenses?: () => void;
   period?: string;
   openReceipt?: (rcp: ReceiptRecord) => void;
 }) => (
@@ -10207,6 +10232,16 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
         </PreviewStyleCard>
       );
     })()}
+
+    {/* PROFIT KPIs — gross revenue (period), business expenses
+        (calendar month), estimated profit, and the monthly subscriptions
+        burn. Tapping any tile jumps to Money → Expenses. */}
+    <ProfitKpiStrip
+      revenue={income}
+      expenses={businessExpenses}
+      currency={business.currency}
+      onOpen={openExpenses}
+    />
 
     <div className="flex items-center justify-between mb-2">
       <SectionTitle>Activity</SectionTitle>
@@ -14057,6 +14092,7 @@ const useCloudSync = (userId: string | null, store: any) => {
   const snap = useRef<Record<string, Map<string, string>>>({
     clients: new Map(), appointments: new Map(), quotes: new Map(),
     receipts: new Map(), communications: new Map(), photos: new Map(),
+    business_expenses: new Map(),
   });
 
   const stamp = () => {
@@ -14075,13 +14111,14 @@ const useCloudSync = (userId: string | null, store: any) => {
     (async () => {
       setState("syncing");
       try {
-        const [clientsCloud, apptsCloud, quotesCloud, receiptsCloud, commsCloud, photosCloud, settingsRow] = await Promise.all([
+        const [clientsCloud, apptsCloud, quotesCloud, receiptsCloud, commsCloud, photosCloud, expensesCloud, settingsRow] = await Promise.all([
           syncClients.pull(userId),
           syncAppointments.pull(userId),
           syncQuotes.pull(userId),
           syncReceipts.pull(userId),
           syncCommunications.pull(userId),
           syncPhotos.pull(userId),
+          syncBusinessExpenses.pull(userId).catch(() => [] as any[]),
           syncSettings.pull(userId),
         ]);
 
@@ -14105,16 +14142,19 @@ const useCloudSync = (userId: string | null, store: any) => {
         // to happen first.
         for (const r of newOnly(store.photos, photosCloud).filter((p: any) => p?.storagePath))
           pushQueue.push(syncPhotos.upsert(userId, r).catch(() => null));
+        for (const r of newOnly(store.businessExpenses || store.expenses || [], expensesCloud))
+          pushQueue.push(syncBusinessExpenses.upsert(userId, r).catch(() => null));
         await Promise.all(pushQueue);
 
         // Re-pull so the local state mirrors what's now in the cloud.
-        const [clients2, appts2, quotes2, receipts2, comms2, photos2] = await Promise.all([
+        const [clients2, appts2, quotes2, receipts2, comms2, photos2, expenses2] = await Promise.all([
           syncClients.pull(userId),
           syncAppointments.pull(userId),
           syncQuotes.pull(userId),
           syncReceipts.pull(userId),
           syncCommunications.pull(userId),
           syncPhotos.pull(userId),
+          syncBusinessExpenses.pull(userId).catch(() => [] as any[]),
         ]);
         // Only adopt the cloud business object when the server row
         // actually carries a saved one (settings.data.business). The
@@ -14130,7 +14170,9 @@ const useCloudSync = (userId: string | null, store: any) => {
         const reminderSettings = settingsRow?.reminder_settings || undefined;
         store.replaceCloudState?.({
           clients: clients2, appointments: appts2, quotes: quotes2,
-          receipts: receipts2, commLog: comms2, photos: photos2, business, reminderSettings,
+          receipts: receipts2, commLog: comms2, photos: photos2,
+          businessExpenses: expenses2,
+          business, reminderSettings,
         });
         // Seed the diff snapshot.
         const seed = (table: string, arr: any[]) => {
@@ -14143,6 +14185,7 @@ const useCloudSync = (userId: string | null, store: any) => {
         seed("receipts", receipts2);
         seed("communications", comms2);
         seed("photos", photos2);
+        seed("business_expenses", expenses2 || []);
 
         stamp();
         setState("idle");
@@ -14167,6 +14210,7 @@ const useCloudSync = (userId: string | null, store: any) => {
       // Only sync photo metadata once the bytes have been uploaded;
       // dataUrl-only records get migrated on next gallery interaction.
       { table: "photos", arr: (store.photos || []).filter((p: any) => p?.storagePath), api: syncPhotos },
+      { table: "business_expenses", arr: store.businessExpenses || [], api: syncBusinessExpenses },
     ];
     let dirty = false;
     setState("syncing");
@@ -14228,7 +14272,7 @@ const useCloudSync = (userId: string | null, store: any) => {
       if (dirty) stamp();
       setState(navigator.onLine ? "idle" : "offline");
     })().catch(() => setState("error"));
-  }, [userId, store.clients, store.appointments, store.quotes, store.receipts, store.commLog, store.photos, store.business, store.reminderSettings]);
+  }, [userId, store.clients, store.appointments, store.quotes, store.receipts, store.commLog, store.photos, store.businessExpenses, store.business, store.reminderSettings]);
 
   // Re-pull appointments when the app returns to the foreground.
   //
@@ -17341,6 +17385,543 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
         )}
       </div>
     </div>
+  );
+};
+
+// ============================================================
+//  EXPENSES — Money → Expenses (Profit & business outflows)
+// ============================================================
+//
+// V1: track outflows + recurring subscriptions, compute estimated
+// profit against the same revenue stream the Reports screen uses,
+// upload receipts to the private `receipts` Storage bucket. All sync
+// is wired through the same toCloudRow/fromCloudRow pipeline so the
+// records show up on every signed-in device.
+
+const ProfitKpiStrip = ({ revenue, expenses, currency, onOpen }: {
+  revenue: number;
+  expenses: ExpenseLike[];
+  currency: string;
+  onOpen?: () => void;
+}) => {
+  const totals = useMemo(() => computeExpenseTotals(expenses), [expenses]);
+  const profit = estimateProfit(revenue, totals.monthTotal);
+  const tiles: { label: string; value: string; tone: "neutral" | "positive" | "warning" }[] = [
+    { label: "Gross revenue",     value: fmtMoney(revenue, currency),                tone: "neutral" },
+    { label: "Expenses (mo)",     value: fmtMoney(totals.monthTotal, currency),      tone: "neutral" },
+    { label: "Estimated profit",  value: fmtMoney(profit, currency),                 tone: profit >= 0 ? "positive" : "warning" },
+    { label: "Subscriptions/mo",  value: fmtMoney(totals.monthlySubscriptions, currency), tone: "neutral" },
+    { label: "Top category",      value: totals.topCategory?.category || "—",         tone: "neutral" },
+  ];
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div className="flex items-center justify-between mb-2">
+        <SectionTitle>Business profit</SectionTitle>
+        {onOpen && (
+          <button
+            type="button"
+            onClick={onOpen}
+            className="rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-[0.97] transition"
+            style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}`, letterSpacing: "0.04em" }}
+          >
+            View all
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {tiles.map(t => (
+          <button
+            type="button"
+            key={t.label}
+            onClick={onOpen}
+            className="text-left rounded-2xl p-3 active:scale-[0.99] transition"
+            style={{
+              background: "#fff",
+              border: `1px solid ${C.hairline}`,
+              boxShadow: "0 1px 0 rgba(21,17,26,0.02)",
+            }}
+          >
+            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+              {t.label}
+            </p>
+            <p
+              style={{
+                fontFamily: FONT_DISPLAY,
+                fontSize: 18,
+                fontWeight: 600,
+                color: t.tone === "positive" ? C.success : t.tone === "warning" ? C.danger : C.espresso,
+                lineHeight: 1.15,
+                marginTop: 2,
+              }}
+            >
+              {t.value}
+            </p>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const ExpensesScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const expenses: ExpenseLike[] = store.businessExpenses || [];
+  const appointments = (store.appointments as any[]) || [];
+  const currency = store.business?.currency || "USD";
+
+  const [editing, setEditing] = useState<ExpenseLike | null>(null);
+  const [openSheet, setOpenSheet] = useState(false);
+
+  // Revenue this calendar month — used for the Estimated Profit card
+  // and the profit-margin insight. Pulled from the same canonical
+  // dashboard helper so reports + expenses never disagree.
+  const monthRevenue = useMemo(() => computeDashboardRevenue(appointments).monthEarned, [appointments]);
+
+  const totals = useMemo(() => computeExpenseTotals(expenses), [expenses]);
+  const groups = useMemo(() => groupExpensesForList(expenses), [expenses]);
+  const insights = useMemo(() => buildExpenseInsights(expenses, monthRevenue), [expenses, monthRevenue]);
+  const subscriptions = useMemo(
+    () => (expenses || []).filter(e => e.isRecurring)
+      .sort((a, b) => (a.nextBillingDate || "").localeCompare(b.nextBillingDate || "")),
+    [expenses],
+  );
+
+  const profit = estimateProfit(monthRevenue, totals.monthTotal);
+
+  const handleAdd = () => { setEditing(null); setOpenSheet(true); };
+  const handleEdit = (e: ExpenseLike) => { setEditing(e); setOpenSheet(true); };
+
+  const handleDelete = async (e: ExpenseLike) => {
+    if (!e?.id) return;
+    if (!window.confirm("Delete this expense?")) return;
+    if (e.receiptPath) {
+      try { await deleteReceiptObject(e.receiptPath); } catch { /* best-effort */ }
+    }
+    await store.deleteBusinessExpense(e.id);
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Expenses"
+        subtitle="Outflows, subscriptions, estimated profit"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        rightAction={{ icon: <Plus size={20} />, onClick: handleAdd }}
+      />
+
+      <div className="px-5 pt-2 space-y-5">
+        {/* KPI tiles — same numbers the Money tab shows, just larger. */}
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { label: "Gross revenue (mo)",  value: fmtMoney(monthRevenue, currency),                tone: "neutral" as const },
+            { label: "Expenses (mo)",       value: fmtMoney(totals.monthTotal, currency),           tone: "neutral" as const },
+            { label: "Estimated profit",    value: fmtMoney(profit, currency),                       tone: (profit >= 0 ? "positive" : "warning") as "positive" | "warning" },
+            { label: "Subscriptions/mo",    value: fmtMoney(totals.monthlySubscriptions, currency), tone: "neutral" as const },
+            { label: "Top category",        value: totals.topCategory?.category || "—",              tone: "neutral" as const },
+            { label: "This week",           value: fmtMoney(totals.weekTotal, currency),             tone: "neutral" as const },
+          ].map(t => (
+            <div key={t.label} className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
+              <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>{t.label}</p>
+              <p style={{
+                fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, lineHeight: 1.15, marginTop: 2,
+                color: t.tone === "positive" ? C.success : t.tone === "warning" ? C.danger : C.espresso,
+              }}>
+                {t.value}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {/* Insights */}
+        {insights.length > 0 && (
+          <div className="space-y-2">
+            {insights.map((i, idx) => (
+              <div
+                key={idx}
+                className="rounded-2xl p-3 text-[12px]"
+                style={{
+                  background: i.kind === "positive" ? "rgba(92,124,74,0.08)" : i.kind === "warning" ? "rgba(156,61,46,0.08)" : C.cream,
+                  border: `1px solid ${i.kind === "positive" ? "rgba(92,124,74,0.25)" : i.kind === "warning" ? "rgba(156,61,46,0.25)" : C.hairline}`,
+                  color: C.espresso,
+                }}
+              >
+                {i.text}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Recurring subscriptions */}
+        {subscriptions.length > 0 && (
+          <div>
+            <SectionTitle>Subscriptions</SectionTitle>
+            <Card className="p-2">
+              {subscriptions.map((e, i) => (
+                <button
+                  type="button"
+                  key={e.id}
+                  onClick={() => handleEdit(e)}
+                  className="w-full text-left flex items-center justify-between px-2 py-2.5 active:scale-[0.99] transition"
+                  style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{e.title || e.category || "Subscription"}</p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      {e.recurringInterval || "monthly"}{e.nextBillingDate ? ` · next ${fmtDate(e.nextBillingDate)}` : ""}
+                    </p>
+                  </div>
+                  <span className="text-[12px] font-semibold tabular-nums ml-3" style={{ color: C.coffee }}>
+                    {fmtMoney(expenseAmount(e), currency)}
+                  </span>
+                </button>
+              ))}
+            </Card>
+          </div>
+        )}
+
+        {/* Grouped list */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <SectionTitle>All expenses</SectionTitle>
+            <button
+              type="button"
+              onClick={handleAdd}
+              className="rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-[0.97] transition"
+              style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}`, letterSpacing: "0.04em" }}
+            >
+              + Add expense
+            </button>
+          </div>
+          {groups.length === 0 ? (
+            <EmptyState
+              icon={<Receipt size={28} style={{ color: C.muted }} />}
+              title="No expenses yet"
+              body="Track hair, supplies, booth rent, subscriptions — anything that comes out of your business — to see your real profit."
+            />
+          ) : (
+            <div className="space-y-4">
+              {groups.map(g => (
+                <div key={g.key}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>{g.label}</p>
+                    <p className="text-[11px] font-semibold tabular-nums" style={{ color: C.coffee }}>{fmtMoney(g.total, currency)}</p>
+                  </div>
+                  <Card className="p-2">
+                    {g.items.map((e, i) => (
+                      <button
+                        type="button"
+                        key={e.id}
+                        onClick={() => handleEdit(e)}
+                        className="w-full text-left flex items-center gap-3 px-2 py-2.5 active:scale-[0.99] transition"
+                        style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                      >
+                        <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: "rgba(156,61,46,0.10)" }}>
+                          {e.isRecurring
+                            ? <Repeat size={16} style={{ color: C.danger }} />
+                            : <ArrowDownRight size={16} style={{ color: C.danger }} />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{e.title || e.category || "Expense"}</p>
+                          <p className="text-[11px]" style={{ color: C.muted }}>
+                            {[e.category, e.expenseDate ? fmtDate(e.expenseDate) : null].filter(Boolean).join(" · ") || "—"}
+                          </p>
+                        </div>
+                        <span className="text-[13px] font-semibold tabular-nums ml-2" style={{ color: C.danger }}>
+                          -{fmtMoney(expenseAmount(e), currency)}
+                        </span>
+                      </button>
+                    ))}
+                  </Card>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {openSheet && (
+        <ExpenseEditorSheet
+          expense={editing}
+          currency={currency}
+          userId={store.userId || null}
+          onClose={() => { setOpenSheet(false); setEditing(null); }}
+          onSave={async (rec) => { await store.upsertBusinessExpense(rec); setOpenSheet(false); setEditing(null); }}
+          onDelete={editing ? async () => { await handleDelete(editing); setOpenSheet(false); setEditing(null); } : undefined}
+        />
+      )}
+    </div>
+  );
+};
+
+const ExpenseEditorSheet = ({ expense, currency, userId, onClose, onSave, onDelete }: {
+  expense: ExpenseLike | null;
+  currency: string;
+  userId: string | null;
+  onClose: () => void;
+  onSave: (rec: ExpenseLike) => Promise<void> | void;
+  onDelete?: () => Promise<void> | void;
+}) => {
+  const isEdit = !!expense?.id;
+  const [title, setTitle] = useState(expense?.title || "");
+  const [amount, setAmount] = useState(expense?.amount != null ? String(expense.amount) : "");
+  const [category, setCategory] = useState<string>(expense?.category || EXPENSE_CATEGORIES[0]);
+  const [note, setNote] = useState(expense?.note || "");
+  const [expenseDate, setExpenseDate] = useState(expense?.expenseDate || todayISO());
+  const [isRecurring, setIsRecurring] = useState(!!expense?.isRecurring);
+  const [recurringInterval, setRecurringInterval] = useState<RecurringInterval>(
+    (expense?.recurringInterval as RecurringInterval) || "monthly",
+  );
+  const [nextBillingDate, setNextBillingDate] = useState(expense?.nextBillingDate || "");
+  const [receiptPath, setReceiptPath] = useState<string | null>(expense?.receiptPath || null);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Resolve a signed preview URL once if we already have a stored
+  // receipt — saves the user a surprise re-upload on edit.
+  useEffect(() => {
+    let alive = true;
+    if (receiptPath) {
+      (async () => {
+        const url = await getReceiptUrl(receiptPath);
+        if (alive) setReceiptPreview(url);
+      })();
+    } else {
+      setReceiptPreview(null);
+    }
+    return () => { alive = false; };
+  }, [receiptPath]);
+
+  const handleFile = async (file: File | null) => {
+    if (!file) return;
+    if (!userId) {
+      alert("Sign in to attach receipts. You can still save the expense without one.");
+      return;
+    }
+    const expenseId = expense?.id || uid();
+    setUploading(true);
+    try {
+      const path = await uploadReceipt(userId, expenseId, file);
+      // If we replaced an existing receipt, drop the old object so the
+      // bucket doesn't accumulate orphans.
+      if (receiptPath && receiptPath !== path) {
+        try { await deleteReceiptObject(receiptPath); } catch { /* best-effort */ }
+      }
+      setReceiptPath(path);
+    } catch (err: any) {
+      console.warn("[expense] receipt upload failed", err);
+      alert(`Couldn't upload receipt: ${err?.message || "please try again."}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleClearReceipt = async () => {
+    if (!receiptPath) return;
+    try { await deleteReceiptObject(receiptPath); } catch { /* best-effort */ }
+    setReceiptPath(null);
+  };
+
+  const handleSave = async () => {
+    const amt = parseMoney(amount);
+    if (amt <= 0) { alert("Amount must be greater than zero."); return; }
+    setBusy(true);
+    try {
+      const rec: ExpenseLike & { id?: string } = {
+        id: expense?.id,
+        title: title.trim() || category || "Expense",
+        amount: amt,
+        category,
+        note: note.trim() || null,
+        expenseDate: expenseDate || null,
+        isRecurring,
+        recurringInterval: isRecurring ? recurringInterval : null,
+        nextBillingDate: isRecurring ? (nextBillingDate || null) : null,
+        receiptPath,
+      };
+      await onSave(rec);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open onClose={onClose} title={isEdit ? "Edit expense" : "Add expense"}>
+      <div className="space-y-4 pb-4">
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Title</label>
+          <input
+            type="text"
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            placeholder="e.g. Braiding hair restock"
+            className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px]"
+            style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Amount</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onChange={e => setAmount(sanitizeMoneyInput(e.target.value))}
+              placeholder="0.00"
+              className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px] tabular-nums"
+              style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Date</label>
+            <input
+              type="date"
+              value={expenseDate}
+              onChange={e => setExpenseDate(e.target.value)}
+              className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px]"
+              style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Category</label>
+          <select
+            value={category}
+            onChange={e => setCategory(e.target.value)}
+            className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px]"
+            style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+          >
+            {EXPENSE_CATEGORIES.map(c => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="rounded-2xl p-3" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-[13px] font-semibold" style={{ color: C.espresso }}>Recurring subscription</span>
+            <input
+              type="checkbox"
+              checked={isRecurring}
+              onChange={e => setIsRecurring(e.target.checked)}
+              className="h-5 w-5"
+            />
+          </label>
+          {isRecurring && (
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Interval</label>
+                <select
+                  value={recurringInterval}
+                  onChange={e => setRecurringInterval(e.target.value as RecurringInterval)}
+                  className="w-full mt-1 px-3 py-2 rounded-xl text-[13px]"
+                  style={{ background: "#fff", border: `1px solid ${C.hairline}`, color: C.espresso }}
+                >
+                  {RECURRING_INTERVALS.map(i => <option key={i} value={i}>{i}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Next billing</label>
+                <input
+                  type="date"
+                  value={nextBillingDate}
+                  onChange={e => setNextBillingDate(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 rounded-xl text-[13px]"
+                  style={{ background: "#fff", border: `1px solid ${C.hairline}`, color: C.espresso }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Note</label>
+          <textarea
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="Optional"
+            rows={2}
+            className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px]"
+            style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso, resize: "vertical" }}
+          />
+        </div>
+
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Receipt</label>
+          <div className="mt-1 flex items-center gap-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              onChange={e => handleFile(e.target.files?.[0] || null)}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="rounded-xl px-3 py-2 text-[12px] font-semibold active:scale-[0.97] transition flex items-center gap-1.5"
+              style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
+            >
+              <Camera size={14} />
+              {uploading ? "Uploading…" : receiptPath ? "Replace" : "Attach receipt"}
+            </button>
+            {receiptPath && (
+              <button
+                type="button"
+                onClick={handleClearReceipt}
+                className="rounded-xl px-3 py-2 text-[12px] font-semibold active:scale-[0.97] transition"
+                style={{ background: "transparent", color: C.danger, border: `1px solid ${C.hairline}` }}
+              >
+                Remove
+              </button>
+            )}
+          </div>
+          {receiptPreview && (
+            <a href={receiptPreview} target="_blank" rel="noreferrer"
+               className="block mt-2 rounded-xl overflow-hidden"
+               style={{ border: `1px solid ${C.hairline}`, maxWidth: 220 }}>
+              <img src={receiptPreview} alt="Receipt preview" style={{ width: "100%", height: "auto", display: "block" }} />
+            </a>
+          )}
+        </div>
+
+        <div className="flex gap-2 pt-2">
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={busy}
+              className="rounded-xl px-3 py-2.5 text-[13px] font-semibold flex items-center gap-1.5"
+              style={{ background: "transparent", color: C.danger, border: `1px solid ${C.hairline}` }}
+            >
+              <Trash2 size={14} /> Delete
+            </button>
+          )}
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+            style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={busy}
+            className="rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+            style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </Sheet>
   );
 };
 
@@ -21568,6 +22149,7 @@ export default function App() {
               openTxSheet={() => { setEditingTx(null); setOpenTx(true); }}
               editTx={(t) => { setEditingTx(t); setOpenTx(true); }}
               openTimerSessions={() => setSecondary("timerSessions")}
+              openExpenses={() => setSecondary("expenses")}
               openReceipt={openReceipt} />
           )}
           {active === "rebooking" && (
@@ -21654,6 +22236,7 @@ export default function App() {
       )}
       {secondary === "services" && <ServicesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "reports" && <ReportsScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "expenses" && <ExpensesScreen store={store} onBack={() => setActive("money")} />}
       {secondary === "discounts" && <DiscountsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "reviews" && <ReviewsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "products" && (
