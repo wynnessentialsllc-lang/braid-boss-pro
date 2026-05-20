@@ -9836,6 +9836,12 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
         preferredStyles: client?.preferredStyles || [],
         scalpSensitivity: client?.scalpSensitivity || "None",
         allergies: client?.allergies || "", notes: client?.notes || "",
+        // Marketing fields. birthday: YYYY-MM-DD or "" (matches the
+        // <input type="date"> contract). Year matters for storage
+        // but the cron only matches MM-DD, so a privacy-conscious
+        // client can put any year and it still works.
+        birthday: client?.birthday || "",
+        marketingEmailsEnabled: client?.marketingEmailsEnabled !== false,
       });
       setTab("info");
     }
@@ -9948,7 +9954,32 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
                 options={SENSITIVITY.map(s => ({ value: s, label: s }))} />
             </Field>
             <Field label="Allergies"><Input value={form.allergies} onChange={e => setForm({ ...form, allergies: e.target.value })} placeholder="e.g. tea tree, lanolin" /></Field>
+            <Field label="Birthday" hint="Optional. We'll send a happy-birthday email each year.">
+              <Input
+                type="date"
+                value={form.birthday || ""}
+                onChange={e => setForm({ ...form, birthday: e.target.value || null })}
+              />
+            </Field>
             <Field label="Notes"><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Hair texture, density, takedown notes…" rows={3} /></Field>
+            {/* Per-client marketing opt-out. Defaults to true (in via
+                the editor's seed) so existing clients receive nudges
+                until they explicitly unsubscribe. Untoggling here
+                does the same thing as the public /unsubscribe page. */}
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Marketing emails</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    Rebook nudges, birthday greetings, win-backs. Transactional emails (confirmations, balance receipts) keep going regardless.
+                  </p>
+                </div>
+                <Toggle
+                  checked={form.marketingEmailsEnabled !== false}
+                  onChange={(v: boolean) => setForm({ ...form, marketingEmailsEnabled: v })}
+                />
+              </div>
+            </Card>
 
             <div className="grid grid-cols-2 gap-3 pt-2">
               <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -24203,13 +24234,18 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
   const services: any[] = store.servicesApi?.services || [];
   const updateService = store.servicesApi?.upsert;
 
-  // Master switch lives on shop_settings.marketing_rebook_nudges_enabled.
-  // Default true so a stylist who's only set up rebook windows on
-  // services starts sending immediately. A pause here suppresses
-  // everything without erasing the per-service settings.
-  const [enabled, setEnabled] = useState<boolean | null>(null);
+  // Four per-type master switches on shop_settings. Default true so
+  // a stylist who's only set up rebook windows starts sending right
+  // away. A pause here suppresses one type without erasing per-
+  // service settings or other toggles.
+  type Toggles = {
+    rebook: boolean;
+    birthday: boolean;
+    winback: boolean;
+    welcome: boolean;
+  };
+  const [toggles, setToggles] = useState<Toggles>({ rebook: true, birthday: true, winback: true, welcome: true });
   const [loading, setLoading] = useState(true);
-  const [savingMaster, setSavingMaster] = useState(false);
 
   useEffect(() => {
     if (!userId) return;
@@ -24217,31 +24253,43 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
     (async () => {
       const { data } = await getSupabase()
         .from("shop_settings")
-        .select("marketing_rebook_nudges_enabled")
+        .select("marketing_rebook_nudges_enabled, marketing_birthday_enabled, marketing_winback_enabled, marketing_welcome_enabled")
         .eq("user_id", userId)
         .maybeSingle();
       if (cancelled) return;
-      setEnabled(data?.marketing_rebook_nudges_enabled ?? true);
+      setToggles({
+        rebook:   data?.marketing_rebook_nudges_enabled ?? true,
+        birthday: data?.marketing_birthday_enabled      ?? true,
+        winback:  data?.marketing_winback_enabled       ?? true,
+        welcome:  data?.marketing_welcome_enabled       ?? true,
+      });
       setLoading(false);
     })();
     return () => { cancelled = true; };
   }, [userId]);
 
-  const saveMaster = async (next: boolean) => {
+  // Save a single toggle column. Optimistic local update; roll back
+  // on error so the UI never desyncs from cloud truth.
+  const saveToggle = async (key: keyof Toggles, next: boolean) => {
     if (!userId) return;
-    setSavingMaster(true);
-    setEnabled(next);
+    const prev = toggles[key];
+    setToggles(t => ({ ...t, [key]: next }));
+    const column = {
+      rebook:   "marketing_rebook_nudges_enabled",
+      birthday: "marketing_birthday_enabled",
+      winback:  "marketing_winback_enabled",
+      welcome:  "marketing_welcome_enabled",
+    }[key];
     const { error: err } = await getSupabase()
       .from("shop_settings")
       .upsert({
         user_id: userId,
-        marketing_rebook_nudges_enabled: next,
+        [column]: next,
         updated_at: new Date().toISOString(),
       }, { onConflict: "user_id" });
-    setSavingMaster(false);
     if (err) {
-      console.warn("[marketing] save master failed:", err.message);
-      setEnabled(!next); // roll back optimistic flip
+      console.warn("[marketing] save toggle failed:", err.message);
+      setToggles(t => ({ ...t, [key]: prev }));
     }
   };
 
@@ -24277,20 +24325,31 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
         leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
       />
       <div className="px-5 pt-2 space-y-4">
-        {/* Master switch */}
-        <Card className="p-3.5">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Send rebook nudges</p>
-              <p className="text-[11px]" style={{ color: C.muted }}>
-                Daily at 10am Pacific, we email clients whose last appointment hit the rebook window for that service.
-              </p>
+        {/* Per-type master switches. Each automation is independent —
+            a stylist can run rebook nudges without birthdays, etc.
+            All default to on so day-one setup is one less screen. */}
+        <Card className="p-2">
+          {([
+            { key: "rebook"   as const, title: "Rebook nudges",       hint: "Service hit its rebook window with no future booking" },
+            { key: "birthday" as const, title: "Birthday greetings",  hint: "Personal birthday email each year (no discount)" },
+            { key: "winback"  as const, title: "Win-back",            hint: "Client hasn't booked in 90+ days" },
+            { key: "welcome"  as const, title: "New-client welcome",  hint: "Day after their first completed appointment" },
+          ]).map((t, i) => (
+            <div
+              key={t.key}
+              className="flex items-center justify-between gap-3 px-2 py-3"
+              style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>{t.title}</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>{t.hint}</p>
+              </div>
+              <Toggle
+                checked={toggles[t.key]}
+                onChange={(v: boolean) => { void saveToggle(t.key, v); }}
+              />
             </div>
-            <Toggle
-              checked={!!enabled}
-              onChange={(v: boolean) => { void saveMaster(v); }}
-            />
-          </div>
+          ))}
         </Card>
 
         {/* How it works */}
