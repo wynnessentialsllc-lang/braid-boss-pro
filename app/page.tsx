@@ -23662,11 +23662,92 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
     }
   };
 
+  // Build the items + viewOrderUrl payload shared by every order
+  // email. Pulled out so each markX handler reads as a 4-liner
+  // instead of duplicating this prep work.
+  const buildOrderEmailBase = (o: OrderRow) => {
+    const items = (o.line_items || []).map((li: any) => ({
+      title: li?.title,
+      variant: [li?.variant_label, li?.variant_name].filter(Boolean).join(" · ") || null,
+      quantity: Number(li?.quantity) || 1,
+      unitAmount: Number(li?.unit_amount) || 0,
+    }));
+    const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+    return {
+      orderRef: String(o.id).slice(0, 8).toUpperCase(),
+      items,
+      viewOrderUrl: baseUrl && o.customer_token ? `${baseUrl}/order/${o.customer_token}` : "",
+      customerName: o.customer_name || null,
+      studioName: store.business?.businessName || "your boutique",
+    };
+  };
+
+  // Side-effect-only email-enqueue helpers. Each is intentionally
+  // best-effort: a queue failure must not roll back the state
+  // transition, so we swallow errors and surface them only in the
+  // console. dedupe_key_in keeps a double-tap from sending two
+  // emails for the same status flip.
+  const queueOrderEmail = async (
+    o: OrderRow,
+    notificationType: "order_ready_for_pickup" | "order_shipped",
+    extraPayload: Record<string, any>,
+  ) => {
+    if (!o.customer_email) return;
+    try {
+      const base = buildOrderEmailBase(o);
+      await getSupabase().rpc("queue_notification", {
+        user_id_in: store.userId,
+        channel_in: "email",
+        notification_type_in: notificationType,
+        body_in: notificationType === "order_shipped"
+          ? `Your order from ${base.studioName} has shipped.`
+          : `Your order from ${base.studioName} is ready for pickup.`,
+        subject_in: notificationType === "order_shipped"
+          ? `Your order has shipped · #${base.orderRef}`
+          : `Your order is ready for pickup · #${base.orderRef}`,
+        recipient_email_in: o.customer_email,
+        recipient_name_in: o.customer_name || null,
+        payload_in: { ...base, ...extraPayload },
+        dedupe_key_in: `${notificationType}:${o.id}`,
+      });
+    } catch (e: any) {
+      console.warn(`[orders] ${notificationType} enqueue failed:`, e?.message || e);
+    }
+  };
+
   const markFulfilled = () =>
     runAction(async () => {
       if (!openOrder) return { ok: false };
       const { error: err } = await getSupabase().rpc("mark_order_fulfilled", { order_id_in: openOrder.id });
       return err ? { ok: false, err: err.message } : { ok: true };
+    });
+
+  const markReadyForPickup = () =>
+    runAction(async () => {
+      if (!openOrder) return { ok: false };
+      const { error: err } = await getSupabase().rpc("mark_order_ready_for_pickup", { order_id_in: openOrder.id });
+      if (err) return { ok: false, err: err.message };
+      // Pull pickup address + instructions from shop_settings so the
+      // email lands with the right location. Best-effort — a missing
+      // settings row falls back to "see message" in the template.
+      let pickupAddress = "";
+      let pickupInstructions = "";
+      try {
+        const { data: settings } = await getSupabase()
+          .from("shop_settings")
+          .select("pickup_address_line1, pickup_address_line2, pickup_city, pickup_state, pickup_postal_code, pickup_instructions")
+          .eq("user_id", store.userId)
+          .maybeSingle();
+        if (settings) {
+          pickupAddress = [
+            [settings.pickup_address_line1, settings.pickup_address_line2].filter(Boolean).join(", "),
+            [settings.pickup_city, settings.pickup_state, settings.pickup_postal_code].filter(Boolean).join(", "),
+          ].filter(Boolean).join(" · ");
+          pickupInstructions = settings.pickup_instructions || "";
+        }
+      } catch { /* fallback to empty */ }
+      await queueOrderEmail(openOrder, "order_ready_for_pickup", { pickupAddress, pickupInstructions });
+      return { ok: true };
     });
 
   const markShipped = () =>
@@ -23678,7 +23759,13 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
         tracking_in: trackingNumber || null,
         url_in: trackingUrl || null,
       });
-      return err ? { ok: false, err: err.message } : { ok: true };
+      if (err) return { ok: false, err: err.message };
+      await queueOrderEmail(openOrder, "order_shipped", {
+        carrier: carrier || null,
+        trackingNumber: trackingNumber || null,
+        trackingUrl: trackingUrl || null,
+      });
+      return { ok: true };
     });
 
   const markCanceled = () =>
@@ -23848,15 +23935,29 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
               )}
 
               {openOrder.status === "paid" && !isFinal && (
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  {s !== "shipped" && s !== "fulfilled" && (
-                    <Button variant="primary" onClick={markFulfilled}>
-                      {actionBusy ? "Saving…" : "Mark fulfilled"}
+                <div className="space-y-2 pt-1">
+                  {/* Pickup orders get a dedicated "Ready for pickup"
+                      action that emails the customer with the
+                      pickup address from shop_settings. Ship-type
+                      orders use the existing tracking + Mark shipped
+                      flow which now also emails the tracking out. */}
+                  {!openOrder.shipping_required && s !== "shipped" && s !== "fulfilled" && s !== "ready_for_pickup" && (
+                    <Button variant="primary" fullWidth onClick={markReadyForPickup}>
+                      {actionBusy ? "Saving…" : "Mark ready for pickup"}
                     </Button>
                   )}
-                  <Button variant="primary" onClick={markShipped}>
-                    {actionBusy ? "Saving…" : "Mark shipped"}
-                  </Button>
+                  <div className="grid grid-cols-2 gap-2">
+                    {s !== "shipped" && s !== "fulfilled" && (
+                      <Button variant="primary" onClick={markFulfilled}>
+                        {actionBusy ? "Saving…" : "Mark fulfilled"}
+                      </Button>
+                    )}
+                    {openOrder.shipping_required && (
+                      <Button variant="primary" onClick={markShipped}>
+                        {actionBusy ? "Saving…" : "Mark shipped"}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
               {openOrder.status !== "canceled" && !isFinal && (
@@ -23889,6 +23990,14 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
 const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const userId: string | null = store.userId;
   const [loading, setLoading] = useState(true);
+  // Structured pickup address — surfaced on the order_ready_for_pickup
+  // email so the customer knows where to come. line2 is optional;
+  // everything else is single-line.
+  const [pickupLine1, setPickupLine1] = useState("");
+  const [pickupLine2, setPickupLine2] = useState("");
+  const [pickupCity, setPickupCity] = useState("");
+  const [pickupState, setPickupState] = useState("");
+  const [pickupPostalCode, setPickupPostalCode] = useState("");
   const [pickupInstructions, setPickupInstructions] = useState("");
   const [shippingNotes, setShippingNotes] = useState("");
   const [turnaroundMin, setTurnaroundMin] = useState<string>("");
@@ -23908,6 +24017,11 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
         .maybeSingle();
       if (cancelled) return;
       if (data) {
+        setPickupLine1(data.pickup_address_line1 || "");
+        setPickupLine2(data.pickup_address_line2 || "");
+        setPickupCity(data.pickup_city || "");
+        setPickupState(data.pickup_state || "");
+        setPickupPostalCode(data.pickup_postal_code || "");
         setPickupInstructions(data.pickup_instructions || "");
         setShippingNotes(data.shipping_notes || "");
         setTurnaroundMin(data.turnaround_days_min == null ? "" : String(data.turnaround_days_min));
@@ -23925,6 +24039,11 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
     setMsg(null);
     const payload = {
       user_id: userId,
+      pickup_address_line1: pickupLine1.trim() || null,
+      pickup_address_line2: pickupLine2.trim() || null,
+      pickup_city: pickupCity.trim() || null,
+      pickup_state: pickupState.trim() || null,
+      pickup_postal_code: pickupPostalCode.trim() || null,
       pickup_instructions: pickupInstructions.trim() || null,
       shipping_notes: shippingNotes.trim() || null,
       turnaround_days_min: turnaroundMin.trim() === "" ? null : Math.max(0, Math.floor(Number(turnaroundMin) || 0)),
@@ -23946,8 +24065,28 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
           <Card className="p-6 text-center"><p className="text-[13px]" style={{ color: C.muted }}>Loading…</p></Card>
         ) : (
           <>
-            <Field label="Pickup instructions" hint="Shown when a product is set to local pickup.">
-              <Textarea rows={3} value={pickupInstructions} onChange={e => setPickupInstructions(e.target.value)} placeholder="Pickup is available Tuesday–Saturday between 10am and 6pm…" />
+            <Card className="p-3.5 space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Pickup address</p>
+              <Field label="Street address">
+                <Input value={pickupLine1} onChange={e => setPickupLine1(e.target.value)} placeholder="5309 Knowlton Street" />
+              </Field>
+              <Field label="Unit / suite (optional)">
+                <Input value={pickupLine2} onChange={e => setPickupLine2(e.target.value)} placeholder="Apt 2B" />
+              </Field>
+              <div className="grid grid-cols-3 gap-2">
+                <Field label="City">
+                  <Input value={pickupCity} onChange={e => setPickupCity(e.target.value)} placeholder="Los Angeles" />
+                </Field>
+                <Field label="State">
+                  <Input value={pickupState} onChange={e => setPickupState(e.target.value.toUpperCase().slice(0, 2))} placeholder="CA" />
+                </Field>
+                <Field label="ZIP">
+                  <Input value={pickupPostalCode} onChange={e => setPickupPostalCode(e.target.value.replace(/[^0-9-]/g, "").slice(0, 10))} inputMode="numeric" placeholder="90045" />
+                </Field>
+              </div>
+            </Card>
+            <Field label="Pickup instructions" hint="Shown on the pickup-ready email + product tracking page.">
+              <Textarea rows={3} value={pickupInstructions} onChange={e => setPickupInstructions(e.target.value)} placeholder="Pickup is available Tuesday–Saturday between 10am and 6pm. Ring the buzzer for 2B." />
             </Field>
             <Field label="Shipping notes" hint="Shown on the customer's order tracking page.">
               <Textarea rows={3} value={shippingNotes} onChange={e => setShippingNotes(e.target.value)} placeholder="Orders ship Monday and Thursday via USPS Priority…" />

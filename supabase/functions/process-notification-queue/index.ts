@@ -699,6 +699,181 @@ const renderAppointmentRescheduled = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- order_confirmation (customer-facing receipt) ------------------
+// Fires from the product-checkout webhook the moment Stripe confirms
+// payment. Payload shape:
+//   { customerName, studioName, orderRef, currency, items[],
+//     subtotal, shippingCents, total, isPickup, viewOrderUrl }
+// items[] entries: { title, variant, quantity, unitAmount, imageUrl }
+const renderOrderConfirmation = (p: Record<string, any>) => {
+  const customerName = p.customerName || "there";
+  const studioName   = p.studioName   || "your boutique";
+  const orderRef     = p.orderRef     || "";
+  const currency     = (p.currency || "USD").toUpperCase();
+  const items        = Array.isArray(p.items) ? p.items : [];
+  const isPickup     = !!p.isPickup;
+  const viewOrderUrl = String(p.viewOrderUrl || "").trim();
+  const fmtMoney = (n: number | string | null | undefined): string => {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "—";
+    try { return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(v); }
+    catch { return `$${v.toFixed(2)}`; }
+  };
+
+  const itemRows = items.map((it: any) => {
+    const title = escape(it?.title || "Item");
+    const variant = it?.variant ? `<div style="font-size:12px;color:${C.muted};">${escape(it.variant)}</div>` : "";
+    const qty = Number(it?.quantity) || 1;
+    const unit = Number(it?.unitAmount) || 0;
+    const line = qty * unit;
+    return `
+      <tr>
+        <td style="padding:10px 0;border-bottom:1px solid ${C.hairline};vertical-align:top;">
+          <div style="font-size:14px;font-weight:600;color:${C.espresso};">${title}</div>
+          ${variant}
+          <div style="font-size:12px;color:${C.muted};margin-top:2px;">Qty ${qty}</div>
+        </td>
+        <td style="padding:10px 0;border-bottom:1px solid ${C.hairline};text-align:right;font-size:14px;color:${C.espresso};white-space:nowrap;vertical-align:top;">
+          ${fmtMoney(line)}
+        </td>
+      </tr>`;
+  }).join("");
+
+  const subtotal = Number(p.subtotal);
+  const total    = Number(p.total);
+  const shipping = Number(p.shippingCents) > 0 ? Number(p.shippingCents) / 100 : null;
+  const showSubtotal = Number.isFinite(subtotal) && Number.isFinite(total) && subtotal !== total;
+
+  const subject = `Your ${studioName} order is confirmed${orderRef ? ` · #${orderRef}` : ""}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Order confirmed</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">Thanks, ${escape(customerName)}.</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 16px;color:${C.coffee};">
+      Your order from <strong>${escape(studioName)}</strong> is in. We'll let you know when it's ${isPickup ? "ready for pickup" : "shipped"}.
+    </p>
+    ${orderRef ? `<p style="font-size:12px;color:${C.muted};margin:0 0 14px;">Order reference · <span style="font-family:SFMono-Regular,Menlo,Monaco,Consolas,monospace;color:${C.coffee};">${escape(orderRef)}</span></p>` : ""}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;margin:8px 0 6px;">
+      ${itemRows}
+      ${showSubtotal ? `
+        <tr>
+          <td style="padding:10px 0 4px;font-size:13px;color:${C.muted};">Subtotal</td>
+          <td style="padding:10px 0 4px;text-align:right;font-size:13px;color:${C.coffee};">${fmtMoney(subtotal)}</td>
+        </tr>` : ""}
+      ${shipping != null ? `
+        <tr>
+          <td style="padding:4px 0;font-size:13px;color:${C.muted};">Shipping</td>
+          <td style="padding:4px 0;text-align:right;font-size:13px;color:${C.coffee};">${fmtMoney(shipping)}</td>
+        </tr>` : ""}
+      <tr>
+        <td style="padding:10px 0 0;font-size:14px;font-weight:700;color:${C.espresso};">Total paid</td>
+        <td style="padding:10px 0 0;text-align:right;font-size:16px;font-weight:700;color:${C.espresso};">${fmtMoney(total)}</td>
+      </tr>
+    </table>
+    ${viewOrderUrl ? ctaButton("View order", viewOrderUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:18px 0 0;">
+      Questions about your order? Reply to this email and ${escape(studioName)} will be in touch.
+    </p>
+  `);
+  return { subject, html };
+};
+
+// ---- order_ready_for_pickup ----------------------------------------
+// Fires when the stylist taps "Ready for pickup" on a pickup order.
+// Payload shape:
+//   { customerName, studioName, orderRef, items[], pickupAddress,
+//     pickupInstructions, viewOrderUrl }
+// pickupAddress is the pre-formatted single-line string built on the
+// client side from shop_settings.pickup_address_* columns.
+const renderOrderReadyForPickup = (p: Record<string, any>) => {
+  const customerName = p.customerName || "there";
+  const studioName   = p.studioName   || "your boutique";
+  const orderRef     = p.orderRef     || "";
+  const items        = Array.isArray(p.items) ? p.items : [];
+  const pickupAddress      = String(p.pickupAddress || "").trim();
+  const pickupInstructions = String(p.pickupInstructions || "").trim();
+  const viewOrderUrl       = String(p.viewOrderUrl || "").trim();
+  const mapsUrl = pickupAddress
+    ? `https://maps.google.com/?q=${encodeURIComponent(pickupAddress)}`
+    : "";
+
+  const itemList = items.map((it: any) => {
+    const qty = Number(it?.quantity) || 1;
+    const title = escape(it?.title || "Item");
+    const variant = it?.variant ? ` — ${escape(it.variant)}` : "";
+    return `<li style="font-size:14px;line-height:22px;color:${C.coffee};">${qty}× ${title}${variant}</li>`;
+  }).join("");
+
+  const subject = `Your ${studioName} order is ready for pickup${orderRef ? ` · #${orderRef}` : ""}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Ready for pickup</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">Your order is ready, ${escape(customerName)}.</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
+      Come grab it from <strong>${escape(studioName)}</strong> at your convenience.
+    </p>
+    ${pickupAddress ? `
+      <div style="background:${C.cream};border:1px solid ${C.hairline};border-radius:12px;padding:14px 16px;margin:0 0 14px;">
+        <p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.muted};margin:0 0 6px;font-weight:700;">Pickup location</p>
+        <p style="font-size:15px;line-height:22px;margin:0;color:${C.espresso};font-weight:600;">${escape(pickupAddress)}</p>
+        ${pickupInstructions ? `<p style="font-size:13px;line-height:20px;margin:8px 0 0;color:${C.coffee};">${escape(pickupInstructions)}</p>` : ""}
+        ${mapsUrl ? `<p style="margin:10px 0 0;"><a href="${escape(mapsUrl)}" style="font-size:13px;color:${C.goldDeep};text-decoration:none;font-weight:600;">Get directions →</a></p>` : ""}
+      </div>` : ""}
+    ${items.length > 0 ? `
+      <p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.muted};margin:0 0 6px;font-weight:700;">Your items</p>
+      <ul style="margin:0 0 14px;padding-left:18px;">${itemList}</ul>` : ""}
+    ${viewOrderUrl ? ctaButton("View order", viewOrderUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:18px 0 0;">
+      Questions? Reply to this email and ${escape(studioName)} will be in touch.
+    </p>
+  `);
+  return { subject, html };
+};
+
+// ---- order_shipped --------------------------------------------------
+// Fires when the stylist taps "Mark shipped" and enters carrier +
+// tracking. Payload shape:
+//   { customerName, studioName, orderRef, items[], carrier,
+//     trackingNumber, trackingUrl, viewOrderUrl }
+const renderOrderShipped = (p: Record<string, any>) => {
+  const customerName   = p.customerName   || "there";
+  const studioName     = p.studioName     || "your boutique";
+  const orderRef       = p.orderRef       || "";
+  const items          = Array.isArray(p.items) ? p.items : [];
+  const carrier        = String(p.carrier        || "").trim();
+  const trackingNumber = String(p.trackingNumber || "").trim();
+  const trackingUrl    = String(p.trackingUrl    || "").trim();
+  const viewOrderUrl   = String(p.viewOrderUrl   || "").trim();
+
+  const itemList = items.map((it: any) => {
+    const qty = Number(it?.quantity) || 1;
+    const title = escape(it?.title || "Item");
+    const variant = it?.variant ? ` — ${escape(it.variant)}` : "";
+    return `<li style="font-size:14px;line-height:22px;color:${C.coffee};">${qty}× ${title}${variant}</li>`;
+  }).join("");
+
+  const subject = `Your ${studioName} order has shipped${orderRef ? ` · #${orderRef}` : ""}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">On the way</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">It's shipped, ${escape(customerName)}.</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
+      Your order from <strong>${escape(studioName)}</strong> is in transit${carrier ? ` via <strong>${escape(carrier)}</strong>` : ""}.
+    </p>
+    ${trackingNumber ? `
+      <div style="background:${C.cream};border:1px solid ${C.hairline};border-radius:12px;padding:14px 16px;margin:0 0 14px;">
+        <p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.muted};margin:0 0 6px;font-weight:700;">Tracking</p>
+        <p style="font-size:15px;line-height:22px;margin:0;color:${C.espresso};font-weight:600;font-family:SFMono-Regular,Menlo,Monaco,Consolas,monospace;">${escape(trackingNumber)}</p>
+        ${trackingUrl ? `<p style="margin:10px 0 0;"><a href="${escape(trackingUrl)}" style="font-size:13px;color:${C.goldDeep};text-decoration:none;font-weight:600;">Track your package →</a></p>` : ""}
+      </div>` : ""}
+    ${items.length > 0 ? `
+      <p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.muted};margin:0 0 6px;font-weight:700;">In this shipment</p>
+      <ul style="margin:0 0 14px;padding-left:18px;">${itemList}</ul>` : ""}
+    ${viewOrderUrl ? ctaButton("View order", viewOrderUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:18px 0 0;">
+      Questions? Reply to this email and ${escape(studioName)} will be in touch.
+    </p>
+  `);
+  return { subject, html };
+};
+
 // ---- generic fallback -----------------------------------------------
 const renderGeneric = (row: ClaimedRow) => {
   const subject = row.subject || "Notification from Braid Boss Pro";
@@ -763,6 +938,12 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderAppointmentRescheduled(row.payload || {});
     case "founding_welcome":
       return renderFoundingWelcome(row.payload || {});
+    case "order_confirmation":
+      return renderOrderConfirmation(row.payload || {});
+    case "order_ready_for_pickup":
+      return renderOrderReadyForPickup(row.payload || {});
+    case "order_shipped":
+      return renderOrderShipped(row.payload || {});
     default:
       return renderGeneric(row);
   }
