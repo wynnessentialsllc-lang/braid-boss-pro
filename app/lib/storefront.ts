@@ -449,6 +449,12 @@ export const useProducts = (userId: string | null): {
   refresh: () => Promise<void>;
   upsert: (draft: Partial<ProductInput> & { id?: string }) => Promise<Product | null>;
   remove: (id: string) => Promise<boolean>;
+  // Targeted setter for the inventory link. Bypasses the full
+  // upsert payload so callers that only need to set this one column
+  // CANNOT accidentally blank image_url, price, description,
+  // variants, etc. — past versions of this code did exactly that
+  // when called via `upsert({ id, title, inventory_item_id })`.
+  setInventoryLink: (productId: string, inventoryItemId: string | null) => Promise<boolean>;
 } => {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState<boolean>(!!userId);
@@ -490,8 +496,42 @@ export const useProducts = (userId: string | null): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  const upsert: ReturnType<typeof useProducts>["upsert"] = async (draft) => {
+  // PATCH-safe upsert on existing rows: if draft.id is set, merge the
+  // draft over the canonical product first so omitted fields keep
+  // their current values. Brand-new products (no id) still build
+  // their full payload from the draft as before.
+  const mergeDraftWithExisting = (draft: Partial<ProductInput> & { id?: string }): Partial<ProductInput> & { id?: string } => {
+    if (!draft.id) return draft;
+    const existing = products.find(p => p.id === draft.id);
+    if (!existing) return draft;
+    const has = (k: keyof typeof draft) =>
+      Object.prototype.hasOwnProperty.call(draft, k) && draft[k] !== undefined;
+    return {
+      id: draft.id,
+      title:                  has("title")                  ? draft.title!                  : existing.title,
+      slug:                   has("slug")                   ? draft.slug!                   : existing.slug,
+      description:            has("description")            ? draft.description!            : existing.description,
+      image_url:              has("image_url")              ? draft.image_url!              : existing.image_url,
+      gallery_images:         has("gallery_images")         ? draft.gallery_images!         : existing.gallery_images,
+      price:                  has("price")                  ? draft.price!                  : existing.price,
+      compare_at_price:       has("compare_at_price")       ? draft.compare_at_price!       : existing.compare_at_price,
+      inventory_count:        has("inventory_count")        ? draft.inventory_count!        : existing.inventory_count,
+      category:               has("category")               ? draft.category!               : existing.category,
+      is_featured:            has("is_featured")            ? draft.is_featured!            : existing.is_featured,
+      local_pickup_available: has("local_pickup_available") ? draft.local_pickup_available! : existing.local_pickup_available,
+      external_checkout_url:  has("external_checkout_url")  ? draft.external_checkout_url!  : existing.external_checkout_url,
+      requires_shipping:      has("requires_shipping")      ? draft.requires_shipping!      : existing.requires_shipping,
+      variant_label:          has("variant_label")          ? draft.variant_label!          : existing.variant_label,
+      variants:               has("variants")               ? draft.variants!               : existing.variants,
+      sort_order:             has("sort_order")             ? draft.sort_order!             : existing.sort_order,
+      active:                 has("active")                 ? draft.active!                 : existing.active,
+      inventory_item_id:      has("inventory_item_id")      ? draft.inventory_item_id!      : (existing as any).inventory_item_id ?? null,
+    };
+  };
+
+  const upsert: ReturnType<typeof useProducts>["upsert"] = async (rawDraft) => {
     if (!userId) return null;
+    const draft = mergeDraftWithExisting(rawDraft);
     const title = (draft.title || "").trim();
     if (!title) { setError("Product title is required."); return null; }
     if (title.length > 100) { setError("Title must be 100 characters or less."); return null; }
@@ -590,7 +630,26 @@ export const useProducts = (userId: string | null): {
     return true;
   };
 
-  return { products, loading, error, refresh, upsert, remove };
+  // Targeted single-column update for the inventory link. Goes
+  // straight to the DB with `update({ inventory_item_id }).eq(id)`
+  // so no other column can possibly be touched — even if a caller
+  // accidentally passes a malformed draft.
+  const setInventoryLink: ReturnType<typeof useProducts>["setInventoryLink"] = async (productId, inventoryItemId) => {
+    if (!userId) return false;
+    const supabase = getSupabase();
+    const { error: err } = await supabase
+      .from("products")
+      .update({ inventory_item_id: inventoryItemId || null })
+      .eq("id", productId)
+      .eq("user_id", userId);
+    if (err) { setError(err.message); return false; }
+    setProducts(prev => prev.map(p =>
+      p.id === productId ? ({ ...p, inventory_item_id: inventoryItemId || null } as Product) : p,
+    ));
+    return true;
+  };
+
+  return { products, loading, error, refresh, upsert, remove, setInventoryLink };
 };
 
 export type PublicProduct = {
