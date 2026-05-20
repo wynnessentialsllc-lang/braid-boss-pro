@@ -23529,6 +23529,10 @@ type OrderRow = {
   canceled_at: string | null;
   refund_amount: number | null;
   stripe_refund_id: string | null;
+  // Set by the checkout webhook once Stripe accepts payment. Used
+  // alongside paid_at to tell real pending-payment orders apart from
+  // abandoned-cart pre-inserts.
+  stripe_payment_intent: string | null;
   created_at: string;
 };
 
@@ -23611,6 +23615,25 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
     );
   }, [orders, search]);
 
+  // Abandoned = pre-checkout rows the /api/product-checkout route
+  // inserted to give the webhook something to match against, but
+  // the customer closed the Stripe tab without ever submitting
+  // payment. Status stays "pending", no payment_intent, no email,
+  // never converts (Stripe expires sessions after ~24h). Surfacing
+  // these as "pending orders to ship" is a footgun — every stylist
+  // who used the storefront has these noise rows.
+  const isAbandoned = (o: OrderRow): boolean =>
+    o.status === "pending" &&
+    !o.paid_at &&
+    !o.stripe_payment_intent &&
+    !o.customer_email;
+
+  const realOrders = useMemo(() => filtered.filter(o => !isAbandoned(o)), [filtered]);
+  const abandoned = useMemo(() => filtered.filter(o => isAbandoned(o)), [filtered]);
+
+  const [tab, setTab] = useState<"orders" | "abandoned">("orders");
+  const visible = tab === "abandoned" ? abandoned : realOrders;
+
   const openDetail = (o: OrderRow) => {
     setOpenOrder(o);
     setCarrier(o.tracking_carrier || "");
@@ -23679,6 +23702,34 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by customer, email, order ref, or product"
         />
+
+        {/* Tabs — only show the Abandoned tab when there's at least
+            one row in it, so a fresh stylist with zero abandoned
+            carts isn't shown a confusing empty section. */}
+        {(abandoned.length > 0 || tab === "abandoned") && (
+          <div className="flex gap-2">
+            {([
+              { key: "orders" as const,    label: `Orders${realOrders.length ? ` · ${realOrders.length}` : ""}` },
+              { key: "abandoned" as const, label: `Abandoned${abandoned.length ? ` · ${abandoned.length}` : ""}` },
+            ]).map(t => (
+              <button
+                type="button"
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className="px-3 py-1.5 rounded-full text-[11px] font-semibold transition"
+                style={{
+                  background: tab === t.key ? C.espresso : "transparent",
+                  color: tab === t.key ? C.cream : C.coffee,
+                  border: `1px solid ${tab === t.key ? C.espresso : C.hairline}`,
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {error && (
           <Card className="p-3" style={{ border: `1px solid ${C.danger}` }}>
             <p className="text-[12px]" style={{ color: C.danger }}>{error}</p>
@@ -23688,15 +23739,19 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
           <Card className="p-6 text-center">
             <p className="text-[13px]" style={{ color: C.muted }}>Loading…</p>
           </Card>
-        ) : filtered.length === 0 ? (
+        ) : visible.length === 0 ? (
           <Card className="p-6 text-center">
-            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>No orders yet</p>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>
+              {tab === "abandoned" ? "No abandoned carts" : "No orders yet"}
+            </p>
             <p className="text-[12px] mt-2" style={{ color: C.muted }}>
-              Customer orders from your storefront will appear here.
+              {tab === "abandoned"
+                ? "Cart sessions that started checkout but never paid will show up here."
+                : "Customer orders from your storefront will appear here."}
             </p>
           </Card>
         ) : (
-          filtered.map((o) => {
+          visible.map((o) => {
             const s = displayStatus(o);
             const tone = ORDER_TONE[s] || "neutral";
             const itemCount = (o.line_items || []).reduce((acc: number, i: any) => acc + (Number(i?.quantity) || 1), 0);
