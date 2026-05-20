@@ -176,5 +176,73 @@ export async function POST(req: Request) {
     return NextResponse.json({ received: true, ignored: "no_matching_order" }, { status: 200 });
   }
 
-  return NextResponse.json({ received: true }, { status: 200 });
+  // Inventory V1 — decrement any linked items. Best-effort: a
+  // failure here doesn't undo the order, but is logged so a manual
+  // adjustment can square the books. The legacy product.inventory_count
+  // column is still maintained by mark_product_order_paid; this is
+  // additive, only firing when a product has an inventory_item_id link.
+  try {
+    const { data: order, error: orderErr } = await admin
+      .from("product_orders")
+      .select("id, user_id, line_items")
+      .eq("stripe_session_id", sessionId || "")
+      .maybeSingle();
+    if (orderErr || !order) {
+      return NextResponse.json({ received: true, inventory_skipped: "order_lookup_failed" }, { status: 200 });
+    }
+    const lineItems = Array.isArray(order.line_items) ? order.line_items : [];
+    if (lineItems.length === 0) {
+      return NextResponse.json({ received: true, inventory_skipped: "no_line_items" }, { status: 200 });
+    }
+    const productIds = Array.from(new Set(lineItems.map((li: any) => String(li?.product_id || "")).filter(Boolean)));
+    if (productIds.length === 0) {
+      return NextResponse.json({ received: true, inventory_skipped: "no_product_ids" }, { status: 200 });
+    }
+    const { data: products, error: productsErr } = await admin
+      .from("products")
+      .select("id, inventory_item_id")
+      .in("id", productIds);
+    if (productsErr) {
+      console.warn("[product-checkout/webhook] inventory lookup failed:", productsErr.message);
+      return NextResponse.json({ received: true, inventory_skipped: "product_lookup_failed" }, { status: 200 });
+    }
+    const linkedById = new Map<string, string>();
+    for (const p of (products || [])) {
+      const linked = (p as any).inventory_item_id;
+      if (linked) linkedById.set(String(p.id), String(linked));
+    }
+    const skipped: string[] = [];
+    for (const li of lineItems) {
+      const productId = String((li as any)?.product_id || "");
+      const qty = Number((li as any)?.quantity);
+      if (!productId || !Number.isFinite(qty) || qty <= 0) { skipped.push(productId || "n/a"); continue; }
+      const itemId = linkedById.get(productId);
+      if (!itemId) continue; // product isn't linked to inventory — that's fine
+      const movementId = `mov_${order.id}_${productId}`.slice(0, 96);
+      const { error: applyErr } = await admin.rpc("inventory_apply_movement_admin", {
+        user_id_in: order.user_id,
+        movement_id_in: movementId,
+        item_id_in: itemId,
+        delta_in: -qty,
+        reason_in: "storefront_sale",
+        appointment_id_in: null,
+        storefront_order_id_in: order.id,
+        business_expense_id_in: null,
+        unit_cost_snapshot_in: null,
+        note_in: (li as any)?.title || null,
+      });
+      if (applyErr) {
+        // Most likely cause: already applied (movement id is
+        // deterministic per order+product, so a Stripe replay won't
+        // double-deduct — duplicate PK is the expected outcome).
+        if (!/duplicate key/i.test(applyErr.message)) {
+          console.warn(`[product-checkout/webhook] inventory apply failed for ${productId}:`, applyErr.message);
+        }
+      }
+    }
+    return NextResponse.json({ received: true, inventory_applied: true, skipped }, { status: 200 });
+  } catch (e: any) {
+    console.warn("[product-checkout/webhook] inventory side-effects failed:", e?.message || e);
+    return NextResponse.json({ received: true, inventory_error: e?.message || "unknown" }, { status: 200 });
+  }
 }

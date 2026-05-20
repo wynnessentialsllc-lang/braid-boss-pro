@@ -113,6 +113,7 @@ import {
   type ServiceInput,
   type ServiceAddOn,
   type ServiceExtra,
+  type ServiceMaterial,
   SERVICES_EMPTY_COPY,
   formatServicePrice,
   useServices,
@@ -5489,6 +5490,11 @@ const Studio = ({ store }) => {
             ))}
           </select>
           <StyleCustomizationSection form={serviceForm} onChange={setServiceForm} />
+          <DefaultMaterialsPicker
+            inventory={(store.inventoryItems || []) as InventoryItem[]}
+            value={Array.isArray(serviceForm.default_materials) ? serviceForm.default_materials : []}
+            onChange={(materials) => setServiceForm({ ...serviceForm, default_materials: materials })}
+          />
           <label className="flex items-center gap-2 mb-2">
             <input
               type="checkbox"
@@ -7203,6 +7209,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   const [form, setForm] = useState<EntityRecord>({});
   const [showNewClient, setShowNewClient] = useState(false);
   const [newClientName, setNewClientName] = useState("");
+  // After save, if the appointment was just transitioned to
+  // "completed", show the MaterialsUsedSheet before closing so the
+  // stylist can confirm what was consumed against the appointment.
+  const [showMaterialsFor, setShowMaterialsFor] = useState<{ id: string; style?: string | null } | null>(null);
 
   // Recurring
   const [makeRecurring, setMakeRecurring] = useState(false);
@@ -7604,6 +7614,21 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         ...recurringSeries.find(s => s.id === seriesId),
         occurrencesGenerated: Number(occurrences),
       });
+    }
+
+    // Inventory wire-up. When the stylist marks an appointment
+    // completed for the first time, open the MaterialsUsedSheet so
+    // they can confirm what was consumed against this appointment
+    // (pre-filled from the service's default_materials). Only fires
+    // for real appointments (not personal/blocked) — those returned
+    // early above. Skipped if the user has no inventory yet, since
+    // there's nothing to deduct against.
+    const wasCompleted = (original as any)?.status === "completed";
+    const nowCompleted = (saved as any)?.status === "completed";
+    const inventoryReady = Array.isArray(store?.inventoryItems) && store.inventoryItems.length > 0;
+    if (!wasCompleted && nowCompleted && inventoryReady) {
+      setShowMaterialsFor({ id: saved.id, style: saved.style ?? form.style ?? null });
+      return;
     }
 
     onClose();
@@ -8356,6 +8381,14 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         onSave={handleQuickReschedule}
         busy={rescheduleBusy}
       />
+      {showMaterialsFor && (
+        <MaterialsUsedSheet
+          appointment={showMaterialsFor}
+          services={(store.servicesApi?.services as Service[]) || []}
+          inventory={(store.inventoryItems || []) as InventoryItem[]}
+          onClose={() => { setShowMaterialsFor(null); onClose(); }}
+        />
+      )}
     </Sheet>
   );
 };
@@ -18921,6 +18954,257 @@ const InventoryMovementSheet = ({ item, currency, onClose, onApplied }: {
   );
 };
 
+// Service-editor row group: typical materials consumed by this
+// service. Pre-fills the appointment-completion sheet. Empty list
+// is fine — services without materials skip the prompt entirely.
+const DefaultMaterialsPicker = ({ inventory, value, onChange }: {
+  inventory: InventoryItem[];
+  value: ServiceMaterial[];
+  onChange: (next: ServiceMaterial[]) => void;
+}) => {
+  const active = useMemo(() => inventory.filter(isActiveItem), [inventory]);
+  const itemById = useMemo(() => {
+    const m = new Map<string, InventoryItem>();
+    for (const i of active) m.set(i.id, i);
+    return m;
+  }, [active]);
+
+  const setMaterial = (i: number, patch: Partial<ServiceMaterial>) => {
+    const next = value.map((m, idx) => idx === i ? { ...m, ...patch } : m);
+    onChange(next);
+  };
+  const removeMaterial = (i: number) => onChange(value.filter((_, idx) => idx !== i));
+  const addMaterial = () => {
+    if (active.length === 0) return;
+    onChange([...value, { inventory_item_id: active[0].id, quantity: 1 }]);
+  };
+
+  return (
+    <div className="mb-2 p-3 rounded-lg border" style={{ background: C.paper, borderColor: C.hairline }}>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[11px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Default materials</p>
+        {active.length === 0 ? (
+          <span className="text-[11px]" style={{ color: C.muted }}>Add inventory items first</span>
+        ) : (
+          <button type="button" onClick={addMaterial} className="text-[11px] font-semibold" style={{ color: C.goldDeep }}>+ Add</button>
+        )}
+      </div>
+      {value.length === 0 ? (
+        <p className="text-[11px]" style={{ color: C.muted }}>
+          Pre-fill what this service typically uses so completion is one tap.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {value.map((m, i) => {
+            const item = itemById.get(m.inventory_item_id);
+            return (
+              <div key={i} className="flex gap-2 items-center">
+                <select
+                  value={m.inventory_item_id}
+                  onChange={e => setMaterial(i, { inventory_item_id: e.target.value })}
+                  className="flex-1 px-2 py-1.5 rounded border text-[13px]"
+                  style={{ borderColor: C.hairline, background: C.paper, color: C.espresso }}
+                >
+                  {!item && <option value={m.inventory_item_id}>(missing item)</option>}
+                  {active.map(opt => (
+                    <option key={opt.id} value={opt.id}>{opt.name}</option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={m.quantity}
+                  onChange={e => setMaterial(i, { quantity: Number(e.target.value) || 0 })}
+                  className="w-20 px-2 py-1.5 rounded border text-[13px] tabular-nums"
+                  style={{ borderColor: C.hairline, background: C.paper, color: C.espresso }}
+                />
+                <span className="text-[11px] w-12" style={{ color: C.muted }}>
+                  {item?.unit || "ea"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeMaterial(i)}
+                  aria-label="Remove"
+                  className="p-1.5"
+                  style={{ color: C.danger }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Appointment-completion sheet: pre-fills materials from the service
+// definition, lets the stylist confirm or edit, then fires
+// inventory_apply_movement for each row. Skip is allowed — accuracy
+// matters more than coercion.
+const MaterialsUsedSheet = ({ appointment, services, inventory, onClose }: {
+  appointment: { id: string; style?: string | null };
+  services: Service[];
+  inventory: InventoryItem[];
+  onClose: () => void;
+}) => {
+  // Match the appointment's `style` (free-text) to a service by name,
+  // case-insensitively. Best-effort — if no match, we still let the
+  // user pick materials manually.
+  const service = useMemo(() => {
+    const name = (appointment.style || "").trim().toLowerCase();
+    if (!name) return null;
+    return services.find(s => (s.name || "").trim().toLowerCase() === name) || null;
+  }, [appointment.style, services]);
+
+  const activeInventory = useMemo(() => inventory.filter(isActiveItem), [inventory]);
+  const itemById = useMemo(() => {
+    const m = new Map<string, InventoryItem>();
+    for (const i of activeInventory) m.set(i.id, i);
+    return m;
+  }, [activeInventory]);
+
+  type Row = ServiceMaterial & { keep: boolean };
+  const [rows, setRows] = useState<Row[]>(() => {
+    const seed: ServiceMaterial[] = service?.default_materials ?? [];
+    return seed
+      .filter(m => itemById.has(m.inventory_item_id))
+      .map(m => ({ ...m, keep: true }));
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const addRow = () => {
+    if (activeInventory.length === 0) return;
+    setRows(prev => [...prev, { inventory_item_id: activeInventory[0].id, quantity: 1, keep: true }]);
+  };
+
+  const handleConfirm = async () => {
+    setErr(null);
+    setBusy(true);
+    try {
+      for (const r of rows) {
+        if (!r.keep) continue;
+        if (!r.inventory_item_id || r.quantity <= 0) continue;
+        const item = itemById.get(r.inventory_item_id);
+        if (!item) continue;
+        // negative delta: use on client.
+        await applyMovement({
+          itemId: r.inventory_item_id,
+          delta: -Math.abs(r.quantity),
+          reason: "service_use",
+          appointmentId: appointment.id,
+          unitCostSnapshot: itemUnitCost(item),
+          note: appointment.style || null,
+        });
+      }
+      onClose();
+    } catch (e: any) {
+      console.error("[inventory] materials used failed", e);
+      setErr(e?.message || "Couldn't apply one or more movements. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open onClose={onClose} title="Materials used">
+      <div className="space-y-4 pb-4">
+        <p className="text-[12px]" style={{ color: C.muted }}>
+          {service
+            ? `Pre-filled from "${service.name}". Edit anything that's off, then confirm to deduct from inventory.`
+            : "We didn't match this appointment to a service. Add what was used, or skip."}
+        </p>
+
+        {rows.length === 0 ? (
+          <div className="rounded-2xl p-3 text-[12px]" style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.coffee }}>
+            No materials yet. {activeInventory.length === 0 ? "Add inventory items first." : "Tap + Add to log something."}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {rows.map((r, i) => {
+              const item = itemById.get(r.inventory_item_id);
+              const onHand = item ? itemQuantity(item) : 0;
+              return (
+                <div key={i} className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
+                  <div className="flex gap-2 items-center mb-2">
+                    <select
+                      value={r.inventory_item_id}
+                      onChange={e => setRows(prev => prev.map((x, idx) => idx === i ? { ...x, inventory_item_id: e.target.value } : x))}
+                      className="flex-1 px-2 py-2 rounded-lg text-[13px]"
+                      style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+                    >
+                      {activeInventory.map(opt => (
+                        <option key={opt.id} value={opt.id}>{opt.name}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={r.quantity}
+                      onChange={e => setRows(prev => prev.map((x, idx) => idx === i ? { ...x, quantity: Number(e.target.value) || 0 } : x))}
+                      className="w-20 px-2 py-2 rounded-lg text-[13px] tabular-nums"
+                      style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]" style={{ color: C.muted }}>
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={r.keep}
+                        onChange={e => setRows(prev => prev.map((x, idx) => idx === i ? { ...x, keep: e.target.checked } : x))}
+                      />
+                      Deduct
+                    </label>
+                    <span>{onHand} {item?.unit || ""} on hand</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {activeInventory.length > 0 && (
+          <button
+            type="button"
+            onClick={addRow}
+            className="w-full rounded-xl px-3 py-2 text-[12px] font-semibold"
+            style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
+          >
+            + Add material
+          </button>
+        )}
+
+        {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
+
+        <div className="flex gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="flex-1 rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+            style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
+          >
+            Skip
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={busy || rows.filter(r => r.keep && r.quantity > 0).length === 0}
+            className="flex-1 rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+            style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+          >
+            {busy ? "Deducting…" : "Confirm & deduct"}
+          </button>
+        </div>
+      </div>
+    </Sheet>
+  );
+};
+
 // ============================================================
 //  BOOKING POLICIES (Phase 2)
 // ============================================================
@@ -21773,6 +22057,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings }: { s
     variant_label: string | null;
     variants: ProductVariant[];
     active: boolean;
+    inventory_item_id: string | null;
   }>;
   const [editing, setEditing] = useState<Draft | null>(null);
   // Raw textarea content for the variants list. Decoupled from
@@ -21881,6 +22166,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings }: { s
                 variant_label: p.variant_label,
                 variants: p.variants || [],
                 active: p.active,
+                inventory_item_id: (p as any).inventory_item_id ?? null,
               });
               // Seed the textarea with the existing variant names so
               // editing keeps them visible; new picks tack on as the
@@ -22007,6 +22293,28 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings }: { s
                 })}
                 placeholder="—"
               />
+            </Field>
+            {/* Link to a tracked inventory item. When set, the
+                storefront purchase webhook auto-decrements that
+                item on every paid order — keeps the bundle count
+                accurate even when it's used on clients too. */}
+            <Field label="Linked inventory item" hint="Optional. Decrements stock on each sale.">
+              <select
+                value={(editing as any).inventory_item_id || ""}
+                onChange={e => setEditing({ ...(editing as any), inventory_item_id: e.target.value || null })}
+                className="w-full px-3 py-2 rounded-xl text-[14px]"
+                style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+              >
+                <option value="">— Not linked —</option>
+                {((store.inventoryItems || []) as InventoryItem[])
+                  .filter(isActiveItem)
+                  .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+                  .map(it => (
+                    <option key={it.id} value={it.id}>
+                      {it.name}{it.unit ? ` (${it.unit})` : ""} — {itemQuantity(it)} on hand
+                    </option>
+                  ))}
+              </select>
             </Field>
             <Field label="Featured image" hint="Main photo shown on the storefront grid.">
               <ProductImageUploader
