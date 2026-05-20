@@ -7611,6 +7611,21 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     onClose();
   };
 
+  // Hard-delete escape hatch for real appointments. "Cancel
+  // appointment" keeps the row (status=cancelled) so the books
+  // retain a record — cancelled rows are already excluded from
+  // Reports by isBillable, so cancellation correctly updates the
+  // numbers. But test/junk appointments leave clutter; this purges
+  // them entirely so they're gone from history and reports for good.
+  const handleHardDelete = async () => {
+    if (!form.id) return;
+    if (!window.confirm(
+      "Permanently delete this appointment? This removes it from your schedule, history, and reports. This cannot be undone.",
+    )) return;
+    await deleteAppointment(form.id);
+    onClose();
+  };
+
   const handleDeleteSeries = async () => {
     if (!form.seriesId) return;
     if (!window.confirm("Cancel this entire recurring series? Past appointments stay; future ones are cancelled (and deposits refunded).")) return;
@@ -8247,6 +8262,11 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         {form.id && (
           <Button variant="danger" icon={<Trash2 size={16} />} onClick={handleDelete} fullWidth>
             {isPersonal ? "Delete this event" : isBlocked ? "Remove blocked time" : "Cancel appointment"}
+          </Button>
+        )}
+        {form.id && isAppointment && (
+          <Button variant="outline" icon={<Trash2 size={16} />} onClick={handleHardDelete} fullWidth>
+            Delete permanently
           </Button>
         )}
         {form.seriesId && (
