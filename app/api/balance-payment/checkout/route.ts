@@ -40,7 +40,7 @@ const baseUrlOf = (req: Request): string => {
 };
 
 export async function POST(req: Request) {
-  let body: { balance_token?: string };
+  let body: { balance_token?: string; tip_cents?: number };
   try { body = await req.json(); }
   catch { return fail(400, "Invalid JSON body."); }
 
@@ -51,6 +51,13 @@ export async function POST(req: Request) {
   if (!balanceToken || balanceToken.length < 16 || balanceToken.length > 128 || !/^[A-Za-z0-9_-]+$/.test(balanceToken)) {
     return fail(400, "Missing or malformed balance token.");
   }
+
+  // Tip is client-chosen, in cents, capped to a sane upper bound so a
+  // typo can't accidentally bill someone $10,000 in tip.
+  const tipCentsRaw = Number(body?.tip_cents);
+  const tipCents = Number.isFinite(tipCentsRaw) && tipCentsRaw > 0
+    ? Math.min(Math.floor(tipCentsRaw), 1_000_000) // $10k cap
+    : 0;
 
   let stripeSecret: string;
   let supabaseUrl: string;
@@ -128,16 +135,28 @@ export async function POST(req: Request) {
   params.set("client_reference_id", apptId);
   params.set("metadata[appointment_id]", apptId);
   params.set("metadata[type]", "balance_payment");
+  params.set("metadata[tip_cents]", String(tipCents));
   params.set("payment_intent_data[metadata][appointment_id]", apptId);
   params.set("payment_intent_data[metadata][type]", "balance_payment");
+  params.set("payment_intent_data[metadata][tip_cents]", String(tipCents));
   if (applicationFeeCents > 0) {
+    // Platform fee is charged on the BALANCE only — tips go 100% to
+    // the stylist. Computed off `cents` not `cents + tipCents`.
     params.set("payment_intent_data[application_fee_amount]", String(applicationFeeCents));
   }
-  // Single line item — the balance.
+  // Line item 1 — the balance itself.
   params.set("line_items[0][quantity]", "1");
   params.set("line_items[0][price_data][currency]", "usd");
   params.set("line_items[0][price_data][unit_amount]", String(cents));
   params.set("line_items[0][price_data][product_data][name]", productName);
+  // Line item 2 — optional tip. Separate line so the Stripe receipt
+  // itemises tip vs service, which clients (and the IRS) appreciate.
+  if (tipCents > 0) {
+    params.set("line_items[1][quantity]", "1");
+    params.set("line_items[1][price_data][currency]", "usd");
+    params.set("line_items[1][price_data][unit_amount]", String(tipCents));
+    params.set("line_items[1][price_data][product_data][name]", "Tip");
+  }
   if (row.client_email) params.set("customer_email", String(row.client_email));
 
   const res = await fetch(`${STRIPE_API}/checkout/sessions`, {

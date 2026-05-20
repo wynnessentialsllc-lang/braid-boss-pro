@@ -105,6 +105,13 @@ const BalancePayInner = ({ id }: { id: string }) => {
   const [info, setInfo] = useState<PaymentInfo | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Tip is stylist's choice to surface, but on by default. Stored
+  // in whole-dollar cents to avoid float drift between the buttons,
+  // the totals row, and the Stripe line-item amount.
+  const [tipCents, setTipCents] = useState(0);
+  const [customTip, setCustomTip] = useState("");
+  const [tipMode, setTipMode] = useState<"none" | "pct" | "custom">("none");
+  const [selectedPct, setSelectedPct] = useState<number | null>(null);
   const isPaidQuery = params?.get("paid") === "1";
   const isCancelledQuery = params?.get("cancelled") === "1";
 
@@ -134,11 +141,11 @@ const BalancePayInner = ({ id }: { id: string }) => {
     setBusy(true);
     setErr(null);
     try {
-      trackEvent("balance_payment_started", { category: "feature", metadata: { id } });
+      trackEvent("balance_payment_started", { category: "feature", metadata: { id, tip_cents: tipCents } });
       const res = await fetch("/api/balance-payment/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ balance_token: id }),
+        body: JSON.stringify({ balance_token: id, tip_cents: tipCents > 0 ? tipCents : undefined }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || !body?.url) {
@@ -255,6 +262,28 @@ const BalancePayInner = ({ id }: { id: string }) => {
     );
   }
 
+  const pickPctTip = (pct: number) => {
+    const cents = Math.round(balance * 100 * (pct / 100));
+    setSelectedPct(pct);
+    setTipMode("pct");
+    setTipCents(cents);
+    setCustomTip("");
+  };
+  const pickNoTip = () => { setSelectedPct(null); setTipMode("none"); setTipCents(0); setCustomTip(""); };
+  const pickCustomTip = (raw: string) => {
+    // Allow free typing; clamp to non-negative dollars at 2dp on the way out.
+    const cleaned = raw.replace(/[^\d.]/g, "");
+    setCustomTip(cleaned);
+    const v = parseFloat(cleaned);
+    setSelectedPct(null);
+    setTipMode("custom");
+    setTipCents(Number.isFinite(v) && v > 0 ? Math.round(v * 100) : 0);
+  };
+
+  const tipDollars = tipCents / 100;
+  const grandTotalCents = Math.round(balance * 100) + tipCents;
+  const grandTotal = grandTotalCents / 100;
+
   // ---- Main pay state ----
   return (
     <Shell>
@@ -264,18 +293,64 @@ const BalancePayInner = ({ id }: { id: string }) => {
         <h1 style={{ ...h1, fontSize: 40, color: C.goldDeep }}>{fmtMoney(balance)}</h1>
         <p style={muted}>Pay your remaining balance with {studio}.</p>
 
+        {/* Tip selector. 100% of the tip flows directly to the
+            stylist's connected account — the platform application_fee
+            is charged on the balance only (see checkout route). */}
+        <div style={{ marginTop: 18 }}>
+          <p style={{ ...eyebrow, color: C.muted }}>Add a tip</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginTop: 8 }}>
+            {[
+              { label: "No tip", action: pickNoTip, active: tipMode === "none" },
+              { label: "15%",    action: () => pickPctTip(15), active: tipMode === "pct" && selectedPct === 15 },
+              { label: "18%",    action: () => pickPctTip(18), active: tipMode === "pct" && selectedPct === 18 },
+              { label: "20%",    action: () => pickPctTip(20), active: tipMode === "pct" && selectedPct === 20 },
+            ].map(b => (
+              <button
+                type="button"
+                key={b.label}
+                onClick={b.action}
+                style={{
+                  appearance: "none", WebkitAppearance: "none", border: `1px solid ${b.active ? C.espresso : C.hairline}`,
+                  borderRadius: 12, padding: "10px 0", background: b.active ? C.espresso : "#fff",
+                  color: b.active ? C.cream : C.coffee, fontWeight: 600, fontSize: 13, cursor: "pointer",
+                  font: "inherit",
+                }}
+              >
+                {b.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="Custom tip amount"
+              value={customTip}
+              onChange={e => pickCustomTip(e.target.value)}
+              onFocus={() => setTipMode("custom")}
+              style={{
+                width: "100%", padding: "10px 12px", borderRadius: 12,
+                border: `1px solid ${tipMode === "custom" ? C.espresso : C.hairline}`,
+                background: "#fff", color: C.espresso, fontSize: 14, font: "inherit",
+              }}
+            />
+          </div>
+        </div>
+
         <div style={{ marginTop: 16, borderTop: `1px solid ${C.hairline}`, paddingTop: 12 }}>
           <Row label="Service" value={info.service_name || "Appointment"} />
           {when && <Row label="Appointment" value={when} />}
           {info.total_price ? <Row label="Total" value={fmtMoney(info.total_price)} /> : null}
           {info.deposit_paid ? <Row label="Deposit paid" value={`− ${fmtMoney(info.deposit_paid)}`} /> : null}
-          <Row label="Balance due" value={fmtMoney(balance)} accent emphasis />
+          <Row label="Balance due" value={fmtMoney(balance)} />
+          {tipCents > 0 && <Row label="Tip" value={`+ ${fmtMoney(tipDollars)}`} />}
+          <Row label={tipCents > 0 ? "Total charge" : "Balance due"} value={fmtMoney(grandTotal)} accent emphasis />
         </div>
 
         {err && <p style={{ color: C.danger, fontSize: 12, marginTop: 12 }}>{err}</p>}
 
         <button type="button" style={primaryBtn} onClick={startCheckout} disabled={busy}>
-          {busy ? "Working…" : `Pay ${fmtMoney(balance)} balance`}
+          {busy ? "Working…" : `Pay ${fmtMoney(grandTotal)}`}
         </button>
         <p style={{ ...muted, fontSize: 11, textAlign: "center", marginTop: 10 }}>
           Secured by Stripe · Your card details never touch our servers.
