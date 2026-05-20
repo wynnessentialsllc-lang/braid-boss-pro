@@ -7611,6 +7611,21 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     onClose();
   };
 
+  // Hard-delete escape hatch for real appointments. "Cancel
+  // appointment" keeps the row (status=cancelled) so the books
+  // retain a record — cancelled rows are already excluded from
+  // Reports by isBillable, so cancellation correctly updates the
+  // numbers. But test/junk appointments leave clutter; this purges
+  // them entirely so they're gone from history and reports for good.
+  const handleHardDelete = async () => {
+    if (!form.id) return;
+    if (!window.confirm(
+      "Permanently delete this appointment? This removes it from your schedule, history, and reports. This cannot be undone.",
+    )) return;
+    await deleteAppointment(form.id);
+    onClose();
+  };
+
   const handleDeleteSeries = async () => {
     if (!form.seriesId) return;
     if (!window.confirm("Cancel this entire recurring series? Past appointments stay; future ones are cancelled (and deposits refunded).")) return;
@@ -8247,6 +8262,11 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         {form.id && (
           <Button variant="danger" icon={<Trash2 size={16} />} onClick={handleDelete} fullWidth>
             {isPersonal ? "Delete this event" : isBlocked ? "Remove blocked time" : "Cancel appointment"}
+          </Button>
+        )}
+        {form.id && isAppointment && (
+          <Button variant="outline" icon={<Trash2 size={16} />} onClick={handleHardDelete} fullWidth>
+            Delete permanently
           </Button>
         )}
         {form.seriesId && (
@@ -17122,6 +17142,31 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
   const styles = useMemo(() => topBookedStyles(appointments, 8), [appointments]);
   const repeats = useMemo(() => repeatClientStats(appointments, 5), [appointments]);
 
+  // Cancelled appointments are already excluded from the aggregators
+  // above (isBillable drops them), but they still live in the books
+  // and can clutter test data. Bulk purge is the natural sibling to
+  // the per-row "Delete permanently" — same destructive operation,
+  // surfaced where the user feels the impact (this screen).
+  const cancelled = useMemo(
+    () => appointments.filter((a: any) => a?.status === "cancelled" || a?.status === "canceled"),
+    [appointments],
+  );
+  const [purging, setPurging] = useState(false);
+  const handlePurgeCancelled = async () => {
+    if (cancelled.length === 0 || purging) return;
+    if (!window.confirm(
+      `Permanently delete ${cancelled.length} cancelled appointment${cancelled.length === 1 ? "" : "s"}? This removes them from your history for good. This cannot be undone.`,
+    )) return;
+    setPurging(true);
+    try {
+      for (const a of cancelled) {
+        await store.deleteAppointment(a.id);
+      }
+    } finally {
+      setPurging(false);
+    }
+  };
+
   const maxRevenue = Math.max(1, ...revenuePoints.map(p => p.revenue));
   const totalRevenue = revenuePoints.reduce((s, p) => s + p.revenue, 0);
   const totalAppts = revenuePoints.reduce((s, p) => s + p.appointmentCount, 0);
@@ -17268,6 +17313,32 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
             )}
           </Card>
         </div>
+
+        {cancelled.length > 0 && (
+          <div>
+            <SectionTitle>Data cleanup</SectionTitle>
+            <Card className="p-4">
+              <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                {cancelled.length} cancelled appointment{cancelled.length === 1 ? " is" : "s are"} still
+                saved. They&apos;re already excluded from the numbers above, but you can permanently
+                remove them to keep your history tidy.
+              </p>
+              <div className="mt-3">
+                <Button
+                  variant="outline"
+                  icon={<Trash2 size={16} />}
+                  onClick={handlePurgeCancelled}
+                  disabled={purging}
+                  fullWidth
+                >
+                  {purging
+                    ? "Purging…"
+                    : `Purge ${cancelled.length} cancelled appointment${cancelled.length === 1 ? "" : "s"}`}
+                </Button>
+              </div>
+            </Card>
+          </div>
+        )}
       </div>
     </div>
   );
