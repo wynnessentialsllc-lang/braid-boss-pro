@@ -42,7 +42,8 @@ export type SyncTable =
   | "receipts"
   | "communications"
   | "notifications"
-  | "photos";
+  | "photos"
+  | "business_expenses";
 
 // What columns each table has beyond the standard (user_id, id,
 // data, created_at, updated_at). Used to build the upsert payload.
@@ -151,6 +152,17 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     is_favorite: r => cleanBool(r.isFavorite),
     storage_path: r => cleanString(r.storagePath),
     thumbnail_path: r => cleanString(r.thumbnailPath),
+  },
+  business_expenses: {
+    title: r => cleanString(r.title),
+    amount: r => cleanNumber(r.amount),
+    category: r => cleanString(r.category),
+    note: r => cleanString(r.note),
+    expense_date: r => cleanDate(r.expenseDate ?? r.date),
+    is_recurring: r => cleanBool(r.isRecurring),
+    recurring_interval: r => cleanString(r.recurringInterval),
+    next_billing_date: r => cleanDate(r.nextBillingDate),
+    receipt_path: r => cleanString(r.receiptPath),
   },
 };
 
@@ -277,6 +289,17 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.storagePath = base.storagePath ?? row.storage_path;
       base.thumbnailPath = base.thumbnailPath ?? row.thumbnail_path;
       break;
+    case "business_expenses":
+      base.title = base.title ?? row.title;
+      base.amount = base.amount ?? row.amount;
+      base.category = base.category ?? row.category;
+      base.note = base.note ?? row.note;
+      base.expenseDate = base.expenseDate ?? row.expense_date;
+      base.isRecurring = base.isRecurring ?? row.is_recurring ?? false;
+      base.recurringInterval = base.recurringInterval ?? row.recurring_interval;
+      base.nextBillingDate = base.nextBillingDate ?? row.next_billing_date;
+      base.receiptPath = base.receiptPath ?? row.receipt_path;
+      break;
   }
   return base;
 };
@@ -346,6 +369,12 @@ export const syncPhotos = {
   upsert: (userId: string, record: any) => upsertOne("photos", userId, record),
   delete: (userId: string, id: string) => deleteOne("photos", userId, id),
   pull: (userId: string) => pullAll("photos", userId),
+};
+
+export const syncBusinessExpenses = {
+  upsert: (userId: string, record: any) => upsertOne("business_expenses", userId, record),
+  delete: (userId: string, id: string) => deleteOne("business_expenses", userId, id),
+  pull: (userId: string) => pullAll("business_expenses", userId),
 };
 
 // ---- Settings (singleton row per user) ---------------------------------
