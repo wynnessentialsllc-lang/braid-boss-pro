@@ -116,6 +116,7 @@ import {
   type ServiceMaterial,
   SERVICES_EMPTY_COPY,
   formatServicePrice,
+  suggestRebookWeeks,
   useServices,
   validateService,
 } from "./lib/services";
@@ -5520,6 +5521,55 @@ const Studio = ({ store }) => {
             value={Array.isArray(serviceForm.default_materials) ? serviceForm.default_materials : []}
             onChange={(materials) => setServiceForm({ ...serviceForm, default_materials: materials })}
           />
+          {/* Rebook nudge window — drives the daily marketing cron.
+              Empty = no auto-nudge for this service. Suggester
+              autofills sensible defaults based on the service name
+              (Knotless → 8, Cornrows → 4, etc.) only when the field
+              is currently empty so we never overwrite a stylist's
+              explicit choice. */}
+          <div className="mb-2 p-3 rounded-lg border" style={{ background: C.paper, borderColor: C.hairline }}>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-[11px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Rebook nudge</p>
+              {(() => {
+                const suggested = suggestRebookWeeks(serviceForm.name || "");
+                const current = (serviceForm as any).rebook_after_weeks;
+                if (!suggested || current === suggested) return null;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setServiceForm({ ...serviceForm, rebook_after_weeks: suggested } as any)}
+                    className="text-[11px] font-semibold"
+                    style={{ color: C.goldDeep }}
+                  >
+                    Use {suggested} weeks
+                  </button>
+                );
+              })()}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="1"
+                max="52"
+                step="1"
+                value={(serviceForm as any).rebook_after_weeks ?? ""}
+                onChange={e => {
+                  const raw = e.target.value;
+                  setServiceForm({
+                    ...serviceForm,
+                    rebook_after_weeks: raw === "" ? null : Math.max(1, Math.min(52, Math.floor(Number(raw) || 0))),
+                  } as any);
+                }}
+                placeholder="e.g. 8"
+                className="w-20 px-2 py-1.5 rounded border text-[13px] tabular-nums"
+                style={{ borderColor: C.hairline, background: C.paper, color: C.espresso }}
+              />
+              <span className="text-[12px]" style={{ color: C.coffee }}>weeks after the appointment</span>
+            </div>
+            <p className="text-[11px] mt-1.5" style={{ color: C.muted }}>
+              Leave blank to skip auto-nudges for this service. Otherwise we'll email the client a "ready to rebook?" message after this many weeks.
+            </p>
+          </div>
           <label className="flex items-center gap-2 mb-2">
             <input
               type="checkbox"
@@ -12140,7 +12190,7 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -12392,6 +12442,36 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                           return low > 0
                             ? `${active.length} items · ${low} low`
                             : `${active.length} items`;
+                        })()}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openMarketing && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openMarketing}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: GRADIENTS.hero, color: "#FFFFFF", flexShrink: 0,
+                      }}
+                    >
+                      <Sparkles size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Marketing</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        {(() => {
+                          const list: any[] = store.servicesApi?.services || [];
+                          const withWindow = list.filter(s => s?.rebook_after_weeks).length;
+                          return withWindow > 0
+                            ? `Auto-rebook on ${withWindow} service${withWindow === 1 ? "" : "s"}`
+                            : "Auto-rebook nudges & opt-outs";
                         })()}
                       </p>
                     </div>
@@ -24115,6 +24195,237 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
   );
 };
 
+// ============================================================
+//  MARKETING — auto-rebook nudges, opt-out, per-service windows
+// ============================================================
+const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const services: any[] = store.servicesApi?.services || [];
+  const updateService = store.servicesApi?.upsert;
+
+  // Master switch lives on shop_settings.marketing_rebook_nudges_enabled.
+  // Default true so a stylist who's only set up rebook windows on
+  // services starts sending immediately. A pause here suppresses
+  // everything without erasing the per-service settings.
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [savingMaster, setSavingMaster] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await getSupabase()
+        .from("shop_settings")
+        .select("marketing_rebook_nudges_enabled")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (cancelled) return;
+      setEnabled(data?.marketing_rebook_nudges_enabled ?? true);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const saveMaster = async (next: boolean) => {
+    if (!userId) return;
+    setSavingMaster(true);
+    setEnabled(next);
+    const { error: err } = await getSupabase()
+      .from("shop_settings")
+      .upsert({
+        user_id: userId,
+        marketing_rebook_nudges_enabled: next,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+    setSavingMaster(false);
+    if (err) {
+      console.warn("[marketing] save master failed:", err.message);
+      setEnabled(!next); // roll back optimistic flip
+    }
+  };
+
+  // Per-service quick-edit: tap a service → opens a tiny popover-ish
+  // sheet to set its rebook window. Keeps the user inside Marketing
+  // so they don't have to deep-dive into Services & Styles editor.
+  const [editService, setEditService] = useState<any | null>(null);
+  const [editWeeks, setEditWeeks] = useState<string>("");
+
+  const openEdit = (s: any) => {
+    setEditService(s);
+    setEditWeeks(s?.rebook_after_weeks != null ? String(s.rebook_after_weeks) : "");
+  };
+  const saveEdit = async () => {
+    if (!editService) return;
+    const raw = editWeeks.trim();
+    const next = raw === "" ? null : Math.max(1, Math.min(52, Math.floor(Number(raw) || 0)));
+    try {
+      await updateService?.({ ...editService, rebook_after_weeks: next });
+      setEditService(null);
+    } catch (e: any) {
+      console.warn("[marketing] save service weeks failed:", e?.message || e);
+    }
+  };
+
+  const withWindow = services.filter(s => s?.rebook_after_weeks).length;
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Marketing"
+        subtitle="Auto-rebook nudges"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-4">
+        {/* Master switch */}
+        <Card className="p-3.5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Send rebook nudges</p>
+              <p className="text-[11px]" style={{ color: C.muted }}>
+                Daily at 10am Pacific, we email clients whose last appointment hit the rebook window for that service.
+              </p>
+            </div>
+            <Toggle
+              checked={!!enabled}
+              onChange={(v: boolean) => { void saveMaster(v); }}
+            />
+          </div>
+        </Card>
+
+        {/* How it works */}
+        <Card className="p-3.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>How it works</p>
+          <ul className="space-y-1.5 text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+            <li>• Each service has a "rebook after N weeks" setting</li>
+            <li>• When a client passes that window with no future booking, they get one nudge with a Book-Now link</li>
+            <li>• Clients who already have a future appointment booked are skipped</li>
+            <li>• Every email includes a one-tap unsubscribe</li>
+            <li>• Transactional emails (confirmations, balance receipts) keep going regardless of opt-out</li>
+          </ul>
+        </Card>
+
+        {/* Per-service table */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <SectionTitle>Rebook windows</SectionTitle>
+            <p className="text-[11px]" style={{ color: C.muted }}>
+              {withWindow} of {services.length} set
+            </p>
+          </div>
+          {services.length === 0 ? (
+            <Card className="p-5 text-center">
+              <p className="text-[13px]" style={{ color: C.muted }}>
+                Add services first (Settings → Services & styles) — nudges fire per service.
+              </p>
+            </Card>
+          ) : (
+            <Card className="p-2">
+              {services.map((s, i) => {
+                const w = s?.rebook_after_weeks;
+                const suggested = suggestRebookWeeks(s?.name || "");
+                return (
+                  <button
+                    type="button"
+                    key={s.id}
+                    onClick={() => openEdit(s)}
+                    className="w-full text-left flex items-center justify-between px-2 py-2.5 active:scale-[0.99] transition"
+                    style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{s.name}</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        {w
+                          ? `Nudge ${w} week${w === 1 ? "" : "s"} after the appointment`
+                          : suggested
+                            ? `Suggested: ${suggested} weeks · tap to enable`
+                            : "No auto-nudge"}
+                      </p>
+                    </div>
+                    <span
+                      className="text-[12px] font-semibold tabular-nums ml-3 px-2 py-1 rounded-full"
+                      style={{
+                        background: w ? "rgba(124,58,237,0.08)" : "transparent",
+                        color: w ? C.goldDeep : C.muted,
+                        border: `1px solid ${w ? "rgba(124,58,237,0.25)" : C.hairline}`,
+                      }}
+                    >
+                      {w ? `${w}w` : "off"}
+                    </span>
+                  </button>
+                );
+              })}
+            </Card>
+          )}
+        </div>
+
+        <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+          Send from <span style={{ color: C.espresso }}>hello@braidbosspro.app</span> with your studio name in the subject + body.
+        </p>
+      </div>
+
+      {editService && (
+        <Sheet open onClose={() => setEditService(null)} title={editService.name}>
+          <div className="space-y-3 pb-4">
+            <p className="text-[12px]" style={{ color: C.muted }}>
+              How many weeks after the appointment should we email the client a rebook nudge?
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="1"
+                max="52"
+                step="1"
+                value={editWeeks}
+                onChange={e => setEditWeeks(e.target.value)}
+                placeholder="e.g. 8"
+                className="w-24 px-3 py-2.5 rounded-xl text-[14px] tabular-nums"
+                style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+              />
+              <span className="text-[13px]" style={{ color: C.coffee }}>weeks</span>
+              {(() => {
+                const suggested = suggestRebookWeeks(editService?.name || "");
+                if (!suggested) return null;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setEditWeeks(String(suggested))}
+                    className="ml-auto text-[12px] font-semibold"
+                    style={{ color: C.goldDeep }}
+                  >
+                    Use {suggested}
+                  </button>
+                );
+              })()}
+            </div>
+            <p className="text-[11px]" style={{ color: C.muted }}>
+              Leave blank to disable nudges for this service.
+            </p>
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditService(null)}
+                className="flex-1 rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+                style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.hairline}` }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveEdit}
+                className="flex-1 rounded-xl px-4 py-2.5 text-[13px] font-semibold"
+                style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </Sheet>
+      )}
+    </div>
+  );
+};
+
 export default function App() {
   const auth = useAuth();
   // First-launch welcome screen — gates AuthGate until the user
@@ -24637,7 +24948,8 @@ export default function App() {
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "inventory" && <InventoryScreen store={store} onBack={() => setSecondary(inventoryBack)} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}

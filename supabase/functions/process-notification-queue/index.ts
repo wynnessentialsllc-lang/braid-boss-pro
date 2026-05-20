@@ -35,6 +35,22 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") || "";
 const RESEND_FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") || "";
+// Marketing-from is intentionally separate so transactional
+// (booking confirmations, balance paid, etc.) stay on noreply@ while
+// marketing (rebook nudges, win-backs) come from a friendlier
+// hello@ identity. Falls back to the transactional sender when the
+// marketing env var isn't set, so a misconfigured deploy still
+// sends instead of silently dropping.
+const RESEND_MARKETING_FROM_EMAIL =
+  Deno.env.get("RESEND_MARKETING_FROM_EMAIL") || RESEND_FROM_EMAIL;
+// Notification types treated as marketing for sender selection.
+// Must be kept in sync with the suppression rules in the queue
+// processor — opt-out (clients.marketing_emails_enabled=false) is
+// already enforced at the enqueue step in process_rebook_nudges,
+// but we use the same set here to pick the right FROM.
+const MARKETING_NOTIFICATION_TYPES = new Set<string>([
+  "rebook_nudge",
+]);
 const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID") || "";
 const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN") || "";
 const TWILIO_PHONE_NUMBER = Deno.env.get("TWILIO_PHONE_NUMBER") || "";
@@ -874,6 +890,45 @@ const renderOrderShipped = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- rebook_nudge (marketing: "your style is due for a refresh") ----
+// Fired by the daily process_rebook_nudges() cron. CAN-SPAM compliant
+// — every render appends an unsubscribe footer with a one-tap opt-out
+// link keyed off the recipient's opaque token. Don't omit the
+// footer; it's a legal requirement, not a UX nicety.
+const renderRebookNudge = (p: Record<string, any>) => {
+  const clientName  = p.clientName  || "there";
+  const studioName  = p.studioName  || "your stylist";
+  const serviceName = p.serviceName || "your style";
+  const weeksSince  = Number(p.weeksSince) || null;
+  const bookingSlug = String(p.bookingSlug || "").trim();
+  const unsubscribeToken = String(p.unsubscribeToken || "").trim();
+  const baseUrl = (Deno.env.get("NEXT_PUBLIC_SITE_URL") || "https://braidbosspro.app").replace(/\/$/, "");
+  const bookUrl = bookingSlug ? `${baseUrl}/book/${encodeURIComponent(bookingSlug)}` : "";
+  const unsubscribeUrl = unsubscribeToken
+    ? `${baseUrl}/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`
+    : "";
+
+  const subject = `Time to refresh your ${serviceName}?`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Ready for a refresh</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Hey ${escape(clientName)},</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
+      It's been ${weeksSince ? `<strong>${weeksSince} weeks</strong>` : "a while"} since your last <strong>${escape(serviceName)}</strong> with ${escape(studioName)}. Most clients book their refresh around now — tap below to grab your next spot.
+    </p>
+    ${bookUrl ? ctaButton("Book now", bookUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:18px 0 0;">
+      Questions? Reply to this email and ${escape(studioName)} will be in touch.
+    </p>
+    ${unsubscribeUrl ? `
+      <hr style="border:none;border-top:1px solid ${C.hairline};margin:22px 0 14px;" />
+      <p style="font-size:11px;color:${C.muted};line-height:18px;text-align:center;margin:0;">
+        You're getting this because you booked with ${escape(studioName)}.
+        <a href="${escape(unsubscribeUrl)}" style="color:${C.muted};text-decoration:underline;">Unsubscribe from marketing emails</a>.
+      </p>` : ""}
+  `);
+  return { subject, html };
+};
+
 // ---- generic fallback -----------------------------------------------
 const renderGeneric = (row: ClaimedRow) => {
   const subject = row.subject || "Notification from Braid Boss Pro";
@@ -944,6 +999,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderOrderReadyForPickup(row.payload || {});
     case "order_shipped":
       return renderOrderShipped(row.payload || {});
+    case "rebook_nudge":
+      return renderRebookNudge(row.payload || {});
     default:
       return renderGeneric(row);
   }
@@ -965,6 +1022,13 @@ const sendViaResend = async (
   if (!row.recipient_email) {
     return { ok: false, retryable: false, error: "missing_recipient_email" };
   }
+  // Pick the right sender. Marketing types (rebook nudges, etc.) use
+  // the marketing identity (hello@…); everything else uses the
+  // transactional identity (noreply@…). Falls back gracefully when
+  // the marketing env isn't set.
+  const fromEmail = MARKETING_NOTIFICATION_TYPES.has(row.notification_type)
+    ? RESEND_MARKETING_FROM_EMAIL
+    : RESEND_FROM_EMAIL;
   try {
     const res = await fetch(RESEND_ENDPOINT, {
       method: "POST",
@@ -973,7 +1037,7 @@ const sendViaResend = async (
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        from: RESEND_FROM_EMAIL,
+        from: fromEmail,
         to: row.recipient_email,
         subject: rendered.subject,
         html: rendered.html,
