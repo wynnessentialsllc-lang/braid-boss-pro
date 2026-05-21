@@ -54,7 +54,12 @@ import {
   buildInvoiceFromQuote,
   buildReceiptSummaryText,
 } from "./lib/receipts";
-import { renderReceiptPdf } from "./lib/pdf-render";
+import { renderReceiptPdf, renderTaxPackPdf } from "./lib/pdf-render";
+import {
+  computeAnnualTaxSummary,
+  taxYearOptions,
+  type AnnualTaxSummary,
+} from "./lib/tax-pack";
 import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
 import WelcomeIntro from "./components/WelcomeIntro";
 import { ProductImageUploader } from "./components/ProductImageUploader";
@@ -12234,7 +12239,7 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReports, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReports?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -12540,6 +12545,28 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Reports</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Revenue · top styles · repeat clients</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openTaxPack && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openTaxPack}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <FileText size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Tax pack</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>Annual P&amp;L · Schedule C map · PDF for your accountant</p>
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
@@ -17488,6 +17515,229 @@ const ServicesScreen = ({
           </div>
         )}
       </Sheet>
+    </div>
+  );
+};
+
+// ============================================================
+//  TAX PACK — annual P&L + Schedule C map, PDF for the accountant
+// ============================================================
+const TaxPackScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const business = store.business || {};
+  const currency = business?.currency || "USD";
+  const appointments: any[] = store.appointments || [];
+  const expenses: any[] = store.businessExpenses || store.expenses || [];
+
+  const years = useMemo(() => taxYearOptions(), []);
+  // Default to last year — January (filing season) is when a stylist
+  // reaches for this, and last year is the year they're filing.
+  const [year, setYear] = useState<number>(years[1] ?? years[0]);
+
+  // Storefront orders aren't in the local store — pull paid orders
+  // once so product income lands in the P&L. Best-effort: a failed
+  // fetch just means the storefront line reads $0 with a note.
+  const [orders, setOrders] = useState<any[] | null>(null);
+  const [ordersError, setOrdersError] = useState(false);
+  useEffect(() => {
+    if (!userId) { setOrders([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await getSupabase()
+          .from("product_orders")
+          .select("status, amount_total, paid_at")
+          .eq("user_id", userId)
+          .eq("status", "paid");
+        if (cancelled) return;
+        if (error) { setOrdersError(true); setOrders([]); return; }
+        setOrders(data || []);
+      } catch {
+        if (!cancelled) { setOrdersError(true); setOrders([]); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const summary: AnnualTaxSummary = useMemo(
+    () => computeAnnualTaxSummary(year, appointments, expenses, orders || []),
+    [year, appointments, expenses, orders],
+  );
+
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const buildPdf = async () => renderTaxPackPdf(summary, business);
+
+  const handleDownload = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const { blob, filename } = await buildPdf();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setMsg(e?.message || "Couldn't generate the PDF.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Share routes through the OS share sheet when the browser supports
+  // sharing files (iOS Safari / installed PWA do) — that's how the
+  // stylist emails it to their accountant. Falls back to download.
+  const handleShare = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const { blob, filename } = await buildPdf();
+      const file = new File([blob], filename, { type: "application/pdf" });
+      const nav = navigator as any;
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        await nav.share({
+          files: [file],
+          title: `${year} Tax Pack`,
+          text: `${business?.businessName || "Braid Boss Pro"} — ${year} profit & loss for your accountant.`,
+        });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setMsg("Sharing isn't supported here — PDF downloaded instead.");
+      }
+    } catch (e: any) {
+      // AbortError = user dismissed the share sheet; not an error.
+      if (e?.name !== "AbortError") setMsg(e?.message || "Couldn't share the PDF.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const Tile = ({ label, value, tone }: { label: string; value: string; tone?: "pos" | "neg" }) => (
+    <div className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
+      <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>{label}</p>
+      <p style={{
+        fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, marginTop: 2,
+        color: tone === "pos" ? C.success : tone === "neg" ? C.danger : C.espresso,
+      }}>{value}</p>
+    </div>
+  );
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Tax pack"
+        subtitle="Annual P&L · Schedule C"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-4">
+        {/* Year picker */}
+        <div className="flex gap-2">
+          {years.map(y => (
+            <button
+              type="button"
+              key={y}
+              onClick={() => setYear(y)}
+              className="px-3 py-1.5 rounded-full text-[12px] font-semibold transition"
+              style={{
+                background: year === y ? C.espresso : "transparent",
+                color: year === y ? C.cream : C.coffee,
+                border: `1px solid ${year === y ? C.espresso : C.hairline}`,
+                letterSpacing: "0.04em",
+              }}
+            >
+              {y}
+            </button>
+          ))}
+        </div>
+
+        {orders == null ? (
+          <Card className="p-6 text-center">
+            <p className="text-[13px]" style={{ color: C.muted }}>Crunching {year}…</p>
+          </Card>
+        ) : (
+          <>
+            {/* Headline numbers */}
+            <div className="grid grid-cols-2 gap-2">
+              <Tile label="Gross income" value={fmtMoney(summary.income.total, currency)} tone="pos" />
+              <Tile label="Total expenses" value={fmtMoney(summary.expenses.total, currency)} tone="neg" />
+              <Tile
+                label={summary.netProfit >= 0 ? "Net profit" : "Net loss"}
+                value={fmtMoney(summary.netProfit, currency)}
+                tone={summary.netProfit >= 0 ? "pos" : "neg"}
+              />
+              <Tile label="Tax year" value={String(year)} />
+            </div>
+
+            {/* Income breakdown */}
+            <Card className="p-3.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>Income</p>
+              <div className="flex items-center justify-between py-1.5">
+                <span className="text-[13px]" style={{ color: C.coffee }}>Service income</span>
+                <span className="text-[13px] font-semibold tabular-nums" style={{ color: C.espresso }}>{fmtMoney(summary.income.appointments, currency)}</span>
+              </div>
+              <div className="flex items-center justify-between py-1.5" style={{ borderTop: `1px solid ${C.hairline}` }}>
+                <span className="text-[13px]" style={{ color: C.coffee }}>Storefront / product sales</span>
+                <span className="text-[13px] font-semibold tabular-nums" style={{ color: C.espresso }}>{fmtMoney(summary.income.storefront, currency)}</span>
+              </div>
+              {ordersError && (
+                <p className="text-[11px] mt-1.5" style={{ color: C.danger }}>
+                  Couldn't load storefront orders — product sales may be understated.
+                </p>
+              )}
+            </Card>
+
+            {/* Schedule C map */}
+            <div>
+              <SectionTitle>Expenses by Schedule C line</SectionTitle>
+              {summary.expenses.byScheduleCLine.length === 0 ? (
+                <Card className="p-5 text-center">
+                  <p className="text-[13px]" style={{ color: C.muted }}>No expenses recorded for {year}.</p>
+                </Card>
+              ) : (
+                <Card className="p-2">
+                  {summary.expenses.byScheduleCLine.map((line, i) => (
+                    <div key={line.line} className="px-2 py-2.5" style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+                      <div className="flex items-center justify-between">
+                        <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+                          Line {line.line} · {line.label}
+                        </p>
+                        <p className="text-[13px] font-semibold tabular-nums" style={{ color: C.espresso }}>
+                          {fmtMoney(line.total, currency)}
+                        </p>
+                      </div>
+                      {line.categories.map(cat => (
+                        <div key={cat.category} className="flex items-center justify-between mt-1">
+                          <span className="text-[11px]" style={{ color: C.muted }}>{cat.category}</span>
+                          <span className="text-[11px] tabular-nums" style={{ color: C.muted }}>{fmtMoney(cat.amount, currency)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </Card>
+              )}
+            </div>
+
+            {/* Export */}
+            <div className="space-y-2">
+              <Button variant="primary" fullWidth onClick={handleShare} disabled={busy} icon={<Upload size={16} />}>
+                {busy ? "Preparing…" : "Share / email PDF"}
+              </Button>
+              <Button variant="outline" fullWidth onClick={handleDownload} disabled={busy} icon={<Download size={16} />}>
+                Download PDF
+              </Button>
+            </div>
+            {msg && <p className="text-[12px]" style={{ color: C.danger }}>{msg}</p>}
+
+            <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+              Cash-basis P&amp;L from your Braid Boss Pro records. Schedule C line assignments are a starting point — confirm with your accountant. This isn't tax advice.
+            </p>
+          </>
+        )}
+      </div>
     </div>
   );
 };
@@ -25547,7 +25797,7 @@ export default function App() {
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReports={() => setSecondary("reports")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "inventory" && <InventoryScreen store={store} onBack={() => setSecondary(inventoryBack)} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
@@ -25619,6 +25869,7 @@ export default function App() {
       )}
       {secondary === "services" && <ServicesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "reports" && <ReportsScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "taxPack" && <TaxPackScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "expenses" && (
         <ExpensesScreen
           store={store}
