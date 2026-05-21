@@ -53,6 +53,7 @@ const MARKETING_NOTIFICATION_TYPES = new Set<string>([
   "birthday_greeting",
   "winback",
   "new_client_welcome",
+  "marketing_campaign",
 ]);
 const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID") || "";
 const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN") || "";
@@ -1049,6 +1050,74 @@ const renderNewClientWelcome = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- marketing_campaign (one-off, stylist-composed) ----------------
+// The stylist's draft is plain text + merge tags. We:
+//   1. escape it so user input can't inject HTML
+//   2. convert blank-line-separated chunks into <p> blocks and
+//      single newlines into <br> for readable rendering
+//   3. substitute merge tags AFTER escaping (so the {{...}} markers
+//      survive the escape pass and the substituted values are not
+//      themselves escaped at write time)
+// The subject line gets its own substitution pass — same set of
+// tags, no HTML treatment since it's plain text in the mail client.
+const MERGE_TAG_RE = /\{\{\s*(client_name|studio_name|book_url|first_name)\s*\}\}/g;
+
+const firstNameOf = (name: string | null | undefined): string => {
+  if (!name) return "";
+  const trimmed = String(name).trim();
+  if (!trimmed) return "";
+  return trimmed.split(/\s+/, 1)[0] || trimmed;
+};
+
+const substituteMergeTags = (input: string, p: Record<string, any>): string => {
+  const studioName = String(p.studioName || "");
+  const clientName = String(p.clientName || "");
+  const bookUrl    = bookUrlOf(p);
+  return input.replace(MERGE_TAG_RE, (_match, key) => {
+    switch (key) {
+      case "client_name": return clientName || "there";
+      case "first_name":  return firstNameOf(clientName) || "there";
+      case "studio_name": return studioName || "your stylist";
+      case "book_url":    return bookUrl || "";
+      default:            return "";
+    }
+  });
+};
+
+const plainTextToHtml = (input: string): string => {
+  const escaped = escape(input);
+  // Split on 2+ newlines → paragraphs; single newlines → <br>.
+  const paragraphs = escaped
+    .split(/\n{2,}/)
+    .map(par => par.replace(/\n/g, "<br>").trim())
+    .filter(Boolean);
+  return paragraphs
+    .map(par => `<p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">${par}</p>`)
+    .join("");
+};
+
+const renderMarketingCampaign = (p: Record<string, any>) => {
+  const studioName = String(p.studioName || "your stylist");
+  const bookUrl    = bookUrlOf(p);
+
+  const rawSubject = String(p.subject || "Update from " + studioName);
+  const subject = substituteMergeTags(rawSubject, p);
+
+  const rawBody = String(p.bodyText || "");
+  // Tags substituted AFTER escaping so the placeholders aren't
+  // double-escaped and the substituted values aren't accidentally
+  // dropped by the escape pass.
+  const bodyHtml = substituteMergeTags(plainTextToHtml(rawBody), p);
+
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 14px;font-weight:700;">${escape(studioName)}</p>
+    ${bodyHtml}
+    ${bookUrl ? ctaButton("Book now", bookUrl) : ""}
+    ${marketingFooter(p, studioName)}
+  `);
+  return { subject, html };
+};
+
 // ---- generic fallback -----------------------------------------------
 const renderGeneric = (row: ClaimedRow) => {
   const subject = row.subject || "Notification from Braid Boss Pro";
@@ -1127,6 +1196,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderWinback(row.payload || {});
     case "new_client_welcome":
       return renderNewClientWelcome(row.payload || {});
+    case "marketing_campaign":
+      return renderMarketingCampaign(row.payload || {});
     default:
       return renderGeneric(row);
   }
