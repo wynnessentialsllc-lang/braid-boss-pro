@@ -15,7 +15,8 @@ export type CampaignStatus = "draft" | "scheduled" | "sending" | "sent" | "faile
 export type CampaignSegment =
   | { kind: "all" }
   | { kind: "active_last"; days: number }
-  | { kind: "lapsed"; min_days: number };
+  | { kind: "lapsed"; min_days: number }
+  | { kind: "manual"; client_ids: string[] };
 
 export type MarketingCampaign = {
   id: string;
@@ -46,12 +47,17 @@ export const SEGMENT_LABELS: Record<string, string> = {
   all:          "All clients",
   active_last:  "Booked recently",
   lapsed:       "Lapsed clients",
+  manual:       "Specific clients",
 };
 
 export const describeSegment = (s: CampaignSegment): string => {
   if (!s || s.kind === "all") return "Everyone who's opted in";
   if (s.kind === "active_last") return `Booked in the last ${s.days} days`;
   if (s.kind === "lapsed") return `Haven't booked in ${s.min_days}+ days`;
+  if (s.kind === "manual") {
+    const n = s.client_ids?.length || 0;
+    return `${n} hand-picked client${n === 1 ? "" : "s"}`;
+  }
   return "";
 };
 
