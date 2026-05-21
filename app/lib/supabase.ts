@@ -79,6 +79,8 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     // doesn't) and per-client opt-out. Sync layer round-trips both.
     birthday: r => cleanDate(r.birthday),
     marketing_emails_enabled: r => cleanBool(r.marketingEmailsEnabled ?? true),
+    // Referral payouts V1 — which client referred this one.
+    referred_by_client_id: r => cleanString(r.referredByClientId),
   },
   appointments: {
     client_id: r => cleanString(r.clientId),
@@ -243,6 +245,7 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.scalpSensitivity = base.scalpSensitivity ?? row.scalp_sensitivity;
       base.birthday = base.birthday ?? row.birthday;
       base.marketingEmailsEnabled = base.marketingEmailsEnabled ?? row.marketing_emails_enabled ?? true;
+      base.referredByClientId = base.referredByClientId ?? row.referred_by_client_id;
       base.allergies = base.allergies ?? row.allergies;
       base.notes = base.notes ?? row.notes;
       break;
