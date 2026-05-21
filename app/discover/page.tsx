@@ -10,8 +10,10 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import {
   fetchDiscoverStylists,
+  fetchStylistReviews,
   priceRangeLabel,
   type DiscoverStylist,
+  type StylistReview,
 } from "../lib/marketplace";
 
 const C = {
@@ -26,67 +28,138 @@ const C = {
 } as const;
 const FONT_DISPLAY = "'Cormorant Garamond', 'Playfair Display', Georgia, serif";
 
-const StarRow = ({ avg, count }: { avg: number | null; count: number }) => {
-  if (!count || avg == null) {
-    return <span style={{ fontSize: 12, color: C.muted }}>No reviews yet</span>;
+const fmtReviewDate = (iso: string | null): string => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+};
+
+const Stars = ({ n }: { n: number }) => {
+  const full = Math.max(0, Math.min(5, Math.round(n)));
+  return (
+    <span style={{ color: C.goldDeep, fontSize: 13, letterSpacing: 1 }} aria-label={`${full} out of 5 stars`}>
+      {"★".repeat(full)}<span style={{ color: C.hairline }}>{"★".repeat(5 - full)}</span>
+    </span>
+  );
+};
+
+// Expandable reviews panel — fetched lazily the first time the
+// rating is tapped.
+const ReviewsPanel = ({ reviews, loading }: { reviews: StylistReview[] | null; loading: boolean }) => {
+  if (loading) {
+    return <p style={{ fontSize: 12, color: C.muted, padding: "10px 0 0" }}>Loading reviews…</p>;
+  }
+  if (!reviews || reviews.length === 0) {
+    return <p style={{ fontSize: 12, color: C.muted, padding: "10px 0 0" }}>No written reviews yet.</p>;
   }
   return (
-    <span style={{ fontSize: 12, color: C.coffee }}>
-      <span style={{ color: C.goldDeep, fontWeight: 700 }}>★ {avg.toFixed(1)}</span>
-      {" "}· {count} review{count === 1 ? "" : "s"}
-    </span>
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.hairline}` }}>
+      {reviews.map((r, i) => (
+        <div key={i} style={{ paddingTop: i === 0 ? 0 : 12, marginTop: i === 0 ? 0 : 12, borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Stars n={r.stars} />
+            <span style={{ fontSize: 12, fontWeight: 600, color: C.espresso }}>
+              {r.displayName || "Client"}
+            </span>
+            {fmtReviewDate(r.submittedAt) && (
+              <span style={{ fontSize: 11, color: C.muted }}>· {fmtReviewDate(r.submittedAt)}</span>
+            )}
+          </div>
+          {r.notes && (
+            <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.5, color: C.coffee }}>
+              {r.notes}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
   );
 };
 
 const StylistCard = ({ s }: { s: DiscoverStylist }) => {
   const where = [s.city, s.state].filter(Boolean).join(", ");
   const price = priceRangeLabel(s.priceMin, s.priceMax);
+  const bookHref = `/book/${encodeURIComponent(s.slug)}`;
+  const hasReviews = s.ratingCount > 0 && s.ratingAvg != null;
+
+  const [open, setOpen] = useState(false);
+  const [reviews, setReviews] = useState<StylistReview[] | null>(null);
+  const [loadingReviews, setLoadingReviews] = useState(false);
+
+  const toggleReviews = async () => {
+    const next = !open;
+    setOpen(next);
+    // Lazy-fetch on first open.
+    if (next && reviews == null && !loadingReviews) {
+      setLoadingReviews(true);
+      try { setReviews(await fetchStylistReviews(s.slug)); }
+      catch { setReviews([]); }
+      finally { setLoadingReviews(false); }
+    }
+  };
+
   return (
-    <a
-      href={`/book/${encodeURIComponent(s.slug)}`}
-      style={{
-        display: "block",
-        textDecoration: "none",
-        background: "#FFFFFF",
-        border: `1px solid ${C.hairline}`,
-        borderRadius: 16,
-        padding: 16,
-        marginBottom: 12,
-      }}
-    >
+    <div style={{
+      background: "#FFFFFF",
+      border: `1px solid ${C.hairline}`,
+      borderRadius: 16,
+      padding: 16,
+      marginBottom: 12,
+    }}>
       <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-        {s.logoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={s.logoUrl}
-            alt=""
-            style={{ width: 56, height: 56, borderRadius: 12, objectFit: "cover", flexShrink: 0 }}
-          />
-        ) : (
-          <div style={{
-            width: 56, height: 56, borderRadius: 12, flexShrink: 0,
-            background: C.ivory, display: "grid", placeItems: "center",
-            fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, color: C.goldDeep,
-          }}>
-            {(s.businessName || "?").trim().charAt(0).toUpperCase()}
-          </div>
-        )}
+        <a href={bookHref} style={{ flexShrink: 0, lineHeight: 0 }}>
+          {s.logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={s.logoUrl}
+              alt=""
+              style={{ width: 56, height: 56, borderRadius: 12, objectFit: "cover" }}
+            />
+          ) : (
+            <div style={{
+              width: 56, height: 56, borderRadius: 12,
+              background: C.ivory, display: "grid", placeItems: "center",
+              fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, color: C.goldDeep,
+            }}>
+              {(s.businessName || "?").trim().charAt(0).toUpperCase()}
+            </div>
+          )}
+        </a>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <p style={{
-            margin: 0, fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 600,
-            color: C.espresso, lineHeight: 1.15,
-            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-          }}>
-            {s.businessName}
-          </p>
+          <a href={bookHref} style={{ textDecoration: "none" }}>
+            <p style={{
+              margin: 0, fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 600,
+              color: C.espresso, lineHeight: 1.15,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {s.businessName}
+            </p>
+          </a>
           {where && (
             <p style={{ margin: "2px 0 0", fontSize: 12, color: C.muted }}>{where}</p>
           )}
           <div style={{ marginTop: 4 }}>
-            <StarRow avg={s.ratingAvg} count={s.ratingCount} />
+            {hasReviews ? (
+              <button
+                type="button"
+                onClick={toggleReviews}
+                style={{
+                  background: "transparent", border: 0, padding: 0, cursor: "pointer",
+                  fontSize: 12, color: C.coffee, display: "inline-flex", alignItems: "center", gap: 4,
+                }}
+              >
+                <span style={{ color: C.goldDeep, fontWeight: 700 }}>★ {s.ratingAvg!.toFixed(1)}</span>
+                <span>· {s.ratingCount} review{s.ratingCount === 1 ? "" : "s"}</span>
+                <span style={{ color: C.goldDeep, fontWeight: 700 }}>{open ? "▴ Hide" : "▾ Read"}</span>
+              </button>
+            ) : (
+              <span style={{ fontSize: 12, color: C.muted }}>No reviews yet</span>
+            )}
           </div>
         </div>
       </div>
+
       {s.intro && (
         <p style={{
           margin: "12px 0 0", fontSize: 13, lineHeight: 1.5, color: C.coffee,
@@ -95,6 +168,9 @@ const StylistCard = ({ s }: { s: DiscoverStylist }) => {
           {s.intro}
         </p>
       )}
+
+      {open && <ReviewsPanel reviews={reviews} loading={loadingReviews} />}
+
       <div style={{
         marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.hairline}`,
         display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -102,14 +178,14 @@ const StylistCard = ({ s }: { s: DiscoverStylist }) => {
         <span style={{ fontSize: 12, color: C.muted }}>
           {price ? `Services from ${price}` : "View services"}
         </span>
-        <span style={{
+        <a href={bookHref} style={{
           fontSize: 12, fontWeight: 700, color: "#FFFFFF", background: C.espresso,
-          padding: "7px 14px", borderRadius: 999, letterSpacing: "0.04em",
+          padding: "7px 14px", borderRadius: 999, letterSpacing: "0.04em", textDecoration: "none",
         }}>
           Book
-        </span>
+        </a>
       </div>
-    </a>
+    </div>
   );
 };
 
