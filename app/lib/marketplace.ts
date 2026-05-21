@@ -43,6 +43,34 @@ export const fetchDiscoverStylists = async (
   })).filter(s => s.slug);
 };
 
+export type StylistReview = {
+  stars: number;
+  notes: string | null;
+  displayName: string | null;
+  submittedAt: string | null;
+};
+
+// Public, anon-callable. A stylist's client reviews by booking-link
+// slug — same status<>'hidden' filter the marketplace card count
+// uses, so count and content always agree. Used by both the
+// /discover card and the public booking page.
+export const fetchStylistReviews = async (
+  slug: string,
+): Promise<StylistReview[]> => {
+  if (!slug) return [];
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("public_stylist_reviews", {
+    slug_in: slug,
+  });
+  if (error) throw error;
+  return ((data || []) as any[]).map(r => ({
+    stars: Number(r.stars) || 0,
+    notes: r.notes || null,
+    displayName: r.display_name || null,
+    submittedAt: r.submitted_at || null,
+  }));
+};
+
 export type MarketplaceListing = {
   enabled: boolean;
   city: string;

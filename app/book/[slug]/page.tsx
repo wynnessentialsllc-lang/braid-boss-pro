@@ -26,6 +26,7 @@ import {
   type PublicProduct,
 } from "../../lib/storefront";
 import { collectPublicContext } from "../../lib/waitlist";
+import { fetchStylistReviews, type StylistReview } from "../../lib/marketplace";
 
 // Local-date "YYYY-MM-DD" — never UTC-shifts so the calendar lines up
 // with what the visitor sees on their phone.
@@ -370,6 +371,11 @@ export default function PublicBookingPage() {
   // Storefront commerce (Phases 3-5). Each list is independent so a
   // failed fetch in one section doesn't blank the others.
   const [reviews, setReviews] = useState<PublicReview[]>([]);
+  // Client reviews tied to real appointments — the same data the
+  // /discover marketplace card's star rating is drawn from, so the
+  // rating is consistent between the marketplace and this page.
+  const [clientReviews, setClientReviews] = useState<StylistReview[]>([]);
+  const [reviewsOpen, setReviewsOpen] = useState(false);
   const [products, setProducts] = useState<PublicProduct[]>([]);
   const [serviceRecs, setServiceRecs] = useState<PublicProduct[]>([]);
   const [activeCategoryId, setActiveCategoryId] = useState<string>("");
@@ -586,6 +592,20 @@ export default function PublicBookingPage() {
       const r = await fetchPublicReviews(slug);
       if (cancelled) return;
       if (r.ok) setReviews(r.reviews);
+    })();
+    return () => { cancelled = true; };
+  }, [slug]);
+
+  // Appointment-tied client reviews — best-effort, independent of
+  // the curated "Client Love" testimonials above.
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await fetchStylistReviews(slug);
+        if (!cancelled) setClientReviews(list);
+      } catch { /* leave empty — section hides itself */ }
     })();
     return () => { cancelled = true; };
   }, [slug]);
@@ -1573,6 +1593,89 @@ export default function PublicBookingPage() {
             </div>
           </div>
         )}
+
+        {/* Client reviews — appointment-tied star ratings. The
+            header chip shows the average; tapping it expands the
+            written reviews. Same data as the /discover marketplace
+            card, so the rating is consistent across surfaces.
+            Hides itself when there are no reviews. */}
+        {clientReviews.length > 0 && (() => {
+          const avg = clientReviews.reduce((s, r) => s + (r.stars || 0), 0) / clientReviews.length;
+          const count = clientReviews.length;
+          const fullStars = Math.max(0, Math.min(5, Math.round(avg)));
+          return (
+            <div style={{ marginTop: 28 }}>
+              <button
+                type="button"
+                onClick={() => setReviewsOpen(o => !o)}
+                style={{
+                  width: "100%",
+                  background: C.paper,
+                  border: `1px solid ${C.hairline}`,
+                  borderRadius: 16,
+                  padding: "14px 16px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  cursor: "pointer",
+                }}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <span style={{ color: accent, fontSize: 15, letterSpacing: 1 }} aria-hidden>
+                    {"★".repeat(fullStars)}<span style={{ color: C.hairline }}>{"★".repeat(5 - fullStars)}</span>
+                  </span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: C.espresso }}>{avg.toFixed(1)}</span>
+                  <span style={{ fontSize: 13, color: C.muted }}>· {count} review{count === 1 ? "" : "s"}</span>
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: accent, whiteSpace: "nowrap" }}>
+                  {reviewsOpen ? "Hide" : "Read reviews"}
+                </span>
+              </button>
+              {reviewsOpen && (
+                <div style={{ marginTop: 10 }}>
+                  {clientReviews.map((r, i) => {
+                    const rf = Math.max(0, Math.min(5, Math.round(r.stars || 0)));
+                    const when = (() => {
+                      if (!r.submittedAt) return "";
+                      const d = new Date(r.submittedAt);
+                      return isNaN(d.getTime())
+                        ? ""
+                        : d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+                    })();
+                    return (
+                      <div
+                        key={i}
+                        style={{
+                          padding: 14,
+                          borderRadius: 14,
+                          background: C.paper,
+                          border: `1px solid ${C.hairline}`,
+                          marginBottom: 8,
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ color: accent, fontSize: 13, letterSpacing: 1 }} aria-label={`${rf} out of 5 stars`}>
+                            {"★".repeat(rf)}<span style={{ color: C.hairline }}>{"★".repeat(5 - rf)}</span>
+                          </span>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: C.espresso }}>
+                            {r.displayName || "Client"}
+                          </span>
+                          {when && <span style={{ fontSize: 12, color: C.muted }}>· {when}</span>}
+                        </div>
+                        {r.notes && (
+                          <p style={{ margin: "6px 0 0", fontSize: 14, lineHeight: 1.5, color: C.coffee }}>
+                            {r.notes}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Phase 3 — Client Love. Renders only when the stylist has
             at least one review. Featured-first sort already happens
