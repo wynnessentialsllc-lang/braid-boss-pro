@@ -60,6 +60,17 @@ import {
   taxYearOptions,
   type AnnualTaxSummary,
 } from "./lib/tax-pack";
+import {
+  type ReferralReward,
+  loadReferralSettings,
+  saveReferralSettings,
+  listReferralRewards,
+  markRewardRedeemed,
+  voidReward,
+  restoreReward,
+  runReferralProcessor,
+  computeReferralSummary,
+} from "./lib/referrals";
 import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
 import WelcomeIntro from "./components/WelcomeIntro";
 import { ProductImageUploader } from "./components/ProductImageUploader";
@@ -9860,6 +9871,7 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
         // client can put any year and it still works.
         birthday: client?.birthday || "",
         marketingEmailsEnabled: client?.marketingEmailsEnabled !== false,
+        referredByClientId: client?.referredByClientId || "",
       });
       setTab("info");
     }
@@ -9979,6 +9991,29 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
                 onChange={e => setForm({ ...form, birthday: e.target.value || null })}
               />
             </Field>
+            {/* Referral attribution — who sent this client in. Drives
+                the referral reward engine: when this client completes
+                their first paid appointment, the referrer earns
+                credit. Only selectable on an existing client (needs
+                an id), and never the client themselves. */}
+            {form.id && (
+              <Field label="Referred by" hint="The client who sent them in — earns referral credit on this client's first paid visit.">
+                <select
+                  value={form.referredByClientId || ""}
+                  onChange={e => setForm({ ...form, referredByClientId: e.target.value || "" })}
+                  className="w-full px-3 py-2.5 rounded-xl text-[14px]"
+                  style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+                >
+                  <option value="">— Not referred —</option>
+                  {((store.clients || []) as EntityRecord[])
+                    .filter(c => c.id !== form.id)
+                    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+                    .map(c => (
+                      <option key={c.id} value={c.id}>{c.name || "Unnamed client"}</option>
+                    ))}
+                </select>
+              </Field>
+            )}
             <Field label="Notes"><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Hair texture, density, takedown notes…" rows={3} /></Field>
             {/* Per-client marketing opt-out. Defaults to true (in via
                 the editor's seed) so existing clients receive nudges
@@ -12239,7 +12274,7 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -12523,6 +12558,28 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                             : "Auto-rebook nudges & opt-outs";
                         })()}
                       </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openReferrals && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openReferrals}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <Users size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Referrals</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>Reward clients who send you new business</p>
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
@@ -24514,6 +24571,220 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
 };
 
 // ============================================================
+//  REFERRALS — reward clients who send new business
+// ============================================================
+const ReferralsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const currency = store.business?.currency || "USD";
+  const clients: EntityRecord[] = store.clients || [];
+  const clientName = (id: string): string =>
+    clients.find(c => c.id === id)?.name || "Unknown client";
+
+  const [loading, setLoading] = useState(true);
+  const [enabled, setEnabled] = useState(false);
+  const [rewardAmount, setRewardAmount] = useState("");
+  const [rewards, setRewards] = useState<ReferralReward[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const [settings, list] = await Promise.all([
+        loadReferralSettings(userId),
+        listReferralRewards(userId),
+      ]);
+      setEnabled(settings.enabled);
+      setRewardAmount(settings.rewardAmount > 0 ? String(settings.rewardAmount) : "");
+      setRewards(list);
+    } catch (e: any) {
+      setMsg(e?.message || "Couldn't load referrals.");
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  const summary = useMemo(() => computeReferralSummary(rewards), [rewards]);
+
+  // Persist the enable toggle + reward amount together — they live
+  // in the same shop_settings row.
+  const saveSettings = async (nextEnabled: boolean, nextAmount: string) => {
+    if (!userId) return;
+    const amount = Math.max(0, parseMoney(nextAmount));
+    try {
+      await saveReferralSettings(userId, { enabled: nextEnabled, rewardAmount: amount });
+    } catch (e: any) {
+      setMsg(e?.message || "Couldn't save settings.");
+      void refresh(); // resync from cloud truth
+    }
+  };
+
+  const handleToggle = (v: boolean) => { setEnabled(v); void saveSettings(v, rewardAmount); };
+
+  // Debounced auto-save for the reward amount — avoids a write per
+  // keystroke. Gated on !loading so the initial hydration of the
+  // field doesn't trigger a redundant save on mount.
+  useEffect(() => {
+    if (loading) return;
+    const t = window.setTimeout(() => { void saveSettings(enabled, rewardAmount); }, 600);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rewardAmount]);
+
+  // On-demand processor run — surfaces rewards immediately instead of
+  // waiting for the daily cron.
+  const handleCheckNow = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const n = await runReferralProcessor();
+      await refresh();
+      setMsg(n > 0
+        ? `${n} new referral reward${n === 1 ? "" : "s"} found.`
+        : "No new rewards — all caught up.");
+    } catch (e: any) {
+      setMsg(e?.message || "Couldn't check for rewards.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const act = async (fn: () => Promise<void>) => {
+    setBusy(true); setMsg(null);
+    try { await fn(); await refresh(); }
+    catch (e: any) { setMsg(e?.message || "Action failed."); }
+    finally { setBusy(false); }
+  };
+
+  const STATUS_TONE: Record<string, string> = {
+    earned: C.goldDeep, redeemed: C.success, void: C.muted,
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Referrals"
+        subtitle="Reward clients for new business"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-4">
+        {loading ? (
+          <Card className="p-6 text-center"><p className="text-[13px]" style={{ color: C.muted }}>Loading…</p></Card>
+        ) : (
+          <>
+            {/* Settings */}
+            <Card className="p-3.5 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Referral rewards</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    When a referred client finishes their first paid appointment, the client who referred them earns credit toward their own next visit.
+                  </p>
+                </div>
+                <Toggle checked={enabled} onChange={handleToggle} />
+              </div>
+              <Field label="Reward per referral" hint="Account credit the referrer earns.">
+                <MoneyInput value={rewardAmount} onChange={(v) => setRewardAmount(String(v))} />
+              </Field>
+            </Card>
+
+            {/* How it works */}
+            <Card className="p-3.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>How it works</p>
+              <ul className="space-y-1.5 text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                <li>• On a new client's profile, set who referred them</li>
+                <li>• When that client completes their first paid appointment, the referrer earns the reward</li>
+                <li>• Apply the credit as a discount on the referrer's next appointment, then mark it redeemed here</li>
+              </ul>
+            </Card>
+
+            {/* Summary */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
+                <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>Referrals</p>
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 600, color: C.espresso, marginTop: 2 }}>{summary.totals.referrals}</p>
+              </div>
+              <div className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
+                <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>Credit owed</p>
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 600, color: C.goldDeep, marginTop: 2 }}>{fmtMoney(summary.totals.creditOutstanding, currency)}</p>
+              </div>
+              <div className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
+                <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>Redeemed</p>
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 600, color: C.success, marginTop: 2 }}>{fmtMoney(summary.totals.creditRedeemed, currency)}</p>
+              </div>
+            </div>
+
+            <Button variant="outline" fullWidth onClick={handleCheckNow} disabled={busy} icon={<RefreshCw size={15} />}>
+              {busy ? "Checking…" : "Check for new rewards"}
+            </Button>
+            {msg && <p className="text-[12px]" style={{ color: C.coffee }}>{msg}</p>}
+
+            {/* Reward list */}
+            <div>
+              <SectionTitle>Reward history</SectionTitle>
+              {rewards.length === 0 ? (
+                <Card className="p-5 text-center">
+                  <p className="text-[13px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+                    No referral rewards yet. Set "Referred by" on a new client's profile — once they finish their first paid appointment, the reward shows up here.
+                  </p>
+                </Card>
+              ) : (
+                <Card className="p-2">
+                  {rewards.map((r, i) => (
+                    <div key={r.id} className="px-2 py-2.5" style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>
+                            {clientName(r.referrer_client_id)}
+                          </p>
+                          <p className="text-[11px]" style={{ color: C.muted }}>
+                            Referred {clientName(r.referred_client_id)} · earned {fmtDate(String(r.earned_at).slice(0, 10))}
+                          </p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <p className="text-[13px] font-semibold tabular-nums" style={{ color: C.espresso }}>{fmtMoney(Number(r.amount), currency)}</p>
+                          <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: STATUS_TONE[r.status], letterSpacing: "0.08em" }}>{r.status}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 mt-2">
+                        {r.status === "earned" && (
+                          <>
+                            <button type="button" disabled={busy}
+                              onClick={() => act(() => markRewardRedeemed(userId!, r.id))}
+                              className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                              style={{ background: C.espresso, color: C.cream }}>
+                              Mark redeemed
+                            </button>
+                            <button type="button" disabled={busy}
+                              onClick={() => act(() => voidReward(userId!, r.id))}
+                              className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                              style={{ background: "transparent", color: C.danger, border: `1px solid ${C.hairline}` }}>
+                              Void
+                            </button>
+                          </>
+                        )}
+                        {r.status !== "earned" && (
+                          <button type="button" disabled={busy}
+                            onClick={() => act(() => restoreReward(userId!, r.id))}
+                            className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                            style={{ background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}` }}>
+                            Restore
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </Card>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
 //  MARKETING — auto-rebook nudges, opt-out, per-service windows
 // ============================================================
 const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
@@ -25797,8 +26068,9 @@ export default function App() {
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "inventory" && <InventoryScreen store={store} onBack={() => setSecondary(inventoryBack)} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
