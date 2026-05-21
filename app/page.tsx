@@ -121,6 +121,18 @@ import {
   validateService,
 } from "./lib/services";
 import {
+  type MarketingCampaign,
+  type CampaignSegment,
+  type CampaignDraft,
+  describeSegment,
+  listCampaigns,
+  saveCampaign,
+  scheduleCampaign,
+  sendCampaignNow,
+  countSegment,
+  deleteCampaign,
+} from "./lib/marketing-campaigns";
+import {
   type ServiceCategory,
   useServiceCategories,
 } from "./lib/service-categories";
@@ -1974,14 +1986,15 @@ const MoneyInput = ({ value, onChange, prefix = "$", suffix, placeholder = "0", 
   );
 };
 
-const Textarea = ({ value, onChange, placeholder, rows = 3 }: {
+const Textarea = ({ value, onChange, placeholder, rows = 3, disabled = false }: {
   value: string;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   placeholder?: string;
   rows?: number;
+  disabled?: boolean;
 }) => (
-  <textarea value={value ?? ""} onChange={onChange} placeholder={placeholder} rows={rows}
-    className="w-full rounded-xl px-3.5 py-3 text-[15px] outline-none resize-none transition"
+  <textarea value={value ?? ""} onChange={onChange} placeholder={placeholder} rows={rows} disabled={disabled}
+    className="w-full rounded-xl px-3.5 py-3 text-[15px] outline-none resize-none transition disabled:opacity-60"
     style={{ background: C.paper, border: `1px solid ${C.hairline}`, color: C.ink, lineHeight: 1.5 }}
     onFocus={e => e.target.style.borderColor = C.gold}
     onBlur={e => e.target.style.borderColor = C.hairline} />
@@ -9836,6 +9849,12 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
         preferredStyles: client?.preferredStyles || [],
         scalpSensitivity: client?.scalpSensitivity || "None",
         allergies: client?.allergies || "", notes: client?.notes || "",
+        // Marketing fields. birthday: YYYY-MM-DD or "" (matches the
+        // <input type="date"> contract). Year matters for storage
+        // but the cron only matches MM-DD, so a privacy-conscious
+        // client can put any year and it still works.
+        birthday: client?.birthday || "",
+        marketingEmailsEnabled: client?.marketingEmailsEnabled !== false,
       });
       setTab("info");
     }
@@ -9948,7 +9967,32 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
                 options={SENSITIVITY.map(s => ({ value: s, label: s }))} />
             </Field>
             <Field label="Allergies"><Input value={form.allergies} onChange={e => setForm({ ...form, allergies: e.target.value })} placeholder="e.g. tea tree, lanolin" /></Field>
+            <Field label="Birthday" hint="Optional. We'll send a happy-birthday email each year.">
+              <Input
+                type="date"
+                value={form.birthday || ""}
+                onChange={e => setForm({ ...form, birthday: e.target.value || null })}
+              />
+            </Field>
             <Field label="Notes"><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Hair texture, density, takedown notes…" rows={3} /></Field>
+            {/* Per-client marketing opt-out. Defaults to true (in via
+                the editor's seed) so existing clients receive nudges
+                until they explicitly unsubscribe. Untoggling here
+                does the same thing as the public /unsubscribe page. */}
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Marketing emails</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    Rebook nudges, birthday greetings, win-backs. Transactional emails (confirmations, balance receipts) keep going regardless.
+                  </p>
+                </div>
+                <Toggle
+                  checked={form.marketingEmailsEnabled !== false}
+                  onChange={(v: boolean) => setForm({ ...form, marketingEmailsEnabled: v })}
+                />
+              </div>
+            </Card>
 
             <div className="grid grid-cols-2 gap-3 pt-2">
               <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -23076,6 +23120,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
     variants: ProductVariant[];
     active: boolean;
     inventory_item_id: string | null;
+    reorder_after_weeks: number | null;
   }>;
   const [editing, setEditing] = useState<Draft | null>(null);
   // Raw textarea content for the variants list. Decoupled from
@@ -23199,6 +23244,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                 variants: p.variants || [],
                 active: p.active,
                 inventory_item_id: (p as any).inventory_item_id ?? null,
+                reorder_after_weeks: (p as any).reorder_after_weeks ?? null,
               });
               // Seed the textarea with the existing variant names so
               // editing keeps them visible; new picks tack on as the
@@ -23347,6 +23393,28 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                     </option>
                   ))}
               </select>
+            </Field>
+            {/* Re-order nudge window — drives the daily reorder cron.
+                Empty = no auto-nudge for this product. Best fit for
+                consumables (oils, edge controls, sprays). Skipped
+                for one-off items like bonnets / tools. */}
+            <Field label="Re-order nudge" hint="Email past buyers to restock after this many weeks. Leave blank to skip.">
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  value={(editing as any).reorder_after_weeks == null ? "" : String((editing as any).reorder_after_weeks)}
+                  onChange={e => {
+                    const raw = e.target.value;
+                    setEditing({
+                      ...(editing as any),
+                      reorder_after_weeks: raw === "" ? null : Math.max(1, Math.min(52, Math.floor(Number(raw) || 0))),
+                    });
+                  }}
+                  placeholder="e.g. 6"
+                />
+                <span className="text-[12px] whitespace-nowrap" style={{ color: C.coffee }}>weeks</span>
+              </div>
             </Field>
             <Field label="Featured image" hint="Main photo shown on the storefront grid.">
               <ProductImageUploader
@@ -24203,13 +24271,19 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
   const services: any[] = store.servicesApi?.services || [];
   const updateService = store.servicesApi?.upsert;
 
-  // Master switch lives on shop_settings.marketing_rebook_nudges_enabled.
-  // Default true so a stylist who's only set up rebook windows on
-  // services starts sending immediately. A pause here suppresses
-  // everything without erasing the per-service settings.
-  const [enabled, setEnabled] = useState<boolean | null>(null);
+  // Four per-type master switches on shop_settings. Default true so
+  // a stylist who's only set up rebook windows starts sending right
+  // away. A pause here suppresses one type without erasing per-
+  // service settings or other toggles.
+  type Toggles = {
+    rebook: boolean;
+    birthday: boolean;
+    winback: boolean;
+    welcome: boolean;
+    reorder: boolean;
+  };
+  const [toggles, setToggles] = useState<Toggles>({ rebook: true, birthday: true, winback: true, welcome: true, reorder: true });
   const [loading, setLoading] = useState(true);
-  const [savingMaster, setSavingMaster] = useState(false);
 
   useEffect(() => {
     if (!userId) return;
@@ -24217,31 +24291,45 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
     (async () => {
       const { data } = await getSupabase()
         .from("shop_settings")
-        .select("marketing_rebook_nudges_enabled")
+        .select("marketing_rebook_nudges_enabled, marketing_birthday_enabled, marketing_winback_enabled, marketing_welcome_enabled, marketing_reorder_enabled")
         .eq("user_id", userId)
         .maybeSingle();
       if (cancelled) return;
-      setEnabled(data?.marketing_rebook_nudges_enabled ?? true);
+      setToggles({
+        rebook:   data?.marketing_rebook_nudges_enabled ?? true,
+        birthday: data?.marketing_birthday_enabled      ?? true,
+        winback:  data?.marketing_winback_enabled       ?? true,
+        welcome:  data?.marketing_welcome_enabled       ?? true,
+        reorder:  data?.marketing_reorder_enabled       ?? true,
+      });
       setLoading(false);
     })();
     return () => { cancelled = true; };
   }, [userId]);
 
-  const saveMaster = async (next: boolean) => {
+  // Save a single toggle column. Optimistic local update; roll back
+  // on error so the UI never desyncs from cloud truth.
+  const saveToggle = async (key: keyof Toggles, next: boolean) => {
     if (!userId) return;
-    setSavingMaster(true);
-    setEnabled(next);
+    const prev = toggles[key];
+    setToggles(t => ({ ...t, [key]: next }));
+    const column = {
+      rebook:   "marketing_rebook_nudges_enabled",
+      birthday: "marketing_birthday_enabled",
+      winback:  "marketing_winback_enabled",
+      welcome:  "marketing_welcome_enabled",
+      reorder:  "marketing_reorder_enabled",
+    }[key];
     const { error: err } = await getSupabase()
       .from("shop_settings")
       .upsert({
         user_id: userId,
-        marketing_rebook_nudges_enabled: next,
+        [column]: next,
         updated_at: new Date().toISOString(),
       }, { onConflict: "user_id" });
-    setSavingMaster(false);
     if (err) {
-      console.warn("[marketing] save master failed:", err.message);
-      setEnabled(!next); // roll back optimistic flip
+      console.warn("[marketing] save toggle failed:", err.message);
+      setToggles(t => ({ ...t, [key]: prev }));
     }
   };
 
@@ -24250,6 +24338,35 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
   // so they don't have to deep-dive into Services & Styles editor.
   const [editService, setEditService] = useState<any | null>(null);
   const [editWeeks, setEditWeeks] = useState<string>("");
+
+  // Campaign state — list, composer sheet, and the "did it send"
+  // confirmation. Loading the list is best-effort: an error just
+  // leaves it empty, with a console warning for the dev.
+  const [campaigns, setCampaigns] = useState<MarketingCampaign[]>([]);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [editingCampaign, setEditingCampaign] = useState<MarketingCampaign | null>(null);
+  const refreshCampaigns = async () => {
+    if (!userId) return;
+    try { setCampaigns(await listCampaigns(userId)); }
+    catch (e: any) { console.warn("[marketing] campaigns load failed:", e?.message || e); }
+  };
+  useEffect(() => { void refreshCampaigns(); }, [userId]);
+
+  const openComposer = (c: MarketingCampaign | null) => {
+    setEditingCampaign(c);
+    setComposerOpen(true);
+  };
+
+  const handleDeleteCampaign = async (c: MarketingCampaign) => {
+    if (!userId) return;
+    if (!confirm(`Delete "${c.name}"? This can't be undone.`)) return;
+    try {
+      await deleteCampaign(userId, c.id);
+      await refreshCampaigns();
+    } catch (e: any) {
+      alert(e?.message || "Couldn't delete the campaign.");
+    }
+  };
 
   const openEdit = (s: any) => {
     setEditService(s);
@@ -24277,20 +24394,32 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
         leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
       />
       <div className="px-5 pt-2 space-y-4">
-        {/* Master switch */}
-        <Card className="p-3.5">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Send rebook nudges</p>
-              <p className="text-[11px]" style={{ color: C.muted }}>
-                Daily at 10am Pacific, we email clients whose last appointment hit the rebook window for that service.
-              </p>
+        {/* Per-type master switches. Each automation is independent —
+            a stylist can run rebook nudges without birthdays, etc.
+            All default to on so day-one setup is one less screen. */}
+        <Card className="p-2">
+          {([
+            { key: "rebook"   as const, title: "Rebook nudges",       hint: "Service hit its rebook window with no future booking" },
+            { key: "birthday" as const, title: "Birthday greetings",  hint: "Personal birthday email each year (no discount)" },
+            { key: "winback"  as const, title: "Win-back",            hint: "Client hasn't booked in 90+ days" },
+            { key: "welcome"  as const, title: "New-client welcome",  hint: "Day after their first completed appointment" },
+            { key: "reorder"  as const, title: "Product re-order",    hint: "Storefront product hit its reorder window" },
+          ]).map((t, i) => (
+            <div
+              key={t.key}
+              className="flex items-center justify-between gap-3 px-2 py-3"
+              style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>{t.title}</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>{t.hint}</p>
+              </div>
+              <Toggle
+                checked={toggles[t.key]}
+                onChange={(v: boolean) => { void saveToggle(t.key, v); }}
+              />
             </div>
-            <Toggle
-              checked={!!enabled}
-              onChange={(v: boolean) => { void saveMaster(v); }}
-            />
-          </div>
+          ))}
         </Card>
 
         {/* How it works */}
@@ -24359,10 +24488,93 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
           )}
         </div>
 
+        {/* One-off campaigns — Memorial Day promos, new-service
+            launches, holiday hours. Stored per stylist; sent to the
+            chosen segment immediately or on a schedule. */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <SectionTitle>Campaigns</SectionTitle>
+            <button
+              type="button"
+              onClick={() => openComposer(null)}
+              className="rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-[0.97] transition"
+              style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}`, letterSpacing: "0.04em" }}
+            >
+              + New campaign
+            </button>
+          </div>
+          {campaigns.length === 0 ? (
+            <Card className="p-5 text-center">
+              <p className="text-[13px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+                Compose a one-off email for a promo, announcement, or holiday hours. Pick a segment, write the message, send now or schedule.
+              </p>
+            </Card>
+          ) : (
+            <Card className="p-2">
+              {campaigns.map((c, i) => {
+                const tone =
+                  c.status === "sent" ? C.success
+                  : c.status === "failed" ? C.danger
+                  : c.status === "scheduled" ? C.goldDeep
+                  : C.muted;
+                const meta =
+                  c.status === "sent"
+                    ? `Sent ${c.sent_at ? fmtRelative(c.sent_at) : ""} · ${c.recipient_count ?? 0} recipient${c.recipient_count === 1 ? "" : "s"}`
+                    : c.status === "scheduled"
+                      ? `Scheduled for ${c.scheduled_for ? new Date(c.scheduled_for).toLocaleString() : ""}`
+                      : c.status === "failed"
+                        ? `Failed — ${c.last_error || "see logs"}`
+                        : describeSegment(c.segment as CampaignSegment);
+                return (
+                  <button
+                    type="button"
+                    key={c.id}
+                    onClick={() => openComposer(c)}
+                    className="w-full text-left flex items-center justify-between px-2 py-2.5 active:scale-[0.99] transition"
+                    style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{c.name}</p>
+                        <span
+                          className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full"
+                          style={{
+                            color: tone,
+                            background: c.status === "sent" ? "rgba(92,124,74,0.10)"
+                              : c.status === "scheduled" ? "rgba(168,137,63,0.10)"
+                              : c.status === "failed" ? "rgba(156,61,46,0.10)"
+                              : "transparent",
+                            border: `1px solid ${tone}`,
+                            letterSpacing: "0.10em",
+                          }}
+                        >
+                          {c.status}
+                        </span>
+                      </div>
+                      <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>{meta}</p>
+                    </div>
+                    <ChevronRight size={14} style={{ color: C.muted, marginLeft: 8 }} />
+                  </button>
+                );
+              })}
+            </Card>
+          )}
+        </div>
+
         <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>
           Send from <span style={{ color: C.espresso }}>hello@braidbosspro.app</span> with your studio name in the subject + body.
         </p>
       </div>
+
+      {composerOpen && (
+        <CampaignComposerSheet
+          campaign={editingCampaign}
+          userId={userId}
+          onClose={() => { setComposerOpen(false); setEditingCampaign(null); }}
+          onSaved={async () => { await refreshCampaigns(); }}
+          onDelete={editingCampaign ? () => handleDeleteCampaign(editingCampaign) : undefined}
+        />
+      )}
 
       {editService && (
         <Sheet open onClose={() => setEditService(null)} title={editService.name}>
@@ -24423,6 +24635,280 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
         </Sheet>
       )}
     </div>
+  );
+};
+
+// One-off campaign composer. Three sections: details (name +
+// segment), content (subject + body with merge tags), action
+// (send-now / schedule / save draft). The recipient-count preview
+// refreshes whenever the segment changes so the stylist can see
+// "Send to N clients" before committing.
+//
+// Plain-text body. Merge tags ({{client_name}}, {{studio_name}},
+// {{book_url}}) get substituted server-side at send. No rich text
+// in V1 — keeps the editor honest about what lands in the inbox.
+const CampaignComposerSheet = ({
+  campaign, userId, onClose, onSaved, onDelete,
+}: {
+  campaign: MarketingCampaign | null;
+  userId: string | null;
+  onClose: () => void;
+  onSaved: () => Promise<void> | void;
+  onDelete?: () => Promise<void> | void;
+}) => {
+  const isReadOnly = campaign?.status === "sent" || campaign?.status === "sending";
+  const [name, setName]       = useState(campaign?.name || "");
+  const [subject, setSubject] = useState(campaign?.subject || "");
+  const [body, setBody]       = useState(campaign?.body_text || "");
+  const initialSegment: CampaignSegment =
+    (campaign?.segment as CampaignSegment) || { kind: "all" };
+  const [segmentKind, setSegmentKind] = useState<CampaignSegment["kind"]>(initialSegment.kind);
+  const [activeDays, setActiveDays] = useState<string>(
+    initialSegment.kind === "active_last" ? String(initialSegment.days) : "60",
+  );
+  const [lapsedDays, setLapsedDays] = useState<string>(
+    initialSegment.kind === "lapsed" ? String(initialSegment.min_days) : "90",
+  );
+  const [scheduledFor, setScheduledFor] = useState<string>(
+    campaign?.scheduled_for ? campaign.scheduled_for.slice(0, 16) : "",
+  );
+  const [recipientCount, setRecipientCount] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  const segment: CampaignSegment = useMemo(() => {
+    if (segmentKind === "active_last") return { kind: "active_last", days: Math.max(1, parseInt(activeDays || "60", 10) || 60) };
+    if (segmentKind === "lapsed")      return { kind: "lapsed",      min_days: Math.max(1, parseInt(lapsedDays || "90", 10) || 90) };
+    return { kind: "all" };
+  }, [segmentKind, activeDays, lapsedDays]);
+
+  // Recipient preview. Debounced so typing in the days field
+  // doesn't spam the RPC; 350ms is short enough to feel live.
+  useEffect(() => {
+    let cancelled = false;
+    const t = window.setTimeout(async () => {
+      try {
+        const n = await countSegment(segment);
+        if (!cancelled) setRecipientCount(n);
+      } catch {
+        if (!cancelled) setRecipientCount(null);
+      }
+    }, 350);
+    return () => { cancelled = true; window.clearTimeout(t); };
+  }, [segment]);
+
+  const persistDraft = async (): Promise<MarketingCampaign | null> => {
+    if (!userId) return null;
+    if (!name.trim()) { setMsg({ kind: "error", text: "Give the campaign a name." }); return null; }
+    if (!subject.trim()) { setMsg({ kind: "error", text: "Subject is required." }); return null; }
+    if (!body.trim()) { setMsg({ kind: "error", text: "Write a message body." }); return null; }
+    try {
+      const saved = await saveCampaign(userId, {
+        id: campaign?.id,
+        name: name,
+        subject: subject,
+        body_text: body,
+        segment,
+      });
+      return saved;
+    } catch (e: any) {
+      setMsg({ kind: "error", text: e?.message || "Couldn't save." });
+      return null;
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    setMsg(null);
+    setBusy(true);
+    const saved = await persistDraft();
+    setBusy(false);
+    if (saved) {
+      setMsg({ kind: "ok", text: "Draft saved." });
+      await onSaved();
+    }
+  };
+
+  const handleSendNow = async () => {
+    setMsg(null);
+    if (!confirm(`Send "${name || "this campaign"}" to ${recipientCount ?? "?"} client${recipientCount === 1 ? "" : "s"} now?`)) return;
+    setBusy(true);
+    const saved = await persistDraft();
+    if (!saved) { setBusy(false); return; }
+    try {
+      const count = await sendCampaignNow(saved.id);
+      setMsg({ kind: "ok", text: `Sent to ${count} client${count === 1 ? "" : "s"}.` });
+      await onSaved();
+      // Auto-close after a beat so the success banner has time to read.
+      window.setTimeout(onClose, 1200);
+    } catch (e: any) {
+      setMsg({ kind: "error", text: e?.message || "Send failed." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSchedule = async () => {
+    setMsg(null);
+    if (!scheduledFor) { setMsg({ kind: "error", text: "Pick a date and time." }); return; }
+    const when = new Date(scheduledFor);
+    if (isNaN(when.getTime()) || when.getTime() <= Date.now()) {
+      setMsg({ kind: "error", text: "Schedule a future time." });
+      return;
+    }
+    setBusy(true);
+    const saved = await persistDraft();
+    if (!saved) { setBusy(false); return; }
+    try {
+      await scheduleCampaign(userId!, saved.id, when.toISOString());
+      setMsg({ kind: "ok", text: "Scheduled." });
+      await onSaved();
+      window.setTimeout(onClose, 1000);
+    } catch (e: any) {
+      setMsg({ kind: "error", text: e?.message || "Couldn't schedule." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open onClose={onClose} title={campaign?.id ? campaign.name : "New campaign"}>
+      <div className="space-y-4 pb-4">
+        {isReadOnly && (
+          <div className="rounded-2xl p-3 text-[12px]" style={{
+            background: campaign?.status === "sent" ? "rgba(92,124,74,0.08)" : C.cream,
+            border: `1px solid ${C.hairline}`,
+            color: C.coffee,
+          }}>
+            {campaign?.status === "sent"
+              ? `Sent ${campaign.sent_at ? new Date(campaign.sent_at).toLocaleString() : ""} to ${campaign.recipient_count ?? 0} client${campaign.recipient_count === 1 ? "" : "s"}.`
+              : "This campaign is currently sending."}
+          </div>
+        )}
+
+        <Field label="Internal name" hint="Just for you — customers never see this.">
+          <Input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="Memorial Day weekend promo"
+            disabled={isReadOnly}
+          />
+        </Field>
+
+        <Field label="Who gets it">
+          <select
+            value={segmentKind}
+            onChange={e => setSegmentKind(e.target.value as CampaignSegment["kind"])}
+            disabled={isReadOnly}
+            className="w-full px-3 py-2.5 rounded-xl text-[14px]"
+            style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+          >
+            <option value="all">All clients</option>
+            <option value="active_last">Booked recently</option>
+            <option value="lapsed">Lapsed clients</option>
+          </select>
+          {segmentKind === "active_last" && (
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-[12px]" style={{ color: C.coffee }}>Booked in the last</span>
+              <input
+                type="number"
+                min="1"
+                max="365"
+                value={activeDays}
+                onChange={e => setActiveDays(e.target.value.replace(/[^0-9]/g, ""))}
+                disabled={isReadOnly}
+                className="w-20 px-2 py-1.5 rounded text-[13px] tabular-nums"
+                style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+              />
+              <span className="text-[12px]" style={{ color: C.coffee }}>days</span>
+            </div>
+          )}
+          {segmentKind === "lapsed" && (
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-[12px]" style={{ color: C.coffee }}>Haven&apos;t booked in</span>
+              <input
+                type="number"
+                min="1"
+                max="365"
+                value={lapsedDays}
+                onChange={e => setLapsedDays(e.target.value.replace(/[^0-9]/g, ""))}
+                disabled={isReadOnly}
+                className="w-20 px-2 py-1.5 rounded text-[13px] tabular-nums"
+                style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+              />
+              <span className="text-[12px]" style={{ color: C.coffee }}>+ days</span>
+            </div>
+          )}
+          <p className="text-[11px] mt-1.5" style={{ color: C.muted }}>
+            {recipientCount == null ? "Counting…" : `Send to ${recipientCount} client${recipientCount === 1 ? "" : "s"}.`}
+          </p>
+        </Field>
+
+        <Field label="Subject line">
+          <Input
+            value={subject}
+            onChange={e => setSubject(e.target.value)}
+            placeholder="A little something for our regulars"
+            disabled={isReadOnly}
+          />
+        </Field>
+
+        <Field label="Message" hint="Use {{client_name}}, {{studio_name}}, {{book_url}} to personalize.">
+          <Textarea
+            value={body}
+            onChange={e => setBody(e.target.value)}
+            placeholder={"Hey {{client_name}}!\n\nA quick note from {{studio_name}}…"}
+            rows={9}
+            disabled={isReadOnly}
+          />
+        </Field>
+
+        {!isReadOnly && (
+          <>
+            <Field label="Schedule for later (optional)" hint="Leave blank to send now.">
+              <Input
+                type="datetime-local"
+                value={scheduledFor}
+                onChange={e => setScheduledFor(e.target.value)}
+              />
+            </Field>
+
+            {msg && (
+              <p className="text-[12px] font-semibold" style={{ color: msg.kind === "error" ? C.danger : C.success }}>
+                {msg.text}
+              </p>
+            )}
+
+            <div className="space-y-2 pt-1">
+              {scheduledFor ? (
+                <Button variant="primary" fullWidth onClick={handleSchedule} disabled={busy}>
+                  {busy ? "Scheduling…" : "Schedule send"}
+                </Button>
+              ) : (
+                <Button variant="primary" fullWidth onClick={handleSendNow} disabled={busy || !recipientCount}>
+                  {busy ? "Sending…" : `Send to ${recipientCount ?? "?"} now`}
+                </Button>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={handleSaveDraft} disabled={busy}>
+                  {busy ? "Saving…" : "Save draft"}
+                </Button>
+                {onDelete && (
+                  <Button variant="outline" onClick={() => { void onDelete(); onClose(); }} disabled={busy}>
+                    Delete
+                  </Button>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
+        {isReadOnly && (
+          <div className="pt-2">
+            <Button variant="outline" fullWidth onClick={onClose}>Close</Button>
+          </div>
+        )}
+      </div>
+    </Sheet>
   );
 };
 

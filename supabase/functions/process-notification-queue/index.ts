@@ -50,6 +50,11 @@ const RESEND_MARKETING_FROM_EMAIL =
 // but we use the same set here to pick the right FROM.
 const MARKETING_NOTIFICATION_TYPES = new Set<string>([
   "rebook_nudge",
+  "birthday_greeting",
+  "winback",
+  "new_client_welcome",
+  "marketing_campaign",
+  "reorder_nudge",
 ]);
 const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID") || "";
 const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN") || "";
@@ -929,6 +934,236 @@ const renderRebookNudge = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// Shared marketing footer with the CAN-SPAM-required unsubscribe
+// link. Built once so all three Phase-2 templates render identically.
+const marketingFooter = (p: Record<string, any>, studioName: string): string => {
+  const unsubscribeToken = String(p.unsubscribeToken || "").trim();
+  const baseUrl = (Deno.env.get("NEXT_PUBLIC_SITE_URL") || "https://braidbosspro.app").replace(/\/$/, "");
+  const unsubscribeUrl = unsubscribeToken
+    ? `${baseUrl}/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`
+    : "";
+  if (!unsubscribeUrl) return "";
+  return `
+    <hr style="border:none;border-top:1px solid ${C.hairline};margin:22px 0 14px;" />
+    <p style="font-size:11px;color:${C.muted};line-height:18px;text-align:center;margin:0;">
+      You're getting this because you booked with ${escape(studioName)}.
+      <a href="${escape(unsubscribeUrl)}" style="color:${C.muted};text-decoration:underline;">Unsubscribe from marketing emails</a>.
+    </p>`;
+};
+
+const bookUrlOf = (p: Record<string, any>): string => {
+  const slug = String(p.bookingSlug || "").trim();
+  if (!slug) return "";
+  const baseUrl = (Deno.env.get("NEXT_PUBLIC_SITE_URL") || "https://braidbosspro.app").replace(/\/$/, "");
+  return `${baseUrl}/book/${encodeURIComponent(slug)}`;
+};
+
+// ---- birthday_greeting (marketing) ---------------------------------
+// Personal greeting on the client's birthday. No discount in V1 —
+// matches the rebook-nudge philosophy. Sent once per client per
+// calendar year via dedupe key.
+const renderBirthdayGreeting = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const bookUrl    = bookUrlOf(p);
+  const subject    = `Happy birthday from ${studioName}!`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Happy birthday</p>
+    <h1 style="font-size:24px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Happy birthday, ${escape(clientName)}!</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
+      Wishing you the best year yet — and a fresh new look whenever you're ready. We'd love to see you back in the chair at <strong>${escape(studioName)}</strong> soon.
+    </p>
+    ${bookUrl ? ctaButton("Book your birthday style", bookUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:18px 0 0;">
+      With love, ${escape(studioName)} 💜
+    </p>
+    ${marketingFooter(p, studioName)}
+  `);
+  return { subject, html };
+};
+
+// ---- winback (marketing) -------------------------------------------
+// Fired on clients 90+ days since their last appointment. Warmer
+// tone than the rebook nudge — they've drifted, not just hit a
+// maintenance window. Includes how-long-ago + their last style so
+// it feels personal, not blasted.
+const renderWinback = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const lastStyle  = p.lastStyle ? String(p.lastStyle) : null;
+  const daysSince  = Number(p.daysSince) || null;
+  const bookUrl    = bookUrlOf(p);
+  const subject    = `We miss you at ${studioName}`;
+  // Frame "weeks" or "months" depending on distance — "180 days" reads
+  // worse than "about 6 months".
+  const sinceLabel = daysSince
+    ? daysSince < 60
+      ? `${Math.round(daysSince / 7)} weeks`
+      : `about ${Math.round(daysSince / 30)} months`
+    : null;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">It's been a minute</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">We miss you, ${escape(clientName)}.</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
+      ${sinceLabel ? `It's been <strong>${sinceLabel}</strong> since` : "It's been a while since"}
+      ${lastStyle ? `your last <strong>${escape(lastStyle)}</strong>` : "your last visit"} at ${escape(studioName)}. Your seat is still warm whenever you're ready to come back.
+    </p>
+    ${bookUrl ? ctaButton("Book your next style", bookUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:18px 0 0;">
+      Reply to this email and ${escape(studioName)} will help find a time that works.
+    </p>
+    ${marketingFooter(p, studioName)}
+  `);
+  return { subject, html };
+};
+
+// ---- new_client_welcome (marketing) --------------------------------
+// Day after their first completed appointment. Sets the relationship
+// + nudges toward rebook without being pushy. Doesn't replace the
+// receipt or review request — separate moment, separate purpose.
+const renderNewClientWelcome = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const firstStyle = p.firstStyle ? String(p.firstStyle) : null;
+  const bookUrl    = bookUrlOf(p);
+  const subject    = `Welcome to ${studioName}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Welcome</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Welcome to ${escape(studioName)}, ${escape(clientName)}.</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
+      Thank you for trusting us with your hair. It was a pleasure doing your${firstStyle ? ` <strong>${escape(firstStyle)}</strong>` : ""} — we hope you're loving how it turned out.
+    </p>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
+      A few quick things to keep in mind for at-home care:
+    </p>
+    <ul style="margin:0 0 14px;padding-left:18px;color:${C.coffee};font-size:14px;line-height:22px;">
+      <li>Sleep with a satin bonnet or silk pillowcase to extend wear</li>
+      <li>Spray the scalp lightly with diluted leave-in to keep it moisturized</li>
+      <li>Avoid heavy oils on the braids themselves — focus on the scalp</li>
+      <li>Book your next appointment before the schedule fills up</li>
+    </ul>
+    ${bookUrl ? ctaButton("Book your next appointment", bookUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:18px 0 0;">
+      Any questions, just reply to this email — ${escape(studioName)} is here.
+    </p>
+    ${marketingFooter(p, studioName)}
+  `);
+  return { subject, html };
+};
+
+// ---- marketing_campaign (one-off, stylist-composed) ----------------
+// The stylist's draft is plain text + merge tags. We:
+//   1. escape it so user input can't inject HTML
+//   2. convert blank-line-separated chunks into <p> blocks and
+//      single newlines into <br> for readable rendering
+//   3. substitute merge tags AFTER escaping (so the {{...}} markers
+//      survive the escape pass and the substituted values are not
+//      themselves escaped at write time)
+// The subject line gets its own substitution pass — same set of
+// tags, no HTML treatment since it's plain text in the mail client.
+const MERGE_TAG_RE = /\{\{\s*(client_name|studio_name|book_url|first_name)\s*\}\}/g;
+
+const firstNameOf = (name: string | null | undefined): string => {
+  if (!name) return "";
+  const trimmed = String(name).trim();
+  if (!trimmed) return "";
+  return trimmed.split(/\s+/, 1)[0] || trimmed;
+};
+
+const substituteMergeTags = (input: string, p: Record<string, any>): string => {
+  const studioName = String(p.studioName || "");
+  const clientName = String(p.clientName || "");
+  const bookUrl    = bookUrlOf(p);
+  return input.replace(MERGE_TAG_RE, (_match, key) => {
+    switch (key) {
+      case "client_name": return clientName || "there";
+      case "first_name":  return firstNameOf(clientName) || "there";
+      case "studio_name": return studioName || "your stylist";
+      case "book_url":    return bookUrl || "";
+      default:            return "";
+    }
+  });
+};
+
+const plainTextToHtml = (input: string): string => {
+  const escaped = escape(input);
+  // Split on 2+ newlines → paragraphs; single newlines → <br>.
+  const paragraphs = escaped
+    .split(/\n{2,}/)
+    .map(par => par.replace(/\n/g, "<br>").trim())
+    .filter(Boolean);
+  return paragraphs
+    .map(par => `<p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">${par}</p>`)
+    .join("");
+};
+
+const renderMarketingCampaign = (p: Record<string, any>) => {
+  const studioName = String(p.studioName || "your stylist");
+  const bookUrl    = bookUrlOf(p);
+
+  const rawSubject = String(p.subject || "Update from " + studioName);
+  const subject = substituteMergeTags(rawSubject, p);
+
+  const rawBody = String(p.bodyText || "");
+  // Tags substituted AFTER escaping so the placeholders aren't
+  // double-escaped and the substituted values aren't accidentally
+  // dropped by the escape pass.
+  const bodyHtml = substituteMergeTags(plainTextToHtml(rawBody), p);
+
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 14px;font-weight:700;">${escape(studioName)}</p>
+    ${bodyHtml}
+    ${bookUrl ? ctaButton("Book now", bookUrl) : ""}
+    ${marketingFooter(p, studioName)}
+  `);
+  return { subject, html };
+};
+
+// ---- reorder_nudge (marketing) -------------------------------------
+// Fires when a paid product order's reorder window has passed. Payload:
+//   { clientName, studioName, productTitle, productSlug, productImage,
+//     weeksSince, reorderAfterWeeks, bookingSlug, unsubscribeToken }
+// CTA points at the public product page when slug is available,
+// else at the shop landing page. Image rendered when present.
+const renderReorderNudge = (p: Record<string, any>) => {
+  const clientName     = p.clientName     || "there";
+  const studioName     = p.studioName     || "your stylist";
+  const productTitle   = p.productTitle   || "your product";
+  const productSlug    = String(p.productSlug || "").trim();
+  const productImage   = String(p.productImage || "").trim();
+  const weeksSince     = Number(p.weeksSince) || null;
+  const bookingSlug    = String(p.bookingSlug || "").trim();
+  const baseUrl = (Deno.env.get("NEXT_PUBLIC_SITE_URL") || "https://braidbosspro.app").replace(/\/$/, "");
+  // Product page slug pattern lives at /u/<handle>/products/<slug>.
+  // If we don't have the handle in the payload (the SQL processor
+  // doesn't pull it today), fall back to the public shop landing
+  // which uses the same slug. Both URLs surface the buy button.
+  const productUrl = bookingSlug && productSlug
+    ? `${baseUrl}/u/${encodeURIComponent(bookingSlug)}/products/${encodeURIComponent(productSlug)}`
+    : bookingSlug
+      ? `${baseUrl}/u/${encodeURIComponent(bookingSlug)}/shop`
+      : "";
+  const subject = `Time to restock your ${productTitle}?`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Time to restock</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">Running low, ${escape(clientName)}?</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
+      ${weeksSince ? `It's been <strong>${weeksSince} weeks</strong> since` : "It's been a while since"}
+      you picked up your <strong>${escape(productTitle)}</strong> from ${escape(studioName)} — should be running low about now.
+    </p>
+    ${productImage ? `
+      <div style="text-align:center;margin:0 0 16px;">
+        <img src="${escape(productImage)}" alt="${escape(productTitle)}" style="max-width:240px;width:100%;height:auto;border-radius:12px;border:1px solid ${C.hairline};" />
+      </div>` : ""}
+    ${productUrl ? ctaButton("Buy again", productUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:18px 0 0;">
+      Reply to this email if you have any questions.
+    </p>
+    ${marketingFooter(p, studioName)}
+  `);
+  return { subject, html };
+};
+
 // ---- generic fallback -----------------------------------------------
 const renderGeneric = (row: ClaimedRow) => {
   const subject = row.subject || "Notification from Braid Boss Pro";
@@ -1001,6 +1236,16 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderOrderShipped(row.payload || {});
     case "rebook_nudge":
       return renderRebookNudge(row.payload || {});
+    case "birthday_greeting":
+      return renderBirthdayGreeting(row.payload || {});
+    case "winback":
+      return renderWinback(row.payload || {});
+    case "new_client_welcome":
+      return renderNewClientWelcome(row.payload || {});
+    case "marketing_campaign":
+      return renderMarketingCampaign(row.payload || {});
+    case "reorder_nudge":
+      return renderReorderNudge(row.payload || {});
     default:
       return renderGeneric(row);
   }
