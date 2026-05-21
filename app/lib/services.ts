@@ -192,6 +192,10 @@ export type Service = {
   // stylist can confirm or edit before the inventory_apply_movement
   // RPC fires. Stored in services.default_materials jsonb.
   default_materials: ServiceMaterial[];
+  // Marketing automation V1 — weeks after the appointment before
+  // the client is "due for a refresh" and gets a rebook nudge email.
+  // null = no auto-nudge (digital consults, one-off classes, etc.).
+  rebook_after_weeks: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -232,6 +236,7 @@ export type ServiceInput = Pick<
   | "included_details"
   | "customization_enabled"
   | "default_materials"
+  | "rebook_after_weeks"
 >;
 
 // ---- Validation -------------------------------------------------------
@@ -360,6 +365,45 @@ draft.deposit_amount > draft.base_price) {
 
 export const SERVICES_EMPTY_COPY =
   "No services yet. Define your braid styles, knotless options, or signature looks so booking is one tap.";
+
+// ---- Rebook window defaults -------------------------------------------
+//
+// Sensible per-style default for "weeks until the client is due for a
+// refresh". Maps a service name to a typical maintenance window based
+// on real braider knowledge — Knotless tends to wear cleanly for 8
+// weeks, cornrows 4, retwists 5, etc. Match is case-insensitive +
+// substring, so "Knotless Box Braids — Medium" still picks up the
+// Knotless default.
+//
+// Returns null when nothing matches; the editor falls back to a
+// generic 6-week suggestion in that case (or the stylist sets it
+// manually).
+const REBOOK_DEFAULTS: Array<{ pattern: RegExp; weeks: number }> = [
+  // Most specific first — longer patterns win when both would match.
+  { pattern: /faux\s*locs|goddess\s*locs/i,           weeks: 10 },
+  { pattern: /knotless|box\s*braids?/i,               weeks: 8  },
+  { pattern: /sew[\s-]*in|weave/i,                    weeks: 8  },
+  { pattern: /micro\s*braids?|tribal\s*braids?/i,     weeks: 8  },
+  { pattern: /crochet/i,                              weeks: 6  },
+  { pattern: /twists?|two[\s-]*strand/i,              weeks: 6  },
+  { pattern: /senegalese|passion\s*twists?/i,         weeks: 6  },
+  { pattern: /lo[ck]s?\s*(retwist|re[\s-]*twist)/i,   weeks: 5  },
+  { pattern: /retwist|re[\s-]*twist/i,                weeks: 5  },
+  { pattern: /silk\s*press/i,                         weeks: 4  },
+  { pattern: /cornrows?|stitch\s*braids?|fulani/i,    weeks: 4  },
+  { pattern: /color|highlight|balayage/i,             weeks: 8  },
+  { pattern: /wash\s*(and|&|n)?\s*style|wash\s*day/i, weeks: 3  },
+  { pattern: /takedown|take[\s-]*down/i,              weeks: 8  },
+];
+
+export const suggestRebookWeeks = (serviceName: string | null | undefined): number | null => {
+  const s = (serviceName || "").trim();
+  if (!s) return null;
+  for (const r of REBOOK_DEFAULTS) {
+    if (r.pattern.test(s)) return r.weeks;
+  }
+  return null;
+};
 
 export const formatServicePrice = (
   s: Pick<Service, "base_price" | "duration_hours">,
@@ -520,6 +564,15 @@ export const useServices = (
             }))
             .filter(m => m.inventory_item_id && m.quantity > 0)
         : [],
+      // Marketing rebook window in weeks. Empty / 0 / non-number =>
+      // null (no auto-nudge). Clamped to the DB check (1..52).
+      rebook_after_weeks: (() => {
+        const raw = (draft as any).rebook_after_weeks;
+        if (raw == null || raw === "") return null;
+        const n = Math.floor(Number(raw));
+        if (!Number.isFinite(n) || n <= 0) return null;
+        return Math.min(52, n);
+      })(),
       // Round-trip the optional add-ons. Keep null/undefined sane and
       // coerce numeric fields so we never persist NaN. Each entry is
       // stored verbatim in services.extras jsonb.
