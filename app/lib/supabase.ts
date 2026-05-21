@@ -75,6 +75,10 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     scalp_sensitivity: r => cleanString(r.scalpSensitivity),
     allergies: r => cleanString(r.allergies),
     notes: r => cleanString(r.notes),
+    // Marketing automation V2 — birthday (date, MM-DD matters; year
+    // doesn't) and per-client opt-out. Sync layer round-trips both.
+    birthday: r => cleanDate(r.birthday),
+    marketing_emails_enabled: r => cleanBool(r.marketingEmailsEnabled ?? true),
   },
   appointments: {
     client_id: r => cleanString(r.clientId),
@@ -237,6 +241,8 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.email = base.email ?? row.email;
       base.preferredStyles = base.preferredStyles ?? row.preferred_styles ?? [];
       base.scalpSensitivity = base.scalpSensitivity ?? row.scalp_sensitivity;
+      base.birthday = base.birthday ?? row.birthday;
+      base.marketingEmailsEnabled = base.marketingEmailsEnabled ?? row.marketing_emails_enabled ?? true;
       base.allergies = base.allergies ?? row.allergies;
       base.notes = base.notes ?? row.notes;
       break;
