@@ -24570,6 +24570,7 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
         <CampaignComposerSheet
           campaign={editingCampaign}
           userId={userId}
+          clients={(store.clients || []) as EntityRecord[]}
           onClose={() => { setComposerOpen(false); setEditingCampaign(null); }}
           onSaved={async () => { await refreshCampaigns(); }}
           onDelete={editingCampaign ? () => handleDeleteCampaign(editingCampaign) : undefined}
@@ -24648,10 +24649,11 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
 // {{book_url}}) get substituted server-side at send. No rich text
 // in V1 — keeps the editor honest about what lands in the inbox.
 const CampaignComposerSheet = ({
-  campaign, userId, onClose, onSaved, onDelete,
+  campaign, userId, clients, onClose, onSaved, onDelete,
 }: {
   campaign: MarketingCampaign | null;
   userId: string | null;
+  clients: EntityRecord[];
   onClose: () => void;
   onSaved: () => Promise<void> | void;
   onDelete?: () => Promise<void> | void;
@@ -24669,6 +24671,12 @@ const CampaignComposerSheet = ({
   const [lapsedDays, setLapsedDays] = useState<string>(
     initialSegment.kind === "lapsed" ? String(initialSegment.min_days) : "90",
   );
+  // Hand-picked recipient ids for the "manual" segment. Seeded from
+  // the campaign's stored segment when re-opening a draft.
+  const [pickedIds, setPickedIds] = useState<Set<string>>(
+    () => new Set(initialSegment.kind === "manual" ? initialSegment.client_ids : []),
+  );
+  const [clientSearch, setClientSearch] = useState("");
   const [scheduledFor, setScheduledFor] = useState<string>(
     campaign?.scheduled_for ? campaign.scheduled_for.slice(0, 16) : "",
   );
@@ -24676,11 +24684,36 @@ const CampaignComposerSheet = ({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
+  // Only clients with an email can receive a campaign; the picker
+  // hides the rest so the stylist isn't confused by a checked client
+  // who silently never gets the email.
+  const emailableClients = useMemo(
+    () => (clients || [])
+      .filter(c => c?.email && String(c.email).trim().length > 3)
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""))),
+    [clients],
+  );
+  const visibleClients = useMemo(() => {
+    const q = clientSearch.trim().toLowerCase();
+    if (!q) return emailableClients;
+    return emailableClients.filter(c =>
+      [c.name, c.email].filter(Boolean).some(v => String(v).toLowerCase().includes(q)));
+  }, [emailableClients, clientSearch]);
+
+  const togglePicked = (id: string) => {
+    setPickedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
   const segment: CampaignSegment = useMemo(() => {
     if (segmentKind === "active_last") return { kind: "active_last", days: Math.max(1, parseInt(activeDays || "60", 10) || 60) };
     if (segmentKind === "lapsed")      return { kind: "lapsed",      min_days: Math.max(1, parseInt(lapsedDays || "90", 10) || 90) };
+    if (segmentKind === "manual")      return { kind: "manual",      client_ids: Array.from(pickedIds) };
     return { kind: "all" };
-  }, [segmentKind, activeDays, lapsedDays]);
+  }, [segmentKind, activeDays, lapsedDays, pickedIds]);
 
   // Recipient preview. Debounced so typing in the days field
   // doesn't spam the RPC; 350ms is short enough to feel live.
@@ -24805,6 +24838,7 @@ const CampaignComposerSheet = ({
             <option value="all">All clients</option>
             <option value="active_last">Booked recently</option>
             <option value="lapsed">Lapsed clients</option>
+            <option value="manual">Specific clients</option>
           </select>
           {segmentKind === "active_last" && (
             <div className="mt-2 flex items-center gap-2">
@@ -24836,6 +24870,85 @@ const CampaignComposerSheet = ({
                 style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
               />
               <span className="text-[12px]" style={{ color: C.coffee }}>+ days</span>
+            </div>
+          )}
+          {segmentKind === "manual" && (
+            <div className="mt-2">
+              {isReadOnly ? (
+                <p className="text-[12px]" style={{ color: C.muted }}>
+                  {pickedIds.size} client{pickedIds.size === 1 ? "" : "s"} were picked for this campaign.
+                </p>
+              ) : emailableClients.length === 0 ? (
+                <p className="text-[12px]" style={{ color: C.muted }}>
+                  No clients with an email address yet. Add an email to a client to include them.
+                </p>
+              ) : (
+                <>
+                  <input
+                    type="search"
+                    value={clientSearch}
+                    onChange={e => setClientSearch(e.target.value)}
+                    placeholder="Search clients…"
+                    className="w-full px-3 py-2 rounded-lg text-[13px] mb-2"
+                    style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+                  />
+                  <div
+                    className="rounded-xl"
+                    style={{ border: `1px solid ${C.hairline}`, maxHeight: 240, overflowY: "auto" }}
+                  >
+                    {visibleClients.length === 0 ? (
+                      <p className="text-[12px] px-3 py-3" style={{ color: C.muted }}>No match.</p>
+                    ) : (
+                      visibleClients.map((c, i) => {
+                        const picked = pickedIds.has(c.id);
+                        return (
+                          <button
+                            type="button"
+                            key={c.id}
+                            onClick={() => togglePicked(c.id)}
+                            className="w-full text-left flex items-center gap-2.5 px-3 py-2 active:scale-[0.99] transition"
+                            style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                          >
+                            <div
+                              aria-hidden
+                              style={{
+                                width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+                                display: "grid", placeItems: "center",
+                                background: picked ? C.espresso : "#fff",
+                                border: `1px solid ${picked ? C.espresso : C.hairline}`,
+                                color: "#fff",
+                              }}
+                            >
+                              {picked && <Check size={12} />}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>
+                                {c.name || "Unnamed client"}
+                              </p>
+                              <p className="text-[11px] truncate" style={{ color: C.muted }}>{c.email}</p>
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between mt-1.5">
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      {pickedIds.size} selected
+                    </p>
+                    {pickedIds.size > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setPickedIds(new Set())}
+                        className="text-[11px] font-semibold"
+                        style={{ color: C.coffee }}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
           <p className="text-[11px] mt-1.5" style={{ color: C.muted }}>
