@@ -61,6 +61,11 @@ import {
   type AnnualTaxSummary,
 } from "./lib/tax-pack";
 import {
+  type MarketplaceListing,
+  loadMarketplaceListing,
+  saveMarketplaceListing,
+} from "./lib/marketplace";
+import {
   type ReferralReward,
   loadReferralSettings,
   saveReferralSettings,
@@ -346,7 +351,7 @@ import {
   type PushCapability,
 } from "./lib/push";
 import {
-  Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon,
+  Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon, MapPin,
   Plus, X, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Search, Copy, Check, Trash2, Edit3,
   FileText, DollarSign, Clock, Phone, Mail, AlertCircle, Sparkles,
   ArrowUpRight, ArrowDownRight, Save, RefreshCw, Download, Upload, Bell, BellOff,
@@ -12274,7 +12279,7 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -12580,6 +12585,28 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Referrals</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Reward clients who send you new business</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openMarketplace && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openMarketplace}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <MapPin size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Marketplace listing</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>Get found on the public &quot;Find a braider&quot; page</p>
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
@@ -24571,6 +24598,157 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
 };
 
 // ============================================================
+//  MARKETPLACE LISTING — opt into public "Find a braider" page
+// ============================================================
+const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const [loading, setLoading] = useState(true);
+  const [listing, setListing] = useState<MarketplaceListing | null>(null);
+  const [enabled, setEnabled] = useState(false);
+  const [city, setCity] = useState("");
+  const [stateRegion, setStateRegion] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const l = await loadMarketplaceListing(userId);
+      setListing(l);
+      setEnabled(l.enabled);
+      setCity(l.city);
+      setStateRegion(l.state);
+    } catch (e: any) {
+      setMsg({ kind: "error", text: e?.message || "Couldn't load your listing." });
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  const save = async (nextEnabled: boolean) => {
+    if (!userId) return;
+    // A listing with no city can't be found by city search — block
+    // turning it on until there's one.
+    if (nextEnabled && !city.trim()) {
+      setMsg({ kind: "error", text: "Add your city before going live — that's how clients find you." });
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      await saveMarketplaceListing(userId, { enabled: nextEnabled, city, state: stateRegion });
+      setEnabled(nextEnabled);
+      setMsg({ kind: "ok", text: nextEnabled ? "You're listed on the marketplace." : "Saved." });
+      await refresh();
+    } catch (e: any) {
+      setMsg({ kind: "error", text: e?.message || "Couldn't save." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const noBookingLink = listing && !listing.slug;
+  const bookingLinkOff = listing && listing.slug && !listing.bookingLinkActive;
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Marketplace listing"
+        subtitle="Find a braider near you"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-4">
+        {loading ? (
+          <Card className="p-6 text-center"><p className="text-[13px]" style={{ color: C.muted }}>Loading…</p></Card>
+        ) : (
+          <>
+            {noBookingLink && (
+              <Card className="p-3.5" style={{ border: `1px solid ${C.danger}` }}>
+                <p className="text-[12px]" style={{ color: C.danger }}>
+                  Set up your booking link first — the marketplace listing links clients to your booking page.
+                </p>
+              </Card>
+            )}
+            {bookingLinkOff && (
+              <Card className="p-3.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                <p className="text-[12px]" style={{ color: C.coffee }}>
+                  Your booking link is currently turned off. While it's off, your marketplace listing won't appear either.
+                </p>
+              </Card>
+            )}
+
+            {/* Opt-in */}
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>List me on the marketplace</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    Appear on the public "Find a braider near you" page. Clients search by city and book straight from your card.
+                  </p>
+                </div>
+                <Toggle
+                  checked={enabled}
+                  onChange={(v: boolean) => { void save(v); }}
+                />
+              </div>
+            </Card>
+
+            {/* Location */}
+            <Card className="p-3.5 space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+                Where you work
+              </p>
+              <Field label="City" hint="What clients search by.">
+                <Input value={city} onChange={e => setCity(e.target.value)} placeholder="Los Angeles" />
+              </Field>
+              <Field label="State / region">
+                <Input value={stateRegion} onChange={e => setStateRegion(e.target.value)} placeholder="CA" />
+              </Field>
+              <Button
+                variant="primary"
+                fullWidth
+                onClick={() => save(enabled)}
+                disabled={busy}
+                icon={<Save size={16} />}
+              >
+                {busy ? "Saving…" : "Save location"}
+              </Button>
+            </Card>
+
+            {msg && (
+              <p className="text-[12px] font-semibold" style={{ color: msg.kind === "error" ? C.danger : C.success }}>
+                {msg.text}
+              </p>
+            )}
+
+            <Card className="p-3.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>What clients see</p>
+              <ul className="space-y-1.5 text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                <li>• Your studio name + logo</li>
+                <li>• Your city, and your service price range</li>
+                <li>• Your star rating from client reviews</li>
+                <li>• A Book button straight to your booking page</li>
+              </ul>
+            </Card>
+
+            <a
+              href="/discover"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-center text-[12px] font-bold uppercase tracking-wider"
+              style={{ color: C.goldDeep, padding: 8, letterSpacing: "0.10em" }}
+            >
+              View the marketplace
+            </a>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
 //  REFERRALS — reward clients who send new business
 // ============================================================
 const ReferralsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
@@ -26068,9 +26246,10 @@ export default function App() {
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "marketplace" && <MarketplaceScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "inventory" && <InventoryScreen store={store} onBack={() => setSecondary(inventoryBack)} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
