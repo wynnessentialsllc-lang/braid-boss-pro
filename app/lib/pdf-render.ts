@@ -208,3 +208,184 @@ export const renderReceiptPdf = async (
   const filename = `${isInvoice ? "invoice" : "receipt"}-${rcp.receiptNumber}.pdf`;
   return { blob, filename };
 };
+
+// ---- Tax-time pack — annual P&L + Schedule C category map ------------
+//
+// Renders the AnnualTaxSummary from lib/tax-pack.ts into a clean
+// one-or-two-page P&L the stylist can hand (or email) to their
+// accountant. Page-break aware: the Schedule C section can run long
+// when a stylist uses many expense categories.
+import type { AnnualTaxSummary } from "./tax-pack";
+
+export const renderTaxPackPdf = async (
+  summary: AnnualTaxSummary,
+  business: any,
+): Promise<{ blob: Blob; filename: string }> => {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const W = doc.internal.pageSize.getWidth();
+  const H = doc.internal.pageSize.getHeight();
+  const M = 48;
+  const cream = [250, 245, 236] as const;
+  const espresso = [42, 24, 16] as const;
+  const coffee = [74, 44, 26] as const;
+  const muted = [139, 115, 85] as const;
+  const goldDeep = [168, 137, 63] as const;
+  const hairline = [220, 205, 180] as const;
+  const green = [60, 110, 70] as const;
+  const red = [150, 60, 50] as const;
+  const currency = business?.currency || "USD";
+  const fmt = (n: number) => formatCurrency(n, currency);
+
+  const paintBackground = () => {
+    doc.setFillColor(cream[0], cream[1], cream[2]);
+    doc.rect(0, 0, W, H, "F");
+  };
+  paintBackground();
+
+  // Header
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(22);
+  doc.setTextColor(espresso[0], espresso[1], espresso[2]);
+  doc.text(business?.businessName || "Braid Boss Pro", M, 80);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(muted[0], muted[1], muted[2]);
+  if (business?.ownerName) doc.text(business.ownerName, M, 96);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(26);
+  doc.setTextColor(goldDeep[0], goldDeep[1], goldDeep[2]);
+  doc.text(`${summary.year} TAX PACK`, W - M, 80, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(coffee[0], coffee[1], coffee[2]);
+  doc.text("Profit & Loss · Schedule C map", W - M, 98, { align: "right" });
+
+  doc.setDrawColor(goldDeep[0], goldDeep[1], goldDeep[2]);
+  doc.setLineWidth(1.5);
+  doc.line(M, 120, W - M, 120);
+
+  let y = 156;
+  const ensureRoom = (needed: number) => {
+    if (y + needed > H - 96) {
+      doc.addPage();
+      paintBackground();
+      y = 80;
+    }
+  };
+  const sectionTitle = (label: string) => {
+    ensureRoom(40);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text(label.toUpperCase(), M, y);
+    y += 18;
+  };
+  const row = (
+    label: string,
+    value: string,
+    opts?: { bold?: boolean; indent?: number; color?: readonly number[]; size?: number },
+  ) => {
+    ensureRoom(22);
+    doc.setFont("helvetica", opts?.bold ? "bold" : "normal");
+    doc.setFontSize(opts?.size ?? (opts?.bold ? 12 : 11));
+    const c = opts?.color ?? espresso;
+    doc.setTextColor(c[0], c[1], c[2]);
+    doc.text(label, M + (opts?.indent ?? 0), y);
+    doc.text(value, W - M, y, { align: "right" });
+    y += 22;
+  };
+  const rule = () => {
+    ensureRoom(14);
+    doc.setDrawColor(hairline[0], hairline[1], hairline[2]);
+    doc.setLineWidth(0.5);
+    doc.line(M, y, W - M, y);
+    y += 18;
+  };
+
+  // --- Income ---
+  sectionTitle("Income");
+  row("Service income (appointments)", fmt(summary.income.appointments));
+  if (summary.income.storefront > 0) {
+    row("Storefront / product sales", fmt(summary.income.storefront));
+  }
+  rule();
+  row("Gross income", fmt(summary.income.total), { bold: true });
+  y += 10;
+
+  // --- Expenses by Schedule C line ---
+  sectionTitle("Expenses — by Schedule C line");
+  if (summary.expenses.byScheduleCLine.length === 0) {
+    row("No expenses recorded for this year.", "", { color: muted });
+  } else {
+    for (const line of summary.expenses.byScheduleCLine) {
+      ensureRoom(24 + line.categories.length * 18);
+      // Line header
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(espresso[0], espresso[1], espresso[2]);
+      doc.text(`Line ${line.line} — ${line.label}`, M, y);
+      doc.text(fmt(line.total), W - M, y, { align: "right" });
+      y += 18;
+      // Categories that rolled into this line
+      for (const cat of line.categories) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(muted[0], muted[1], muted[2]);
+        doc.text(cat.category, M + 16, y);
+        doc.text(fmt(cat.amount), W - M, y, { align: "right" });
+        y += 16;
+      }
+      y += 4;
+    }
+  }
+  rule();
+  row("Total expenses", fmt(summary.expenses.total), { bold: true });
+  y += 10;
+
+  // --- Net ---
+  sectionTitle("Net profit");
+  const netColor = summary.netProfit >= 0 ? green : red;
+  row(
+    summary.netProfit >= 0 ? "Net profit" : "Net loss",
+    fmt(summary.netProfit),
+    { bold: true, color: netColor, size: 15 },
+  );
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(muted[0], muted[1], muted[2]);
+  doc.text(
+    `Based on ${summary.counts.appointmentsCounted} paid appointment(s), `
+    + `${summary.counts.ordersCounted} storefront order(s), `
+    + `${summary.counts.expensesCounted} expense(s).`,
+    M, y,
+  );
+  y += 24;
+
+  // --- Disclaimer ---
+  ensureRoom(70);
+  doc.setDrawColor(hairline[0], hairline[1], hairline[2]);
+  doc.setLineWidth(0.5);
+  doc.line(M, y, W - M, y);
+  y += 16;
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(8.5);
+  doc.setTextColor(muted[0], muted[1], muted[2]);
+  const disclaimer = doc.splitTextToSize(
+    "Prepared on a cash basis from Braid Boss Pro records. Schedule C line "
+    + "assignments are a starting point — confirm with your accountant. Hair "
+    + "and products resold to clients may belong in Cost of Goods Sold "
+    + "(Schedule C Part III) rather than Supplies. This is not tax advice.",
+    W - 2 * M,
+  );
+  doc.text(disclaimer, M, y);
+
+  const blob = doc.output("blob");
+  const safeBiz = String(business?.businessName || "braid-boss")
+    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const filename = `tax-pack-${safeBiz || "braid-boss"}-${summary.year}.pdf`;
+  return { blob, filename };
+};
+
