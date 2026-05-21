@@ -61,6 +61,13 @@ const PullToRefresh = () => {
   const startY = useRef<number | null>(null);
   const pulling = useRef(false);
   const refreshing = useRef(false);
+  // distance / phase are mirrored into refs because the touch
+  // handlers must read the LIVE value. touchend can fire in the same
+  // frame as the last touchmove — before React flushes the state
+  // update — so a closure over the `distance` state would see a
+  // stale, often sub-threshold value and silently abort the refresh.
+  const distanceRef = useRef(0);
+  const phaseRef = useRef<Phase>("idle");
   const router = useRouter();
 
   useEffect(() => {
@@ -79,6 +86,17 @@ const PullToRefresh = () => {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
+    // Update ref + state together so the handlers (refs) and the
+    // render (state) never disagree.
+    const applyDistance = (d: number) => {
+      distanceRef.current = d;
+      setDistance(d);
+    };
+    const applyPhase = (p: Phase) => {
+      phaseRef.current = p;
+      setPhase(p);
+    };
+
     const onTouchStart = (e: TouchEvent) => {
       if (refreshing.current) return;
       if (window.scrollY > 0) return;
@@ -96,9 +114,9 @@ const PullToRefresh = () => {
       if (window.scrollY > 0) {
         startY.current = null;
         pulling.current = false;
-        if (phase !== "idle") {
-          setPhase("idle");
-          setDistance(0);
+        if (phaseRef.current !== "idle") {
+          applyPhase("idle");
+          applyDistance(0);
         }
         return;
       }
@@ -106,8 +124,8 @@ const PullToRefresh = () => {
       if (delta <= 0) {
         if (pulling.current) {
           pulling.current = false;
-          setPhase("idle");
-          setDistance(0);
+          applyPhase("idle");
+          applyDistance(0);
         }
         return;
       }
@@ -123,8 +141,8 @@ const PullToRefresh = () => {
           ? delta
           : PULL_THRESHOLD + (delta - PULL_THRESHOLD) / RESIST_FACTOR;
       const clamped = Math.min(MAX_PULL, adjusted);
-      setDistance(clamped);
-      setPhase(clamped >= PULL_THRESHOLD ? "ready" : "pulling");
+      applyDistance(clamped);
+      applyPhase(clamped >= PULL_THRESHOLD ? "ready" : "pulling");
     };
 
     const onTouchEnd = () => {
@@ -136,16 +154,16 @@ const PullToRefresh = () => {
       pulling.current = false;
       startY.current = null;
 
-      if (distance < PULL_THRESHOLD) {
-        setPhase("idle");
-        setDistance(0);
+      if (distanceRef.current < PULL_THRESHOLD) {
+        applyPhase("idle");
+        applyDistance(0);
         return;
       }
 
       // Lock and trigger the refresh.
       refreshing.current = true;
-      setPhase("refreshing");
-      setDistance(PULL_THRESHOLD);
+      applyPhase("refreshing");
+      applyDistance(PULL_THRESHOLD);
 
       // Collect any promises listeners want us to wait for. The event
       // is mutated synchronously by listeners (waitFor pushes into the
@@ -176,8 +194,8 @@ const PullToRefresh = () => {
         const remaining = Math.max(0, MIN_REFRESH_HOLD_MS - elapsed);
         window.setTimeout(() => {
           refreshing.current = false;
-          setPhase("idle");
-          setDistance(0);
+          applyPhase("idle");
+          applyDistance(0);
         }, remaining);
       };
       // Wait for whatever the app told us to wait for, but cap so a
@@ -192,8 +210,8 @@ const PullToRefresh = () => {
       pulling.current = false;
       startY.current = null;
       if (!refreshing.current) {
-        setPhase("idle");
-        setDistance(0);
+        applyPhase("idle");
+        applyDistance(0);
       }
     };
 
@@ -209,7 +227,10 @@ const PullToRefresh = () => {
       window.removeEventListener("touchend", onTouchEnd);
       window.removeEventListener("touchcancel", onTouchCancel);
     };
-  }, [distance, phase, router]);
+    // Listeners read live refs, so they register once — no need to
+    // re-bind on every distance/phase change (that churn was also
+    // what let touchend race the last touchmove's state update).
+  }, [router]);
 
   // Hide the indicator entirely in idle state so SSR markup is empty
   // and hydration is stable. Once active, the element animates in via
