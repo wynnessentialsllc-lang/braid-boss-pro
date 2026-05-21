@@ -388,8 +388,34 @@ const renderReviewRequest = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- review_received (stylist alert: a client left feedback) ------
+const renderReviewReceived = (p: Record<string, any>) => {
+  const clientName = p.clientName || "A client";
+  const studioName = p.studioName || "your studio";
+  const serviceName = p.serviceName || null;
+  const stars = Math.max(1, Math.min(5, parseInt(String(p.stars), 10) || 5));
+  const reviewText = String(p.reviewText || "").trim();
+  const appUrl = String(p.appUrl || "").trim();
+  const starRow = "★★★★★☆☆☆☆☆".slice(5 - stars, 10 - stars);
+  const subject = `New ${stars}-star review from ${clientName}`;
+  const cta = appUrl ? ctaButton("Open Braid Boss Pro", appUrl) : "";
+  const quote = reviewText
+    ? `<p style="font-size:15px;line-height:24px;margin:0 0 16px;color:${C.coffee};border-left:3px solid ${C.goldDeep};padding-left:14px;font-style:italic;">"${escape(reviewText)}"</p>`
+    : `<p style="font-size:14px;line-height:22px;margin:0 0 16px;color:${C.muted};">No written note — just the star rating.</p>`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">New review</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">${escape(clientName)} left you a review.</h1>
+    <p style="font-size:26px;letter-spacing:4px;margin:0 0 14px;color:${C.goldDeep};">${starRow}</p>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
+      ${escape(clientName)} reviewed their visit${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""} at ${escape(studioName)}.
+    </p>
+    ${quote}
+    ${cta}
+  `);
+  return { subject, html };
+};
+
 // ---- appointment_confirmed (final approval — deposit already in) ---
-//
 // Distinct from `appointment_approved`, which is the earlier "please
 // pay your deposit" approval email. This one fires after the stylist
 // taps Approve & schedule on a deposit-paid request, so the client
@@ -1204,6 +1230,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderBalancePaid(row.payload || {});
     case "review_request":
       return renderReviewRequest(row.payload || {});
+    case "review_received":
+      return renderReviewReceived(row.payload || {});
     case "booking_denied_no_charge":
       return renderBookingDeniedNoCharge(row.payload || {});
     case "booking_denied_refunded":
