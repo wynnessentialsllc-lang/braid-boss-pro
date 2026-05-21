@@ -417,6 +417,10 @@ export type Product = {
   // checkout.session.completed so the underlying stock decrements in
   // lockstep with the sale.
   inventory_item_id: string | null;
+  // Marketing V4 — weeks after a paid order before the buyer is
+  // emailed a "time to restock?" nudge. null = no auto-nudge (one-
+  // off items like bonnets / tools).
+  reorder_after_weeks: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -429,6 +433,7 @@ export type ProductInput = Pick<
   | "is_featured" | "local_pickup_available" | "external_checkout_url"
   | "requires_shipping" | "sort_order" | "active"
   | "inventory_item_id"
+  | "reorder_after_weeks"
 >;
 
 // URL-friendly slug from a free-form title. Mirrors the DB
@@ -529,6 +534,7 @@ export const useProducts = (userId: string | null): {
       sort_order:             has("sort_order")             ? draft.sort_order!             : existing.sort_order,
       active:                 has("active")                 ? draft.active!                 : existing.active,
       inventory_item_id:      has("inventory_item_id")      ? draft.inventory_item_id!      : (existing as any).inventory_item_id ?? null,
+      reorder_after_weeks:    has("reorder_after_weeks")    ? draft.reorder_after_weeks!   : (existing as any).reorder_after_weeks ?? null,
     };
   };
 
@@ -601,6 +607,15 @@ export const useProducts = (userId: string | null): {
       inventory_item_id: draft.inventory_item_id && String(draft.inventory_item_id).trim()
         ? String(draft.inventory_item_id).trim()
         : null,
+      // Marketing V4 — empty / 0 / non-number => null (no auto-nudge).
+      // Clamped to the DB check (1..52).
+      reorder_after_weeks: (() => {
+        const raw = (draft as any).reorder_after_weeks;
+        if (raw == null || raw === "") return null;
+        const n = Math.floor(Number(raw));
+        if (!Number.isFinite(n) || n <= 0) return null;
+        return Math.min(52, n);
+      })(),
     };
     const supabase = getSupabase();
     const { data, error: err } = draft.id
