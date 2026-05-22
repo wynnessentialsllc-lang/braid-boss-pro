@@ -147,7 +147,13 @@ export async function POST(req: Request) {
   if (!meta?.product_order_id) {
     return NextResponse.json({ received: true, ignored: "no_product_order_id" }, { status: 200 });
   }
-  if (session?.payment_status && session.payment_status !== "paid") {
+  // 'no_payment_required' is the status of a $0 session — i.e. a
+  // gift card covered the whole order. It still counts as paid.
+  if (
+    session?.payment_status &&
+    session.payment_status !== "paid" &&
+    session.payment_status !== "no_payment_required"
+  ) {
     return NextResponse.json(
       { received: true, ignored: `payment_status=${session.payment_status}` },
       { status: 200 },
@@ -354,6 +360,37 @@ export async function POST(req: Request) {
     }
   } catch (e: any) {
     console.warn("[product-checkout/webhook] gift card issuance failed:", e?.message || e);
+  }
+
+  // Gift card redemption — if this order paid (partly or fully)
+  // with a gift card, decrement that card's balance. Idempotent:
+  // gift_card_redemptions has a UNIQUE product_order_id, so a Stripe
+  // replay can't double-spend the card.
+  try {
+    const { data: redOrder } = await admin
+      .from("product_orders")
+      .select("id, user_id, gift_card_id, gift_card_redeemed_amount")
+      .eq("stripe_session_id", sessionId || "")
+      .maybeSingle();
+    if (
+      redOrder?.gift_card_id &&
+      Number(redOrder.gift_card_redeemed_amount) > 0
+    ) {
+      const { error: redeemErr } = await admin.rpc("redeem_gift_card_for_order", {
+        card_id_in: redOrder.gift_card_id,
+        order_id_in: redOrder.id,
+        user_id_in: redOrder.user_id,
+        amount_in: Number(redOrder.gift_card_redeemed_amount),
+      });
+      if (redeemErr) {
+        console.warn(
+          "[product-checkout/webhook] gift card redeem failed:",
+          redeemErr.message,
+        );
+      }
+    }
+  } catch (e: any) {
+    console.warn("[product-checkout/webhook] gift card redemption failed:", e?.message || e);
   }
 
   // Inventory V1 — decrement any linked items. Best-effort: a
