@@ -425,6 +425,9 @@ export type Product = {
   // per unit (see the product-checkout webhook) instead of shipping
   // a physical item. Denominations are the product's variants.
   is_gift_card: boolean;
+  // When true (and is_gift_card), the storefront shows an "Other
+  // amount" input so the buyer can choose any amount in range.
+  gift_card_allow_custom: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -439,6 +442,7 @@ export type ProductInput = Pick<
   | "inventory_item_id"
   | "reorder_after_weeks"
   | "is_gift_card"
+  | "gift_card_allow_custom"
 >;
 
 // URL-friendly slug from a free-form title. Mirrors the DB
@@ -541,6 +545,7 @@ export const useProducts = (userId: string | null): {
       inventory_item_id:      has("inventory_item_id")      ? draft.inventory_item_id!      : (existing as any).inventory_item_id ?? null,
       reorder_after_weeks:    has("reorder_after_weeks")    ? draft.reorder_after_weeks!   : (existing as any).reorder_after_weeks ?? null,
       is_gift_card:           has("is_gift_card")           ? draft.is_gift_card!           : (existing as any).is_gift_card ?? false,
+      gift_card_allow_custom: has("gift_card_allow_custom") ? draft.gift_card_allow_custom! : (existing as any).gift_card_allow_custom ?? false,
     };
   };
 
@@ -623,6 +628,9 @@ export const useProducts = (userId: string | null): {
         return Math.min(52, n);
       })(),
       is_gift_card: !!draft.is_gift_card,
+      // Custom amount only meaningful for gift cards; force off
+      // otherwise so a stale flag can't linger on a normal product.
+      gift_card_allow_custom: !!draft.is_gift_card && !!draft.gift_card_allow_custom,
     };
     const supabase = getSupabase();
     const { data, error: err } = draft.id
@@ -694,6 +702,8 @@ export type PublicProduct = {
   requires_shipping: boolean;
   variant_label: string | null;
   variants: ProductVariant[];
+  is_gift_card: boolean;
+  gift_card_allow_custom: boolean;
 };
 
 const normalizePublicProduct = (p: any): PublicProduct => ({
@@ -717,6 +727,8 @@ const normalizePublicProduct = (p: any): PublicProduct => ({
         .map((v) => normalizeVariant(v))
         .filter((v) => v.id && v.name)
     : [],
+  is_gift_card: !!p.is_gift_card,
+  gift_card_allow_custom: !!p.gift_card_allow_custom,
 });
 
 export const fetchPublicProducts = async (
@@ -840,6 +852,8 @@ export const fetchPublicServiceRecommendations = async (
     requires_shipping: false,
     variant_label: null,
     variants: [],
+    is_gift_card: false,
+    gift_card_allow_custom: false,
   }));
   return { ok: true, products };
 };

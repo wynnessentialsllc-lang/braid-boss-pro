@@ -76,8 +76,17 @@ export default function ProductDetailPage() {
   // The Buy button stays disabled until a pick is made for any
   // product that declares variants.
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
+  // Gift-card buyer-chosen amount (only when the product allows it).
+  const [customAmount, setCustomAmount] = useState("");
+  const customAllowed = !!product?.is_gift_card && !!product?.gift_card_allow_custom;
+  const customMode = customAllowed && customAmount.trim().length > 0;
+  const customAmountNum = customAmount.trim() ? Number(customAmount.trim()) : null;
+  const customAmountValid =
+    customAmountNum != null && Number.isFinite(customAmountNum) &&
+    customAmountNum >= 10 && customAmountNum <= 200;
   const hasVariants = (product?.variants?.length || 0) > 0;
-  const needsVariantPick = hasVariants && !selectedVariantId;
+  // A buyer-chosen amount stands in for the variant pick.
+  const needsVariantPick = hasVariants && !selectedVariantId && !customMode;
   const selectedVariant = useMemo(
     () =>
       product?.variants?.find((v) => v.id === selectedVariantId) ?? null,
@@ -170,6 +179,11 @@ export default function ProductDetailPage() {
       setBuyError(`Pick ${product.variant_label || "an option"} first.`);
       return;
     }
+    if (customMode && !customAmountValid) {
+      setBuyState("error");
+      setBuyError("Enter a gift card amount between $10 and $200.");
+      return;
+    }
     if (product.external_checkout_url) {
       // External shop link wins — the stylist explicitly redirected
       // this product elsewhere.
@@ -197,7 +211,10 @@ export default function ProductDetailPage() {
           // variants list. The checkout API validates the id
           // against the product's variants jsonb and surfaces the
           // chosen variant in line_items + Stripe metadata.
-          variant_id: selectedVariantId,
+          variant_id: customMode ? null : selectedVariantId,
+          // Gift-card buyer-chosen amount. The checkout API validates
+          // it against the $10-$200 range for gift-card products.
+          custom_amount: customMode ? customAmountNum : null,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -482,6 +499,48 @@ export default function ProductDetailPage() {
         </section>
       )}
 
+      {/* Gift-card "Other amount" — buyer-chosen value, $10–$200.
+          Custom amounts check out directly (Buy now), not via cart. */}
+      {customAllowed && (
+        <section className="mt-5">
+          <p
+            className="text-[11px] font-bold uppercase tracking-widest mb-2"
+            style={{ color: C.muted, letterSpacing: "0.14em" }}
+          >
+            Other amount
+          </p>
+          <div className="flex items-center gap-2">
+            <span className="text-[16px] font-bold" style={{ color: C.brandText }}>$</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              min={10}
+              max={200}
+              value={customAmount}
+              onChange={(e) => setCustomAmount(e.target.value)}
+              placeholder="Enter $10–$200"
+              className="flex-1 rounded-2xl px-4 py-3 text-[15px]"
+              style={{
+                background: C.paper,
+                border: `1.5px solid ${C.brandBorder}`,
+                color: C.brandText,
+                outline: "none",
+              }}
+            />
+          </div>
+          {customAmount.trim() && !customAmountValid && (
+            <p className="text-[11px] mt-2" style={{ color: C.brandError }}>
+              Amount must be between $10 and $200.
+            </p>
+          )}
+          {customMode && customAmountValid && (
+            <p className="text-[11px] mt-2" style={{ color: C.muted }}>
+              Tap Buy now for a ${customAmountNum} gift card — custom amounts check out directly, not via cart.
+            </p>
+          )}
+        </section>
+      )}
+
       {/* Buy / Add-to-cart row. Buy Now stays the primary action
           (gradient + glow); Add to cart is the outline secondary
           for visitors browsing multiple products before checkout.
@@ -490,7 +549,7 @@ export default function ProductDetailPage() {
         <button
           type="button"
           onClick={() => {
-            if (soldOut || needsVariantPick || !product) return;
+            if (soldOut || needsVariantPick || customMode || !product) return;
             if (product.external_checkout_url) {
               window.location.href = product.external_checkout_url;
               return;
@@ -517,7 +576,7 @@ export default function ProductDetailPage() {
             setAddedFlash(true);
             window.setTimeout(() => setAddedFlash(false), 1500);
           }}
-          disabled={soldOut || needsVariantPick || !!product.external_checkout_url}
+          disabled={soldOut || needsVariantPick || customMode || !!product.external_checkout_url}
           className="w-full rounded-2xl px-4 py-3 text-[13px] font-bold uppercase tracking-widest transition active:scale-[0.98] mb-2"
           style={{
             background: "transparent",
@@ -537,7 +596,7 @@ export default function ProductDetailPage() {
         <button
           type="button"
           onClick={startCheckout}
-          disabled={soldOut || buyState === "loading" || needsVariantPick}
+          disabled={soldOut || buyState === "loading" || needsVariantPick || (customMode && !customAmountValid)}
           className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-bold uppercase tracking-widest transition active:scale-[0.98]"
           style={{
             background: (soldOut || needsVariantPick) ? C.brandBorder : GRADIENTS.primary,

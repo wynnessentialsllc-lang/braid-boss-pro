@@ -116,6 +116,9 @@ export const CartDrawer = () => {
     useCart();
   const [checkoutState, setCheckoutState] = useState<"idle" | "loading" | "error">("idle");
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  // Optional gift card code applied at checkout. The checkout API
+  // validates it server-side and returns an error if it's invalid.
+  const [giftCardCode, setGiftCardCode] = useState("");
 
   // Lock body scroll while the drawer is open so iOS Safari doesn't
   // bounce the page under the sheet.
@@ -158,6 +161,7 @@ export const CartDrawer = () => {
             quantity: i.quantity,
             variant_id: i.variant_id,
           })),
+          gift_card_code: giftCardCode.trim() || null,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -312,6 +316,27 @@ export const CartDrawer = () => {
             <p style={{ fontSize: 11, color: C.muted, margin: 0 }}>
               Taxes + shipping calculated at checkout.
             </p>
+            <input
+              type="text"
+              value={giftCardCode}
+              onChange={(e) => setGiftCardCode(e.target.value.toUpperCase())}
+              placeholder="Gift card code (optional)"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              style={{
+                width: "100%",
+                padding: "12px 14px",
+                borderRadius: 12,
+                border: `1px solid ${C.brandBorder}`,
+                background: "#FFFFFF",
+                color: C.ink,
+                fontSize: 13,
+                letterSpacing: "0.04em",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
             <button
               type="button"
               onClick={startCheckout}

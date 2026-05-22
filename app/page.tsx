@@ -23481,6 +23481,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
     inventory_item_id: string | null;
     reorder_after_weeks: number | null;
     is_gift_card: boolean;
+    gift_card_allow_custom: boolean;
   }>;
   const [editing, setEditing] = useState<Draft | null>(null);
   // Raw textarea content for the variants list. Decoupled from
@@ -23524,7 +23525,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
         rightAction={
           <button
             type="button"
-            onClick={() => { setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false, is_gift_card: false }); setVariantsRaw(""); }}
+            onClick={() => { setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false, is_gift_card: false, gift_card_allow_custom: false }); setVariantsRaw(""); }}
             className="p-2 rounded-full"
             style={{ background: C.gold, color: C.espresso, border: 0 }}
             aria-label="Add product"
@@ -23582,7 +23583,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
             </p>
             <div className="mt-4">
               <Button variant="primary" icon={<Plus size={16} />} fullWidth
-                onClick={() => { setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false, is_gift_card: false }); setVariantsRaw(""); }}>
+                onClick={() => { setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false, is_gift_card: false, gift_card_allow_custom: false }); setVariantsRaw(""); }}>
                 Add your first product
               </Button>
             </div>
@@ -23606,6 +23607,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                 inventory_item_id: (p as any).inventory_item_id ?? null,
                 reorder_after_weeks: (p as any).reorder_after_weeks ?? null,
                 is_gift_card: !!(p as any).is_gift_card,
+                gift_card_allow_custom: !!(p as any).gift_card_allow_custom,
               });
               // Seed the textarea with the existing variant names so
               // editing keeps them visible; new picks tack on as the
@@ -23983,9 +23985,22 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                     Use variants for denominations (e.g. $25, $50, $100) and leave shipping off.
                   </p>
                 </div>
-                <Toggle checked={!!editing.is_gift_card} onChange={(v: boolean) => setEditing({ ...editing, is_gift_card: v })} />
+                <Toggle checked={!!editing.is_gift_card} onChange={(v: boolean) => setEditing({ ...editing, is_gift_card: v, gift_card_allow_custom: v ? editing.gift_card_allow_custom : false })} />
               </div>
             </Card>
+            {editing.is_gift_card && (
+              <Card className="p-3.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold" style={{ color: C.espresso }}>Let buyers choose their own amount</p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      Adds an &quot;Other amount&quot; option on the product page — buyers can enter any amount from $10 to $200.
+                    </p>
+                  </div>
+                  <Toggle checked={!!editing.gift_card_allow_custom} onChange={(v: boolean) => setEditing({ ...editing, gift_card_allow_custom: v })} />
+                </div>
+              </Card>
+            )}
             <Card className="p-3.5">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">

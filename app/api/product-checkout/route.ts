@@ -22,6 +22,10 @@ export const dynamic = "force-dynamic";
 
 const STRIPE_API = "https://api.stripe.com/v1";
 const MAX_LINES = 30;
+// Buyer-chosen gift-card amount bounds (dollars). Enforced here so a
+// hand-crafted request can't mint a $100k gift card.
+const GIFT_CARD_MIN = 10;
+const GIFT_CARD_MAX = 200;
 
 const env = (k: string): string => {
   const v = process.env[k];
@@ -61,7 +65,9 @@ export async function POST(req: Request) {
     product_slug?: string;
     quantity?: number;
     variant_id?: string | null;
-    items?: Array<{ product_slug?: string; quantity?: number; variant_id?: string | null }>;
+    custom_amount?: number | null;
+    gift_card_code?: string | null;
+    items?: Array<{ product_slug?: string; quantity?: number; variant_id?: string | null; custom_amount?: number | null }>;
   };
   try {
     body = await req.json();
@@ -70,24 +76,30 @@ export async function POST(req: Request) {
   }
   const handle = (body?.handle || "").trim().replace(/^@/, "");
   if (!handle) return fail(400, "Missing stylist handle.");
+  const giftCardCode = String(body?.gift_card_code || "").trim().toUpperCase();
 
-  // Normalize to a uniform list of {product_slug, quantity, variant_id}.
-  // Legacy single-item payloads are wrapped to length 1.
-  const inputItems: Array<{ product_slug: string; quantity: number; variant_id: string | null }> = [];
+  // Normalize to a uniform list of {product_slug, quantity, variant_id,
+  // custom_amount}. Legacy single-item payloads are wrapped to length 1.
+  const inputItems: Array<{ product_slug: string; quantity: number; variant_id: string | null; custom_amount: number | null }> = [];
+  const readCustom = (raw: unknown): number | null => {
+    if (raw === null || raw === undefined || raw === "") return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  };
   if (Array.isArray(body.items) && body.items.length > 0) {
     for (const raw of body.items) {
       const slug = String(raw?.product_slug || "").trim();
       if (!slug) continue;
       const q = Math.max(1, Math.min(99, Math.floor(Number(raw?.quantity || 1))));
       const vid = typeof raw?.variant_id === "string" && raw.variant_id.trim() ? raw.variant_id.trim() : null;
-      inputItems.push({ product_slug: slug, quantity: q, variant_id: vid });
+      inputItems.push({ product_slug: slug, quantity: q, variant_id: vid, custom_amount: readCustom(raw?.custom_amount) });
     }
   } else {
     const slug = String(body?.product_slug || "").trim();
     if (!slug) return fail(400, "Missing product slug.");
     const q = Math.max(1, Math.min(99, Math.floor(Number(body?.quantity || 1))));
     const vid = typeof body?.variant_id === "string" && body.variant_id.trim() ? body.variant_id.trim() : null;
-    inputItems.push({ product_slug: slug, quantity: q, variant_id: vid });
+    inputItems.push({ product_slug: slug, quantity: q, variant_id: vid, custom_amount: readCustom(body?.custom_amount) });
   }
   if (inputItems.length === 0) return fail(400, "Cart is empty.");
   if (inputItems.length > MAX_LINES) return fail(400, `Cart exceeds ${MAX_LINES} items.`);
@@ -114,10 +126,13 @@ export async function POST(req: Request) {
   let stylistUserId: string | null = null;
   let stylistAccountId: string | null = null;
   let chargesEnabled = false;
-  const collapseKey = (slug: string, vid: string | null) => `${slug}::${vid || ""}`;
-  const merged = new Map<string, { product_slug: string; variant_id: string | null; quantity: number }>();
+  // Custom-amount lines never collapse together — two $50 and $75
+  // gift cards are distinct SKUs — so the amount is part of the key.
+  const collapseKey = (slug: string, vid: string | null, amt: number | null) =>
+    `${slug}::${vid || ""}::${amt == null ? "" : amt}`;
+  const merged = new Map<string, { product_slug: string; variant_id: string | null; quantity: number; custom_amount: number | null }>();
   for (const item of inputItems) {
-    const k = collapseKey(item.product_slug, item.variant_id);
+    const k = collapseKey(item.product_slug, item.variant_id, item.custom_amount);
     const prior = merged.get(k);
     if (prior) prior.quantity = Math.min(99, prior.quantity + item.quantity);
     else merged.set(k, { ...item });
@@ -142,34 +157,49 @@ export async function POST(req: Request) {
     if (product.external_checkout_url) {
       return fail(409, `'${product.title}' is sold via an external store — remove it from the cart and visit the product page.`);
     }
-    // Variant validation runs FIRST so a variant-specific price /
-    // inventory override applies to the rest of the checks.
     const variants = Array.isArray(product.variants) ? (product.variants as any[]) : [];
     let resolvedVariant: any = null;
-    if (variants.length > 0) {
-      if (!item.variant_id) {
-        return fail(400, `Pick a ${product.variant_label || "variant"} for '${product.title}'.`);
-      }
-      const match = variants.find((v) => v && String(v.id) === item.variant_id);
-      if (!match) return fail(400, `That variant is no longer available for '${product.title}'.`);
-      resolvedVariant = match;
-    }
+    let priceDollars: number | null = null;
 
-    // Variant price override wins when set; otherwise fall back to
-    // product.price. Negative / missing prices reject the line.
-    const variantPriceRaw = resolvedVariant?.price;
-    const variantPrice =
-      variantPriceRaw === null || variantPriceRaw === undefined || variantPriceRaw === ""
-        ? null
-        : Number(variantPriceRaw);
-    const priceDollars =
-      variantPrice != null && Number.isFinite(variantPrice) && variantPrice >= 0
-        ? variantPrice
-        : product.price == null
+    if (product.is_gift_card && item.custom_amount != null) {
+      // Gift-card custom-amount path: a buyer-chosen amount replaces
+      // the variant/product price entirely — no variant pick needed.
+      if (!product.gift_card_allow_custom) {
+        return fail(400, `'${product.title}' doesn't accept a custom amount.`);
+      }
+      const amt = Number(item.custom_amount);
+      if (!Number.isFinite(amt) || amt < GIFT_CARD_MIN || amt > GIFT_CARD_MAX) {
+        return fail(400, `Gift card amount must be between $${GIFT_CARD_MIN} and $${GIFT_CARD_MAX}.`);
+      }
+      priceDollars = Math.round(amt * 100) / 100;
+    } else {
+      // Variant validation runs FIRST so a variant-specific price /
+      // inventory override applies to the rest of the checks.
+      if (variants.length > 0) {
+        if (!item.variant_id) {
+          return fail(400, `Pick a ${product.variant_label || "variant"} for '${product.title}'.`);
+        }
+        const match = variants.find((v) => v && String(v.id) === item.variant_id);
+        if (!match) return fail(400, `That variant is no longer available for '${product.title}'.`);
+        resolvedVariant = match;
+      }
+
+      // Variant price override wins when set; otherwise fall back to
+      // product.price. Negative / missing prices reject the line.
+      const variantPriceRaw = resolvedVariant?.price;
+      const variantPrice =
+        variantPriceRaw === null || variantPriceRaw === undefined || variantPriceRaw === ""
           ? null
-          : Number(product.price);
-    if (priceDollars == null || !Number.isFinite(priceDollars) || priceDollars < 0) {
-      return fail(400, `'${product.title}' doesn't have a price set.`);
+          : Number(variantPriceRaw);
+      priceDollars =
+        variantPrice != null && Number.isFinite(variantPrice) && variantPrice >= 0
+          ? variantPrice
+          : product.price == null
+            ? null
+            : Number(product.price);
+      if (priceDollars == null || !Number.isFinite(priceDollars) || priceDollars < 0) {
+        return fail(400, `'${product.title}' doesn't have a price set.`);
+      }
     }
 
     // Inventory ceiling: variant's count wins when present, else
@@ -223,12 +253,37 @@ export async function POST(req: Request) {
   const subtotalCents = resolved.reduce((s, r) => s + r.unit_amount_cents * r.quantity, 0);
   const subtotalDollars = subtotalCents / 100;
 
+  // Gift card redemption — validate the code against this stylist's
+  // own active cards. The redeemed amount is capped at the subtotal
+  // (a $100 card on a $30 order redeems $30, leaving $70 on the card).
+  let giftCardId: string | null = null;
+  let redeemCents = 0;
+  if (giftCardCode) {
+    const { data: card } = await admin
+      .from("gift_cards")
+      .select("id, balance, status")
+      .eq("code", giftCardCode)
+      .eq("user_id", stylistUserId)
+      .maybeSingle();
+    if (!card) return fail(400, "That gift card code isn't valid for this shop.");
+    if (card.status !== "active" || Number(card.balance) <= 0) {
+      return fail(400, "That gift card has no remaining balance.");
+    }
+    const balanceCents = Math.round(Number(card.balance) * 100);
+    redeemCents = Math.min(balanceCents, subtotalCents);
+    giftCardId = String(card.id);
+  }
+  // What the buyer actually pays by card after the gift card applies.
+  const chargeableCents = subtotalCents - redeemCents;
+
   const feeBps = (() => {
     const raw = Number(process.env.PLATFORM_FEE_BPS || 0);
     if (!Number.isFinite(raw) || raw < 0 || raw > 10_000) return 0;
     return Math.floor(raw);
   })();
-  const applicationFeeCents = feeBps > 0 ? Math.floor((subtotalCents * feeBps) / 10_000) : 0;
+  // Fee is taken on what the buyer pays, never the pre-gift-card
+  // subtotal — Stripe rejects an application fee above the charge.
+  const applicationFeeCents = feeBps > 0 ? Math.floor((chargeableCents * feeBps) / 10_000) : 0;
 
   // Pre-insert the order row. customer_token auto-fills from the
   // column default. line_items captures the resolved cart shape so
@@ -256,6 +311,8 @@ export async function POST(req: Request) {
       currency: "usd",
       shipping_required: requiresShipping,
       line_items: lineItemsJson,
+      gift_card_id: giftCardId,
+      gift_card_redeemed_amount: redeemCents > 0 ? (redeemCents / 100).toFixed(2) : null,
       metadata: { handle, item_count: resolved.length },
     })
     .select("id, customer_token")
@@ -295,9 +352,51 @@ export async function POST(req: Request) {
   form.set("metadata[stylist_account_id]", stylistAccountId);
   form.set("metadata[handle]", handle);
   form.set("metadata[item_count]", String(resolved.length));
-  form.set("payment_intent_data[metadata][product_order_id]", String(order.id));
-  if (applicationFeeCents > 0) {
-    form.set("payment_intent_data[application_fee_amount]", String(applicationFeeCents));
+  // payment_intent_data is meaningless when a gift card covers the
+  // whole order — there's no PaymentIntent, and Stripe rejects the
+  // block on a $0 session.
+  if (chargeableCents > 0) {
+    form.set("payment_intent_data[metadata][product_order_id]", String(order.id));
+    if (applicationFeeCents > 0) {
+      form.set("payment_intent_data[application_fee_amount]", String(applicationFeeCents));
+    }
+  }
+
+  // Gift card → a one-time amount_off coupon on the connected
+  // account. Stripe does the discount math (partial, full, or
+  // capped). A full cover yields a $0 session that completes with
+  // payment_status 'no_payment_required' — handled in the webhook.
+  if (redeemCents > 0) {
+    const couponForm = new URLSearchParams();
+    couponForm.set("amount_off", String(redeemCents));
+    couponForm.set("currency", "usd");
+    couponForm.set("duration", "once");
+    couponForm.set("name", "Gift card");
+    couponForm.set("max_redemptions", "1");
+    const couponRes = await fetch(`${STRIPE_API}/coupons`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${stripeSecret}`,
+        "Stripe-Version": "2024-06-20",
+        "Stripe-Account": stylistAccountId,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: couponForm.toString(),
+      cache: "no-store",
+    });
+    if (!couponRes.ok) {
+      await admin
+        .from("product_orders")
+        .update({ status: "failed", updated_at: new Date().toISOString() })
+        .eq("id", order.id);
+      return fail(502, "Couldn't apply the gift card. Try again in a moment.");
+    }
+    const coupon = (await couponRes.json()) as { id?: string };
+    if (!coupon?.id) {
+      await admin.from("product_orders").update({ status: "failed" }).eq("id", order.id);
+      return fail(502, "Couldn't apply the gift card. Try again in a moment.");
+    }
+    form.set("discounts[0][coupon]", String(coupon.id));
   }
 
   const stripeRes = await fetch(`${STRIPE_API}/checkout/sessions`, {
