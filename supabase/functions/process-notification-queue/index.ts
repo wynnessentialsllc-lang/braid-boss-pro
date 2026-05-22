@@ -415,6 +415,40 @@ const renderReviewReceived = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- gift_card_issued (buyer's copy of purchased gift card codes) --
+const renderGiftCardIssued = (p: Record<string, any>) => {
+  const studioName = p.studioName || "your studio";
+  const purchaserName = p.purchaserName || "there";
+  const cards: Array<{ code: string; amount: number }> =
+    Array.isArray(p.cards) ? p.cards : [];
+  const money = (n: unknown) => `$${(Number(n) || 0).toFixed(2)}`;
+  const total = cards.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+  const multi = cards.length > 1;
+  const subject = `Your gift card from ${studioName}`;
+  const cardBlocks = cards
+    .map(
+      (c) => `
+    <div style="border:1px solid ${C.hairline};border-radius:12px;padding:16px;margin:0 0 10px;text-align:center;background:${C.cream};">
+      <p style="font-size:12px;color:${C.muted};margin:0 0 6px;text-transform:uppercase;letter-spacing:0.12em;">${money(c.amount)} gift card</p>
+      <p style="font-size:24px;font-weight:700;letter-spacing:2px;margin:0;color:${C.espresso};font-family:'Courier New',monospace;">${escape(c.code)}</p>
+    </div>`,
+    )
+    .join("");
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Gift card</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Thank you, ${escape(purchaserName)}.</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 16px;color:${C.coffee};">
+      Here ${multi ? "are your gift cards" : "is your gift card"} for ${escape(studioName)}${multi ? ` — ${money(total)} total` : ""}.
+      Keep ${multi ? "these codes" : "this code"} safe and share with whoever ${multi ? "they're" : "it's"} for.
+    </p>
+    ${cardBlocks}
+    <p style="font-size:13px;line-height:21px;margin:14px 0 0;color:${C.muted};">
+      Redeemable toward ${escape(studioName)}'s services and products.
+    </p>
+  `);
+  return { subject, html };
+};
+
 // ---- appointment_confirmed (final approval — deposit already in) ---
 // Distinct from `appointment_approved`, which is the earlier "please
 // pay your deposit" approval email. This one fires after the stylist
@@ -1232,6 +1266,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderReviewRequest(row.payload || {});
     case "review_received":
       return renderReviewReceived(row.payload || {});
+    case "gift_card_issued":
+      return renderGiftCardIssued(row.payload || {});
     case "booking_denied_no_charge":
       return renderBookingDeniedNoCharge(row.payload || {});
     case "booking_denied_refunded":
