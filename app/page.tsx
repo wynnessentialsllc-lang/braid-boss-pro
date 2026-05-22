@@ -71,7 +71,10 @@ import {
   DEFAULT_LOYALTY, loadLoyaltySettings, saveLoyaltySettings,
   fetchLoyaltyRedemptions, recordLoyaltyRedemption, earnedPoints,
 } from "./lib/loyalty";
-import { SMS_PACKS, loadSmsBalance, buySmsCredits } from "./lib/sms-credits";
+import {
+  SMS_PACKS, SMS_LOW_BALANCE, loadSmsBalance, buySmsCredits,
+  fetchSmsLedger, type SmsLedgerEntry,
+} from "./lib/sms-credits";
 import {
   type ReferralReward,
   loadReferralSettings,
@@ -24839,6 +24842,7 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
   const userId: string | null = store.userId;
   const [loading, setLoading] = useState(true);
   const [balance, setBalance] = useState(0);
+  const [ledger, setLedger] = useState<SmsLedgerEntry[]>([]);
   const [busyPack, setBusyPack] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -24847,13 +24851,24 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
     let cancelled = false;
     (async () => {
       try {
-        const b = await loadSmsBalance(userId);
-        if (!cancelled) setBalance(b);
+        const [b, l] = await Promise.all([
+          loadSmsBalance(userId),
+          fetchSmsLedger(userId).catch(() => []),
+        ]);
+        if (!cancelled) { setBalance(b); setLedger(l); }
       } catch { /* shows 0 */ }
       finally { if (!cancelled) setLoading(false); }
     })();
     return () => { cancelled = true; };
   }, [userId]);
+
+  const lowBalance = !loading && balance <= SMS_LOW_BALANCE;
+  const ledgerLabel = (r: SmsLedgerEntry): string => {
+    if (r.reason === "purchase") return "Credit pack purchased";
+    if (r.reason === "send") return "Text sent";
+    if (r.reason === "refund") return "Refund — text failed";
+    return "Adjustment";
+  };
 
   const buy = async (packId: string) => {
     setErr(null);
@@ -24885,6 +24900,19 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
             text{balance === 1 ? "" : "s"} remaining
           </p>
         </Card>
+
+        {lowBalance && (
+          <Card className="p-3.5" style={{ background: "rgba(176,58,46,0.07)", border: `1px solid ${C.danger}` }}>
+            <p className="text-[13px] font-semibold" style={{ color: C.danger }}>
+              {balance === 0 ? "You're out of SMS credits" : "SMS credits running low"}
+            </p>
+            <p className="text-[12px] mt-0.5" style={{ color: C.coffee, lineHeight: 1.5 }}>
+              {balance === 0
+                ? "Text reminders and confirmations won't send until you top up. Email still goes out as normal."
+                : `Only ${balance} text${balance === 1 ? "" : "s"} left — top up so reminders keep going out.`}
+            </p>
+          </Card>
+        )}
 
         <p className="text-[10px] font-bold uppercase tracking-widest px-1" style={{ color: C.muted, letterSpacing: "0.14em" }}>
           Buy credits
@@ -24922,6 +24950,38 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
             what you use; the platform never texts on an empty balance.
           </p>
         </Card>
+
+        {ledger.length > 0 && (
+          <>
+            <p className="text-[10px] font-bold uppercase tracking-widest px-1" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+              Transaction history
+            </p>
+            <Card className="p-0 overflow-hidden">
+              {ledger.map((r, i) => (
+                <div
+                  key={r.id}
+                  className="flex items-center justify-between gap-3 px-3.5 py-2.5"
+                  style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+                      {ledgerLabel(r)}
+                    </p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      {r.createdAt ? new Date(r.createdAt).toLocaleDateString() : ""}
+                    </p>
+                  </div>
+                  <span
+                    className="text-[13px] font-bold whitespace-nowrap"
+                    style={{ color: r.delta >= 0 ? C.success : C.coffee }}
+                  >
+                    {r.delta >= 0 ? "+" : ""}{r.delta}
+                  </span>
+                </div>
+              ))}
+            </Card>
+          </>
+        )}
       </div>
     </div>
   );
