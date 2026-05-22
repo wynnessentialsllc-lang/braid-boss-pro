@@ -421,6 +421,10 @@ export type Product = {
   // emailed a "time to restock?" nudge. null = no auto-nudge (one-
   // off items like bonnets / tools).
   reorder_after_weeks: number | null;
+  // When true, a paid order for this product issues a gift card code
+  // per unit (see the product-checkout webhook) instead of shipping
+  // a physical item. Denominations are the product's variants.
+  is_gift_card: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -434,6 +438,7 @@ export type ProductInput = Pick<
   | "requires_shipping" | "sort_order" | "active"
   | "inventory_item_id"
   | "reorder_after_weeks"
+  | "is_gift_card"
 >;
 
 // URL-friendly slug from a free-form title. Mirrors the DB
@@ -535,6 +540,7 @@ export const useProducts = (userId: string | null): {
       active:                 has("active")                 ? draft.active!                 : existing.active,
       inventory_item_id:      has("inventory_item_id")      ? draft.inventory_item_id!      : (existing as any).inventory_item_id ?? null,
       reorder_after_weeks:    has("reorder_after_weeks")    ? draft.reorder_after_weeks!   : (existing as any).reorder_after_weeks ?? null,
+      is_gift_card:           has("is_gift_card")           ? draft.is_gift_card!           : (existing as any).is_gift_card ?? false,
     };
   };
 
@@ -616,6 +622,7 @@ export const useProducts = (userId: string | null): {
         if (!Number.isFinite(n) || n <= 0) return null;
         return Math.min(52, n);
       })(),
+      is_gift_card: !!draft.is_gift_card,
     };
     const supabase = getSupabase();
     const { data, error: err } = draft.id

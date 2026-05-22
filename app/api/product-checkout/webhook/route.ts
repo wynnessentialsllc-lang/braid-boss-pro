@@ -12,12 +12,23 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHmac, timingSafeEqual, randomInt } from "crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const TOLERANCE_SECONDS = 5 * 60;
+
+// Gift card code — bearer instrument, so use crypto randomness, not
+// Math.random. Charset omits 0/O/1/I/L so codes are easy to read and
+// retype off a phone screen. `code` is UNIQUE in the table, so an
+// (astronomically unlikely) collision just fails that one insert.
+const genGiftCardCode = (): string => {
+  const cs = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  const pick = (n: number) =>
+    Array.from({ length: n }, () => cs[randomInt(cs.length)]).join("");
+  return `BBP-${pick(4)}-${pick(4)}`;
+};
 
 const env = (k: string): string => {
   const v = process.env[k];
@@ -251,6 +262,98 @@ export async function POST(req: Request) {
     }
   } catch (e: any) {
     console.warn("[product-checkout/webhook] order_confirmation enqueue failed:", e?.message || e);
+  }
+
+  // Gift cards — issue a redeemable code per unit for any gift-card
+  // line in the order, then email the codes to the buyer.
+  // Best-effort + idempotent: an order that already has issued cards
+  // is skipped, so a Stripe replay can't double-issue.
+  try {
+    const { data: gcOrder } = await admin
+      .from("product_orders")
+      .select("id, user_id, customer_email, customer_name, line_items")
+      .eq("stripe_session_id", sessionId || "")
+      .maybeSingle();
+    const gcLines = Array.isArray(gcOrder?.line_items)
+      ? (gcOrder!.line_items as any[])
+      : [];
+    if (gcOrder?.id && gcLines.length > 0) {
+      const gcProductIds = Array.from(
+        new Set(gcLines.map((li) => String(li?.product_id || "")).filter(Boolean)),
+      );
+      const { data: gcProducts } = await admin
+        .from("products")
+        .select("id, is_gift_card")
+        .in("id", gcProductIds);
+      const giftProductIds = new Set(
+        (gcProducts || [])
+          .filter((p) => (p as any).is_gift_card)
+          .map((p) => String(p.id)),
+      );
+      if (giftProductIds.size > 0) {
+        const { data: existing } = await admin
+          .from("gift_cards")
+          .select("id")
+          .eq("product_order_id", gcOrder.id)
+          .limit(1);
+        if (!existing || existing.length === 0) {
+          const issued: Array<{ code: string; amount: number }> = [];
+          for (const li of gcLines) {
+            if (!giftProductIds.has(String(li?.product_id || ""))) continue;
+            const unit = Number(li?.unit_amount);
+            const qty = Math.max(1, Math.floor(Number(li?.quantity) || 1));
+            if (!Number.isFinite(unit) || unit <= 0) continue;
+            for (let i = 0; i < qty; i++) {
+              const code = genGiftCardCode();
+              const { error: gcErr } = await admin.from("gift_cards").insert({
+                user_id: gcOrder.user_id,
+                code,
+                initial_amount: unit.toFixed(2),
+                balance: unit.toFixed(2),
+                currency: "usd",
+                status: "active",
+                purchaser_email: gcOrder.customer_email || null,
+                purchaser_name: gcOrder.customer_name || null,
+                product_order_id: gcOrder.id,
+              });
+              if (!gcErr) issued.push({ code, amount: unit });
+            }
+          }
+          if (issued.length > 0 && gcOrder.customer_email) {
+            let studioName: string | null = null;
+            try {
+              const { data: prof } = await admin
+                .from("profiles")
+                .select("studio_name, business_name")
+                .eq("id", gcOrder.user_id)
+                .maybeSingle();
+              studioName =
+                (prof?.studio_name || prof?.business_name || "").toString().trim() ||
+                null;
+            } catch { /* best-effort */ }
+            await admin.rpc("queue_notification", {
+              user_id_in: gcOrder.user_id,
+              channel_in: "email",
+              notification_type_in: "gift_card_issued",
+              body_in: `Your gift card code${issued.length > 1 ? "s" : ""}: ${issued
+                .map((g) => g.code)
+                .join(", ")}`,
+              subject_in: `Your gift card from ${studioName || "the studio"}`,
+              recipient_email_in: gcOrder.customer_email,
+              recipient_name_in: gcOrder.customer_name || null,
+              payload_in: {
+                studioName: studioName || "your studio",
+                purchaserName: gcOrder.customer_name || null,
+                cards: issued.map((g) => ({ code: g.code, amount: g.amount })),
+              },
+              dedupe_key_in: `gift_card_issued:${gcOrder.id}`,
+            });
+          }
+        }
+      }
+    }
+  } catch (e: any) {
+    console.warn("[product-checkout/webhook] gift card issuance failed:", e?.message || e);
   }
 
   // Inventory V1 — decrement any linked items. Best-effort: a

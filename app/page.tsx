@@ -65,6 +65,7 @@ import {
   loadMarketplaceListing,
   saveMarketplaceListing,
 } from "./lib/marketplace";
+import { type GiftCard, listGiftCards } from "./lib/gift-cards";
 import {
   type ReferralReward,
   loadReferralSettings,
@@ -353,7 +354,7 @@ import {
   type PushCapability,
 } from "./lib/push";
 import {
-  Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon, MapPin,
+  Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon, MapPin, Gift,
   Plus, X, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Search, Copy, Check, Trash2, Edit3,
   FileText, DollarSign, Clock, Phone, Mail, AlertCircle, Sparkles,
   ArrowUpRight, ArrowDownRight, Save, RefreshCw, Download, Upload, Bell, BellOff,
@@ -12281,7 +12282,7 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -12609,6 +12610,28 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Marketplace listing</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Get found on the public &quot;Find a braider&quot; page</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openGiftCards && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openGiftCards}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <Gift size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Gift cards</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>Sell gift cards and track issued codes</p>
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
@@ -23457,6 +23480,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
     active: boolean;
     inventory_item_id: string | null;
     reorder_after_weeks: number | null;
+    is_gift_card: boolean;
   }>;
   const [editing, setEditing] = useState<Draft | null>(null);
   // Raw textarea content for the variants list. Decoupled from
@@ -23500,7 +23524,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
         rightAction={
           <button
             type="button"
-            onClick={() => { setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false }); setVariantsRaw(""); }}
+            onClick={() => { setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false, is_gift_card: false }); setVariantsRaw(""); }}
             className="p-2 rounded-full"
             style={{ background: C.gold, color: C.espresso, border: 0 }}
             aria-label="Add product"
@@ -23558,7 +23582,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
             </p>
             <div className="mt-4">
               <Button variant="primary" icon={<Plus size={16} />} fullWidth
-                onClick={() => { setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false }); setVariantsRaw(""); }}>
+                onClick={() => { setEditing({ title: "", slug: "", price: null, compare_at_price: null, inventory_count: null, category: null, gallery_images: [], variant_label: null, variants: [], active: true, is_featured: false, local_pickup_available: false, requires_shipping: false, is_gift_card: false }); setVariantsRaw(""); }}>
                 Add your first product
               </Button>
             </div>
@@ -23581,6 +23605,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                 active: p.active,
                 inventory_item_id: (p as any).inventory_item_id ?? null,
                 reorder_after_weeks: (p as any).reorder_after_weeks ?? null,
+                is_gift_card: !!(p as any).is_gift_card,
               });
               // Seed the textarea with the existing variant names so
               // editing keeps them visible; new picks tack on as the
@@ -23947,6 +23972,18 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                   <p className="text-[11px]" style={{ color: C.muted }}>Collects a shipping address at checkout.</p>
                 </div>
                 <Toggle checked={!!editing.requires_shipping} onChange={(v: boolean) => setEditing({ ...editing, requires_shipping: v })} />
+              </div>
+            </Card>
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>This is a gift card</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    On purchase, the buyer is emailed a redeemable code instead of a shipped item.
+                    Use variants for denominations (e.g. $25, $50, $100) and leave shipping off.
+                  </p>
+                </div>
+                <Toggle checked={!!editing.is_gift_card} onChange={(v: boolean) => setEditing({ ...editing, is_gift_card: v })} />
               </div>
             </Card>
             <Card className="p-3.5">
@@ -24592,6 +24629,113 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
             <Button variant="primary" fullWidth onClick={save} icon={<Save size={16} />}>
               {busy ? "Saving…" : "Save"}
             </Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
+//  GIFT CARDS — issued-card tracking
+// ============================================================
+const GiftCardsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const [loading, setLoading] = useState(true);
+  const [cards, setCards] = useState<GiftCard[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!userId) { setLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await listGiftCards(userId);
+        if (!cancelled) setCards(list);
+      } catch (e: any) {
+        if (!cancelled) setErr(e?.message || "Couldn't load gift cards.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const money = (n: number) =>
+    `$${(Number(n) || 0).toFixed(2)}`;
+  const outstanding = cards
+    .filter(c => c.status === "active")
+    .reduce((s, c) => s + c.balance, 0);
+  const totalIssued = cards.reduce((s, c) => s + c.initialAmount, 0);
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Gift cards"
+        subtitle="Issued codes"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-4">
+        {loading ? (
+          <Card className="p-6 text-center"><p className="text-[13px]" style={{ color: C.muted }}>Loading…</p></Card>
+        ) : err ? (
+          <Card className="p-4"><p className="text-[12px]" style={{ color: C.danger }}>{err}</p></Card>
+        ) : cards.length === 0 ? (
+          <Card className="p-4" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+            <p className="text-sm font-semibold mb-1" style={{ color: C.espresso }}>No gift cards sold yet</p>
+            <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+              To sell gift cards, add a product in your shop, turn on
+              &quot;This is a gift card,&quot; and use variants for the
+              denominations ($25, $50, $100). When a client buys one,
+              they&apos;re emailed a redeemable code and it shows up here.
+            </p>
+          </Card>
+        ) : (
+          <>
+            <div className="flex gap-3">
+              <Card className="p-3.5 flex-1">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Outstanding</p>
+                <p className="text-lg font-bold" style={{ color: C.espresso }}>{money(outstanding)}</p>
+              </Card>
+              <Card className="p-3.5 flex-1">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Total issued</p>
+                <p className="text-lg font-bold" style={{ color: C.espresso }}>{money(totalIssued)}</p>
+              </Card>
+            </div>
+            {cards.map(c => {
+              const pill =
+                c.status === "void"
+                  ? { label: "Void", bg: C.hairline, fg: C.muted }
+                  : c.status === "depleted"
+                  ? { label: "Used up", bg: C.hairline, fg: C.muted }
+                  : { label: "Active", bg: "rgba(92,124,74,0.12)", fg: C.success };
+              return (
+                <Card key={c.id} className="p-3.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[15px] font-bold" style={{ color: C.espresso, fontFamily: "ui-monospace, monospace", letterSpacing: "0.04em" }}>
+                        {c.code}
+                      </p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        {c.purchaserName || c.purchaserEmail || "Purchased"}
+                        {c.issuedAt ? ` · ${new Date(c.issuedAt).toLocaleDateString()}` : ""}
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: pill.bg, color: pill.fg }}>
+                      {pill.label}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: `1px solid ${C.hairline}` }}>
+                    <span className="text-[12px]" style={{ color: C.muted }}>
+                      Balance <strong style={{ color: C.espresso }}>{money(c.balance)}</strong>
+                    </span>
+                    <span className="text-[12px]" style={{ color: C.muted }}>
+                      of {money(c.initialAmount)}
+                    </span>
+                  </div>
+                </Card>
+              );
+            })}
           </>
         )}
       </div>
@@ -26316,10 +26460,11 @@ export default function App() {
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "marketplace" && <MarketplaceScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "giftCards" && <GiftCardsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "inventory" && <InventoryScreen store={store} onBack={() => setSecondary(inventoryBack)} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
