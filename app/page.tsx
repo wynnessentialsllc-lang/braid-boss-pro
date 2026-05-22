@@ -67,6 +67,11 @@ import {
 } from "./lib/marketplace";
 import { type GiftCard, listGiftCards } from "./lib/gift-cards";
 import {
+  type LoyaltySettings, type LoyaltyRedemption,
+  DEFAULT_LOYALTY, loadLoyaltySettings, saveLoyaltySettings,
+  fetchLoyaltyRedemptions, recordLoyaltyRedemption, earnedPoints,
+} from "./lib/loyalty";
+import {
   type ReferralReward,
   loadReferralSettings,
   saveReferralSettings,
@@ -9510,6 +9515,15 @@ const ClientProfileSheet = ({
           </Card>
         </div>
 
+        {/* Loyalty — renders only when the program is enabled. */}
+        {client?.id && (
+          <ClientLoyaltyCard
+            store={store}
+            clientId={String(client.id)}
+            completedVisits={completed.length}
+          />
+        )}
+
         {/* INSIGHTS — pure derivation from existing appointments.
             Hidden for brand-new clients with nothing to summarize. */}
         {(insights.insights.length > 0 || lastBookedHint) && (
@@ -12288,7 +12302,7 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -12638,6 +12652,28 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Gift cards</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Sell gift cards and track issued codes</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openLoyalty && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openLoyalty}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <Star size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Loyalty points</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>Reward clients for every visit</p>
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
@@ -24658,6 +24694,222 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
 };
 
 // ============================================================
+//  LOYALTY — per-visit points program
+// ============================================================
+const LoyaltyScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState<LoyaltySettings>({ ...DEFAULT_LOYALTY });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!userId) { setLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await loadLoyaltySettings(userId);
+        if (!cancelled) setForm(s);
+      } catch { /* defaults stand */ }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const numField = (raw: string): number => {
+    const n = parseInt(raw.replace(/[^0-9]/g, ""), 10);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const save = async () => {
+    if (!userId) return;
+    if (form.pointsPerVisit < 1) { setMsg({ kind: "error", text: "Points per visit must be at least 1." }); return; }
+    if (form.rewardPoints < 1) { setMsg({ kind: "error", text: "Reward threshold must be at least 1 point." }); return; }
+    if (form.rewardValue <= 0) { setMsg({ kind: "error", text: "Reward value must be more than $0." }); return; }
+    setBusy(true);
+    setMsg(null);
+    try {
+      await saveLoyaltySettings(userId, form);
+      setMsg({ kind: "ok", text: "Saved." });
+    } catch (e: any) {
+      setMsg({ kind: "error", text: e?.message || "Couldn't save." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const visitsForReward = form.pointsPerVisit > 0
+    ? Math.ceil(form.rewardPoints / form.pointsPerVisit)
+    : 0;
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Loyalty points"
+        subtitle="Reward repeat clients"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-4">
+        {loading ? (
+          <Card className="p-6 text-center"><p className="text-[13px]" style={{ color: C.muted }}>Loading…</p></Card>
+        ) : (
+          <>
+            <Card className="p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Loyalty program</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    Clients earn points for every completed visit. Off until you turn it on.
+                  </p>
+                </div>
+                <Toggle checked={form.enabled} onChange={(v: boolean) => setForm({ ...form, enabled: v })} />
+              </div>
+            </Card>
+
+            <Card className="p-3.5 space-y-3">
+              <Field label="Points per visit" hint="Earned each time a client completes an appointment.">
+                <Input
+                  value={String(form.pointsPerVisit)}
+                  onChange={e => setForm({ ...form, pointsPerVisit: numField(e.target.value) })}
+                  inputMode="numeric"
+                  placeholder="10"
+                />
+              </Field>
+              <Field label="Points for a reward" hint="How many points a client needs to redeem one reward.">
+                <Input
+                  value={String(form.rewardPoints)}
+                  onChange={e => setForm({ ...form, rewardPoints: numField(e.target.value) })}
+                  inputMode="numeric"
+                  placeholder="100"
+                />
+              </Field>
+              <Field label="Reward value ($)" hint="Dollar value the client gets when they redeem.">
+                <Input
+                  value={String(form.rewardValue)}
+                  onChange={e => setForm({ ...form, rewardValue: Number(e.target.value.replace(/[^0-9.]/g, "")) || 0 })}
+                  inputMode="decimal"
+                  placeholder="10"
+                />
+              </Field>
+              <Button variant="primary" fullWidth onClick={save} disabled={busy} icon={<Save size={16} />}>
+                {busy ? "Saving…" : "Save"}
+              </Button>
+            </Card>
+
+            {msg && (
+              <p className="text-[12px] font-semibold" style={{ color: msg.kind === "error" ? C.danger : C.success }}>
+                {msg.text}
+              </p>
+            )}
+
+            {visitsForReward > 0 && (
+              <Card className="p-3.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                  As set up, a client earns a <strong>${form.rewardValue.toFixed(2)}</strong> reward
+                  every <strong>{visitsForReward} visit{visitsForReward === 1 ? "" : "s"}</strong>.
+                  Each client&apos;s point balance shows on their profile, where you can redeem rewards.
+                </p>
+              </Card>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Loyalty status + redeem control for a single client. Renders
+// nothing when the program is off. completedVisits is the client's
+// count of completed appointments — earned points derive from it.
+const ClientLoyaltyCard = ({
+  store, clientId, completedVisits,
+}: { store: any; clientId: string; completedVisits: number }) => {
+  const userId: string | null = store.userId;
+  const [settings, setSettings] = useState<LoyaltySettings | null>(null);
+  const [redemptions, setRedemptions] = useState<LoyaltyRedemption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!userId || !clientId) { setLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [s, reds] = await Promise.all([
+          loadLoyaltySettings(userId),
+          fetchLoyaltyRedemptions(userId),
+        ]);
+        if (cancelled) return;
+        setSettings(s);
+        setRedemptions(reds.filter(r => r.clientId === clientId));
+      } catch { /* card hides itself */ }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [userId, clientId]);
+
+  if (loading || !settings || !settings.enabled) return null;
+
+  const earned = earnedPoints(completedVisits, settings.pointsPerVisit);
+  const redeemedPoints = redemptions.reduce((s, r) => s + r.pointsSpent, 0);
+  const available = Math.max(0, earned - redeemedPoints);
+  const canRedeem = available >= settings.rewardPoints;
+  const progress = settings.rewardPoints > 0
+    ? Math.min(1, available / settings.rewardPoints)
+    : 0;
+
+  const redeem = async () => {
+    if (!userId || !canRedeem || busy) return;
+    setBusy(true);
+    try {
+      const r = await recordLoyaltyRedemption(
+        userId, clientId, settings.rewardPoints, settings.rewardValue,
+      );
+      setRedemptions(prev => [r, ...prev]);
+    } catch { /* leave as-is */ }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Card className="p-3.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+          Loyalty
+        </p>
+        <p className="text-[12px]" style={{ color: C.muted }}>
+          {earned} earned · {redeemedPoints} redeemed
+        </p>
+      </div>
+      <p className="text-lg font-bold mt-1" style={{ color: C.espresso }}>
+        {available} point{available === 1 ? "" : "s"} available
+      </p>
+      <div style={{ height: 6, borderRadius: 999, background: C.hairline, marginTop: 8, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${progress * 100}%`, background: C.goldDeep, borderRadius: 999 }} />
+      </div>
+      <p className="text-[11px] mt-1.5" style={{ color: C.muted }}>
+        {canRedeem
+          ? `Ready to redeem a $${settings.rewardValue.toFixed(2)} reward.`
+          : `${settings.rewardPoints - available} more point${settings.rewardPoints - available === 1 ? "" : "s"} to a $${settings.rewardValue.toFixed(2)} reward.`}
+      </p>
+      <Button
+        variant={canRedeem ? "primary" : "outline"}
+        fullWidth
+        onClick={redeem}
+        disabled={!canRedeem || busy}
+        className="mt-2.5"
+      >
+        {busy ? "Redeeming…" : canRedeem ? `Redeem $${settings.rewardValue.toFixed(2)} reward` : "Not enough points yet"}
+      </Button>
+      {redemptions.length > 0 && (
+        <p className="text-[11px] mt-2" style={{ color: C.muted }}>
+          {redemptions.length} reward{redemptions.length === 1 ? "" : "s"} redeemed to date.
+        </p>
+      )}
+    </Card>
+  );
+};
+
+// ============================================================
 //  GIFT CARDS — issued-card tracking
 // ============================================================
 const GiftCardsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
@@ -26481,11 +26733,12 @@ export default function App() {
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "marketplace" && <MarketplaceScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "giftCards" && <GiftCardsScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "loyalty" && <LoyaltyScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "inventory" && <InventoryScreen store={store} onBack={() => setSecondary(inventoryBack)} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
