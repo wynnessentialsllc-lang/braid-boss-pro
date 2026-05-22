@@ -13929,6 +13929,11 @@ const useNotifications = (store: any) => {
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [read, setRead] = useState<string[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  // Cloud-side communication notifications mirrored from the
+  // notification_queue (see migration 20260808). One bell row per
+  // client-facing email — non-actionable (communication_status), so
+  // they appear in the list but don't badge.
+  const [persistedItems, setPersistedItems] = useState<NotifItem[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -13949,10 +13954,55 @@ const useNotifications = (store: any) => {
     return () => { cancelled = true; };
   }, []);
 
-  const allItems = useMemo(() => buildNotifications(store), [
-    store.reminders, store.appointments, store.clients, store.business,
-    store.approvalsApi?.requests,
-  ]);
+  // Pull the stylist's "email sent" records from the cloud
+  // notifications table. RLS scopes to user_id = auth.uid(). Refresh
+  // on focus and on a slow timer so newly-sent emails appear without
+  // a full reload.
+  useEffect(() => {
+    const userId: string | null = store?.userId || null;
+    if (!userId) { setPersistedItems([]); return; }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const supabase = getSupabase();
+        const { data } = await supabase
+          .from("notifications")
+          .select("id, category, title, body, created_at, data")
+          .eq("user_id", userId)
+          .eq("dismissed", false)
+          .order("created_at", { ascending: false })
+          .limit(80);
+        if (cancelled) return;
+        const items: NotifItem[] = ((data || []) as any[]).map((r) => ({
+          id: String(r.id),
+          category: "communication_status" as NotifCategory,
+          kind: "client_email_sent",
+          tone: "neutral" as const,
+          icon: <Mail size={16} style={{ color: C.muted }} />,
+          title: String(r.title || "Email sent"),
+          body: String(r.body || ""),
+          meta: r.created_at ? fmtRelative(r.created_at) : undefined,
+        }));
+        setPersistedItems(items);
+      } catch { /* best-effort */ }
+    };
+    void load();
+    const interval = window.setInterval(load, 60_000);
+    const onFocus = () => { void load(); };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [store?.userId]);
+
+  const allItems = useMemo(
+    () => [...buildNotifications(store), ...persistedItems],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store.reminders, store.appointments, store.clients, store.business,
+     store.approvalsApi?.requests, persistedItems],
+  );
   const items = useMemo(() => allItems.filter(n => !dismissed.includes(n.id)), [allItems, dismissed]);
   // Badge counts only actionable (system / finance / retention /
   // appointment) categories. Communication-status rows are info-only.
