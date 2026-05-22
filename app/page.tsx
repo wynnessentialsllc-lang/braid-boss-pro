@@ -18220,7 +18220,7 @@ const ProfitKpiStrip = ({ revenue, expenses, currency, onSelect }: {
     { label: "Gross revenue",     value: fmtMoney(revenue, currency),                       tone: "neutral", view: "revenue" },
     { label: "Expenses (mo)",     value: fmtMoney(totals.monthTotal, currency),             tone: "neutral", view: "expenses-month" },
     { label: "Estimated profit",  value: fmtMoney(profit, currency),                        tone: profit >= 0 ? "positive" : "warning", view: "profit" },
-    { label: "Subscriptions/mo",  value: fmtMoney(totals.monthlySubscriptions, currency),   tone: "neutral", view: "subscriptions" },
+    { label: "Recurring/mo",     value: fmtMoney(totals.monthlySubscriptions, currency),   tone: "neutral", view: "subscriptions" },
     { label: "Top category",      value: topCat || "—",                                     tone: "neutral", view: "category", category: topCat ?? undefined },
   ];
   return (
@@ -18293,12 +18293,12 @@ const VIEW_PILLS: { key: ExpensesView; label: string }[] = [
   { key: "overview",        label: "Overview" },
   { key: "profit",          label: "Profit" },
   { key: "expenses-month",  label: "This month" },
-  { key: "subscriptions",   label: "Subs" },
+  { key: "subscriptions",   label: "Recurring" },
   { key: "category",        label: "Category" },
 ];
 
 const SUBTITLE_FOR_VIEW: Record<ExpensesView, string> = {
-  overview:         "Outflows, subscriptions, estimated profit",
+  overview:         "Outflows, recurring costs, estimated profit",
   profit:           "Income vs expenses, profit margin",
   "expenses-month": "Only this calendar month",
   subscriptions:    "Recurring monthly burn",
@@ -18494,7 +18494,7 @@ const ExpensesScreen = ({ store, onBack, initialView = "overview", initialCatego
               <Tile label="Gross revenue (mo)" value={fmtMoney(monthRevenue, currency)} />
               <Tile label="Expenses (mo)"       value={fmtMoney(totals.monthTotal, currency)} />
               <Tile label="Estimated profit"    value={fmtMoney(profit, currency)} tone={profit >= 0 ? "positive" : "warning"} />
-              <Tile label="Subscriptions/mo"    value={fmtMoney(totals.monthlySubscriptions, currency)} />
+              <Tile label="Recurring/mo"        value={fmtMoney(totals.monthlySubscriptions, currency)} />
               <Tile label="Top category"        value={totals.topCategory?.category || "—"} />
               <Tile label="This week"           value={fmtMoney(totals.weekTotal, currency)} />
             </div>
@@ -18712,7 +18712,7 @@ const ExpensesScreen = ({ store, onBack, initialView = "overview", initialCatego
         {view === "subscriptions" && (
           <>
             <div className="grid grid-cols-2 gap-2">
-              <Tile label="Subscriptions/mo" value={fmtMoney(totals.monthlySubscriptions, currency)} />
+              <Tile label="Recurring/mo" value={fmtMoney(totals.monthlySubscriptions, currency)} />
               <Tile label="Active"           value={String(subscriptions.length)} />
             </div>
             <div>
@@ -18724,14 +18724,14 @@ const ExpensesScreen = ({ store, onBack, initialView = "overview", initialCatego
                   className="rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-[0.97] transition"
                   style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}`, letterSpacing: "0.04em" }}
                 >
-                  + Add subscription
+                  + Add recurring expense
                 </button>
               </div>
               {subscriptions.length === 0 ? (
                 <EmptyState
                   icon={<Repeat size={28} style={{ color: C.muted }} />}
-                  title="No subscriptions yet"
-                  body="Add booking software, scheduling SMS, supply boxes — anything billed monthly — to see your true monthly burn."
+                  title="No recurring expenses yet"
+                  body="Mark anything billed monthly — apps, booth rent, insurance, supply boxes — as recurring to see your true monthly burn."
                 />
               ) : (
                 <Card className="p-2">
@@ -18744,7 +18744,7 @@ const ExpensesScreen = ({ store, onBack, initialView = "overview", initialCatego
                       style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{e.title || e.category || "Subscription"}</p>
+                        <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{e.title || e.category || "Recurring expense"}</p>
                         <p className="text-[11px]" style={{ color: C.muted }}>
                           {e.recurringInterval || "monthly"}{e.nextBillingDate ? ` · next ${fmtDate(e.nextBillingDate)}` : ""}
                         </p>
@@ -18972,7 +18972,7 @@ const ExpenseEditorSheet = ({ expense, currency, userId, onClose, onSave, onDele
 
         <div className="rounded-2xl p-3" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
           <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-[13px] font-semibold" style={{ color: C.espresso }}>Recurring subscription</span>
+            <span className="text-[13px] font-semibold" style={{ color: C.espresso }}>Recurring expense</span>
             <input
               type="checkbox"
               checked={isRecurring}
