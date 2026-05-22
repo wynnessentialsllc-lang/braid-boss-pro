@@ -9883,7 +9883,13 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
       });
       setTab("info");
     }
-  }, [open, client]);
+    // Depend on the client ID, not the object reference. A background
+    // cloud sync replaces the clients array — handing this component a
+    // fresh `client` object every time — and re-seeding the form on
+    // that would wipe phone/email/notes the user has typed but not yet
+    // saved. Re-seed only when the sheet opens or a different client
+    // is loaded.
+  }, [open, client?.id]);
 
   const myAppts = useMemo(() =>
     form.id ? appointments.filter((a: any) => a.clientId === form.id).sort((a: any, b: any) => b.date.localeCompare(a.date)) : []
