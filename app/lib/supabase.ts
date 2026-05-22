@@ -113,6 +113,12 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     created_from_public: r => cleanBool(r.createdFromPublic),
     is_all_day: r => cleanBool(r.isAllDay),
     blocks_availability: r => r.blocksAvailability === false ? false : true,
+    // SMS reminders — the stylist's opt-in for this appointment's
+    // client. The reminder cron + confirmation RPC gate on it.
+    // sms_opt_in_at / sms_consent_source / last_reminder_sent_at are
+    // server-managed (trigger + cron), so they're deliberately not
+    // synced from the client.
+    sms_opt_in: r => cleanBool(r.smsOptIn),
   },
   quotes: {
     label: r => cleanString(r.label),
