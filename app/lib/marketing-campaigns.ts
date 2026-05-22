@@ -149,6 +149,37 @@ export const countSegment = async (segment: CampaignSegment): Promise<number> =>
   return Number(data) || 0;
 };
 
+// One row per client a campaign was enqueued for, with the delivery
+// outcome from the notification queue.
+export type CampaignRecipient = {
+  clientId: string | null;
+  name: string | null;
+  email: string | null;
+  status: string;        // queued | processing | sent | failed
+  sentAt: string | null;
+  failureReason: string | null;
+};
+
+// Who a campaign actually went to. Reads the notification_queue rows
+// the send produced, via an owner-scoped RPC.
+export const fetchCampaignRecipients = async (
+  campaignId: string,
+): Promise<CampaignRecipient[]> => {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("list_campaign_recipients", {
+    campaign_id_in: campaignId,
+  });
+  if (error) throw error;
+  return ((data || []) as any[]).map(r => ({
+    clientId: r.client_id ?? null,
+    name: r.recipient_name ?? null,
+    email: r.recipient_email ?? null,
+    status: String(r.status || "queued"),
+    sentAt: r.sent_at ?? null,
+    failureReason: r.failure_reason ?? null,
+  }));
+};
+
 export const deleteCampaign = async (
   userId: string,
   campaignId: string,

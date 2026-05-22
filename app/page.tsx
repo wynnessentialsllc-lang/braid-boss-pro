@@ -152,6 +152,8 @@ import {
   sendCampaignNow,
   countSegment,
   deleteCampaign,
+  fetchCampaignRecipients,
+  type CampaignRecipient,
 } from "./lib/marketing-campaigns";
 import {
   type ServiceCategory,
@@ -25382,6 +25384,27 @@ const CampaignComposerSheet = ({
   const [recipientCount, setRecipientCount] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  // Who a sent campaign actually went to — loaded on open for any
+  // sent/sending campaign so the stylist can see and audit the list.
+  const [recipients, setRecipients] = useState<CampaignRecipient[] | null>(null);
+  const [recipientsLoading, setRecipientsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isReadOnly || !campaign?.id) return;
+    let cancelled = false;
+    setRecipientsLoading(true);
+    (async () => {
+      try {
+        const list = await fetchCampaignRecipients(campaign.id);
+        if (!cancelled) setRecipients(list);
+      } catch {
+        if (!cancelled) setRecipients([]);
+      } finally {
+        if (!cancelled) setRecipientsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isReadOnly, campaign?.id]);
 
   // Only clients with an email can receive a campaign; the picker
   // hides the rest so the stylist isn't confused by a checked client
@@ -25514,6 +25537,53 @@ const CampaignComposerSheet = ({
             {campaign?.status === "sent"
               ? `Sent ${campaign.sent_at ? new Date(campaign.sent_at).toLocaleString() : ""} to ${campaign.recipient_count ?? 0} client${campaign.recipient_count === 1 ? "" : "s"}.`
               : "This campaign is currently sending."}
+          </div>
+        )}
+
+        {isReadOnly && (
+          <div className="rounded-2xl p-3" style={{ background: C.cream, border: `1px solid ${C.hairline}` }}>
+            <p className="text-[10px] font-bold uppercase mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+              Recipients{recipients ? ` · ${recipients.length}` : ""}
+            </p>
+            {recipientsLoading ? (
+              <p className="text-[12px]" style={{ color: C.muted }}>Loading recipients…</p>
+            ) : !recipients || recipients.length === 0 ? (
+              <p className="text-[12px]" style={{ color: C.muted }}>
+                No recipient records found for this campaign.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {recipients.map((r, i) => {
+                  const pill =
+                    r.status === "sent"
+                      ? { label: "Sent", bg: "rgba(92,124,74,0.12)", fg: C.success }
+                      : r.status === "failed"
+                      ? { label: "Failed", bg: "rgba(176,58,46,0.12)", fg: C.danger }
+                      : { label: "Pending", bg: C.hairline, fg: C.muted };
+                  return (
+                    <div key={r.clientId || i} className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>
+                          {r.name || "Client"}
+                        </p>
+                        {r.email && (
+                          <p className="text-[11px] truncate" style={{ color: C.muted }}>{r.email}</p>
+                        )}
+                        {r.status === "failed" && r.failureReason && (
+                          <p className="text-[11px] truncate" style={{ color: C.danger }}>{r.failureReason}</p>
+                        )}
+                      </div>
+                      <span
+                        className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
+                        style={{ background: pill.bg, color: pill.fg }}
+                      >
+                        {pill.label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
