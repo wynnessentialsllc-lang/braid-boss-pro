@@ -404,6 +404,10 @@ export default function PublicBookingPage() {
   const [preferredDate, setPreferredDate] = useState("");
   const [preferredTime, setPreferredTime] = useState("");
   const [notes, setNotes] = useState("");
+  // SMS reminders opt-in. Default on — most clients want a text
+  // reminder; they can untick it. Threaded into the booking request
+  // so the reminder scheduler knows whether to also send SMS.
+  const [smsOptIn, setSmsOptIn] = useState(true);
   // Style customization (hair color + curl pattern) — only shown
   // when the selected service enables them. "Custom / Other" reveals
   // a small free-text field saved to customization_summary.
@@ -946,6 +950,9 @@ export default function PublicBookingPage() {
           addon_ids_in: hasCatalog && selectedExtraIds.length > 0
             ? selectedExtraIds
             : null,
+          // SMS reminder opt-in. The reminder scheduler only sends a
+          // text when this is true AND a phone was given.
+          sms_opt_in_in: smsOptIn && !!phone.trim(),
         },
       );
       if (!rpcErr && rpcRows) {
@@ -1810,6 +1817,22 @@ export default function PublicBookingPage() {
                 <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" autoComplete="email" />
               </Field>
             </div>
+            {/* SMS reminder opt-in — only meaningful once a phone is
+                entered. The booking request carries this through to
+                the reminder scheduler. */}
+            {phone.trim() && (
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={smsOptIn}
+                  onChange={e => setSmsOptIn(e.target.checked)}
+                  style={{ marginTop: 2, width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }}
+                />
+                <span style={{ fontSize: 13, color: C.coffee, lineHeight: 1.45 }}>
+                  Text me appointment reminders. Standard message rates may apply.
+                </span>
+              </label>
+            )}
             {hasCatalog ? (
               <>
                 {/* Featured services — pinned row above the category

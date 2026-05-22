@@ -17,7 +17,8 @@
 //      app only enqueues the raw template data on `payload`. Old
 //      enqueue rows that include `payload.html` are still
 //      honored for backward compat.
-//   4. Channel: email only in B12.1a. SMS rows are terminal-failed.
+//   4. Channels: email (Resend) and SMS (Twilio). SMS rows consume
+//      one prepaid credit per send and refund it on Twilio failure.
 //
 // Invocation:
 //   * Manual: POST <fn URL> with bearer service-role
@@ -1693,11 +1694,34 @@ serve(async (req) => {
         | { ok: false; retryable: boolean; error: string };
       let provider: string;
       if (row.channel === "sms") {
-        // SMS reuses the same row lifecycle as email — no separate
-        // architecture. Dedup is the existing atomic claim +
-        // idempotent mark_notification_sent.
+        // Prepaid-credit gate. Consume one credit before sending —
+        // the consume RPC is atomic, so concurrent workers can't
+        // double-spend. No credits → terminal-fail (don't burn
+        // retries; the stylist must top up). On a Twilio failure
+        // the credit is refunded so an undelivered text is free.
+        const { data: consumeRes, error: consumeErr } = await admin.rpc(
+          "consume_sms_credit",
+          { user_id_in: row.user_id },
+        );
+        const consumed =
+          !consumeErr && consumeRes && (consumeRes as any).ok === true;
+        if (!consumed) {
+          await failTerminal(admin, row.id, "no_sms_credits");
+          failed++;
+          return;
+        }
         result = await sendViaTwilio(row);
         provider = "twilio";
+        if (!result.ok) {
+          try {
+            await admin.rpc("refund_sms_credit", {
+              user_id_in: row.user_id,
+              note_in: "twilio_send_failed",
+            });
+          } catch {
+            /* refund is best-effort */
+          }
+        }
       } else {
         await enrichCustomization(admin, row);
         await enrichStudioName(admin, row);

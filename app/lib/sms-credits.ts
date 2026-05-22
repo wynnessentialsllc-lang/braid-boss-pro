@@ -8,6 +8,40 @@ import { getSupabase } from "./supabase";
 
 export { SMS_PACKS, findSmsPack, type SmsPack } from "./sms-packs";
 
+// At/below this balance the SMS screen shows a low-credit warning.
+export const SMS_LOW_BALANCE = 20;
+
+export type SmsLedgerEntry = {
+  id: string;
+  delta: number;            // +credits for purchase/refund, -1 for send
+  reason: string;           // purchase | send | refund | adjustment
+  note: string | null;
+  createdAt: string;
+};
+
+// Credit transaction history — purchases, sends, refunds.
+export const fetchSmsLedger = async (
+  userId: string,
+  limit = 60,
+): Promise<SmsLedgerEntry[]> => {
+  if (!userId) return [];
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("sms_credit_ledger")
+    .select("id, delta, reason, note, created_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return ((data || []) as any[]).map(r => ({
+    id: String(r.id),
+    delta: Number(r.delta) || 0,
+    reason: String(r.reason || ""),
+    note: r.note || null,
+    createdAt: String(r.created_at || ""),
+  }));
+};
+
 export const loadSmsBalance = async (userId: string): Promise<number> => {
   if (!userId) return 0;
   const supabase = getSupabase();
