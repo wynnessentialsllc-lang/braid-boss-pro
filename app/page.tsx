@@ -7628,6 +7628,52 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       clientPhone: form.clientPhone, clientEmail: form.clientEmail,
     });
 
+    // New-appointment confirmation email. Whoever creates the
+    // appointment — a client self-booking OR the stylist from this
+    // screen — the client gets a confirmation. Client self-bookings
+    // already email on their own path; this covers stylist-created
+    // appointments, which previously sent nothing. Best-effort and
+    // dedup-keyed on the appointment id so re-saving never resends.
+    try {
+      const isNew = !appt?.id;
+      const isRealAppt = (form.kind || "appointment") === "appointment";
+      const confirmEmail = (form.clientEmail || saved.clientEmail || "").trim();
+      const notCancelled =
+        (saved.status || "") !== "cancelled" && (saved.status || "") !== "canceled";
+      if (isNew && isRealAppt && confirmEmail && notCancelled && store.userId) {
+        const supabase = getSupabase();
+        let studioName = "your stylist";
+        try {
+          const { data: studio } = await supabase
+            .rpc("public_get_studio_name", { user_id_in: store.userId });
+          if (typeof studio === "string" && studio.trim()) studioName = studio.trim();
+        } catch { /* studio name best-effort */ }
+        const balance = Number(saved.totalPrice ?? form.totalPrice ?? 0);
+        await supabase.rpc("queue_notification", {
+          user_id_in: store.userId,
+          channel_in: "email",
+          notification_type_in: "appointment_confirmed",
+          body_in: "Your appointment is confirmed.",
+          subject_in: `Your appointment is confirmed — ${studioName}`,
+          recipient_email_in: confirmEmail,
+          recipient_name_in: form.clientName || saved.clientName || null,
+          payload_in: {
+            clientName: form.clientName || saved.clientName || "there",
+            studioName,
+            serviceName: form.style || saved.style || null,
+            preferredDate: form.date || saved.date || null,
+            preferredTime: form.time || saved.time || null,
+            remainingBalance: Number.isFinite(balance) && balance > 0 ? balance : null,
+            appBase: typeof window !== "undefined" ? window.location.origin : null,
+          },
+          dedupe_key_in: `appointment_confirmed:${saved.id}`,
+          appointment_id_in: saved.id,
+        });
+      }
+    } catch {
+      // Confirmation email is best-effort — never block the save.
+    }
+
     // Stylist-initiated reschedule notice. When the stylist changes
     // the date or time of an EXISTING real appointment, email the
     // client so they know it moved. Best-effort + idempotent (dedupe
