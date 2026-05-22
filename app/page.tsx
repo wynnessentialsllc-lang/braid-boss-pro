@@ -23536,6 +23536,33 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Gift-card denominations → variants. Each amount becomes a
+  // variant named "$25" priced at 25, so the existing variant-price
+  // path in the checkout route charges the right amount. Ids are
+  // reused when an amount already exists, so editing the list
+  // doesn't churn ids referenced by past orders.
+  const parseGiftCardDenominations = (
+    raw: string,
+    existing: ProductVariant[],
+  ): ProductVariant[] => {
+    const amounts: number[] = [];
+    for (const tok of raw.split(/[\n,]/)) {
+      const n = parseFloat(tok.replace(/[^0-9.]/g, ""));
+      if (Number.isFinite(n) && n > 0 && !amounts.includes(n)) amounts.push(n);
+    }
+    return amounts.map(amt => {
+      const name = `$${Number.isInteger(amt) ? amt : amt.toFixed(2)}`;
+      const prior = existing.find(v => v.name === name || Number(v.price) === amt);
+      return normalizeVariant({
+        ...(prior || {}),
+        id: prior?.id,
+        name,
+        price: amt,
+        inventory_count: null,
+      });
+    });
+  };
+
   const handleSave = async () => {
     if (!editing || busy) return;
     setBusy(true); setErr(null);
@@ -23851,6 +23878,47 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                 }}
               />
             </Field>
+            {/* Gift cards get a dedicated denomination editor;
+                every other product uses the generic variant picker. */}
+            {editing.is_gift_card ? (
+              <>
+                <Field
+                  label="Gift card denominations"
+                  hint="Fixed amounts buyers can choose — one per line. Each becomes a priced option."
+                >
+                  <Textarea
+                    value={variantsRaw}
+                    onChange={e => {
+                      setVariantsRaw(e.target.value);
+                      setEditing({
+                        ...editing,
+                        variant_label: "Amount",
+                        variants: parseGiftCardDenominations(e.target.value, editing.variants || []),
+                      });
+                    }}
+                    rows={4}
+                    placeholder={"25\n50\n100"}
+                  />
+                </Field>
+                {(editing.variants || []).length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {(editing.variants || []).map(v => (
+                      <Pill key={v.id} tone="gold">{v.name}</Pill>
+                    ))}
+                  </div>
+                )}
+                {editing.gift_card_allow_custom ? (
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    Buyers can also enter a custom amount ($10–$200), so denominations are optional.
+                  </p>
+                ) : (editing.variants || []).length === 0 ? (
+                  <p className="text-[11px]" style={{ color: C.brandError }}>
+                    Add at least one denomination, or turn on custom amounts — otherwise buyers have nothing to pick.
+                  </p>
+                ) : null}
+              </>
+            ) : (
+            <>
             {/* Variant picker config — single dimension per product
                 (Color, Size, Style, etc). Leave Option label blank
                 to disable the picker entirely. Variant names are
@@ -23996,6 +24064,8 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                   </button>
                 </div>
               </Field>
+            )}
+            </>
             )}
             <Field label="External checkout URL (optional)" hint="When set, the Buy button redirects out instead of running Stripe checkout.">
               <Input type="url" inputMode="url" value={editing.external_checkout_url || ""} onChange={e => setEditing({ ...editing, external_checkout_url: e.target.value || null })} placeholder="https://…" />
