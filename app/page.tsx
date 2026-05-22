@@ -71,6 +71,7 @@ import {
   DEFAULT_LOYALTY, loadLoyaltySettings, saveLoyaltySettings,
   fetchLoyaltyRedemptions, recordLoyaltyRedemption, earnedPoints,
 } from "./lib/loyalty";
+import { SMS_PACKS, loadSmsBalance, buySmsCredits } from "./lib/sms-credits";
 import {
   type ReferralReward,
   loadReferralSettings,
@@ -12302,7 +12303,7 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -12674,6 +12675,28 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Loyalty points</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Reward clients for every visit</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openSmsCredits && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openSmsCredits}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                      }}
+                    >
+                      <MessageSquare size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>SMS credits</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>Buy text-message credits for reminders</p>
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
@@ -24694,6 +24717,101 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
 };
 
 // ============================================================
+//  SMS CREDITS — prepaid text-message balance
+// ============================================================
+const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const [loading, setLoading] = useState(true);
+  const [balance, setBalance] = useState(0);
+  const [busyPack, setBusyPack] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!userId) { setLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const b = await loadSmsBalance(userId);
+        if (!cancelled) setBalance(b);
+      } catch { /* shows 0 */ }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const buy = async (packId: string) => {
+    setErr(null);
+    setBusyPack(packId);
+    try {
+      await buySmsCredits(packId);  // redirects to Stripe on success
+    } catch (e: any) {
+      setErr(e?.message || "Couldn't start checkout.");
+      setBusyPack(null);
+    }
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="SMS credits"
+        subtitle="Text-message balance"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-4">
+        <Card className="p-5 text-center">
+          <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+            Current balance
+          </p>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 40, fontWeight: 700, color: C.espresso, lineHeight: 1.1, marginTop: 4 }}>
+            {loading ? "…" : balance.toLocaleString()}
+          </p>
+          <p className="text-[12px]" style={{ color: C.muted }}>
+            text{balance === 1 ? "" : "s"} remaining
+          </p>
+        </Card>
+
+        <p className="text-[10px] font-bold uppercase tracking-widest px-1" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+          Buy credits
+        </p>
+        {SMS_PACKS.map(pack => (
+          <Card key={pack.id} className="p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold" style={{ color: C.espresso }}>
+                  {pack.label} · {pack.credits.toLocaleString()} texts
+                </p>
+                <p className="text-[11px]" style={{ color: C.muted }}>
+                  ${(pack.priceCents / 100).toFixed(2)} · ${((pack.priceCents / 100) / pack.credits).toFixed(3)} per text
+                </p>
+              </div>
+              <Button
+                variant="primary"
+                onClick={() => buy(pack.id)}
+                disabled={!!busyPack}
+              >
+                {busyPack === pack.id ? "Opening…" : `$${(pack.priceCents / 100).toFixed(0)}`}
+              </Button>
+            </div>
+          </Card>
+        ))}
+
+        {err && (
+          <p className="text-[12px] font-semibold" style={{ color: C.danger }}>{err}</p>
+        )}
+
+        <Card className="p-3.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+            Credits are spent when text reminders and confirmations send to your
+            clients — one credit per text. Credits never expire. You only pay for
+            what you use; the platform never texts on an empty balance.
+          </p>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
 //  LOYALTY — per-visit points program
 // ============================================================
 const LoyaltyScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
@@ -26733,12 +26851,13 @@ export default function App() {
       {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "marketplace" && <MarketplaceScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "giftCards" && <GiftCardsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "loyalty" && <LoyaltyScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "smsCredits" && <SmsCreditsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "inventory" && <InventoryScreen store={store} onBack={() => setSecondary(inventoryBack)} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
