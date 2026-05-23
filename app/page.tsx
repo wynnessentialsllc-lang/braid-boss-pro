@@ -13676,7 +13676,8 @@ export type NotificationTarget =
   | { kind: "client"; clientId: string }
   | { kind: "reminders" }
   | { kind: "schedule" }
-  | { kind: "booking_approval"; requestId: string };
+  | { kind: "booking_approval"; requestId: string }
+  | { kind: "email_log"; queueId: string };
 
 type NotifItem = {
   id: string;
@@ -13973,16 +13974,23 @@ const useNotifications = (store: any) => {
           .order("created_at", { ascending: false })
           .limit(80);
         if (cancelled) return;
-        const items: NotifItem[] = ((data || []) as any[]).map((r) => ({
-          id: String(r.id),
-          category: "communication_status" as NotifCategory,
-          kind: "client_email_sent",
-          tone: "neutral" as const,
-          icon: <Mail size={16} style={{ color: C.muted }} />,
-          title: String(r.title || "Email sent"),
-          body: String(r.body || ""),
-          meta: r.created_at ? fmtRelative(r.created_at) : undefined,
-        }));
+        const items: NotifItem[] = ((data || []) as any[]).map((r) => {
+          const queueId = (r.data && typeof r.data === "object" ? r.data.queueId : null) || null;
+          return {
+            id: String(r.id),
+            category: "communication_status" as NotifCategory,
+            kind: "client_email_sent",
+            tone: "neutral" as const,
+            icon: <Mail size={16} style={{ color: C.muted }} />,
+            title: String(r.title || "Email sent"),
+            body: String(r.body || ""),
+            meta: r.created_at ? fmtRelative(r.created_at) : undefined,
+            // Tap → open a sheet with the actual email contents.
+            target: queueId
+              ? ({ kind: "email_log", queueId: String(queueId) } as const)
+              : undefined,
+          };
+        });
         setPersistedItems(items);
       } catch { /* best-effort */ }
     };
@@ -14086,6 +14094,7 @@ type NotificationRouterCtx = {
   setApptPrefill: (a: any) => void;
   setClientToOpenId: (id: string | null) => void;
   setApprovalFocusId: (id: string | null) => void;
+  setEmailLogId: (id: string | null) => void;
 };
 
 const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
@@ -14120,6 +14129,13 @@ const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
       // pre-expand that row, then navigate.
       ctx.setApprovalFocusId(target.requestId);
       ctx.setSecondary("approvals");
+      break;
+    }
+    case "email_log": {
+      // Open a sheet showing the actual notification_queue row —
+      // subject, recipient, body, status. The fetch happens in the
+      // sheet against the RLS-scoped owner_select policy.
+      ctx.setEmailLogId(target.queueId);
       break;
     }
   }
@@ -14564,6 +14580,182 @@ const NotificationsSheet = ({ open, onClose, items, unreadCount, dismiss, clearA
           </div>
         </>
       )}
+    </Sheet>
+  );
+};
+
+// Detail view for a single notification_queue row — opened by
+// tapping any "Email sent" entry in the bell. Shows subject,
+// recipient, status, and the actual body that was sent.
+const EmailDetailSheet = ({ queueId, onClose }: {
+  queueId: string | null;
+  onClose: () => void;
+}) => {
+  const [loading, setLoading] = useState(true);
+  const [row, setRow] = useState<any>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!queueId) { setRow(null); return; }
+    let cancelled = false;
+    setLoading(true);
+    setErr(null);
+    (async () => {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from("notification_queue")
+          .select(
+            "id, channel, notification_type, status, subject, body, payload, recipient_email, recipient_phone, recipient_name, scheduled_for, sent_at, failed_at, failure_reason, dedupe_key, created_at",
+          )
+          .eq("id", queueId)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error) { setErr(error.message); setRow(null); }
+        else setRow(data || null);
+      } catch (e: any) {
+        if (!cancelled) { setErr(e?.message || "Couldn't load."); setRow(null); }
+      } finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [queueId]);
+
+  const statusTone = (s: string | null | undefined): { label: string; bg: string; fg: string } => {
+    if (s === "sent")       return { label: "Sent",       bg: "rgba(92,124,74,0.12)", fg: C.success };
+    if (s === "failed")     return { label: "Failed",     bg: "rgba(176,58,46,0.12)", fg: C.danger };
+    if (s === "processing") return { label: "Sending…",   bg: C.hairline,             fg: C.muted };
+    return                         { label: "Queued",     bg: C.hairline,             fg: C.muted };
+  };
+
+  const fmtTs = (ts: string | null | undefined): string => {
+    if (!ts) return "—";
+    try { return new Date(ts).toLocaleString(); } catch { return String(ts); }
+  };
+
+  const payload = (row?.payload && typeof row.payload === "object") ? row.payload : {};
+  const payloadRows: Array<[string, string]> = [];
+  const addRow = (label: string, value: any) => {
+    const v = value == null ? "" : String(value).trim();
+    if (v) payloadRows.push([label, v]);
+  };
+  addRow("Service", payload.serviceName);
+  addRow("Date",    payload.preferredDate);
+  addRow("Time",    payload.preferredTime);
+  addRow("Studio",  payload.studioName);
+  addRow("Order #", payload.orderRef);
+  addRow("Cancel link",     payload.cancelUrl);
+  addRow("Reschedule link", payload.rescheduleUrl);
+  addRow("Sign link",       payload.signUrl || payload.contractSignUrl);
+  addRow("Portal link",     payload.portalUrl);
+  addRow("View order link", payload.viewOrderUrl);
+  addRow("Review link",     payload.reviewUrl);
+  if (Array.isArray(payload.contracts) && payload.contracts.length > 0) {
+    payload.contracts.forEach((c: any, i: number) => {
+      const t = String(c?.title || `Contract ${i + 1}`);
+      const u = String(c?.url || "").trim();
+      if (u) payloadRows.push([t, u]);
+    });
+  }
+
+  const tone = statusTone(row?.status);
+
+  return (
+    <Sheet open={!!queueId} onClose={onClose} title="Email details">
+      <div className="space-y-3 pb-4">
+        {loading ? (
+          <p className="text-[13px] text-center py-6" style={{ color: C.muted }}>Loading…</p>
+        ) : err ? (
+          <p className="text-[13px]" style={{ color: C.danger }}>{err}</p>
+        ) : !row ? (
+          <p className="text-[13px]" style={{ color: C.muted }}>This email is no longer available.</p>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-2">
+              <span
+                className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest"
+                style={{ background: tone.bg, color: tone.fg, letterSpacing: "0.12em" }}
+              >
+                {tone.label}
+              </span>
+              <span className="text-[11px]" style={{ color: C.muted }}>
+                {row.channel === "sms" ? "SMS" : "Email"} · {String(row.notification_type || "")}
+              </span>
+            </div>
+
+            <Card className="p-3.5 space-y-2">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>To</p>
+                <p className="text-[13px]" style={{ color: C.espresso }}>
+                  {row.recipient_name ? `${row.recipient_name} · ` : ""}
+                  {row.recipient_email || row.recipient_phone || "—"}
+                </p>
+              </div>
+              {row.subject && (
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Subject</p>
+                  <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>{row.subject}</p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Queued</p>
+                  <p className="text-[12px]" style={{ color: C.coffee }}>{fmtTs(row.created_at)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+                    {row.status === "failed" ? "Failed" : row.sent_at ? "Sent" : "Scheduled"}
+                  </p>
+                  <p className="text-[12px]" style={{ color: C.coffee }}>
+                    {fmtTs(row.failed_at || row.sent_at || row.scheduled_for)}
+                  </p>
+                </div>
+              </div>
+              {row.failure_reason && (
+                <p className="text-[12px]" style={{ color: C.danger }}>{String(row.failure_reason)}</p>
+              )}
+            </Card>
+
+            {row.body && (
+              <Card className="p-3.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+                  Body
+                </p>
+                <pre
+                  className="text-[12px] whitespace-pre-wrap"
+                  style={{ color: C.coffee, fontFamily: "inherit", lineHeight: 1.5, margin: 0 }}
+                >{String(row.body)}</pre>
+              </Card>
+            )}
+
+            {payloadRows.length > 0 && (
+              <Card className="p-3.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+                  Included
+                </p>
+                <div className="space-y-1.5">
+                  {payloadRows.map(([k, v], i) => {
+                    const isUrl = /^https?:\/\//i.test(v);
+                    return (
+                      <div key={i} className="flex flex-col">
+                        <span className="text-[11px]" style={{ color: C.muted }}>{k}</span>
+                        {isUrl ? (
+                          <a href={v} target="_blank" rel="noopener noreferrer" className="text-[12px] break-all" style={{ color: C.goldDeep }}>{v}</a>
+                        ) : (
+                          <span className="text-[12px]" style={{ color: C.espresso }}>{v}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            )}
+
+            <p className="text-[10px] text-center" style={{ color: C.muted }}>
+              {row.dedupe_key ? `Dedupe key: ${row.dedupe_key}` : ""}
+            </p>
+          </>
+        )}
+      </div>
     </Sheet>
   );
 };
@@ -26792,6 +26984,10 @@ export default function App() {
   // client, App stamps the id and Clients pops the matching profile.
   const [clientToOpenId, setClientToOpenId] = useState<string | null>(null);
   const [approvalFocusId, setApprovalFocusId] = useState<string | null>(null);
+  // Notification-tap deep link: a "Contract sign-link emailed" /
+  // "Confirmation emailed" / etc. row opens this sheet showing the
+  // actual notification_queue row (subject, recipient, body, status).
+  const [emailLogId, setEmailLogId] = useState<string | null>(null);
   const [commPickerCtx, setCommPickerCtx] = useState<CommContext | null>(null);
   const [activeComm, setActiveComm] = useState<(CommContext & { templateKey: CommTemplateKey }) | null>(null);
   const [activeReceipt, setActiveReceipt] = useState<ReceiptRecord | null>(null);
@@ -26861,6 +27057,7 @@ export default function App() {
       setApptPrefill,
       setClientToOpenId,
       setApprovalFocusId,
+      setEmailLogId,
     });
   }, [notifications, store.appointments]);
 
@@ -27349,6 +27546,10 @@ export default function App() {
         markAllRead={notifications.markAllRead}
         onTap={handleNotificationTap}
         readIds={notifications.readIds}
+      />
+      <EmailDetailSheet
+        queueId={emailLogId}
+        onClose={() => setEmailLogId(null)}
       />
 
       {/* Transaction sheet */}
