@@ -13975,7 +13975,29 @@ const useNotifications = (store: any) => {
           .limit(80);
         if (cancelled) return;
         const items: NotifItem[] = ((data || []) as any[]).map((r) => {
-          const queueId = (r.data && typeof r.data === "object" ? r.data.queueId : null) || null;
+          const d = (r.data && typeof r.data === "object") ? r.data : {};
+          const cat = String(r.category || "");
+          // Contract signed → actionable, appointment-category bell
+          // entry so it badges. Tap → opens the appointment.
+          if (cat === "contract") {
+            const apptId = d.appointmentId || null;
+            return {
+              id: String(r.id),
+              category: "appointment" as NotifCategory,
+              kind: "contract_signed",
+              tone: "success" as const,
+              icon: <FileText size={16} style={{ color: C.goldDeep }} />,
+              title: String(r.title || "Contract signed"),
+              body: String(r.body || ""),
+              meta: r.created_at ? fmtRelative(r.created_at) : undefined,
+              target: apptId
+                ? ({ kind: "appointment", appointmentId: String(apptId) } as const)
+                : undefined,
+            };
+          }
+          // Default: email-sent (info-only); tap opens the email
+          // detail sheet via the queueId stamped in data.
+          const queueId = d.queueId || null;
           return {
             id: String(r.id),
             category: "communication_status" as NotifCategory,
@@ -13985,7 +14007,6 @@ const useNotifications = (store: any) => {
             title: String(r.title || "Email sent"),
             body: String(r.body || ""),
             meta: r.created_at ? fmtRelative(r.created_at) : undefined,
-            // Tap → open a sheet with the actual email contents.
             target: queueId
               ? ({ kind: "email_log", queueId: String(queueId) } as const)
               : undefined,
