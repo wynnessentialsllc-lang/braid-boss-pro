@@ -113,11 +113,26 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
   // the stylist actually sees. Exclude cancelled, personal/blocked,
   // and dateless rows — same filters as lib/reports.ts
   // pendingBalanceAppts + the dashboard helpers.
+  //
+  // Scoped to the CURRENT MONTH so this count matches the Pending
+  // Balances sheet the stylist actually sees from the dashboard.
+  // Without the month gate, the insight rolled in future-month
+  // bookings (e.g. June balances while it's still May) and the
+  // "N clients owe a balance" headline disagreed with the list.
+  const monthStartIso = today.slice(0, 8) + "01";
+  const [yStr, mStr] = today.split("-");
+  const yNum = Number(yStr);
+  const mNum = Number(mStr);
+  const nextMonthDate = new Date(yNum, mNum, 1);  // mNum is already next month (1-indexed -> 0-indexed)
+  const nextMonthIso =
+    `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth() + 1).padStart(2, "0")}-01`;
   const owingAppts = appts.filter(a =>
     a &&
     !isCanceledAppointment(a) &&
     (!a.kind || a.kind === "appointment") &&
     !!a.date &&
+    a.date >= monthStartIso &&
+    a.date < nextMonthIso &&
     a.paymentStatus !== "paid" &&
     num(a.balanceDue) > 0
   );
