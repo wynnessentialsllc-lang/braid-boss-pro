@@ -463,7 +463,16 @@ export const weekClientRows = (
   appointments: AppointmentLike[] | null | undefined,
   reference: string = todayISO(),
 ): WeekClientRow[] => {
-  const list = weekRevenueAppts(appointments, reference);
+  // Full Sun–Sat window so already-booked appointments later in the
+  // week (e.g. a Saturday on the books since Tuesday) count toward
+  // the "clients this week" tile right away, not only after that day
+  // arrives.
+  const ws = startOfWeekISO(reference);
+  const we = addDaysISO(ws, 6);
+  const list = (appointments || [])
+    .filter(isBillable)
+    .filter(a => a.date && a.date >= ws && a.date <= we)
+    .sort((a, b) => ((a.date || "") + (a.time || "")).localeCompare((b.date || "") + (b.time || "")));
   const byClient = new Map<string, WeekClientRow>();
   for (const a of list) {
     const id = a.clientId || "_unknown";

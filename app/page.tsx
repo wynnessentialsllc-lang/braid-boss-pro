@@ -3098,7 +3098,7 @@ const DashboardHero = ({
               Week
             </p>
             <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: "#FFFFFF", lineHeight: 1 }}>
-              {weekAppts} {weekAppts === 1 ? "booking" : "bookings"}
+              {weekAppts} {weekAppts === 1 ? "client" : "clients"}
             </p>
           </div>
         </div>
@@ -3972,7 +3972,11 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
       .reduce((s, a) => s + calculateCollectedAmount(a), 0);
     const monthIncome = roundCents(txIncomeMonth + apptIncomeMonth);
     const monthExpense = roundCents(transactions.filter(t => t.type === "expense" && t.date >= msISO).reduce((s, t) => s + parseMoney(t.amount), 0));
-    return { weekRevenue, weekAppts: completedThisWeek.length, pendingBalance, monthProfit: calculateProfit(monthIncome, monthExpense) };
+    // "Week clients" tile shows unique clients booked across the full
+    // Sun–Sat week (not appointments Sun→today), matching the detail
+    // sheet that uses weekClientRows.
+    const weekClients = weekClientRows(appointments, today).length;
+    return { weekRevenue, weekAppts: weekClients, pendingBalance, monthProfit: calculateProfit(monthIncome, monthExpense) };
   }, [appointments, transactions, today]);
   // Pending balance rows for the dashboard list, projected from the
   // canonical `pendingBalanceAppts` (which is what the dedupe sets use)
