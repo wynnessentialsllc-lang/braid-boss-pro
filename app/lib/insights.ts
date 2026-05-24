@@ -88,6 +88,9 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
   const today = input.today || new Date().toISOString().slice(0, 10);
   const business = input.settings?.business || {};
   const currency = business?.currency || "USD";
+  // Exclude cancelled rows AND non-real entries (personal blocks,
+  // all-day Unavailable holds) so an off-day with only a "blocked"
+  // event doesn't read as "1 appointment today".
   const appts = safeArr(input.appointments).filter(a => a && !isCanceledAppointment(a));
   const clients = safeArr(input.clients);
   const out: Insight[] = [];
@@ -213,7 +216,17 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
   }
 
   // ---- SCHEDULE: today's appointment list (high if any) ---------------
-  const todayAppts = appts.filter(a => a.date === today);
+  // Exclude personal/blocked time and all-day Unavailable holds so an
+  // off-day with only a "blocked" event doesn't read as "1 appointment
+  // today". (The base `appts` filter intentionally keeps these so
+  // other insights can reference them; the schedule headline is the
+  // one place we strictly want real bookings.)
+  const todayAppts = appts.filter(a =>
+    a.date === today
+    && (a.kind ?? "appointment") === "appointment"
+    && a.is_all_day !== true
+    && a.isAllDay !== true,
+  );
   if (todayAppts.length > 0) {
     const first = todayAppts.sort((a, b) => (a.time || "").localeCompare(b.time || ""))[0];
     out.push({
