@@ -2060,7 +2060,6 @@ export default function PublicBookingPage() {
                       }}
                     >
                       {filteredCatalog.map(s => {
-                        const cover = (s as any).cover_image_url as string | undefined;
                         const deposit = s.deposit_required && s.deposit_amount
                           ? `$${Number(s.deposit_amount).toFixed(0)} deposit`
                           : null;
@@ -2105,23 +2104,10 @@ export default function PublicBookingPage() {
                               transition: "transform 120ms ease, box-shadow 120ms ease",
                             }}
                           >
-                            {cover && (
-                              <div
-                                style={{
-                                  aspectRatio: "4 / 3",
-                                  background: C.ivory,
-                                  overflow: "hidden",
-                                }}
-                              >
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={cover}
-                                  alt={`${s.name} cover`}
-                                  loading="lazy"
-                                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                                />
-                              </div>
-                            )}
+                            {/* No cover image on the landing menu —
+                                the photo is reserved for the detail
+                                page so the menu reads cleanly as a
+                                text list of services (Acuity flow). */}
                             <div style={{ padding: 16 }}>
                               <p
                                 style={{
@@ -2237,8 +2223,8 @@ export default function PublicBookingPage() {
                         style={{
                           display: "block", width: "100%", padding: 0, border: 0,
                           appearance: "none", WebkitAppearance: "none",
-                          aspectRatio: "16 / 9", background: C.ivory,
-                          cursor: "zoom-in", overflow: "hidden",
+                          background: C.ivory,
+                          cursor: "zoom-in",
                         }}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2246,7 +2232,7 @@ export default function PublicBookingPage() {
                           src={(selectedCatalogService as any).cover_image_url}
                           alt={`${selectedCatalogService.name} cover`}
                           loading="lazy"
-                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                          style={{ width: "100%", height: "auto", display: "block" }}
                         />
                       </button>
                     )}
@@ -2297,9 +2283,8 @@ export default function PublicBookingPage() {
                       overflow: "hidden",
                     }}
                   >
-                    {/* Cover image on the parent header — same
-                        object-cover treatment as the featured cards
-                        so the page reads as one design system. */}
+                    {/* Cover image shows the full photo (no crop) so
+                        clients see exactly what they're booking. */}
                     {(selectedCatalogService as any).cover_image_url && (
                       <button
                         type="button"
@@ -2308,8 +2293,8 @@ export default function PublicBookingPage() {
                         style={{
                           display: "block", width: "100%", padding: 0, border: 0,
                           appearance: "none", WebkitAppearance: "none",
-                          aspectRatio: "16 / 9", background: C.ivory,
-                          cursor: "zoom-in", overflow: "hidden",
+                          background: C.ivory,
+                          cursor: "zoom-in",
                         }}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2317,7 +2302,7 @@ export default function PublicBookingPage() {
                           src={(selectedCatalogService as any).cover_image_url}
                           alt={`${selectedCatalogService.name} cover`}
                           loading="lazy"
-                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                          style={{ width: "100%", height: "auto", display: "block" }}
                         />
                       </button>
                     )}
