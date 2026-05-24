@@ -682,12 +682,17 @@ const isCanceledAppointment = (appt: any): boolean => isCanceledStatus(appt?.sta
 const normalizeAppointment = (raw: any): any => {
   if (!raw || typeof raw !== "object") return raw;
   const totalPrice = roundCents(parseMoney(raw.totalPrice));
+  // totalPrice is the gross subtotal; balance + paid-in-full both key
+  // off the NET (post-discount) total so a "Mark paid" against a
+  // discounted appointment lands as paid (not "owes the discount").
+  const discountAmount = roundCents(parseMoney(raw.discountAmount));
+  const netTotal = Math.max(0, roundCents(totalPrice - discountAmount));
   let depositPaid = roundCents(parseMoney(raw.depositPaid));
-  if (depositPaid > totalPrice && totalPrice > 0) depositPaid = totalPrice;
+  if (depositPaid > netTotal && netTotal > 0) depositPaid = netTotal;
   if (depositPaid < 0) depositPaid = 0;
-  const balanceDue = roundCents(Math.max(0, totalPrice - depositPaid));
+  const balanceDue = roundCents(Math.max(0, netTotal - depositPaid));
   let paymentStatus: "paid" | "" | string = raw.paymentStatus || "";
-  if (totalPrice > 0 && balanceDue === 0) paymentStatus = "paid";
+  if (netTotal > 0 && balanceDue === 0) paymentStatus = "paid";
   else if (paymentStatus === "paid") paymentStatus = "";
   return {
     ...raw,
@@ -3989,9 +3994,13 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
   const markApptPaid = async (appt: any) => {
     const apptDate = appt.date || todayISO();
     const isPastOrToday = apptDate <= today;
+    // Net total = subtotal − discount. Without subtracting the
+    // discount, depositPaid would equal the gross subtotal and the
+    // appointment would render as "overpaid by $discount".
+    const netTotal = Math.max(0, parseMoney(appt.totalPrice) - parseMoney(appt.discountAmount));
     const updated = {
       ...appt,
-      depositPaid: parseMoney(appt.totalPrice),
+      depositPaid: netTotal,
       balanceDue: 0,
       paymentStatus: "paid",
       paymentDate: appt.paymentDate || todayISO(),
@@ -4168,9 +4177,10 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
           revenueStats={revenueStats}
           onOpenAppointment={(a) => { closeKpi(); openAppointmentRecord?.(a); }}
           markAppointmentPaid={async (a) => {
+            const netTotal = Math.max(0, (Number(a.totalPrice) || 0) - (Number(a.discountAmount) || 0));
             const next = {
               ...a,
-              depositPaid: Number(a.totalPrice) || 0,
+              depositPaid: netTotal,
               paymentStatus: "paid",
               paymentDate: a.paymentDate || todayISO(),
               status: a.status === "scheduled" || a.status === "confirmed" ? "completed" : a.status,
@@ -8350,9 +8360,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                 onClick={() => {
                   const apptDate = form.date || todayISO();
                   const isPastOrToday = apptDate <= todayISO();
+                  const netTotal = Math.max(0, parseMoney(form.totalPrice) - parseMoney(form.discountAmount));
                   setForm({
                     ...form,
-                    depositPaid: parseMoney(form.totalPrice),
+                    depositPaid: netTotal,
                     paymentStatus: "paid",
                     paymentDate: form.paymentDate || todayISO(),
                     status: isPastOrToday && !isCanceledAppointment(form) && form.status !== "no_show"
@@ -14441,6 +14452,17 @@ const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: 
 
         <Card className="p-4">
           <div className="space-y-1.5">
+            {receipt.discountAmount && receipt.subtotal ? (
+              <>
+                <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
+                  <span>Subtotal</span><span className="font-mono">{formatCurrency(receipt.subtotal, currency)}</span>
+                </div>
+                <div className="flex justify-between text-sm" style={{ color: C.goldDeep }}>
+                  <span>Discount{receipt.discountName ? ` — ${receipt.discountName}` : ""}</span>
+                  <span className="font-mono">− {formatCurrency(receipt.discountAmount, currency)}</span>
+                </div>
+              </>
+            ) : null}
             <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
               <span>Total price</span><span className="font-mono">{formatCurrency(receipt.totalPrice, currency)}</span>
             </div>

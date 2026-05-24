@@ -143,6 +143,13 @@ export const renderReceiptPdf = async (
     y += 22;
   };
 
+  if (rcp.discountAmount && rcp.subtotal) {
+    drawRow("Subtotal", fmt(rcp.subtotal));
+    drawRow(
+      "Discount" + (rcp.discountName ? ` — ${rcp.discountName}` : ""),
+      "− " + fmt(rcp.discountAmount),
+    );
+  }
   drawRow("Total price", fmt(rcp.totalPrice));
   drawRow("Deposit paid", fmt(rcp.depositPaid), { muted: rcp.depositPaid === 0 });
   drawRow("Balance due", fmt(rcp.balanceDue), { muted: rcp.balanceDue === 0 });

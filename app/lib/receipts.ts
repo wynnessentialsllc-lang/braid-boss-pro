@@ -15,7 +15,13 @@ export type ReceiptRecord = {
   service?: string;
   serviceDate?: string;
   serviceTime?: string;
+  // totalPrice is the NET total (post-discount). For receipts that
+  // had a discount applied, subtotal + discount lines are surfaced
+  // separately so the math reads honestly.
   totalPrice: number;
+  subtotal?: number;
+  discountAmount?: number;
+  discountName?: string;
   depositPaid: number;
   balanceDue: number;
   amountCollected: number;
@@ -84,7 +90,13 @@ export const buildReceiptFromAppointment = (
   newId: string,
   clientName?: string,
 ): ReceiptRecord => {
-  const total = parseMoney(a.totalPrice);
+  const subtotal = parseMoney(a.totalPrice);
+  const discountAmount = parseMoney(a.discountAmount);
+  // Receipt math uses the NET total. The form's "Total price" field
+  // is the subtotal (gross) and the discount line subtracts from it,
+  // so a paid-in-full receipt must reflect post-discount dollars or
+  // the math reads as if the client overpaid by the discount amount.
+  const total = Math.max(0, subtotal - discountAmount);
   const deposit = parseMoney(a.depositPaid);
   const balance = parseMoney(a.balanceDue ?? Math.max(0, total - deposit));
   return {
@@ -98,6 +110,9 @@ export const buildReceiptFromAppointment = (
     serviceDate: a.date || "",
     serviceTime: a.time || "",
     totalPrice: total,
+    subtotal: discountAmount > 0 ? subtotal : undefined,
+    discountAmount: discountAmount > 0 ? discountAmount : undefined,
+    discountName: discountAmount > 0 ? (a.discountName || undefined) : undefined,
     depositPaid: deposit,
     balanceDue: balance,
     amountCollected: type === "receipt" ? (deposit > 0 ? deposit : (balance === 0 ? total : 0)) : 0,
@@ -148,6 +163,8 @@ export const buildReceiptSummaryText = (rcp: ReceiptRecord, currency: string = "
     `Client: ${rcp.clientName || "—"}`,
     `Service: ${rcp.service || "—"}`,
     rcp.serviceDate ? `Date: ${fmtDateLong(rcp.serviceDate)}${rcp.serviceTime ? ` ${fmtTime(rcp.serviceTime)}` : ""}` : null,
+    rcp.discountAmount && rcp.subtotal ? `Subtotal: ${fmt(rcp.subtotal)}` : null,
+    rcp.discountAmount ? `Discount${rcp.discountName ? ` (${rcp.discountName})` : ""}: − ${fmt(rcp.discountAmount)}` : null,
     `Total: ${fmt(rcp.totalPrice)}`,
     `Deposit paid: ${fmt(rcp.depositPaid)}`,
     `Balance due: ${fmt(rcp.balanceDue)}`,
