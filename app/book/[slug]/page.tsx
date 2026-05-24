@@ -1806,32 +1806,38 @@ export default function PublicBookingPage() {
 
         {!linkLoading && !linkError && !submitted && link && (
           <form onSubmit={handleSubmit} style={{ marginTop: 28, display: "grid", gap: 14 }}>
-            <Field label="Your name">
-              <Input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" autoComplete="name" required />
-            </Field>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Phone">
-                <Input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="555-0123" autoComplete="tel" />
-              </Field>
-              <Field label="Email">
-                <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" autoComplete="email" />
-              </Field>
-            </div>
-            {/* SMS reminder opt-in — only meaningful once a phone is
-                entered. The booking request carries this through to
-                the reminder scheduler. */}
-            {phone.trim() && (
-              <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={smsOptIn}
-                  onChange={e => setSmsOptIn(e.target.checked)}
-                  style={{ marginTop: 2, width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }}
-                />
-                <span style={{ fontSize: 13, color: C.coffee, lineHeight: 1.45 }}>
-                  Text me appointment reminders. Standard message rates may apply.
-                </span>
-              </label>
+            {/* Personal info gates on having picked a service when a
+                catalog exists — the landing should read as a menu
+                (Acuity flow). Legacy/free-form bookings keep the
+                old "name first" layout because there's no service
+                grid above. */}
+            {(serviceId || !hasCatalog) && (
+              <>
+                <Field label="Your name">
+                  <Input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" autoComplete="name" required />
+                </Field>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <Field label="Phone">
+                    <Input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="555-0123" autoComplete="tel" />
+                  </Field>
+                  <Field label="Email">
+                    <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" autoComplete="email" />
+                  </Field>
+                </div>
+                {phone.trim() && (
+                  <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={smsOptIn}
+                      onChange={e => setSmsOptIn(e.target.checked)}
+                      style={{ marginTop: 2, width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }}
+                    />
+                    <span style={{ fontSize: 13, color: C.coffee, lineHeight: 1.45 }}>
+                      Text me appointment reminders. Standard message rates may apply.
+                    </span>
+                  </label>
+                )}
+              </>
             )}
             {hasCatalog ? (
               <>
@@ -2035,38 +2041,178 @@ export default function PublicBookingPage() {
                     </p>
                   );
                 })()}
-                <Field label="Service">
-                  <select
-                    value={serviceId}
-                    onChange={e => {
-                      const id = e.target.value;
-                      setServiceId(id);
-                      setSelectedVariationId(""); // reset picker on service change
-                      const svc = catalog.find(s => s.id === id);
-                      // Keep serviceName in sync as the human-readable
-                      // label submitted to the booking-request edge
-                      // function (which still expects serviceName).
-                      setServiceName(svc?.name || "");
-                      // Phase B1 view tracking — anon allow-listed.
-                      if (id && link?.user_id && svc) {
-                        void emitAnalyticsEvent({
-                          ownerUserId: link.user_id,
-                          type: "public_service_viewed" as any,
-                          source: "public",
-                          payload: { slug, serviceId: id, serviceName: svc.name },
+                {/* Acuity-style service menu. The dropdown was hidden
+                    behind a tap; cards put every option in front of
+                    the client with the cover photo, name, duration,
+                    price, and deposit on the surface. Selecting a
+                    card sets serviceId, which gates the rest of the
+                    form below — name/contact, calendar, notes — so
+                    the landing reads as a menu first, booking flow
+                    second. The "back" affordance to return to the
+                    menu sits above the selected-service card. */}
+                {!serviceId && (
+                  <Field label={filteredCatalog.length === 1 ? "Service" : "Choose a service"}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr",
+                        gap: 12,
+                      }}
+                    >
+                      {filteredCatalog.map(s => {
+                        const cover = (s as any).cover_image_url as string | undefined;
+                        const deposit = s.deposit_required && s.deposit_amount
+                          ? `$${Number(s.deposit_amount).toFixed(0)} deposit`
+                          : null;
+                        return (
+                          <button
+                            key={`svc_card_${s.id}`}
+                            type="button"
+                            onClick={() => {
+                              setServiceId(s.id);
+                              setSelectedVariationId("");
+                              setServiceName(s.name || "");
+                              if (link?.user_id) {
+                                void emitAnalyticsEvent({
+                                  ownerUserId: link.user_id,
+                                  type: "public_service_viewed" as any,
+                                  source: "public",
+                                  payload: { slug, serviceId: s.id, serviceName: s.name },
+                                });
+                              }
+                              // Scroll the picked service to the top
+                              // so the client lands on its photo and
+                              // details, not back at the menu.
+                              if (typeof window !== "undefined") {
+                                requestAnimationFrame(() => {
+                                  window.scrollTo({ top: 0, behavior: "smooth" });
+                                });
+                              }
+                            }}
+                            style={{
+                              padding: 0,
+                              border: `1px solid ${C.hairline}`,
+                              borderRadius: 18,
+                              background: C.paper,
+                              textAlign: "left",
+                              font: "inherit",
+                              color: "inherit",
+                              cursor: "pointer",
+                              appearance: "none",
+                              WebkitAppearance: "none",
+                              overflow: "hidden",
+                              boxShadow: "0 4px 14px rgba(21, 17, 26, 0.06)",
+                              transition: "transform 120ms ease, box-shadow 120ms ease",
+                            }}
+                          >
+                            {cover && (
+                              <div
+                                style={{
+                                  aspectRatio: "4 / 3",
+                                  background: C.ivory,
+                                  overflow: "hidden",
+                                }}
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={cover}
+                                  alt={`${s.name} cover`}
+                                  loading="lazy"
+                                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                                />
+                              </div>
+                            )}
+                            <div style={{ padding: 16 }}>
+                              <p
+                                style={{
+                                  fontFamily: FONT_DISPLAY,
+                                  fontSize: 19,
+                                  fontWeight: 600,
+                                  color: C.espresso,
+                                  margin: 0,
+                                  lineHeight: 1.2,
+                                }}
+                              >
+                                {s.name}
+                              </p>
+                              <p style={{ marginTop: 6, fontSize: 12, color: C.muted }}>
+                                {s.duration_hours}h @ ${Number(s.base_price).toFixed(2)}
+                                {deposit ? ` · ${deposit}` : ""}
+                              </p>
+                              {s.description && (
+                                <p
+                                  style={{
+                                    marginTop: 10,
+                                    fontSize: 12.5,
+                                    color: C.coffee,
+                                    lineHeight: 1.5,
+                                    display: "-webkit-box",
+                                    WebkitLineClamp: 3,
+                                    WebkitBoxOrient: "vertical",
+                                    overflow: "hidden",
+                                  }}
+                                >
+                                  {s.description}
+                                </p>
+                              )}
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  marginTop: 14,
+                                  padding: "8px 16px",
+                                  borderRadius: 999,
+                                  background: C.espresso,
+                                  color: "#FFF",
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  letterSpacing: "0.14em",
+                                  textTransform: "uppercase",
+                                }}
+                              >
+                                Select
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </Field>
+                )}
+                {/* Back-to-menu affordance once a service is picked.
+                    Resets serviceId + variation + customization so the
+                    client can re-enter the flow cleanly. */}
+                {serviceId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setServiceId("");
+                      setSelectedVariationId("");
+                      setServiceName("");
+                      setSelectedExtraIds([]);
+                      if (typeof window !== "undefined") {
+                        requestAnimationFrame(() => {
+                          window.scrollTo({ top: 0, behavior: "smooth" });
                         });
                       }
                     }}
-                    style={selectStyle}
+                    style={{
+                      alignSelf: "flex-start",
+                      padding: "8px 14px",
+                      borderRadius: 999,
+                      background: "transparent",
+                      border: `1px solid ${C.hairline}`,
+                      color: C.coffee,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      appearance: "none",
+                      WebkitAppearance: "none",
+                      letterSpacing: "0.06em",
+                    }}
                   >
-                    <option value="">— Pick a service —</option>
-                    {filteredCatalog.map(s => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} · {s.duration_hours}h · ${s.base_price}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
+                    ← View all services
+                  </button>
+                )}
                 {/* When the service has no variations, render a plain
                     summary card. When variations exist we hand off to
                     the unified picker below (base + every saved
@@ -2551,6 +2697,10 @@ export default function PublicBookingPage() {
                 </div>
               );
             })()}
+            {/* Calendar + notes + submit only after a service is picked
+                (or in legacy free-form mode), so the landing reads
+                cleanly as a menu. */}
+            {(serviceId || !hasCatalog) && <>
             <BookingCalendar
               monthCursor={monthCursor}
               setMonthCursor={setMonthCursor}
@@ -2713,6 +2863,7 @@ export default function PublicBookingPage() {
             <p style={{ fontSize: 11, color: C.muted, textAlign: "center", marginTop: 4 }}>
               You&apos;ll get a confirmation reply once your stylist reviews the request.
             </p>
+            </>}
           </form>
         )}
 
