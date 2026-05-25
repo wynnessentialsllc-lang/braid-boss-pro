@@ -14,6 +14,8 @@ import {
   CtaFooter,
 } from "../components/marketing/MarketingShell";
 import { C, FONT_DISPLAY, GRADIENTS, SHADOWS } from "../components/marketing/tokens";
+import SavingsCalculator from "../components/marketing/SavingsCalculator";
+import CompetitorTable from "../components/marketing/CompetitorTable";
 
 export const metadata: Metadata = {
   title: "Founding Access · Braid Boss Pro — the business OS for braiders",
@@ -146,6 +148,18 @@ export default function PricingPage() {
           paid to Stripe. Braid Boss Pro never custodies your funds — every
           deposit, balance, and product sale lands directly in your Stripe
           account the same day.
+        </div>
+      </Section>
+
+      {/* Cost comparison — savings calculator + side-by-side table */}
+      <Section
+        eyebrow="Switching from Booksy or StyleSeat?"
+        title="Run the numbers on your own chair."
+        intro="Every marketplace charges you twice — a monthly subscription, plus a cut of every new-client booking. See what that costs on your real volume vs. one $9.99 founding payment."
+      >
+        <SavingsCalculator />
+        <div style={{ marginTop: 28 }}>
+          <CompetitorTable />
         </div>
       </Section>
 

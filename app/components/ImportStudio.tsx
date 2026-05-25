@@ -71,23 +71,82 @@ type FieldDef = {
   required?: boolean;
 };
 
+// Aliases include the exact column headers used by Booksy, StyleSeat,
+// Vagaro, GlossGenius, Fresha, Square Appointments, and Acuity client
+// exports so a paste-and-import works without manual remapping. The
+// `norm()` helper strips spaces, underscores, and hyphens — so e.g.
+// "First Name", "first_name", "first-name" all collapse to "firstname".
 const CLIENTS_FIELDS: FieldDef[] = [
-  { key: "name", label: "Full name", aliases: ["name", "fullname", "clientname", "firstname"], required: true },
-  { key: "phone", label: "Phone", aliases: ["phone", "mobile", "cell", "phonenumber"] },
-  { key: "email", label: "Email", aliases: ["email", "emailaddress"] },
-  { key: "preferredStyles", label: "Preferred styles", aliases: ["preferredstyles", "styles", "preferred"] },
-  { key: "notes", label: "Notes", aliases: ["notes", "note", "comments"] },
-  { key: "tags", label: "Tags", aliases: ["tags", "labels"] },
+  { key: "name", label: "Full name", aliases: [
+      "name", "fullname", "clientname", "customername",
+      "firstname",                        // Booksy/StyleSeat (first-name only)
+      "client",                           // Vagaro
+      "displayname",                      // GlossGenius
+    ], required: true },
+  { key: "phone", label: "Phone", aliases: [
+      "phone", "mobile", "cell", "phonenumber",
+      "mobilephone", "cellphone",
+      "primaryphone",                     // Vagaro
+      "phone1",                           // Square
+    ] },
+  { key: "email", label: "Email", aliases: [
+      "email", "emailaddress",
+      "primaryemail",                     // Vagaro / GlossGenius
+      "clientemail",
+    ] },
+  { key: "preferredStyles", label: "Preferred styles", aliases: [
+      "preferredstyles", "styles", "preferred",
+      "preferredservice", "preferredservices",   // StyleSeat / Booksy
+      "favorites",                              // GlossGenius
+    ] },
+  { key: "notes", label: "Notes", aliases: [
+      "notes", "note", "comments",
+      "clientnote", "clientnotes",        // Vagaro / Booksy
+      "memo",                             // Square
+      "internalnotes",                    // GlossGenius
+    ] },
+  { key: "tags", label: "Tags", aliases: [
+      "tags", "labels",
+      "group", "groups",                  // Vagaro
+      "category",                         // Acuity
+    ] },
 ];
 
 const SERVICES_FIELDS: FieldDef[] = [
-  { key: "name", label: "Service name", aliases: ["name", "service", "servicename", "title"], required: true },
-  { key: "duration_hours", label: "Duration (hours)", aliases: ["durationhours", "duration", "hours"] },
-  { key: "base_price", label: "Base price", aliases: ["baseprice", "price", "cost"] },
-  { key: "deposit_required", label: "Deposit required", aliases: ["depositrequired"] },
-  { key: "deposit_amount", label: "Deposit amount", aliases: ["depositamount", "deposit"] },
-  { key: "prep_instructions", label: "Prep instructions", aliases: ["prepinstructions", "prep"] },
-  { key: "is_active", label: "Active", aliases: ["isactive", "active"] },
+  { key: "name", label: "Service name", aliases: [
+      "name", "service", "servicename", "title",
+      "treatment",                        // Fresha
+      "menuitem",                         // GlossGenius
+      "itemname",                         // Square
+    ], required: true },
+  { key: "duration_hours", label: "Duration (hours)", aliases: [
+      "durationhours", "duration", "hours",
+      "lengthhours",
+    ] },
+  { key: "base_price", label: "Base price", aliases: [
+      "baseprice", "price", "cost",
+      "amount",                           // Booksy / Square
+      "fee",                              // Vagaro
+      "rate",                             // GlossGenius
+    ] },
+  { key: "deposit_required", label: "Deposit required", aliases: [
+      "depositrequired", "requiresdeposit",
+    ] },
+  { key: "deposit_amount", label: "Deposit amount", aliases: [
+      "depositamount", "deposit",
+      "depositfee",                       // Booksy
+    ] },
+  { key: "prep_instructions", label: "Prep instructions", aliases: [
+      "prepinstructions", "prep",
+      "description",                      // Booksy / StyleSeat / Vagaro / Fresha
+      "details",
+      "instructions",
+    ] },
+  { key: "is_active", label: "Active", aliases: [
+      "isactive", "active",
+      "enabled",                          // Vagaro
+      "visible",                          // GlossGenius
+    ] },
 ];
 
 // =====================================================================
@@ -100,8 +159,20 @@ const normalizeEmail = (s: string): string => s.trim().toLowerCase();
 
 const detectTarget = (headers: string[]): ImportTarget => {
   const set = new Set(headers.map(norm));
-  if (set.has("durationhours") || set.has("baseprice") || set.has("price")) return "services";
-  if (set.has("phone") || set.has("email") || set.has("name") || set.has("clientname") || set.has("fullname")) return "clients";
+  const has = (...ks: string[]) => ks.some(k => set.has(k));
+  // Services-y signals (duration + price / fee / rate / treatment / menu)
+  if (has("durationhours", "duration", "lengthhours", "baseprice", "price",
+          "fee", "rate", "amount", "treatment", "menuitem", "itemname",
+          "servicename")) {
+    return "services";
+  }
+  // Client-y signals (any common name/contact column from major exports)
+  if (has("phone", "mobile", "cell", "phonenumber", "primaryphone", "phone1",
+          "email", "emailaddress", "primaryemail", "clientemail",
+          "name", "fullname", "clientname", "customername", "firstname",
+          "client", "displayname")) {
+    return "clients";
+  }
   return "unknown";
 };
 
@@ -446,6 +517,9 @@ const ImportStudio = ({ store, onClose, onViewClients, onViewServices }: ImportS
               </p>
               <p style={{ margin: 0, fontSize: 11.5, color: C.muted }}>
                 .csv files supported · clients or services
+              </p>
+              <p style={{ margin: 0, fontSize: 11, color: C.muted, lineHeight: 1.5, maxWidth: 320 }}>
+                Recognizes exports from Booksy, StyleSeat, Vagaro, GlossGenius, Fresha, Square &amp; Acuity — column names auto-map.
               </p>
             </div>
             <input

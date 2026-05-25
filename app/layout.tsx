@@ -3,6 +3,7 @@ import "./globals.css";
 import PullToRefresh from "./components/PullToRefresh";
 import { CartProvider } from "./lib/cart";
 import { CartDrawer, CartFloatingBadge } from "./components/CartDrawer";
+import { SITE_URL } from "./lib/seo";
 
 // Viewport for both the PWA and the Capacitor iOS shell.
 // - viewportFit: "cover" lets `env(safe-area-inset-*)` produce real
@@ -24,6 +25,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "Braid Boss Pro",
   description: "Appointments, clients, payments, and reminders for braid stylists.",
   applicationName: "Braid Boss Pro",
