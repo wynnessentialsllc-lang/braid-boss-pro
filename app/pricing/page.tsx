@@ -48,6 +48,8 @@ export const metadata: Metadata = {
 };
 
 const MONTHLY_PRICE_DOLLARS = 14.99;
+const ANNUAL_PRICE_DOLLARS = 149;
+const ANNUAL_SAVINGS_DOLLARS = 30.88; // $14.99 × 12 = $179.88 → save $30.88
 const TRIAL_DAYS = 14;
 
 export default function PricingPage() {
@@ -71,13 +73,34 @@ export default function PricingPage() {
             </em>
           </>
         }
-        body="Braid Boss Pro is built specifically for braid stylists — bookings, deposits, contracts, retail storefronts, analytics, and modern creator-economy tools designed around how braiders actually run their chairs. One simple plan, every feature included. Start free for 14 days, then just $14.99/month — less than every major salon app, with no per-staff fees."
-        primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
+        body="Braid Boss Pro is built specifically for braid stylists — bookings, deposits, contracts, retail storefronts, analytics, and modern creator-economy tools designed around how braiders actually run their chairs. Every feature included. Start free for 14 days, then just $14.99/month — or $149/year (save $30.88). Less than every major salon app, with no per-staff fees."
+        primaryCta={{ label: "Start Your Free Trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See the platform", href: "/features" }}
       />
 
       {/* Pricing */}
-      <Section eyebrow="One simple plan" title="Everything included. $14.99/month.">
+      <Section eyebrow="One simple plan" title="Everything included. $14.99/mo or $149/yr.">
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
+          <span
+            className="bbp-reveal"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 7,
+              padding: "7px 16px",
+              borderRadius: 999,
+              background: GRADIENTS.primary,
+              color: "#FFFFFF",
+              fontSize: 12,
+              fontWeight: 800,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              boxShadow: SHADOWS.primaryGlow,
+            }}
+          >
+            <Sparkles size={13} aria-hidden /> Built Specifically for Braiders
+          </span>
+        </div>
         <div
           style={{
             display: "grid",
@@ -90,24 +113,23 @@ export default function PricingPage() {
             tone="founding"
             badge="14-Day Free Trial"
             title="Braid Boss Pro"
-            subtitle="Monthly · Cancel anytime"
+            subtitle={`$${ANNUAL_PRICE_DOLLARS}/year option · save $${ANNUAL_SAVINGS_DOLLARS.toFixed(2)}`}
             price={`$${MONTHLY_PRICE_DOLLARS.toFixed(2)}`}
             cadence="/month"
-            description={`Try every feature free for ${TRIAL_DAYS} days — no charge until your trial ends. One flat price, no per-staff fees, no marked-up card fees. Cancel anytime in a tap.`}
+            description={`Try every feature free for ${TRIAL_DAYS} days — no charge until your trial ends. Or go annual at $${ANNUAL_PRICE_DOLLARS}/year and save $${ANNUAL_SAVINGS_DOLLARS.toFixed(2)} (about 2 months free). No contracts. Cancel anytime.`}
             features={[
-              "Unlimited clients, appointments & quotes",
-              "Online booking with your own /@handle link",
-              "Deposits + balance payments via Stripe Connect",
-              "Contracts + e-sign at booking",
-              "Reminders + email/SMS automation",
-              "Marketing: rebook, birthday & win-back campaigns",
-              "Gift cards, loyalty points & referrals",
-              "Retail storefront with variants + inventory",
-              "Expense tracking + tax & P&L reports",
-              "Mobile dashboard with PWA install",
-              "Every future upgrade included",
+              "Online Booking",
+              "Deposits & Payments",
+              "Digital Contracts",
+              "Appointment Reminders",
+              "Client Management CRM",
+              "Reviews & Testimonials",
+              "Business Analytics",
+              "Expense Tracking",
+              "Education Hub",
+              "Mobile App Access",
             ]}
-            cta={{ label: "Start free trial", href: "/?signup=1" }}
+            cta={{ label: "Start Your Free Trial", href: "/?signup=1" }}
           />
           <PricingCard
             tone="future"
@@ -188,8 +210,8 @@ export default function PricingPage() {
 
       <CtaFooter
         title="Start free. Pay when you're ready."
-        body={`Create your account in under 10 minutes and try every feature free for ${TRIAL_DAYS} days. Then it's just $14.99/month — cancel anytime.`}
-        primaryCta={{ label: "Start my free trial", href: "/?signup=1" }}
+        body={`Create your account in under 10 minutes and try every feature free for ${TRIAL_DAYS} days. Then it's just $14.99/month — or $149/year. No contracts. Cancel anytime.`}
+        primaryCta={{ label: "Start Your Free Trial", href: "/?signup=1" }}
         secondaryCta={{ label: "Read the FAQ", href: "/faq" }}
       />
     </MarketingShell>

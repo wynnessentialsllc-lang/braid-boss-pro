@@ -105,6 +105,9 @@ import {
   openBillingPortal,
   SUBSCRIPTION_PRICE_LABEL,
   SUBSCRIPTION_TRIAL_DAYS,
+  ANNUAL_PRICE_LABEL,
+  ANNUAL_SAVINGS_LABEL,
+  type SubscriptionPlan,
   useLifetimeAccess,
   useFoundingMembership,
 } from "./lib/premium";
@@ -23560,6 +23563,39 @@ const DiscountsScreen = ({
   );
 };
 
+// Monthly / Annual segmented selector shared by the upgrade surfaces.
+const PlanToggle = ({
+  plan, onChange,
+}: {
+  plan: SubscriptionPlan;
+  onChange: (p: SubscriptionPlan) => void;
+}) => {
+  const opt = (key: SubscriptionPlan, top: string, bottom: string) => {
+    const active = plan === key;
+    return (
+      <button
+        type="button"
+        onClick={() => onChange(key)}
+        className="flex-1 rounded-xl py-2 px-2 text-center transition active:scale-[0.99]"
+        style={{
+          background: active ? `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})` : C.ivory,
+          color: active ? C.paper : C.coffee,
+          border: `1px solid ${active ? C.goldDeep : C.hairline}`,
+        }}
+      >
+        <span className="block text-[13px] font-bold leading-tight">{top}</span>
+        <span className="block text-[10px] font-semibold leading-tight" style={{ opacity: 0.9 }}>{bottom}</span>
+      </button>
+    );
+  };
+  return (
+    <div className="flex gap-2 mb-3">
+      {opt("monthly", "Monthly", `${SUBSCRIPTION_PRICE_LABEL}`)}
+      {opt("annual", "Annual", `${ANNUAL_PRICE_LABEL} · ${ANNUAL_SAVINGS_LABEL}`)}
+    </div>
+  );
+};
+
 // Account-screen subscription card. Two states:
 //   • Live subscription (trialing / active / past_due) → status + a
 //     "Manage subscription" button that opens the Stripe billing portal.
@@ -23575,6 +23611,7 @@ const SubscriptionStatusCard = ({
 }) => {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [plan, setPlan] = useState<SubscriptionPlan>("monthly");
 
   const fmtDate = (iso: string | null): string | null => {
     if (!iso) return null;
@@ -23666,14 +23703,15 @@ const SubscriptionStatusCard = ({
         </div>
       </div>
       <p className="text-[11px] mb-3" style={{ color: C.muted }}>
-        Every feature unlocked — unlimited clients, reminders, marketing, storefront, and more. Cancel anytime.
+        Every feature unlocked — unlimited clients, reminders, marketing, storefront, and more. No contracts. Cancel anytime.
       </p>
+      <PlanToggle plan={plan} onChange={setPlan} />
       <button
         type="button"
         disabled={busy}
         onClick={async () => {
           setBusy(true); setErr(null);
-          const r = await startSubscription(userId);
+          const r = await startSubscription(userId, plan);
           setBusy(false);
           if (!r.ok) setErr("Couldn't start checkout. Try again in a moment.");
         }}
@@ -23707,6 +23745,7 @@ const UpgradeSheet = ({
   const featureName = feature ? FEATURE_LABEL[feature] : "";
   const [subBusy, setSubBusy] = useState(false);
   const [subError, setSubError] = useState<string | null>(null);
+  const [subPlan, setSubPlan] = useState<SubscriptionPlan>("monthly");
 
   return (
     <Sheet open={open} onClose={onClose} title="Braid Boss Pro">
@@ -23811,12 +23850,13 @@ const UpgradeSheet = ({
             </>
           ) : (
             <>
+              <PlanToggle plan={subPlan} onChange={setSubPlan} />
               <button
                 type="button"
                 disabled={subBusy}
                 onClick={async () => {
                   setSubBusy(true);
-                  const r = await startSubscription(userId);
+                  const r = await startSubscription(userId, subPlan);
                   setSubBusy(false);
                   if (r.ok) { onClose(); return; }
                   setSubError(r.error || "Couldn't start checkout. Try again.");
@@ -23828,10 +23868,12 @@ const UpgradeSheet = ({
                   boxShadow: "0 8px 20px -10px rgba(91, 33, 182, 0.6)",
                 }}
               >
-                {subBusy ? "Starting…" : `Start ${SUBSCRIPTION_TRIAL_DAYS}-day free trial`}
+                {subBusy
+                  ? "Starting…"
+                  : `Start ${SUBSCRIPTION_TRIAL_DAYS}-day free trial`}
               </button>
               <p className="text-[11px] text-center" style={{ color: C.muted }}>
-                Free for {SUBSCRIPTION_TRIAL_DAYS} days, then {SUBSCRIPTION_PRICE_LABEL} · Cancel anytime · Secure checkout by Stripe
+                Free for {SUBSCRIPTION_TRIAL_DAYS} days, then {subPlan === "annual" ? ANNUAL_PRICE_LABEL : SUBSCRIPTION_PRICE_LABEL} · No contracts, cancel anytime
               </p>
               {subError && (
                 <p className="text-[11px] text-center" style={{ color: C.danger }}>{subError}</p>
