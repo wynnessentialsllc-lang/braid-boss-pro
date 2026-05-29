@@ -16,9 +16,9 @@ import {
 import { C, FONT_DISPLAY, GRADIENTS, SHADOWS } from "../components/marketing/tokens";
 
 export const metadata: Metadata = {
-  title: "Founding Access · Braid Boss Pro — the business OS for braiders",
+  title: "Pricing · Braid Boss Pro — the business OS for braiders",
   description:
-    "Lock in lifetime access to Braid Boss Pro — the business operating system for braiders — with a one-time Founding Stylist payment. After the first 100 stylists, the platform transitions to monthly membership pricing.",
+    "Braid Boss Pro is the business operating system for braiders — bookings, deposits, contracts, storefront, and marketing. Start a 14-day free trial, then $14.99/month. Cancel anytime.",
   alternates: { canonical: "/pricing" },
   keywords: [
     "braid business software",
@@ -29,31 +29,32 @@ export const metadata: Metadata = {
     "business tools for braiders",
     "braid pricing software",
     "creator economy braid platform",
-    "founding stylist access",
+    "braider app monthly price",
   ],
   openGraph: {
-    title: "Founding Access · Braid Boss Pro",
+    title: "Pricing · Braid Boss Pro",
     description:
-      "One-time Founding Stylist payment. Lifetime access to the business operating system for braiders. After the first 100 stylists, the platform moves to monthly membership pricing.",
+      "Everything braiders need to run their chair — for $14.99/month. Start with a 14-day free trial. Cancel anytime.",
     url: "/pricing",
     siteName: "Braid Boss Pro",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Founding Access · Braid Boss Pro",
+    title: "Pricing · Braid Boss Pro",
     description:
-      "One-time Founding Stylist payment. Lifetime access to the business operating system for braiders.",
+      "Everything braiders need to run their chair — $14.99/month after a 14-day free trial.",
   },
 };
 
-const FOUNDING_PRICE_DOLLARS = 9.99;
+const MONTHLY_PRICE_DOLLARS = 14.99;
+const TRIAL_DAYS = 14;
 
 export default function PricingPage() {
   return (
     <MarketingShell>
       <MarketingHero
-        eyebrow="Founding Access · First 100 stylists"
+        eyebrow="Simple pricing · 14-day free trial"
         title={
           <>
             The business operating system{" "}
@@ -70,13 +71,13 @@ export default function PricingPage() {
             </em>
           </>
         }
-        body="Braid Boss Pro is built specifically for braid stylists — bookings, deposits, contracts, retail storefronts, analytics, and modern creator-economy tools designed around how braiders actually run their chairs. Founding stylists lock in lifetime access at a single one-time payment before the platform transitions to monthly membership pricing."
-        primaryCta={{ label: "Claim founding access", href: "/founding-access" }}
+        body="Braid Boss Pro is built specifically for braid stylists — bookings, deposits, contracts, retail storefronts, analytics, and modern creator-economy tools designed around how braiders actually run their chairs. One simple plan, every feature included. Start free for 14 days, then just $14.99/month — less than every major salon app, with no per-staff fees."
+        primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See the platform", href: "/features" }}
       />
 
-      {/* Pricing tiers */}
-      <Section eyebrow="Founding stylist offer" title="One-time payment. Lifetime access.">
+      {/* Pricing */}
+      <Section eyebrow="One simple plan" title="Everything included. $14.99/month.">
         <div
           style={{
             display: "grid",
@@ -87,43 +88,42 @@ export default function PricingPage() {
         >
           <PricingCard
             tone="founding"
-            badge="First 100 Users"
-            title="Founding Stylist Access"
-            subtitle="One-Time Payment · Lifetime Access"
-            price={`$${FOUNDING_PRICE_DOLLARS.toFixed(2)}`}
-            cadence="one-time"
-            description="Lock in lifetime access before Braid Boss Pro transitions to monthly membership pricing. Founding stylists receive early-access pricing, grandfathered platform access, and priority access to future platform upgrades and tools."
+            badge="14-Day Free Trial"
+            title="Braid Boss Pro"
+            subtitle="Monthly · Cancel anytime"
+            price={`$${MONTHLY_PRICE_DOLLARS.toFixed(2)}`}
+            cadence="/month"
+            description={`Try every feature free for ${TRIAL_DAYS} days — no charge until your trial ends. One flat price, no per-staff fees, no marked-up card fees. Cancel anytime in a tap.`}
             features={[
-              "Lifetime platform access — no monthly bill, ever",
-              "Branded booking link with your own /@handle",
-              "Stripe Connect direct charges + deposits",
+              "Unlimited clients, appointments & quotes",
+              "Online booking with your own /@handle link",
+              "Deposits + balance payments via Stripe Connect",
               "Contracts + e-sign at booking",
-              "Pricing calculator + saved quotes",
+              "Reminders + email/SMS automation",
+              "Marketing: rebook, birthday & win-back campaigns",
+              "Gift cards, loyalty points & referrals",
               "Retail storefront with variants + inventory",
-              "Order management + customer tracking",
-              "Reminder + email automation",
+              "Expense tracking + tax & P&L reports",
               "Mobile dashboard with PWA install",
-              "Every future platform upgrade included",
-              "Priority access to new tools as they ship",
+              "Every future upgrade included",
             ]}
-            cta={{ label: "Claim founding access", href: "/founding-access" }}
+            cta={{ label: "Start free trial", href: "/?signup=1" }}
           />
           <PricingCard
             tone="future"
-            badge="After the first 100"
-            title="Future Membership Pricing"
-            subtitle="Monthly Subscription"
-            price="$TBA"
-            cadence="per month"
-            description="After the first 100 founding users, Braid Boss Pro will move to a monthly pricing structure as the platform expands with advanced booking, storefront, automation, analytics, and business tools. Founding stylists are grandfathered in at their one-time rate forever."
+            badge="Founding & lifetime members"
+            title="You're set — forever"
+            subtitle="Grandfathered Access"
+            price="Lifetime"
+            cadence="already yours"
+            description="Already bought Founding Stylist Access or a lifetime unlock? You keep full access forever at no monthly cost — nothing changes for you, and there's nothing to do. The new monthly plan only applies to new stylists joining now."
             features={[
-              "Same complete feature set as Founding Access",
-              "Cancel anytime",
-              "Every platform upgrade included",
-              "Stripe Connect direct charges",
-              "Mobile dashboard + PWA install",
+              "Lifetime access stays active — no monthly bill",
+              "Every current and future feature included",
+              "No action needed",
+              "Same account, same data, same login",
             ]}
-            cta={{ label: "Join founding access", href: "/founding-access" }}
+            cta={{ label: "Open the app", href: "/" }}
           />
         </div>
 
@@ -142,18 +142,18 @@ export default function PricingPage() {
           }}
         >
           <strong style={{ color: C.brandPrimary }}>Note:</strong>{" "}
-          Stripe processing fees (~2.9% + 30¢ per charge) are separate and
-          paid to Stripe. Braid Boss Pro never custodies your funds — every
-          deposit, balance, and product sale lands directly in your Stripe
-          account the same day.
+          Stripe processing fees (~2.9% + 30¢ per charge) on your clients&apos;
+          deposits and payments are separate and paid to Stripe. Braid Boss Pro
+          never custodies your funds — every deposit, balance, and product sale
+          lands directly in your Stripe account the same day.
         </div>
       </Section>
 
-      {/* Why founding access */}
+      {/* Why Braid Boss Pro */}
       <Section
-        eyebrow="Why founding access?"
-        title="Built with the first 100 stylists."
-        intro="Founding stylists shape the roadmap and lock in pricing before the platform scales. You get the early-builder rate forever — we get the feedback that makes Braid Boss Pro the operating system braiders actually want."
+        eyebrow="Why Braid Boss Pro?"
+        title="More than booking — your whole business."
+        intro="Most salon apps charge $24–$48/month and tack on per-staff fees. Braid Boss Pro is one flat $14.99 — bookings, payments, contracts, storefront, and marketing — built around how braiders actually work."
         background="#FBFAFD"
       >
         <div
@@ -165,31 +165,31 @@ export default function PricingPage() {
         >
           <Benefit
             icon={<Crown size={20} />}
-            title="Early-access pricing"
-            body="A one-time payment unlocks the full platform — no monthly fee for founding stylists, ever."
+            title="Lower, flat pricing"
+            body="$14.99/month, everything included — and no per-staff charges like the other apps."
           />
           <Benefit
             icon={<Zap size={20} />}
-            title="Priority roadmap access"
-            body="Founding feedback ships first. New tools land on your dashboard ahead of monthly subscribers."
+            title="Try it free for 14 days"
+            body="Take real bookings and get paid before you ever pay us. Cancel anytime, no questions."
           />
           <Benefit
             icon={<ShieldCheck size={20} />}
-            title="Grandfathered forever"
-            body="When monthly pricing turns on for the rest of the market, your founding rate stays locked in."
+            title="Your money, same day"
+            body="Payments land directly in your own Stripe account. We never custody your funds or mark up card fees."
           />
           <Benefit
             icon={<Sparkles size={20} />}
             title="Braid-specific by design"
-            body="Variations, hair-included pricing, deposit policies, retail storefronts — built for how braiders work, not generic salon software."
+            body="Variations, hair-included pricing, deposit policies, retail storefronts — built for braiders, not generic salon software."
           />
         </div>
       </Section>
 
       <CtaFooter
-        title="The window closes at 100 stylists."
-        body="Create your founding account in under 10 minutes. Lock in lifetime access before the platform transitions to monthly membership pricing."
-        primaryCta={{ label: "Claim my founding spot", href: "/founding-access" }}
+        title="Start free. Pay when you're ready."
+        body={`Create your account in under 10 minutes and try every feature free for ${TRIAL_DAYS} days. Then it's just $14.99/month — cancel anytime.`}
+        primaryCta={{ label: "Start my free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "Read the FAQ", href: "/faq" }}
       />
     </MarketingShell>

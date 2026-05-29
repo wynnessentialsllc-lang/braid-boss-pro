@@ -101,9 +101,10 @@ import { trackEvent } from "./lib/track";
 import { isAdminUser } from "./lib/admin";
 import { getAuthRedirectUrl } from "./lib/site-url";
 import {
-  LIFETIME_PRICE_LABEL,
-  isPaymentLinkConfigured,
-  openCheckout,
+  startSubscription,
+  openBillingPortal,
+  SUBSCRIPTION_PRICE_LABEL,
+  SUBSCRIPTION_TRIAL_DAYS,
   useLifetimeAccess,
   useFoundingMembership,
 } from "./lib/premium";
@@ -12557,7 +12558,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <p className="text-[11px]" style={{ color: C.muted }}>
                 {store.premium
                   ? `${store.reminderSettings?.enabled ? "Enabled" : "Disabled"} · ${(store.reminderSettings?.defaultChannel || "sms").toString().toUpperCase()}`
-                  : `Lifetime Access · ${LIFETIME_PRICE_LABEL}`}
+                  : `${SUBSCRIPTION_TRIAL_DAYS}-day free trial · then ${SUBSCRIPTION_PRICE_LABEL}`}
               </p>
             </div>
             {store.premium
@@ -16008,7 +16009,6 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   // useLifetimeAccess plus the founding_paid_at timestamp so the
   // Account card can show the activation date.
   const foundingMembership = useFoundingMembership(userId);
-  const paymentLinkReady = isPaymentLinkConfigured();
 
   useEffect(() => {
     let cancelled = false;
@@ -16486,7 +16486,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
         )}
 
         {mode === "authed" && userId && (
-          foundingMembership.active === true ? (
+          foundingMembership.grandfathered ? (
             <Card className="p-4">
               <div className="flex items-start gap-3">
                 <div
@@ -16540,50 +16540,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
             // prompt. The card resolves once the profile row loads.
             null
           ) : (
-            <Card className="p-4">
-              <div className="flex items-center gap-3 mb-3">
-                <div
-                  aria-hidden
-                  style={{
-                    width: 36, height: 36, borderRadius: 999, display: "grid", placeItems: "center",
-                    background: C.ivory, border: `1px solid ${C.hairline}`, color: C.caramel,
-                  }}
-                >
-                  <Sparkles size={18} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>
-                    Lifetime Access
-                  </p>
-                  <p className="text-sm font-semibold mt-0.5" style={{ color: C.espresso }}>
-                    Unlock everything for {LIFETIME_PRICE_LABEL}
-                  </p>
-                </div>
-              </div>
-              <p className="text-[11px] mb-3" style={{ color: C.muted }}>
-                One-time payment. No subscription. Tied to your account
-                so it follows you to every device.
-              </p>
-              <button
-                type="button"
-                disabled={!paymentLinkReady}
-                onClick={() => { void openCheckout(userId); }}
-                className="w-full rounded-2xl py-3 text-[14px] font-semibold active:scale-[0.99] transition disabled:opacity-60"
-                style={{
-                  background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
-                  color: C.paper,
-                  border: `1px solid ${C.goldDeep}`,
-                  boxShadow: "0 8px 20px -10px rgba(91, 33, 182, 0.6)",
-                }}
-              >
-                {paymentLinkReady ? `Unlock for ${LIFETIME_PRICE_LABEL}` : "Coming soon"}
-              </button>
-              {!paymentLinkReady && (
-                <p className="text-[11px] mt-2" style={{ color: C.muted }}>
-                  Stripe Payment Link not configured yet.
-                </p>
-              )}
-            </Card>
+            <SubscriptionStatusCard userId={userId} membership={foundingMembership} />
           )
         )}
 
@@ -23603,6 +23560,137 @@ const DiscountsScreen = ({
   );
 };
 
+// Account-screen subscription card. Two states:
+//   • Live subscription (trialing / active / past_due) → status + a
+//     "Manage subscription" button that opens the Stripe billing portal.
+//   • No subscription → "Start your 14-day free trial" CTA.
+// Grandfathered lifetime/founding members never reach this card — they
+// get the "Lifetime access active" card instead.
+const SubscriptionStatusCard = ({
+  userId,
+  membership,
+}: {
+  userId: string;
+  membership: ReturnType<typeof useFoundingMembership>;
+}) => {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const fmtDate = (iso: string | null): string | null => {
+    if (!iso) return null;
+    try {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return null;
+      return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+    } catch { return null; }
+  };
+
+  if (membership.subscriptionActive) {
+    const status = membership.subscriptionStatus;
+    const trialing = status === "trialing";
+    const pastDue = status === "past_due";
+    const when = fmtDate(membership.subscriptionPeriodEnd);
+    const statusLabel = trialing ? "Free trial" : pastDue ? "Payment past due" : "Active";
+    const detail = membership.cancelAtPeriodEnd
+      ? (when ? `Cancels on ${when}.` : "Cancels at the end of the current period.")
+      : trialing
+        ? (when ? `Your free trial ends ${when}, then ${SUBSCRIPTION_PRICE_LABEL}.` : `Free trial, then ${SUBSCRIPTION_PRICE_LABEL}.`)
+        : pastDue
+          ? "We couldn't process your last payment. Update your card to keep access."
+          : (when ? `Renews ${when} · ${SUBSCRIPTION_PRICE_LABEL}.` : `${SUBSCRIPTION_PRICE_LABEL}.`);
+    return (
+      <Card className="p-4">
+        <div className="flex items-start gap-3">
+          <div
+            aria-hidden
+            style={{
+              width: 36, height: 36, borderRadius: 999, display: "grid", placeItems: "center",
+              background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+              color: C.paper, flexShrink: 0,
+            }}
+          >
+            <Sparkles size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.goldDeep, letterSpacing: "0.12em" }}>
+              Braid Boss Pro · {statusLabel}
+            </p>
+            <p className="text-sm font-semibold mt-0.5" style={{ color: C.espresso }}>
+              Subscription active
+            </p>
+            <p className="text-[11px] mt-1" style={{ color: pastDue ? C.danger : C.muted, lineHeight: 1.5 }}>
+              {detail}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true); setErr(null);
+            const r = await openBillingPortal(userId);
+            setBusy(false);
+            if (!r.ok) setErr(r.error === "No subscription found for this account."
+              ? r.error
+              : "Couldn't open billing. Try again in a moment.");
+          }}
+          className="w-full mt-3 rounded-2xl py-3 text-[14px] font-semibold active:scale-[0.99] transition disabled:opacity-60"
+          style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}
+        >
+          {busy ? "Opening…" : "Manage subscription"}
+        </button>
+        {err && <p className="text-[11px] mt-2 text-center" style={{ color: C.danger }}>{err}</p>}
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-center gap-3 mb-3">
+        <div
+          aria-hidden
+          style={{
+            width: 36, height: 36, borderRadius: 999, display: "grid", placeItems: "center",
+            background: C.ivory, border: `1px solid ${C.hairline}`, color: C.caramel,
+          }}
+        >
+          <Sparkles size={18} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+            Braid Boss Pro
+          </p>
+          <p className="text-sm font-semibold mt-0.5" style={{ color: C.espresso }}>
+            {SUBSCRIPTION_TRIAL_DAYS}-day free trial, then {SUBSCRIPTION_PRICE_LABEL}
+          </p>
+        </div>
+      </div>
+      <p className="text-[11px] mb-3" style={{ color: C.muted }}>
+        Every feature unlocked — unlimited clients, reminders, marketing, storefront, and more. Cancel anytime.
+      </p>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true); setErr(null);
+          const r = await startSubscription(userId);
+          setBusy(false);
+          if (!r.ok) setErr("Couldn't start checkout. Try again in a moment.");
+        }}
+        className="w-full rounded-2xl py-3 text-[14px] font-semibold active:scale-[0.99] transition disabled:opacity-60"
+        style={{
+          background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+          color: C.paper, border: `1px solid ${C.goldDeep}`,
+          boxShadow: "0 8px 20px -10px rgba(91, 33, 182, 0.6)",
+        }}
+      >
+        {busy ? "Starting…" : `Start ${SUBSCRIPTION_TRIAL_DAYS}-day free trial`}
+      </button>
+      {err && <p className="text-[11px] mt-2 text-center" style={{ color: C.danger }}>{err}</p>}
+    </Card>
+  );
+};
+
 const UpgradeSheet = ({
   feature, userId, mode, onClose, onSignInPrompt,
 }: {
@@ -23617,10 +23705,11 @@ const UpgradeSheet = ({
     ? (GUEST_LIMITS as any)[feature] as number
     : null;
   const featureName = feature ? FEATURE_LABEL[feature] : "";
-  const linkReady = isPaymentLinkConfigured();
+  const [subBusy, setSubBusy] = useState(false);
+  const [subError, setSubError] = useState<string | null>(null);
 
   return (
-    <Sheet open={open} onClose={onClose} title="Lifetime Access">
+    <Sheet open={open} onClose={onClose} title="Braid Boss Pro">
       <div className="px-1 pb-2 pt-1">
         <div className="flex items-center gap-2 mb-3">
           <span
@@ -23658,10 +23747,10 @@ const UpgradeSheet = ({
             without the "BUY NOW" energy. */}
         <div className="mt-4 grid grid-cols-2 gap-2">
           {[
-            { label: "One-time unlock",   icon: <Check size={13} /> },
-            { label: "Lifetime access",   icon: <Sparkles size={13} /> },
-            { label: "Future upgrades",   icon: <ArrowUpRight size={13} /> },
-            { label: "No subscriptions",  icon: <Heart size={13} /> },
+            { label: "14-day free trial", icon: <Sparkles size={13} /> },
+            { label: "Then $14.99/month", icon: <Check size={13} /> },
+            { label: "Every feature",     icon: <ArrowUpRight size={13} /> },
+            { label: "Cancel anytime",    icon: <Heart size={13} /> },
           ].map(chip => (
             <div
               key={chip.label}
@@ -23724,8 +23813,14 @@ const UpgradeSheet = ({
             <>
               <button
                 type="button"
-                disabled={!linkReady}
-                onClick={() => { void openCheckout(userId); onClose(); }}
+                disabled={subBusy}
+                onClick={async () => {
+                  setSubBusy(true);
+                  const r = await startSubscription(userId);
+                  setSubBusy(false);
+                  if (r.ok) { onClose(); return; }
+                  setSubError(r.error || "Couldn't start checkout. Try again.");
+                }}
                 className="w-full rounded-2xl py-3.5 text-[15px] font-semibold active:scale-[0.99] transition disabled:opacity-60"
                 style={{
                   background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
@@ -23733,11 +23828,14 @@ const UpgradeSheet = ({
                   boxShadow: "0 8px 20px -10px rgba(91, 33, 182, 0.6)",
                 }}
               >
-                {linkReady ? `Unlock for ${LIFETIME_PRICE_LABEL}` : "Coming soon"}
+                {subBusy ? "Starting…" : `Start ${SUBSCRIPTION_TRIAL_DAYS}-day free trial`}
               </button>
               <p className="text-[11px] text-center" style={{ color: C.muted }}>
-                Secure checkout by Stripe · No subscriptions
+                Free for {SUBSCRIPTION_TRIAL_DAYS} days, then {SUBSCRIPTION_PRICE_LABEL} · Cancel anytime · Secure checkout by Stripe
               </p>
+              {subError && (
+                <p className="text-[11px] text-center" style={{ color: C.danger }}>{subError}</p>
+              )}
             </>
           )}
           <button

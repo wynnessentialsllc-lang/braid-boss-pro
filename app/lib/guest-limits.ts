@@ -49,8 +49,15 @@ export const FEATURE_LABEL: Record<GatedFeature, string> = {
 // Calm, premium copy — no aggressive lock language.
 export const UPGRADE_HEADLINE = "Your guest workspace has reached its limit.";
 export const UPGRADE_BODY =
-  "Unlock Braid Boss Pro once for lifetime access and every future upgrade. No subscriptions.";
-export const UPGRADE_BADGE = "Lifetime Access · $9.99";
+  "Start your 14-day free trial of Braid Boss Pro — every feature unlocked, just $14.99/month after. Cancel anytime.";
+export const UPGRADE_BADGE = "14-day free trial · then $14.99/mo";
+
+// Subscription statuses that count as "live" access. trialing + active
+// are obvious; past_due keeps access during Stripe's retry/grace window
+// so a temporary card hiccup doesn't lock a paying stylist out.
+const LIVE_SUBSCRIPTION_STATUSES = new Set(["trialing", "active", "past_due"]);
+export const isSubscriptionActive = (status: string | null | undefined): boolean =>
+  !!status && LIVE_SUBSCRIPTION_STATUSES.has(status);
 
 export type AuthMode = "loading" | "guest" | "authed";
 
@@ -132,13 +139,17 @@ export const usePremiumStatus = (
       try {
         const { getSupabase } = await import("./supabase");
         const supabase = getSupabase();
+        // Access = grandfathered lifetime/founding OR a live subscription.
         const { data } = await supabase
           .from("profiles")
-          .select("lifetime_access")
+          .select("lifetime_access, founding_access, subscription_status")
           .eq("id", userId)
           .maybeSingle();
         if (cancelled) return;
-        const next = !!data?.lifetime_access;
+        const next =
+          !!data?.lifetime_access ||
+          !!data?.founding_access ||
+          isSubscriptionActive(data?.subscription_status);
         setPremium(next);
         writeCachedLifetime(userId, next);
       } finally {

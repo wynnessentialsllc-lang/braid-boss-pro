@@ -30,6 +30,78 @@ export const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/3cI3co3S24hUdms5hv97G
 
 export const LIFETIME_PRICE_LABEL = "$9.99";
 
+// ---- Monthly subscription ($14.99/mo, 14-day free trial) ------------
+// The current offer for NEW users. Existing lifetime/founding holders
+// are grandfathered and never see this.
+export const SUBSCRIPTION_PRICE_LABEL = "$14.99/mo";
+export const SUBSCRIPTION_TRIAL_DAYS = 14;
+
+// Open a hosted Stripe Checkout for the monthly subscription. Creates
+// the session server-side (binds it to the signed-in user) then sends
+// the user to Stripe — via SFSafariViewController on the Capacitor iOS
+// shell so they return into the app cleanly, like openCheckout.
+export const startSubscription = async (
+  userId: string,
+  email?: string | null,
+): Promise<{ ok: boolean; error?: string }> => {
+  if (typeof window === "undefined") return { ok: false, error: "no_window" };
+  try {
+    const res = await fetch("/api/subscribe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId, email: email || undefined }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+    if (!res.ok || !data.url) {
+      return { ok: false, error: data.error || `checkout_failed_${res.status}` };
+    }
+    const cap = (window as any).Capacitor;
+    if (cap?.isNativePlatform?.()) {
+      try {
+        const mod = await import("@capacitor/browser");
+        await mod.Browser.open({ url: data.url });
+        return { ok: true };
+      } catch { /* fall through to navigation */ }
+    }
+    window.location.href = data.url;
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "network" };
+  }
+};
+
+// Open the Stripe Billing Portal so the user can update their card or
+// cancel. Returns an error string when there's no subscription yet or
+// the portal isn't enabled in the Stripe dashboard.
+export const openBillingPortal = async (
+  userId: string,
+): Promise<{ ok: boolean; error?: string }> => {
+  if (typeof window === "undefined") return { ok: false, error: "no_window" };
+  try {
+    const res = await fetch("/api/subscribe/portal", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+    if (!res.ok || !data.url) {
+      return { ok: false, error: data.error || `portal_failed_${res.status}` };
+    }
+    const cap = (window as any).Capacitor;
+    if (cap?.isNativePlatform?.()) {
+      try {
+        const mod = await import("@capacitor/browser");
+        await mod.Browser.open({ url: data.url });
+        return { ok: true };
+      } catch { /* fall through */ }
+    }
+    window.location.href = data.url;
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "network" };
+  }
+};
+
 export const isPaymentLinkConfigured = (): boolean =>
   STRIPE_PAYMENT_LINK.startsWith("https://buy.stripe.com/") &&
   !STRIPE_PAYMENT_LINK.includes("REPLACE_ME");
@@ -147,21 +219,39 @@ export const isPremiumUnlocked = (profile: { lifetime_access?: boolean | null } 
 // activation timestamp when available. Stays simple — caller renders
 // a card; null means 'still loading.'
 export type FoundingMembershipState = {
-  active: boolean | null;
+  active: boolean | null;          // any access — grandfathered OR live subscription
+  grandfathered: boolean;          // legacy lifetime or founding (one-time, forever)
+  subscriptionStatus: string | null;
+  subscriptionActive: boolean;     // trialing / active / past_due
+  subscriptionPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
   activatedAt: string | null;
 };
+
+// Statuses that count as a live subscription. Kept in sync with
+// guest-limits.isSubscriptionActive.
+const LIVE_SUB = new Set(["trialing", "active", "past_due"]);
 
 export const useFoundingMembership = (
   userId: string | null,
 ): FoundingMembershipState => {
   const [state, setState] = useState<FoundingMembershipState>({
     active: null,
+    grandfathered: false,
+    subscriptionStatus: null,
+    subscriptionActive: false,
+    subscriptionPeriodEnd: null,
+    cancelAtPeriodEnd: false,
     activatedAt: null,
   });
 
   useEffect(() => {
     if (!userId) {
-      setState({ active: false, activatedAt: null });
+      setState({
+        active: false, grandfathered: false, subscriptionStatus: null,
+        subscriptionActive: false, subscriptionPeriodEnd: null,
+        cancelAtPeriodEnd: false, activatedAt: null,
+      });
       return;
     }
     let cancelled = false;
@@ -169,14 +259,22 @@ export const useFoundingMembership = (
     const refresh = async () => {
       const { data } = await supabase
         .from("profiles")
-        .select("lifetime_access, founding_access, founding_paid_at")
+        .select("lifetime_access, founding_access, founding_paid_at, subscription_status, subscription_current_period_end, subscription_cancel_at_period_end")
         .eq("id", userId)
         .maybeSingle();
       if (cancelled) return;
       const founding = !!data?.founding_access;
       const legacy = !!data?.lifetime_access;
+      const grandfathered = founding || legacy;
+      const subStatus = (data?.subscription_status as string | null) ?? null;
+      const subActive = !!subStatus && LIVE_SUB.has(subStatus);
       setState({
-        active: founding || legacy,
+        active: grandfathered || subActive,
+        grandfathered,
+        subscriptionStatus: subStatus,
+        subscriptionActive: subActive,
+        subscriptionPeriodEnd: data?.subscription_current_period_end ?? null,
+        cancelAtPeriodEnd: !!data?.subscription_cancel_at_period_end,
         activatedAt: data?.founding_paid_at ?? null,
       });
     };
