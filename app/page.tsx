@@ -13692,7 +13692,8 @@ export type NotificationTarget =
   | { kind: "reminders" }
   | { kind: "schedule" }
   | { kind: "booking_approval"; requestId: string }
-  | { kind: "email_log"; queueId: string };
+  | { kind: "email_log"; queueId: string }
+  | { kind: "contract_view"; contractId: string };
 
 type NotifItem = {
   id: string;
@@ -13993,8 +13994,10 @@ const useNotifications = (store: any) => {
           const d = (r.data && typeof r.data === "object") ? r.data : {};
           const cat = String(r.category || "");
           // Contract signed → actionable, appointment-category bell
-          // entry so it badges. Tap → opens the appointment.
+          // entry so it badges. Tap → opens the signed contract copy
+          // (falls back to the appointment if no contract id is set).
           if (cat === "contract") {
+            const contractId = d.bookingContractId || null;
             const apptId = d.appointmentId || null;
             return {
               id: String(r.id),
@@ -14005,7 +14008,9 @@ const useNotifications = (store: any) => {
               title: String(r.title || "Contract signed"),
               body: String(r.body || ""),
               meta: r.created_at ? fmtRelative(r.created_at) : undefined,
-              target: apptId
+              target: contractId
+                ? ({ kind: "contract_view", contractId: String(contractId) } as const)
+                : apptId
                 ? ({ kind: "appointment", appointmentId: String(apptId) } as const)
                 : undefined,
             };
@@ -14131,6 +14136,7 @@ type NotificationRouterCtx = {
   setClientToOpenId: (id: string | null) => void;
   setApprovalFocusId: (id: string | null) => void;
   setEmailLogId: (id: string | null) => void;
+  setContractViewId: (id: string | null) => void;
 };
 
 const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
@@ -14172,6 +14178,13 @@ const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
       // subject, recipient, body, status. The fetch happens in the
       // sheet against the RLS-scoped owner_select policy.
       ctx.setEmailLogId(target.queueId);
+      break;
+    }
+    case "contract_view": {
+      // Open the signed-contract copy — full agreement body + the
+      // signature audit trail. Fetched by id in the sheet against the
+      // owner-scoped booking_contracts RLS policy.
+      ctx.setContractViewId(target.contractId);
       break;
     }
   }
@@ -14800,6 +14813,155 @@ const EmailDetailSheet = ({ queueId, onClose }: {
             <p className="text-[10px] text-center" style={{ color: C.muted }}>
               {row.dedupe_key ? `Dedupe key: ${row.dedupe_key}` : ""}
             </p>
+          </>
+        )}
+      </div>
+    </Sheet>
+  );
+};
+
+// Owner-facing signed-contract viewer. Opened from the "Contract
+// signed" bell notification (target.kind === "contract_view"). Shows
+// the full agreement body exactly as signed plus the signature audit
+// trail (signer, typed signature, initials, signed date/time, IP,
+// device) — the same record the owner gets emailed, viewable in-app.
+// Fetched by id against the owner-scoped booking_contracts RLS policy.
+const ContractDetailSheet = ({ contractId, onClose }: {
+  contractId: string | null;
+  onClose: () => void;
+}) => {
+  const [loading, setLoading] = useState(true);
+  const [row, setRow] = useState<any>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!contractId) { setRow(null); return; }
+    let cancelled = false;
+    setLoading(true);
+    setErr(null);
+    (async () => {
+      try {
+        const supabase = getSupabase();
+        const { data, error } = await supabase
+          .from("booking_contracts")
+          .select(
+            "id, title, status, body_snapshot, service_name, client_name, client_email, client_phone, signed_name, signature_text, initials, signed_at, signed_date, ip_address, user_agent, created_at",
+          )
+          .eq("id", contractId)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error) { setErr(error.message); setRow(null); }
+        else setRow(data || null);
+      } catch (e: any) {
+        if (!cancelled) { setErr(e?.message || "Couldn't load."); setRow(null); }
+      } finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [contractId]);
+
+  const fmtTs = (ts: string | null | undefined): string => {
+    if (!ts) return "—";
+    try { return new Date(ts).toLocaleString(); } catch { return String(ts); }
+  };
+
+  const isSigned = row?.status === "signed";
+  const sigRows: Array<[string, string]> = [];
+  const addSig = (label: string, value: any) => {
+    const v = value == null ? "" : String(value).trim();
+    if (v) sigRows.push([label, v]);
+  };
+  if (row) {
+    addSig("Signed by", row.signed_name);
+    addSig("Signature", row.signature_text);
+    addSig("Initials", row.initials);
+    addSig("Signed", row.signed_at ? fmtTs(row.signed_at) : (row.signed_date || ""));
+    addSig("IP address", row.ip_address);
+    addSig("Device", row.user_agent);
+  }
+
+  return (
+    <Sheet open={!!contractId} onClose={onClose} title="Signed contract">
+      <div className="space-y-3 pb-4">
+        {loading ? (
+          <p className="text-[13px] text-center py-6" style={{ color: C.muted }}>Loading…</p>
+        ) : err ? (
+          <p className="text-[13px]" style={{ color: C.danger }}>{err}</p>
+        ) : !row ? (
+          <p className="text-[13px]" style={{ color: C.muted }}>This contract is no longer available.</p>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-2">
+              <span
+                className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest"
+                style={{
+                  background: isSigned ? "rgba(92,124,74,0.12)" : C.hairline,
+                  color: isSigned ? C.success : C.muted,
+                  letterSpacing: "0.12em",
+                }}
+              >
+                {isSigned ? "Signed" : String(row.status || "—")}
+              </span>
+              {row.service_name && (
+                <span className="text-[11px]" style={{ color: C.muted }}>{String(row.service_name)}</span>
+              )}
+            </div>
+
+            <Card className="p-3.5 space-y-2">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Agreement</p>
+                <p className="text-[14px] font-semibold" style={{ color: C.espresso }}>{String(row.title || "Appointment agreement")}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Client</p>
+                <p className="text-[13px]" style={{ color: C.espresso }}>
+                  {row.client_name || "—"}
+                  {row.client_email ? ` · ${row.client_email}` : ""}
+                  {row.client_phone ? ` · ${row.client_phone}` : ""}
+                </p>
+              </div>
+            </Card>
+
+            {row.body_snapshot && (
+              <Card className="p-3.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+                  Agreement text
+                </p>
+                <pre
+                  className="text-[12px] whitespace-pre-wrap"
+                  style={{ color: C.coffee, fontFamily: "inherit", lineHeight: 1.5, margin: 0 }}
+                >{String(row.body_snapshot)}</pre>
+              </Card>
+            )}
+
+            {sigRows.length > 0 && (
+              <Card className="p-3.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+                  Signature
+                </p>
+                <div className="space-y-1.5">
+                  {sigRows.map(([k, v], i) => (
+                    <div key={i} className="flex flex-col">
+                      <span className="text-[11px]" style={{ color: C.muted }}>{k}</span>
+                      <span
+                        className="text-[12px] break-all"
+                        style={{
+                          color: C.espresso,
+                          ...(k === "Signature"
+                            ? { fontFamily: FONT_DISPLAY, fontStyle: "italic", fontSize: 18 }
+                            : {}),
+                        }}
+                      >{v}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {!isSigned && (
+              <p className="text-[11px] text-center" style={{ color: C.muted }}>
+                This agreement hasn&apos;t been signed yet.
+              </p>
+            )}
           </>
         )}
       </div>
@@ -27035,6 +27197,7 @@ export default function App() {
   // "Confirmation emailed" / etc. row opens this sheet showing the
   // actual notification_queue row (subject, recipient, body, status).
   const [emailLogId, setEmailLogId] = useState<string | null>(null);
+  const [contractViewId, setContractViewId] = useState<string | null>(null);
   const [commPickerCtx, setCommPickerCtx] = useState<CommContext | null>(null);
   const [activeComm, setActiveComm] = useState<(CommContext & { templateKey: CommTemplateKey }) | null>(null);
   const [activeReceipt, setActiveReceipt] = useState<ReceiptRecord | null>(null);
@@ -27105,6 +27268,7 @@ export default function App() {
       setClientToOpenId,
       setApprovalFocusId,
       setEmailLogId,
+      setContractViewId,
     });
   }, [notifications, store.appointments]);
 
@@ -27597,6 +27761,10 @@ export default function App() {
       <EmailDetailSheet
         queueId={emailLogId}
         onClose={() => setEmailLogId(null)}
+      />
+      <ContractDetailSheet
+        contractId={contractViewId}
+        onClose={() => setContractViewId(null)}
       />
 
       {/* Transaction sheet */}
