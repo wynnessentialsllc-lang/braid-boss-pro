@@ -18,8 +18,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const STRIPE_API = "https://api.stripe.com/v1";
-const SUBSCRIPTION_PRICE_CENTS = 1499; // $14.99 / month
 const TRIAL_DAYS = 14;
+
+// Two billing intervals. Annual ($149/yr) is ~2 months free vs monthly
+// ($14.99 × 12 = $179.88 → save $30.88).
+const PLANS = {
+  monthly: { unitAmount: 1499, interval: "month", label: "Monthly" },
+  annual: { unitAmount: 14900, interval: "year", label: "Annual" },
+} as const;
+type PlanKey = keyof typeof PLANS;
 
 const env = (k: string): string => {
   const v = process.env[k];
@@ -51,7 +58,7 @@ export async function POST(req: Request) {
 
   // The subscription binds to the signed-in user. The app passes the
   // Supabase user id (and optionally the email for Stripe to prefill).
-  let body: { userId?: string; email?: string } = {};
+  let body: { userId?: string; email?: string; plan?: string } = {};
   try {
     body = await req.json();
   } catch {
@@ -59,9 +66,16 @@ export async function POST(req: Request) {
   }
   const userId = (body?.userId || "").trim();
   const email = (body?.email || "").trim();
+  const planKey: PlanKey = body?.plan === "annual" ? "annual" : "monthly";
+  const plan = PLANS[planKey];
   if (!userId) {
     return fail(400, "Sign in before starting your subscription.");
   }
+
+  const priceBlurb =
+    planKey === "annual"
+      ? "Full access to Braid Boss Pro. 14-day free trial, then $149/year. Cancel anytime."
+      : "Full access to Braid Boss Pro. 14-day free trial, then $14.99/month. Cancel anytime.";
 
   // Inline recurring price_data — no stored Stripe Product/Price, same
   // as the rest of the app's Stripe usage.
@@ -70,21 +84,20 @@ export async function POST(req: Request) {
   form.set("payment_method_types[]", "card");
   form.set("line_items[0][quantity]", "1");
   form.set("line_items[0][price_data][currency]", "usd");
-  form.set("line_items[0][price_data][unit_amount]", String(SUBSCRIPTION_PRICE_CENTS));
-  form.set("line_items[0][price_data][recurring][interval]", "month");
-  form.set("line_items[0][price_data][product_data][name]", "Braid Boss Pro — Monthly");
-  form.set(
-    "line_items[0][price_data][product_data][description]",
-    "Full access to Braid Boss Pro. 14-day free trial, then $14.99/month. Cancel anytime.",
-  );
+  form.set("line_items[0][price_data][unit_amount]", String(plan.unitAmount));
+  form.set("line_items[0][price_data][recurring][interval]", plan.interval);
+  form.set("line_items[0][price_data][product_data][name]", `Braid Boss Pro — ${plan.label}`);
+  form.set("line_items[0][price_data][product_data][description]", priceBlurb);
   form.set("subscription_data[trial_period_days]", String(TRIAL_DAYS));
   form.set("subscription_data[metadata][purpose]", "subscription");
   form.set("subscription_data[metadata][user_id]", userId);
+  form.set("subscription_data[metadata][plan]", planKey);
   // Bind the subscription to the Supabase user so the webhook can stamp
   // the right profile on checkout.session.completed.
   form.set("client_reference_id", userId);
   form.set("metadata[purpose]", "subscription");
   form.set("metadata[user_id]", userId);
+  form.set("metadata[plan]", planKey);
   // Let stylists apply a launch promo code at checkout.
   form.set("allow_promotion_codes", "true");
   if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {

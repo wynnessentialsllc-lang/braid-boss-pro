@@ -33,15 +33,19 @@ export const LIFETIME_PRICE_LABEL = "$9.99";
 // ---- Monthly subscription ($14.99/mo, 14-day free trial) ------------
 // The current offer for NEW users. Existing lifetime/founding holders
 // are grandfathered and never see this.
+export type SubscriptionPlan = "monthly" | "annual";
 export const SUBSCRIPTION_PRICE_LABEL = "$14.99/mo";
 export const SUBSCRIPTION_TRIAL_DAYS = 14;
+export const ANNUAL_PRICE_LABEL = "$149/yr";
+export const ANNUAL_SAVINGS_LABEL = "Save $30.88"; // vs $14.99 × 12 = $179.88
 
-// Open a hosted Stripe Checkout for the monthly subscription. Creates
-// the session server-side (binds it to the signed-in user) then sends
-// the user to Stripe — via SFSafariViewController on the Capacitor iOS
-// shell so they return into the app cleanly, like openCheckout.
+// Open a hosted Stripe Checkout for the subscription (monthly or
+// annual). Creates the session server-side (binds it to the signed-in
+// user) then sends the user to Stripe — via SFSafariViewController on
+// the Capacitor iOS shell so they return into the app cleanly.
 export const startSubscription = async (
   userId: string,
+  plan: SubscriptionPlan = "monthly",
   email?: string | null,
 ): Promise<{ ok: boolean; error?: string }> => {
   if (typeof window === "undefined") return { ok: false, error: "no_window" };
@@ -49,7 +53,7 @@ export const startSubscription = async (
     const res = await fetch("/api/subscribe", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ userId, email: email || undefined }),
+      body: JSON.stringify({ userId, plan, email: email || undefined }),
     });
     const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
     if (!res.ok || !data.url) {
