@@ -28,6 +28,7 @@ export type NotificationMessageType =
   | "contract_signed_owner_alert"
   | "contract_declined_owner_alert"
   | "contract_reminder"
+  | "contract_reminder_owner_alert"
   | "deposit_paid_owner_alert"
   | "deposit_expired_client"
   | "cancellation_notice";

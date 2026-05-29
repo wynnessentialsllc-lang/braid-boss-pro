@@ -342,6 +342,42 @@ const renderContractSignedOwnerAlert = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- contract_reminder_owner_alert (stylist heads-up) ---------------
+// Sent to the stylist when the 7-day unsigned-contract reminder fires:
+// "we nudged the client, they still haven't signed." Lets the stylist
+// decide whether to follow up personally. System framing, not a
+// client touchpoint.
+const renderContractReminderOwnerAlert = (p: Record<string, any>) => {
+  const studioName    = p.studioName    || "your studio";
+  const contractTitle = p.contractTitle || "Appointment agreement";
+  const serviceName   = p.serviceName   || null;
+  const clientName    = p.clientName    || "Your client";
+  const clientEmail   = String(p.clientEmail || "").trim();
+  const daysUnsigned  = Number(p.daysUnsigned) > 0 ? Number(p.daysUnsigned) : null;
+  const contractUrl   = String(p.contractUrl || "").trim();
+
+  const subject = `Reminder sent: ${contractTitle} still unsigned by ${clientName}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Still unsigned</p>
+    <h1 style="font-size:20px;line-height:1.3;margin:0 0 12px;color:${C.espresso};">${escape(clientName)} hasn't signed yet.</h1>
+    <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">
+      <strong>${escape(contractTitle)}</strong>${serviceName ? ` (for ${escape(serviceName)})` : ""} has been outstanding${daysUnsigned ? ` for ${daysUnsigned} day${daysUnsigned === 1 ? "" : "s"}` : ""} at ${escape(studioName)}. We just sent ${escape(clientName)} a reminder to review and sign.
+    </p>
+    <table style="width:100%;border-collapse:collapse;border-top:1px solid ${C.hairline};border-bottom:1px solid ${C.hairline};margin:0 0 16px;">
+      <tr><td style="padding:4px 0;color:${C.muted};font-size:13px;">Client</td><td style="padding:4px 0 4px 14px;text-align:right;color:${C.espresso};font-size:13px;font-weight:600;">${escape(clientName)}</td></tr>
+      ${clientEmail ? `<tr><td style="padding:4px 0;color:${C.muted};font-size:13px;">Email</td><td style="padding:4px 0 4px 14px;text-align:right;color:${C.espresso};font-size:13px;font-weight:600;word-break:break-word;">${escape(clientEmail)}</td></tr>` : ""}
+    </table>
+    <p style="font-size:13px;line-height:20px;margin:0 0 14px;color:${C.coffee};">
+      Want to follow up personally? Reach out to ${escape(clientName)} directly${clientEmail ? ` at ${escape(clientEmail)}` : ""}, or share the signing link again.
+    </p>
+    ${contractUrl ? ctaButton("View the signing link", contractUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:18px;">
+      Automated alert from Braid Boss Pro. You'll get a signed copy here the moment ${escape(clientName)} completes it.
+    </p>
+  `);
+  return { subject, html };
+};
+
 // ---- appointment_approved ------------------------------------------
 const renderAppointmentApproved = (p: Record<string, any>) => {
   const clientName  = p.clientName  || "there";
@@ -1336,6 +1372,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderContractSigning(row.payload || {});
     case "contract_signed_owner_alert":
       return renderContractSignedOwnerAlert(row.payload || {});
+    case "contract_reminder_owner_alert":
+      return renderContractReminderOwnerAlert(row.payload || {});
     case "appointment_approved":
       return renderAppointmentApproved(row.payload || {});
     case "deposit_received":
