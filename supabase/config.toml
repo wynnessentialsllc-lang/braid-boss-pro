@@ -21,6 +21,12 @@ verify_jwt = false
 # the request under the salon owner's user_id via the service role.
 verify_jwt = false
 
+[functions.twilio-inbound]
+# PUBLIC. Twilio's inbound-SMS webhook — Twilio cannot send a Supabase
+# JWT. The function instead verifies Twilio's X-Twilio-Signature
+# (HMAC-SHA1 keyed by TWILIO_AUTH_TOKEN) before touching any state.
+verify_jwt = false
+
 # Authenticated functions (verify_jwt = true is the default, listed
 # here for documentation only — no entry needed):
 #
