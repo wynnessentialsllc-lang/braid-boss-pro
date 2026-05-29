@@ -265,6 +265,83 @@ const renderContractSigning = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- contract_signed_owner_alert (stylist's records copy) -----------
+// Sent to the stylist the moment a client signs. Unlike the other
+// contract emails (which are client-facing invites), this one is the
+// stylist's documented PROOF: the full agreement snapshot exactly as
+// signed, plus the signature audit trail (typed signature, initials,
+// signed timestamp, IP, device). Keeps the "Braid Boss Pro" system
+// framing — it's an internal records email, not a client touchpoint.
+const renderContractSignedOwnerAlert = (p: Record<string, any>) => {
+  const studioName    = p.studioName    || "your studio";
+  const contractTitle = p.contractTitle || "Appointment agreement";
+  const serviceName   = p.serviceName   || null;
+  const clientName    = p.clientName    || "Client";
+  const clientEmail   = String(p.clientEmail   || "").trim();
+  const clientPhone   = String(p.clientPhone   || "").trim();
+  const bodySnapshot  = String(p.bodySnapshot  || "").trim();
+  const signedName    = p.signedName    || clientName;
+  const signatureText = String(p.signatureText || "").trim();
+  const initials      = String(p.initials      || "").trim();
+  const signedDate    = String(p.signedDate    || "").trim();
+  const signedAt      = String(p.signedAt      || "").trim();
+  const ipAddress     = String(p.ipAddress     || "").trim();
+  const userAgent     = String(p.userAgent     || "").trim();
+
+  // Human-readable signed timestamp in UTC, falling back to the date.
+  let signedStamp = signedDate;
+  if (signedAt) {
+    const d = new Date(signedAt);
+    if (!isNaN(d.getTime())) {
+      signedStamp = `${d.toISOString().replace("T", " ").slice(0, 16)} UTC`;
+    }
+  }
+
+  const subject = `Signed contract: ${contractTitle} — ${signedName}`;
+
+  const metaRow = (label: string, value: string) =>
+    value
+      ? `<tr><td style="padding:4px 0;color:${C.muted};font-size:13px;vertical-align:top;white-space:nowrap;">${escape(label)}</td><td style="padding:4px 0 4px 14px;color:${C.espresso};font-size:13px;font-weight:600;vertical-align:top;word-break:break-word;">${escape(value)}</td></tr>`
+      : "";
+
+  const agreementBody = bodySnapshot
+    ? plainTextToHtml(bodySnapshot)
+    : `<p style="font-size:14px;color:${C.muted};margin:0;">(Agreement text unavailable.)</p>`;
+
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Signed contract — your copy</p>
+    <h1 style="font-size:20px;line-height:1.3;margin:0 0 12px;color:${C.espresso};">${escape(signedName)} signed ${escape(contractTitle)}.</h1>
+    <p style="font-size:14px;line-height:22px;margin:0 0 16px;color:${C.coffee};">
+      Keep this email for your records — it's your documented copy of the agreement ${escape(clientName)} signed${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""} at ${escape(studioName)}.
+    </p>
+    <table style="width:100%;border-collapse:collapse;border-top:1px solid ${C.hairline};border-bottom:1px solid ${C.hairline};margin:0 0 18px;">
+      ${metaRow("Client", clientName)}
+      ${metaRow("Email", clientEmail)}
+      ${metaRow("Phone", clientPhone)}
+      ${metaRow("Service", serviceName || "")}
+      ${metaRow("Signed", signedStamp)}
+    </table>
+    <p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 8px;font-weight:700;">Agreement</p>
+    <p style="font-size:15px;font-weight:700;margin:0 0 8px;color:${C.espresso};">${escape(contractTitle)}</p>
+    <div style="font-size:14px;line-height:22px;color:${C.coffee};border-left:3px solid ${C.hairline};padding-left:14px;margin:0 0 18px;">
+      ${agreementBody}
+    </div>
+    <p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 8px;font-weight:700;">Signature</p>
+    <table style="width:100%;border-collapse:collapse;border-top:1px solid ${C.hairline};border-bottom:1px solid ${C.hairline};">
+      ${metaRow("Signed by", signedName)}
+      ${metaRow("Signature", signatureText)}
+      ${metaRow("Initials", initials)}
+      ${metaRow("Date", signedStamp)}
+      ${metaRow("IP address", ipAddress)}
+      ${metaRow("Device", userAgent)}
+    </table>
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:18px;">
+      Automated records copy from Braid Boss Pro. The signing details above were captured at the time ${escape(clientName)} submitted their signature.
+    </p>
+  `);
+  return { subject, html };
+};
+
 // ---- appointment_approved ------------------------------------------
 const renderAppointmentApproved = (p: Record<string, any>) => {
   const clientName  = p.clientName  || "there";
@@ -1257,6 +1334,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
     case "contract_signing_email":
     case "contract_invite":
       return renderContractSigning(row.payload || {});
+    case "contract_signed_owner_alert":
+      return renderContractSignedOwnerAlert(row.payload || {});
     case "appointment_approved":
       return renderAppointmentApproved(row.payload || {});
     case "deposit_received":
