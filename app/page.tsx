@@ -3898,7 +3898,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   );
 };
 
-const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient, openQuickTx, openSettings, openInventory, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openInventory?: () => void; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; openAppointmentRecord?: (a: any) => void }) => {
+const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient, openQuickTx, openSettings, openInventory, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openInventory?: () => void; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; openAppointmentRecord?: (a: any) => void }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
@@ -4333,12 +4333,6 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
             <QuickTile icon={<TimerIcon size={20} />} label="Start Timer" onClick={openTimer} />
           </div>
         </div>
-
-        <Card className="p-4 cursor-pointer active:scale-[0.98] transition" onClick={openSavedQuotes}>
-          <FileText size={20} style={{ color: C.gold }} />
-          <p className="mt-3 font-semibold text-[15px]" style={{ color: C.espresso }}>Saved Quotes</p>
-          <p className="text-xs mt-0.5" style={{ color: C.muted }}>{store.quotes.length} saved</p>
-        </Card>
       </div>
     </div>
   );
@@ -5908,6 +5902,34 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
           <Button variant="dark" icon={<CalendarPlus size={18} />} onClick={handleConvertToAppointment} disabled={result.finalPrice <= 0}>Book it</Button>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={reset} fullWidth>Reset calculator</Button>
+
+        {/* Saved Quotes — relocated here from the Home page so the
+            calculator is the single home for estimates. Opens the same
+            SavedQuotes screen (view / edit / reuse / book). */}
+        <Card className="p-4 mt-2 cursor-pointer active:scale-[0.99] transition" onClick={openSavedQuotes}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div
+                aria-hidden
+                style={{
+                  width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                  background: GRADIENTS.primary, color: "#FFFFFF", flexShrink: 0,
+                  boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
+                }}
+              >
+                <FileText size={15} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold" style={{ color: C.espresso }}>Saved Quotes</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>Review, edit, or book from past estimates.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[11px]" style={{ color: C.muted }}>{store.quotes.length} saved</span>
+              <ChevronRight size={18} style={{ color: C.muted }} />
+            </div>
+          </div>
+        </Card>
       </div>
 
       <Sheet open={showSaveSheet} onClose={() => setShowSaveSheet(false)} title="Name this quote">
@@ -27549,7 +27571,6 @@ export default function App() {
               openQuickTx={openQuickTx}
               openSettings={() => setSecondary("settings")}
               openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }}
-              openSavedQuotes={() => setSecondary("savedQuotes")}
               openReminders={() => { setNotifOpen(true); notifications.markAllRead(); }}
               notifBadgeCount={notifications.unreadCount}
               openCommunication={openCommunication}
