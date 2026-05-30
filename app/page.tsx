@@ -3898,7 +3898,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   );
 };
 
-const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient, openQuickTx, openSettings, openInventory, openPolicies, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openInventory?: () => void; openPolicies: any; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; openAppointmentRecord?: (a: any) => void }) => {
+const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient, openQuickTx, openSettings, openInventory, openSavedQuotes, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openInventory?: () => void; openSavedQuotes: any; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; openAppointmentRecord?: (a: any) => void }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
@@ -4334,18 +4334,11 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Card className="p-4 cursor-pointer active:scale-[0.98] transition" onClick={openSavedQuotes}>
-            <FileText size={20} style={{ color: C.gold }} />
-            <p className="mt-3 font-semibold text-[15px]" style={{ color: C.espresso }}>Saved Quotes</p>
-            <p className="text-xs mt-0.5" style={{ color: C.muted }}>{store.quotes.length} saved</p>
-          </Card>
-          <Card className="p-4 cursor-pointer active:scale-[0.98] transition" onClick={openPolicies}>
-            <ScrollText size={20} style={{ color: C.gold }} />
-            <p className="mt-3 font-semibold text-[15px]" style={{ color: C.espresso }}>Policies</p>
-            <p className="text-xs mt-0.5" style={{ color: C.muted }}>{store.policies.length} templates</p>
-          </Card>
-        </div>
+        <Card className="p-4 cursor-pointer active:scale-[0.98] transition" onClick={openSavedQuotes}>
+          <FileText size={20} style={{ color: C.gold }} />
+          <p className="mt-3 font-semibold text-[15px]" style={{ color: C.espresso }}>Saved Quotes</p>
+          <p className="text-xs mt-0.5" style={{ color: C.muted }}>{store.quotes.length} saved</p>
+        </Card>
       </div>
     </div>
   );
@@ -11928,7 +11921,13 @@ const SavedQuotes = ({ store, onBack, onLoadQuote, onConvertToAppt, openReceipt 
 // ============================================================
 //  POLICIES (V1 reused)
 // ============================================================
-const Policies = ({ store, onBack }) => {
+// Policy Templates — the reusable, copyable policy snippets clients
+// see before booking. Formerly a standalone "Policies" screen reached
+// from a Home quick-action card; now rendered as a section inside
+// Settings → Booking policies so there's a single policy destination.
+// Content-only (no screen chrome) so it can embed under the booking
+// policy fields. Data is unchanged: store.policies + upsert/delete.
+const PolicyTemplatesSection = ({ store }: { store: any }) => {
   const [editing, setEditing] = useState<EntityRecord | null>(null);
   const [creating, setCreating] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -11941,31 +11940,32 @@ const Policies = ({ store, onBack }) => {
   };
 
   return (
-    <div className="bbp-fade pb-32">
-      <Header title="Policies" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} rightAction={{ icon: <Plus size={20} />, onClick: () => setCreating(true) }} />
-
-      <div className="px-5 pt-2 space-y-2.5">
-        {store.policies.map(p => (
-          <Card key={p.id} className="p-4">
-            <div className="flex items-start justify-between gap-2 mb-2">
-              <p className="font-semibold text-base" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{p.title}</p>
-              <Pill tone="neutral">{p.category}</Pill>
-            </div>
-            <p className="text-xs leading-relaxed mb-3" style={{ color: C.coffee }}>{p.body}</p>
-            <div className="grid grid-cols-3 gap-1.5">
-              <Button variant="outline" onClick={() => copy(p)} icon={<Copy size={13} />} fullWidth>Copy</Button>
-              <Button variant="outline" onClick={() => setEditing(p)} icon={<Edit3 size={13} />} fullWidth>Edit</Button>
-              <Button variant="outline" icon={<Trash2 size={13} />} onClick={() => store.deletePolicy(p.id)} fullWidth>Delete</Button>
-            </div>
-          </Card>
-        ))}
-        {store.policies.length === 0 && (
-          <EmptyState icon={<ScrollText size={28} style={{ color: C.muted }} />}
-            title="No policies yet"
-            body="Add deposit, cancellation, late, and prep policies. Copy them into texts or DMs in one tap."
-            cta={<Button variant="primary" icon={<Plus size={16} />} onClick={() => setCreating(true)}>Add Policy</Button>} />
-        )}
-      </div>
+    <div className="space-y-2.5">
+      {store.policies.length > 0 && (
+        <Button variant="outline" icon={<Plus size={14} />} onClick={() => setCreating(true)} fullWidth>
+          Add policy template
+        </Button>
+      )}
+      {store.policies.map(p => (
+        <Card key={p.id} className="p-4">
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <p className="font-semibold text-base" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{p.title}</p>
+            <Pill tone="neutral">{p.category}</Pill>
+          </div>
+          <p className="text-xs leading-relaxed mb-3" style={{ color: C.coffee }}>{p.body}</p>
+          <div className="grid grid-cols-3 gap-1.5">
+            <Button variant="outline" onClick={() => copy(p)} icon={<Copy size={13} />} fullWidth>Copy</Button>
+            <Button variant="outline" onClick={() => setEditing(p)} icon={<Edit3 size={13} />} fullWidth>Edit</Button>
+            <Button variant="outline" icon={<Trash2 size={13} />} onClick={() => store.deletePolicy(p.id)} fullWidth>Delete</Button>
+          </div>
+        </Card>
+      ))}
+      {store.policies.length === 0 && (
+        <EmptyState icon={<ScrollText size={28} style={{ color: C.muted }} />}
+          title="No policy templates yet"
+          body="Add deposit, cancellation, late, and prep policies. Copy them into texts or DMs in one tap."
+          cta={<Button variant="primary" icon={<Plus size={16} />} onClick={() => setCreating(true)}>Add Policy</Button>} />
+      )}
 
       {(editing || creating) && (
         <PolicySheet policy={creating ? blank() : editing} isNew={creating}
@@ -12887,7 +12887,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Booking policies</p>
-                      <p className="text-[11px]" style={{ color: C.muted }}>Deposit · cancellation · prep · more</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>Deposits · cancellations · prep · templates</p>
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
@@ -21214,7 +21214,7 @@ const BookingPoliciesScreen = ({ store, onBack }: { store: any; onBack: () => vo
     <div className="bbp-fade pb-32">
       <Header
         title="Booking policies"
-        subtitle="What clients agree to when they book"
+        subtitle="Deposits · cancellations · prep · templates"
         leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
       />
       <div className="px-5 pt-2 space-y-4">
@@ -21280,6 +21280,16 @@ const BookingPoliciesScreen = ({ store, onBack }: { store: any; onBack: () => vo
           <Button variant="primary" icon={savedFlash ? <Check size={16} /> : <Save size={16} />} onClick={handleSave} fullWidth>
             {busy ? "Saving…" : savedFlash ? "Saved" : "Save policies"}
           </Button>
+        </div>
+
+        {/* Merged from the former Home → Policies card: reusable policy
+            templates clients can see before booking. */}
+        <div className="pt-4">
+          <p className="text-sm font-semibold" style={{ color: C.espresso }}>Policy Templates</p>
+          <p className="text-[11px] mb-3" style={{ color: C.muted }}>
+            Create and manage the rules clients see before booking.
+          </p>
+          <PolicyTemplatesSection store={store} />
         </div>
       </div>
     </div>
@@ -27539,7 +27549,6 @@ export default function App() {
               openQuickTx={openQuickTx}
               openSettings={() => setSecondary("settings")}
               openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }}
-              openPolicies={() => setSecondary("policies")}
               openSavedQuotes={() => setSecondary("savedQuotes")}
               openReminders={() => { setNotifOpen(true); notifications.markAllRead(); }}
               notifBadgeCount={notifications.unreadCount}
@@ -27625,7 +27634,6 @@ export default function App() {
         </>
       )}
 
-      {secondary === "policies" && <Policies store={store} onBack={() => setSecondary(null)} />}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
       {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
