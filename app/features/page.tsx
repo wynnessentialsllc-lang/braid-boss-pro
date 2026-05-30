@@ -85,7 +85,7 @@ export default function FeaturesPage() {
           </>
         }
         body="Braid Boss Pro is a premium business operating system for braid stylists — branded booking links, deposits, contracts, retail storefronts, analytics, and creator-economy tools built around how braiders actually run their chairs. Not generic salon software."
-        primaryCta={{ label: "Claim founding access", href: "/pricing" }}
+        primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "How it works", href: "/how-it-works" }}
       />
 
@@ -321,8 +321,8 @@ export default function FeaturesPage() {
 
       <CtaFooter
         title="Run your braid business like a brand."
-        body="The first 100 stylists lock in lifetime founding access at a single one-time payment. After that, Braid Boss Pro moves to monthly membership pricing."
-        primaryCta={{ label: "Claim founding access", href: "/pricing" }}
+        body="Start with a 14-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
+        primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "How it works", href: "/how-it-works" }}
       />
     </MarketingShell>

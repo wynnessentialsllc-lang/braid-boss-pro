@@ -16126,8 +16126,9 @@ const useCloudSync = (userId: string | null, store: any) => {
   return { state, lastOk, pendingCount };
 };
 
-const AuthGate = ({ onContinueGuest, initialTab = "signin" }: {
+const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
   onContinueGuest: () => void;
+  onBack?: () => void;
   initialTab?: "signin" | "signup" | "reset";
 }) => {
   const [tab, setTab] = useState<"signin" | "signup" | "reset">(initialTab);
@@ -16171,6 +16172,18 @@ const AuthGate = ({ onContinueGuest, initialTab = "signin" }: {
     <div className="flex flex-col items-center justify-center px-5" style={{ minHeight: "100dvh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso }}>
       <GlobalStyle />
       <div className="w-full max-w-[400px]">
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-1 text-[12px] mb-3"
+            style={{ color: C.coffee }}
+            aria-label="Back to welcome screen"
+          >
+            <ChevronLeft size={14} />
+            <span>Back</span>
+          </button>
+        )}
         <p className="text-center text-[10px] font-bold tracking-[0.22em] uppercase" style={{ color: C.gold }}>Braid Boss Pro</p>
         <h1 className="text-center mt-2 mb-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 600, color: C.espresso }}>
           {tab === "signin" ? "Welcome back" : tab === "signup" ? "Create your account" : "Reset password"}
@@ -27850,6 +27863,14 @@ export default function App() {
       }
     } catch { /* private mode — gate still works in-memory this session */ }
   }, []);
+  const returnToIntro = useCallback(() => {
+    setIntroSeen(false);
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem("bbp-intro-seen-v1");
+      }
+    } catch { /* private mode — silent */ }
+  }, []);
   const rawStore = useStorage();
   const { premium } = usePremiumStatus(auth.userId);
   const discountsApi = useDiscounts(auth.userId);
@@ -28214,7 +28235,7 @@ export default function App() {
         />
       );
     }
-    return <AuthGate onContinueGuest={auth.continueAsGuest} initialTab={authInitialTab} />;
+    return <AuthGate onContinueGuest={auth.continueAsGuest} onBack={returnToIntro} initialTab={authInitialTab} />;
   }
 
   if (store.loading) {

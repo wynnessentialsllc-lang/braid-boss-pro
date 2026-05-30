@@ -133,12 +133,12 @@ export default function PricingPage() {
           />
           <PricingCard
             tone="future"
-            badge="Founding & lifetime members"
+            badge="Grandfathered members"
             title="You're set — forever"
-            subtitle="Grandfathered Access"
+            subtitle="Lifetime access"
             price="Lifetime"
             cadence="already yours"
-            description="Already bought Founding Stylist Access or a lifetime unlock? You keep full access forever at no monthly cost — nothing changes for you, and there's nothing to do. The new monthly plan only applies to new stylists joining now."
+            description="Already have a lifetime unlock on your account? You keep full access forever at no monthly cost — nothing changes for you, and there's nothing to do. The monthly plan only applies to new stylists joining now."
             features={[
               "Lifetime access stays active — no monthly bill",
               "Every current and future feature included",

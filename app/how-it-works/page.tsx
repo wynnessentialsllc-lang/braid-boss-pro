@@ -74,7 +74,7 @@ export default function HowItWorksPage() {
           </>
         }
         body="Braid Boss Pro is the business operating system for braiders — branded booking links, deposits, contracts, retail storefronts, and a mobile dashboard built around how braid stylists run their chairs. This is the path from a new account to a shareable booking link."
-        primaryCta={{ label: "Claim founding access", href: "/pricing" }}
+        primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See the platform", href: "/features" }}
       />
 
@@ -92,8 +92,8 @@ export default function HowItWorksPage() {
             body={
               <>
                 Sign up with your email — the dashboard opens to a guided
-                walkthrough. Founding stylists lock in lifetime access with a
-                one-time payment at sign-up.
+                walkthrough. Start with a 14-day free trial; every feature
+                unlocked from day one.
               </>
             }
             cta={{ label: "Sign up", href: "/" }}
@@ -304,9 +304,9 @@ export default function HowItWorksPage() {
       </Section>
 
       <CtaFooter
-        title="Ten minutes to live. A founding spot to claim."
-        body="The first 100 stylists lock in lifetime access at a one-time founding payment. After that, Braid Boss Pro moves to monthly membership pricing."
-        primaryCta={{ label: "Claim founding access", href: "/pricing" }}
+        title="Ten minutes to live. Try it free for 14 days."
+        body="Every feature unlocked from day one. Then $14.99/month. No contracts, cancel anytime."
+        primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "Browse features", href: "/features" }}
       />
     </MarketingShell>
