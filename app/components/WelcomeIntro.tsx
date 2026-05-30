@@ -1007,36 +1007,53 @@ const WelcomeIntro = ({
           })}
         </ul>
 
-        {/* Up-front pricing chip — sets expectations before the
+        {/* Up-front pricing card — sets expectations before the
             CTA so users don't hit a paywall surprise after signup. */}
         <div
           className="bbp-intro-anim"
           style={{
             display: "flex",
             justifyContent: "center",
-            marginTop: 14,
+            marginTop: 18,
             animation: reduced ? "none" : "bbp-fade-up 600ms 820ms both",
           }}
         >
-          <span
+          <div
             style={{
-              display: "inline-flex",
+              display: "flex",
               alignItems: "center",
-              gap: 6,
-              padding: "6px 12px",
-              borderRadius: 999,
+              gap: 12,
+              padding: "12px 18px",
+              borderRadius: 16,
               background: GRADIENTS.primary,
               color: "#FFFFFF",
-              fontSize: 11,
-              fontWeight: 800,
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
               boxShadow: SHADOWS.primaryGlow,
+              width: "100%",
+              maxWidth: 360,
             }}
           >
-            <Sparkles size={12} />
-            {SUBSCRIPTION_TRIAL_DAYS}-day free trial · then {SUBSCRIPTION_PRICE_LABEL} · Cancel anytime
-          </span>
+            <div
+              style={{
+                display: "grid",
+                placeItems: "center",
+                width: 32,
+                height: 32,
+                borderRadius: 999,
+                background: "rgba(255,255,255,0.18)",
+                flexShrink: 0,
+              }}
+            >
+              <Sparkles size={16} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 700, letterSpacing: "0.01em" }}>
+                {SUBSCRIPTION_TRIAL_DAYS}-day free trial
+              </p>
+              <p style={{ margin: 0, fontSize: 12, fontWeight: 500, opacity: 0.88 }}>
+                Then {SUBSCRIPTION_PRICE_LABEL} · Cancel anytime
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* CTAs — placed above the preview carousel so they're
