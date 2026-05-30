@@ -34,6 +34,7 @@ import {
   DollarSign,
 } from "lucide-react";
 import { trackEvent } from "../lib/track";
+import { SUBSCRIPTION_PRICE_LABEL, SUBSCRIPTION_TRIAL_DAYS } from "../lib/premium";
 
 // Palette mirrors the project's C tokens (app/page.tsx:231).
 const P = {
@@ -1005,6 +1006,38 @@ const WelcomeIntro = ({
           );
           })}
         </ul>
+
+        {/* Up-front pricing chip — sets expectations before the
+            CTA so users don't hit a paywall surprise after signup. */}
+        <div
+          className="bbp-intro-anim"
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            marginTop: 14,
+            animation: reduced ? "none" : "bbp-fade-up 600ms 820ms both",
+          }}
+        >
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 12px",
+              borderRadius: 999,
+              background: GRADIENTS.primary,
+              color: "#FFFFFF",
+              fontSize: 11,
+              fontWeight: 800,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              boxShadow: SHADOWS.primaryGlow,
+            }}
+          >
+            <Sparkles size={12} />
+            {SUBSCRIPTION_TRIAL_DAYS}-day free trial · then {SUBSCRIPTION_PRICE_LABEL} · Cancel anytime
+          </span>
+        </div>
 
         {/* CTAs — placed above the preview carousel so they're
             reachable without scrolling on smaller iPhones. */}
