@@ -114,12 +114,22 @@ import {
 import {
   APP_VERSION,
   BUILD_NUMBER,
+  SUPPORT_EMAIL as SUPPORT_EMAIL_ADDR,
+  ONBOARDING_STEPS,
+  FEATURE_CATEGORIES,
+  type BugPriority,
+  type HelpArticle,
+  type Walkthrough,
   detectClientInfo,
   uploadSupportScreenshot,
   submitBugReport,
   submitFeatureRequest,
   useReleaseNotes,
   useMemberSince,
+  useHelpArticles,
+  useWalkthroughs,
+  useOnboardingProgress,
+  scoreHelpArticle,
 } from "./lib/support";
 import {
   GUEST_LIMITS,
@@ -12409,38 +12419,19 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
 
 // ============================================================
 //  SUPPORT CENTER (Settings → Support)
+//  Self-service learning + onboarding hub. No video placeholders —
+//  everything (checklist, walkthroughs, help articles, bug + feature
+//  capture) is functional and backed by Supabase.
 // ============================================================
-const SUPPORT_EMAIL = "support@braidbosspro.app";
-
-const SETUP_ARTICLES: { title: string; body: string }[] = [
-  { title: "Setting Up Your Business", body: "Open Settings → Business profile to add your studio name, logo, hours, and booking link handle. This is what clients see at the top of your public booking page." },
-  { title: "Creating Services", body: "Go to Settings → Services to add each style you offer with pricing, duration, deposit, and optional add-ons or variations (e.g. hair included, length, curl pattern)." },
-  { title: "Accepting Bookings", body: "Share your booking link (/@your-handle). Requests land in Approvals, where you approve, request a deposit, or decline. Approved bookings appear on your calendar." },
-  { title: "Deposits & Payments", body: "Connect Stripe in Settings → Payments to collect deposits and balances. Funds go straight to your own Stripe account — Braid Boss Pro never holds your money." },
-  { title: "Contracts", body: "Create agreement templates and attach them to services. Clients e-sign before their appointment, and you get an emailed copy plus a record in the app." },
-  { title: "Client Management", body: "The Clients tab is your CRM — contact info, history, notes, and lifetime value. Clients are created automatically from bookings, or add them manually." },
-  { title: "Calendar & Scheduling", body: "The Schedule tab shows your day, week, and appointments. Tap a slot to add a booking, block time, or open an existing appointment." },
-  { title: "Pricing Calculator", body: "Build a quote from a base price, add-ons, discounts, and tip. Save it for later or turn it straight into a booking. Saved quotes live under the calculator." },
-  { title: "Style Presets", body: "Save reusable style templates with pricing, time estimates, and add-ons so you can drop them into a quote or appointment in one tap." },
-  { title: "Cloud Backup", body: "Sign in to back up your data to the cloud. Everything syncs across every device you sign in on, so you never lose a client, appointment, or receipt." },
-];
-
-const VIDEO_TUTORIALS: { title: string; url: string | null }[] = [
-  { title: "First 10 Minutes Setup", url: null },
-  { title: "How Booking Approval Works", url: null },
-  { title: "How Deposits Work", url: null },
-  { title: "How Contracts Work", url: null },
-  { title: "How to Use Pricing Calculator", url: null },
-  { title: "Managing Clients", url: null },
-];
+const SUPPORT_EMAIL = SUPPORT_EMAIL_ADDR;
 
 type StatusState = "operational" | "degraded" | "outage";
 const SYSTEM_STATUS: { label: string; value: string; state: StatusState }[] = [
   { label: "Cloud Backup",   value: "Active",      state: "operational" },
   { label: "Bookings",       value: "Operational", state: "operational" },
+  { label: "Database",       value: "Operational", state: "operational" },
   { label: "Payments",       value: "Operational", state: "operational" },
   { label: "Email Delivery", value: "Operational", state: "operational" },
-  { label: "Database",       value: "Operational", state: "operational" },
 ];
 
 const LEGAL_LINKS: { label: string; href: string }[] = [
@@ -12467,12 +12458,14 @@ const SupportSection = ({ icon, title, desc, children }: { icon: React.ReactNode
   </div>
 );
 
-const BugReportSheet = ({ userId, onClose, onDone }: { userId: string | null; onClose: () => void; onDone: (msg: string) => void }) => {
+const BugReportSheet = ({ userId, defaultPage, onClose, onDone }: { userId: string | null; defaultPage?: string; onClose: () => void; onDone: (msg: string) => void }) => {
   const info = detectClientInfo();
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
   const [device, setDevice] = useState(info.device);
   const [browser, setBrowser] = useState(info.browser);
+  const [page, setPage] = useState(defaultPage || "");
+  const [priority, setPriority] = useState<BugPriority>("medium");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -12482,17 +12475,41 @@ const BugReportSheet = ({ userId, onClose, onDone }: { userId: string | null; on
     setBusy(true); setErr(null);
     let screenshotUrl: string | null = null;
     if (file && userId) screenshotUrl = await uploadSupportScreenshot(userId, file);
-    const r = await submitBugReport(userId || "", { title, description: desc, device, browser, screenshotUrl });
+    const r = await submitBugReport(userId || "", { title, description: desc, device, browser, screenshotUrl, page, priority });
     setBusy(false);
     if (r.ok) { onDone("Bug report sent — thank you!"); onClose(); }
     else setErr(r.error);
   };
+
+  const PRIORITIES: { id: BugPriority; label: string }[] = [
+    { id: "low", label: "Low" },
+    { id: "medium", label: "Medium" },
+    { id: "high", label: "High" },
+  ];
 
   return (
     <Sheet open onClose={onClose} title="Report a bug">
       <div className="space-y-4">
         <Field label="Issue title"><Input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Calendar won't open" /></Field>
         <Field label="Description"><Textarea value={desc} onChange={e => setDesc(e.target.value)} rows={4} placeholder="What happened? What did you expect?" /></Field>
+        <Field label="Page where it happened">
+          <Input value={page} onChange={e => setPage(e.target.value)} placeholder="e.g. Calendar, Approvals, Settings → Services" />
+        </Field>
+        <Field label="Priority">
+          <div className="grid grid-cols-3 gap-2">
+            {PRIORITIES.map(p => (
+              <button key={p.id} type="button" onClick={() => setPriority(p.id)}
+                className="px-3 py-2 rounded-xl text-[12.5px] font-semibold transition"
+                style={{
+                  background: priority === p.id ? GRADIENTS.primary : C.paper,
+                  color: priority === p.id ? "#FFFFFF" : C.espresso,
+                  border: `1px solid ${priority === p.id ? "transparent" : C.hairline}`,
+                }}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Device"><Input value={device} onChange={e => setDevice(e.target.value)} /></Field>
           <Field label="Browser"><Input value={browser} onChange={e => setBrowser(e.target.value)} /></Field>
@@ -12513,12 +12530,13 @@ const BugReportSheet = ({ userId, onClose, onDone }: { userId: string | null; on
 const FeatureRequestSheet = ({ userId, onClose, onDone }: { userId: string | null; onClose: () => void; onDone: (msg: string) => void }) => {
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
+  const [category, setCategory] = useState<string>("other");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const submit = async () => {
     if (busy) return;
     setBusy(true); setErr(null);
-    const r = await submitFeatureRequest(userId || "", { title, description: desc });
+    const r = await submitFeatureRequest(userId || "", { title, description: desc, category });
     setBusy(false);
     if (r.ok) { onDone("Feature request sent — thank you!"); onClose(); }
     else setErr(r.error);
@@ -12528,6 +12546,24 @@ const FeatureRequestSheet = ({ userId, onClose, onDone }: { userId: string | nul
       <div className="space-y-4">
         <Field label="Feature title"><Input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Waitlist auto-fill" /></Field>
         <Field label="Description"><Textarea value={desc} onChange={e => setDesc(e.target.value)} rows={4} placeholder="What would it do, and how would it help?" /></Field>
+        <Field label="Category">
+          <div className="flex flex-wrap gap-2">
+            {FEATURE_CATEGORIES.map(c => (
+              <button key={c.id} type="button" onClick={() => setCategory(c.id)}
+                className="px-3 py-1.5 rounded-full text-[12px] font-semibold transition"
+                style={{
+                  background: category === c.id ? GRADIENTS.primary : C.paper,
+                  color: category === c.id ? "#FFFFFF" : C.espresso,
+                  border: `1px solid ${category === c.id ? "transparent" : C.hairline}`,
+                }}>
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </Field>
+        <p className="text-[11px]" style={{ color: C.muted }}>
+          Future-ready: every request will be votable so the community can rank what we build next.
+        </p>
         {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
         <Button variant="primary" fullWidth disabled={busy || !title.trim()} onClick={submit}>
           {busy ? "Sending…" : "Send feature request"}
@@ -12537,14 +12573,101 @@ const FeatureRequestSheet = ({ userId, onClose, onDone }: { userId: string | nul
   );
 };
 
-const SupportCenterScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+// Step-by-step walkthrough player. Doesn't require a real video —
+// just walks through the steps with a success screen at the end.
+// Future-ready: a `target` selector per step could highlight buttons.
+const WalkthroughSheet = ({ walkthrough, onClose }: { walkthrough: Walkthrough; onClose: () => void }) => {
+  const [step, setStep] = useState(0);
+  const total = walkthrough.steps.length;
+  const isDone = step >= total;
+  const current = walkthrough.steps[step];
+
+  return (
+    <Sheet open onClose={onClose} title={walkthrough.title}>
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-[11.5px] font-semibold" style={{ color: C.muted }}>
+            {isDone ? "Complete" : `Step ${step + 1} of ${total}`}
+          </span>
+          <span className="text-[11.5px]" style={{ color: C.muted }}>~{walkthrough.est_minutes} min</span>
+        </div>
+        <div style={{ height: 6, background: C.hairline, borderRadius: 999, overflow: "hidden" }}>
+          <div style={{
+            height: "100%",
+            width: `${isDone ? 100 : Math.round((step / Math.max(total, 1)) * 100)}%`,
+            background: GRADIENTS.primary,
+            transition: "width 200ms ease",
+          }} />
+        </div>
+      </div>
+
+      {!isDone && current && (
+        <div className="space-y-3">
+          <p className="text-[16px] font-semibold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>
+            {current.title}
+          </p>
+          <p className="text-[14px] leading-relaxed" style={{ color: C.coffee }}>{current.body}</p>
+        </div>
+      )}
+
+      {isDone && (
+        <div className="py-6 text-center">
+          <div className="mx-auto mb-3" style={{
+            width: 56, height: 56, borderRadius: 999, background: GRADIENTS.primary,
+            display: "grid", placeItems: "center", color: "#FFFFFF",
+          }}>
+            <Check size={28} />
+          </div>
+          <p className="text-lg font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>
+            {walkthrough.success_message || "You're all set."}
+          </p>
+        </div>
+      )}
+
+      <div className="mt-6 flex items-center gap-2">
+        {!isDone && step > 0 && (
+          <Button variant="outline" onClick={() => setStep(step - 1)}>Back</Button>
+        )}
+        {!isDone && (
+          <Button variant="primary" fullWidth onClick={() => setStep(step + 1)}>
+            {step + 1 >= total ? "Finish" : "Next"}
+          </Button>
+        )}
+        {isDone && (
+          <Button variant="primary" fullWidth onClick={onClose}>Done</Button>
+        )}
+      </div>
+    </Sheet>
+  );
+};
+
+const SupportCenterScreen = ({
+  store, onBack,
+  openAccount, openServices, openAvailability, openPolicies,
+  goToTab,
+}: {
+  store: any;
+  onBack: () => void;
+  openAccount?: () => void;
+  openServices?: () => void;
+  openAvailability?: () => void;
+  openPolicies?: () => void;
+  goToTab?: (tab: string) => void;
+}) => {
   const userId: string | null = store.userId || null;
   const membership = useFoundingMembership(userId);
   const { notes } = useReleaseNotes();
   const memberSince = useMemberSince();
+  const { articles } = useHelpArticles();
+  const { walkthroughs } = useWalkthroughs();
+  const { done: onboardingDone, toggle: toggleOnboarding, percent: onboardingPercent } = useOnboardingProgress(userId);
+
   const [bugOpen, setBugOpen] = useState(false);
   const [featureOpen, setFeatureOpen] = useState(false);
-  const [article, setArticle] = useState<{ title: string; body: string } | null>(null);
+  const [article, setArticle] = useState<HelpArticle | null>(null);
+  const [activeWalkthrough, setActiveWalkthrough] = useState<Walkthrough | null>(null);
+  const [helpQuery, setHelpQuery] = useState("");
+  const [howDoIQuery, setHowDoIQuery] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); };
 
@@ -12560,6 +12683,40 @@ const SupportCenterScreen = ({ store, onBack }: { store: any; onBack: () => void
     catch { return "—"; }
   };
 
+  const onboardingHandlerFor = (id: string): (() => void) | null => {
+    switch (id) {
+      case "business_info": return openAccount ?? null;
+      case "first_service": return openServices ?? null;
+      case "availability":  return openAvailability ?? null;
+      case "deposits":      return openServices ?? null;
+      case "policies":      return openPolicies ?? null;
+      case "first_client":  return goToTab ? () => goToTab("clients") : null;
+      case "first_booking": return goToTab ? () => goToTab("calendar") : null;
+      default: return null;
+    }
+  };
+
+  const filteredHelp = (() => {
+    const q = helpQuery.trim();
+    if (!q) return articles;
+    return articles
+      .map(a => ({ a, s: scoreHelpArticle(a, q) }))
+      .filter(x => x.s > 0)
+      .sort((x, y) => y.s - x.s)
+      .map(x => x.a);
+  })();
+
+  const howDoIResults = (() => {
+    const q = howDoIQuery.trim();
+    if (!q) return [];
+    return articles
+      .map(a => ({ a, s: scoreHelpArticle(a, q) }))
+      .filter(x => x.s > 0)
+      .sort((x, y) => y.s - x.s)
+      .slice(0, 5)
+      .map(x => x.a);
+  })();
+
   const QuickAction = ({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) => (
     <button type="button" onClick={onClick}
       className="rounded-2xl p-4 flex flex-col items-start gap-2 active:scale-[0.98] transition text-left"
@@ -12574,7 +12731,7 @@ const SupportCenterScreen = ({ store, onBack }: { store: any; onBack: () => void
       <div className="flex items-center justify-between gap-3 w-full">
         <div className="flex items-center gap-3 min-w-0">
           <span aria-hidden style={{ color: C.brandPrimary, flexShrink: 0 }}>{icon}</span>
-          <span className="text-[13.5px] font-medium" style={{ color: C.espresso }}>{label}</span>
+          <span className="text-[13.5px] font-medium text-left" style={{ color: C.espresso }}>{label}</span>
         </div>
         <ChevronRight size={17} style={{ color: C.muted }} />
       </div>
@@ -12597,64 +12754,218 @@ const SupportCenterScreen = ({ store, onBack }: { store: any; onBack: () => void
     <div className="bbp-fade pb-32">
       <Header
         title="Support Center"
-        subtitle="Everything you need to get the most out of Braid Boss Pro."
+        subtitle="Learn, troubleshoot, and grow — all without leaving the app."
         leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
       />
       <div className="px-5 pt-2 space-y-6">
+
+        {/* HERO — Need Help? */}
+        <Card className="p-5" style={{ background: GRADIENTS.primary, color: "#FFFFFF", border: "none" }}>
+          <p className="text-[20px] font-bold leading-tight" style={{ fontFamily: FONT_DISPLAY }}>Need Help?</p>
+          <p className="text-[13px] mt-1 opacity-90">Search articles, launch a walkthrough, or contact support.</p>
+          <div className="grid grid-cols-3 gap-2 mt-4">
+            <button type="button"
+              onClick={() => { document.getElementById("support-help")?.scrollIntoView({ behavior: "smooth", block: "start" }); setTimeout(() => document.getElementById("support-help-input")?.focus(), 300); }}
+              className="rounded-xl p-3 text-[12px] font-semibold active:scale-[0.97] transition flex flex-col items-center gap-1"
+              style={{ background: "rgba(255,255,255,0.18)", color: "#FFFFFF" }}>
+              <Search size={16} /> Search Help
+            </button>
+            <button type="button"
+              onClick={() => { document.getElementById("support-walkthroughs")?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+              className="rounded-xl p-3 text-[12px] font-semibold active:scale-[0.97] transition flex flex-col items-center gap-1"
+              style={{ background: "rgba(255,255,255,0.18)", color: "#FFFFFF" }}>
+              <PlayCircle size={16} /> Walkthroughs
+            </button>
+            <button type="button"
+              onClick={() => { window.location.href = `mailto:${SUPPORT_EMAIL}`; }}
+              className="rounded-xl p-3 text-[12px] font-semibold active:scale-[0.97] transition flex flex-col items-center gap-1"
+              style={{ background: "rgba(255,255,255,0.18)", color: "#FFFFFF" }}>
+              <Mail size={16} /> Contact
+            </button>
+          </div>
+        </Card>
+
         {/* QUICK ACTIONS */}
         <div className="grid grid-cols-2 gap-3">
           <QuickAction icon={<Mail size={18} />} label="Contact Support" onClick={() => { window.location.href = `mailto:${SUPPORT_EMAIL}`; }} />
           <QuickAction icon={<Lightbulb size={18} />} label="Request Feature" onClick={() => setFeatureOpen(true)} />
           <QuickAction icon={<Bug size={18} />} label="Report Bug" onClick={() => setBugOpen(true)} />
-          <QuickAction icon={<PlayCircle size={18} />} label="Watch Tutorials" onClick={() => { document.getElementById("support-videos")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} />
+          <QuickAction icon={<PlayCircle size={18} />} label="Walkthroughs" onClick={() => { document.getElementById("support-walkthroughs")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} />
         </div>
 
-        {/* GET HELP */}
-        <SupportSection icon={<HelpCircle size={15} />} title="Get Help" desc="Contact support or report an issue.">
-          <div className="space-y-2">
-            <ActionRow icon={<Mail size={17} />} label="Contact Support" href={`mailto:${SUPPORT_EMAIL}`} />
-            <ActionRow icon={<Bug size={17} />} label="Report a Bug" onClick={() => setBugOpen(true)} />
-            <ActionRow icon={<Lightbulb size={17} />} label="Request a Feature" onClick={() => setFeatureOpen(true)} />
-          </div>
-        </SupportSection>
-
-        {/* SETUP GUIDE */}
-        <SupportSection icon={<ScrollText size={15} />} title="Getting Started" desc="Learn how to use Braid Boss Pro.">
-          <div className="space-y-2">
-            {SETUP_ARTICLES.map(a => (
-              <ActionRow key={a.title} icon={<ScrollText size={17} />} label={a.title} onClick={() => setArticle(a)} />
-            ))}
-          </div>
-        </SupportSection>
-
-        {/* VIDEO TUTORIALS */}
-        <div id="support-videos">
-          <SupportSection icon={<PlayCircle size={15} />} title="Video Tutorials" desc="Quick walkthroughs.">
-            <div className="grid grid-cols-2 gap-3">
-              {VIDEO_TUTORIALS.map(v => (
-                <button key={v.title} type="button"
-                  onClick={() => { if (v.url) window.open(v.url, "_blank", "noopener,noreferrer"); else flash("Tutorial coming soon."); }}
-                  className="rounded-2xl overflow-hidden active:scale-[0.98] transition text-left"
-                  style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
-                  <div style={{ background: GRADIENTS.primary, height: 70, display: "grid", placeItems: "center", color: "#FFFFFF" }}>
-                    <PlayCircle size={26} />
-                  </div>
-                  <div className="p-3">
-                    <p className="text-[12.5px] font-semibold leading-tight" style={{ color: C.espresso }}>{v.title}</p>
-                    <p className="text-[10px] mt-1" style={{ color: C.muted }}>{v.url ? "Watch now" : "Coming soon"}</p>
-                  </div>
-                </button>
-              ))}
+        {/* GETTING STARTED CHECKLIST */}
+        <SupportSection icon={<CheckCircle2 size={15} />} title="Getting Started" desc="Set up your business in minutes.">
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+                {onboardingPercent}% complete
+              </p>
+              <p className="text-[11.5px]" style={{ color: C.muted }}>
+                {ONBOARDING_STEPS.filter(s => onboardingDone.has(s.id)).length} / {ONBOARDING_STEPS.length}
+              </p>
             </div>
+            <div style={{ height: 8, background: C.hairline, borderRadius: 999, overflow: "hidden" }}>
+              <div style={{
+                height: "100%",
+                width: `${onboardingPercent}%`,
+                background: GRADIENTS.primary,
+                transition: "width 220ms ease",
+              }} />
+            </div>
+            <div className="mt-3 space-y-1.5">
+              {ONBOARDING_STEPS.map(step => {
+                const isDone = onboardingDone.has(step.id);
+                const handler = onboardingHandlerFor(step.id);
+                return (
+                  <div key={step.id}
+                    className="flex items-center gap-3 p-2.5 rounded-xl"
+                    style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                    <button type="button"
+                      aria-label={isDone ? "Mark incomplete" : "Mark complete"}
+                      onClick={(e) => { e.stopPropagation(); toggleOnboarding(step.id, !isDone); }}
+                      style={{
+                        width: 22, height: 22, borderRadius: 999, flexShrink: 0,
+                        display: "grid", placeItems: "center",
+                        background: isDone ? GRADIENTS.primary : "transparent",
+                        border: isDone ? "none" : `1.5px solid ${C.muted}`,
+                        color: "#FFFFFF",
+                      }}>
+                      {isDone && <Check size={13} />}
+                    </button>
+                    <button type="button"
+                      onClick={() => handler?.()}
+                      disabled={!handler}
+                      className="flex-1 text-left text-[13.5px] font-medium"
+                      style={{
+                        color: isDone ? C.muted : C.espresso,
+                        textDecoration: isDone ? "line-through" : "none",
+                        cursor: handler ? "pointer" : "default",
+                      }}>
+                      {step.label}
+                    </button>
+                    {handler && <ChevronRight size={16} style={{ color: C.muted, flexShrink: 0 }} />}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        </SupportSection>
+
+        {/* INTERACTIVE WALKTHROUGHS */}
+        <div id="support-walkthroughs">
+          <SupportSection icon={<PlayCircle size={15} />} title="Interactive Walkthroughs" desc="Step-by-step guides for the most-used flows.">
+            {walkthroughs.length === 0 ? (
+              <Card className="p-4"><p className="text-[12px]" style={{ color: C.muted }}>Loading walkthroughs…</p></Card>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                {walkthroughs.map(w => (
+                  <button key={w.slug} type="button"
+                    onClick={() => setActiveWalkthrough(w)}
+                    className="rounded-2xl overflow-hidden active:scale-[0.98] transition text-left"
+                    style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+                    <div style={{ background: GRADIENTS.primary, height: 70, display: "grid", placeItems: "center", color: "#FFFFFF" }}>
+                      <PlayCircle size={26} />
+                    </div>
+                    <div className="p-3">
+                      <p className="text-[12.5px] font-semibold leading-tight" style={{ color: C.espresso }}>{w.title}</p>
+                      <p className="text-[10.5px] mt-1" style={{ color: C.muted }}>
+                        {w.steps.length} step{w.steps.length === 1 ? "" : "s"} · ~{w.est_minutes} min
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </SupportSection>
         </div>
 
-        {/* FEATURE REQUESTS */}
-        <SupportSection icon={<Lightbulb size={15} />} title="Feature Requests" desc="Tell us what you'd like added.">
+        {/* HELP CENTER (searchable articles) */}
+        <div id="support-help">
+          <SupportSection icon={<HelpCircle size={15} />} title="Help Center" desc="Searchable help articles.">
+            <Card className="p-3 mb-3">
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-xl"
+                style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                <Search size={16} style={{ color: C.muted, flexShrink: 0 }} />
+                <input
+                  id="support-help-input"
+                  value={helpQuery}
+                  onChange={e => setHelpQuery(e.target.value)}
+                  placeholder="Search help articles..."
+                  className="flex-1 bg-transparent outline-none text-[13.5px]"
+                  style={{ color: C.espresso }}
+                />
+                {helpQuery && (
+                  <button type="button" onClick={() => setHelpQuery("")}
+                    aria-label="Clear" style={{ color: C.muted }}>
+                    <X size={15} />
+                  </button>
+                )}
+              </div>
+            </Card>
+            {filteredHelp.length === 0 ? (
+              <Card className="p-4">
+                <p className="text-[12.5px]" style={{ color: C.muted }}>
+                  No articles match &ldquo;{helpQuery}&rdquo;. Try a different keyword, or contact support.
+                </p>
+              </Card>
+            ) : (
+              <div className="space-y-2">
+                {filteredHelp.map(a => (
+                  <ActionRow key={a.slug} icon={<ScrollText size={17} />} label={a.title} onClick={() => setArticle(a)} />
+                ))}
+              </div>
+            )}
+          </SupportSection>
+        </div>
+
+        {/* HOW DO I? */}
+        <SupportSection icon={<HelpCircle size={15} />} title="How Do I?" desc="Find answers fast.">
           <Card className="p-4">
-            <p className="text-[12.5px]" style={{ color: C.coffee }}>Have an idea that would make your day smoother? Send it over — we read every one, and you'll be able to vote on requests soon.</p>
-            <div className="mt-3"><Button variant="primary" icon={<Lightbulb size={16} />} fullWidth onClick={() => setFeatureOpen(true)}>Request a feature</Button></div>
+            <div className="flex items-center gap-2 px-2 py-1.5 rounded-xl"
+              style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              <Search size={16} style={{ color: C.muted, flexShrink: 0 }} />
+              <input
+                value={howDoIQuery}
+                onChange={e => setHowDoIQuery(e.target.value)}
+                placeholder="How do I add a client?"
+                className="flex-1 bg-transparent outline-none text-[13.5px]"
+                style={{ color: C.espresso }}
+              />
+              {howDoIQuery && (
+                <button type="button" onClick={() => setHowDoIQuery("")} aria-label="Clear" style={{ color: C.muted }}>
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+            {howDoIQuery.trim() && (
+              <div className="mt-3 space-y-2">
+                {howDoIResults.length === 0 ? (
+                  <p className="text-[12.5px]" style={{ color: C.muted }}>
+                    Nothing matched. Try simpler words like &ldquo;deposit&rdquo; or &ldquo;reschedule&rdquo;.
+                  </p>
+                ) : howDoIResults.map(a => (
+                  <ActionRow key={a.slug} icon={<ScrollText size={17} />} label={a.title} onClick={() => setArticle(a)} />
+                ))}
+              </div>
+            )}
+            {!howDoIQuery.trim() && (
+              <p className="text-[11.5px] mt-3" style={{ color: C.muted }}>
+                Try: &ldquo;how do deposits work&rdquo;, &ldquo;how do I reschedule&rdquo;, &ldquo;how do I create a contract&rdquo;.
+              </p>
+            )}
           </Card>
+        </SupportSection>
+
+        {/* GET HELP / SUBMIT */}
+        <SupportSection icon={<LifeBuoy size={15} />} title="Get Help" desc="Contact support or send us feedback.">
+          <div className="space-y-2">
+            <ActionRow icon={<Mail size={17} />} label="Email Support" href={`mailto:${SUPPORT_EMAIL}`} />
+            <ActionRow icon={<Bug size={17} />} label="Report a Bug" onClick={() => setBugOpen(true)} />
+            <ActionRow icon={<Lightbulb size={17} />} label="Request a Feature" onClick={() => setFeatureOpen(true)} />
+          </div>
+          <p className="text-[11px] mt-2 px-1" style={{ color: C.muted }}>
+            Or reach us anytime at <a href={`mailto:${SUPPORT_EMAIL}`} style={{ color: C.brandPrimary }}>{SUPPORT_EMAIL}</a>.
+          </p>
         </SupportSection>
 
         {/* SYSTEM STATUS */}
@@ -12673,7 +12984,7 @@ const SupportCenterScreen = ({ store, onBack }: { store: any; onBack: () => void
         </SupportSection>
 
         {/* RELEASE NOTES */}
-        <SupportSection icon={<Sparkles size={15} />} title="What's New" desc="Latest updates.">
+        <SupportSection icon={<Sparkles size={15} />} title="Release Notes" desc="Latest updates, newest first.">
           {notes.length === 0 ? (
             <Card className="p-4"><p className="text-[12px]" style={{ color: C.muted }}>No release notes yet.</p></Card>
           ) : (
@@ -12724,6 +13035,9 @@ const SupportCenterScreen = ({ store, onBack }: { store: any; onBack: () => void
 
       {bugOpen && <BugReportSheet userId={userId} onClose={() => setBugOpen(false)} onDone={flash} />}
       {featureOpen && <FeatureRequestSheet userId={userId} onClose={() => setFeatureOpen(false)} onDone={flash} />}
+      {activeWalkthrough && (
+        <WalkthroughSheet walkthrough={activeWalkthrough} onClose={() => setActiveWalkthrough(null)} />
+      )}
       {article && (
         <Sheet open onClose={() => setArticle(null)} title={article.title}>
           <p className="text-[14px] leading-relaxed" style={{ color: C.coffee }}>{article.body}</p>
@@ -28038,7 +28352,17 @@ export default function App() {
       {secondary === "inventory" && <InventoryScreen store={store} onBack={() => setSecondary(inventoryBack)} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
-      {secondary === "support" && <SupportCenterScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "support" && (
+        <SupportCenterScreen
+          store={store}
+          onBack={() => setSecondary("settings")}
+          openAccount={() => setSecondary("account")}
+          openServices={() => setSecondary("services")}
+          openAvailability={() => setSecondary("availability")}
+          openPolicies={() => setSecondary("bookingPolicies")}
+          goToTab={(tab) => { setSecondary(null); setActive(tab); }}
+        />
+      )}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "intelligence" && <BookingIntelligenceScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "approvals" && <ApprovalQueueScreen store={store} onBack={() => setSecondary("settings")} focusRequestId={approvalFocusId} clearFocusRequestId={() => setApprovalFocusId(null)} />}
