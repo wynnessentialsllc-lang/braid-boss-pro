@@ -112,6 +112,16 @@ import {
   useFoundingMembership,
 } from "./lib/premium";
 import {
+  APP_VERSION,
+  BUILD_NUMBER,
+  detectClientInfo,
+  uploadSupportScreenshot,
+  submitBugReport,
+  submitFeatureRequest,
+  useReleaseNotes,
+  useMemberSince,
+} from "./lib/support";
+import {
   GUEST_LIMITS,
   FEATURE_LABEL,
   UPGRADE_HEADLINE,
@@ -374,7 +384,8 @@ import {
   CalendarPlus, UserPlus, Coffee, Lock, Receipt, ScrollText, Image as ImageIcon, Camera,
   Star, Heart, Repeat, Play, Pause, Square, Timer as TimerIcon, Zap, Award,
   BarChart3, Layers, MessageSquare, Send, AlertTriangle, CheckCircle2,
-  XCircle, Filter, MoreHorizontal, SlidersHorizontal, LogOut
+  XCircle, Filter, MoreHorizontal, SlidersHorizontal, LogOut,
+  LifeBuoy, Bug, Lightbulb, PlayCircle, ShieldCheck, HelpCircle
 } from "lucide-react";
 
 /* ============================================================
@@ -12396,7 +12407,340 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void }) => {
+// ============================================================
+//  SUPPORT CENTER (Settings → Support)
+// ============================================================
+const SUPPORT_EMAIL = "support@braidbosspro.app";
+
+const SETUP_ARTICLES: { title: string; body: string }[] = [
+  { title: "Setting Up Your Business", body: "Open Settings → Business profile to add your studio name, logo, hours, and booking link handle. This is what clients see at the top of your public booking page." },
+  { title: "Creating Services", body: "Go to Settings → Services to add each style you offer with pricing, duration, deposit, and optional add-ons or variations (e.g. hair included, length, curl pattern)." },
+  { title: "Accepting Bookings", body: "Share your booking link (/@your-handle). Requests land in Approvals, where you approve, request a deposit, or decline. Approved bookings appear on your calendar." },
+  { title: "Deposits & Payments", body: "Connect Stripe in Settings → Payments to collect deposits and balances. Funds go straight to your own Stripe account — Braid Boss Pro never holds your money." },
+  { title: "Contracts", body: "Create agreement templates and attach them to services. Clients e-sign before their appointment, and you get an emailed copy plus a record in the app." },
+  { title: "Client Management", body: "The Clients tab is your CRM — contact info, history, notes, and lifetime value. Clients are created automatically from bookings, or add them manually." },
+  { title: "Calendar & Scheduling", body: "The Schedule tab shows your day, week, and appointments. Tap a slot to add a booking, block time, or open an existing appointment." },
+  { title: "Pricing Calculator", body: "Build a quote from a base price, add-ons, discounts, and tip. Save it for later or turn it straight into a booking. Saved quotes live under the calculator." },
+  { title: "Style Presets", body: "Save reusable style templates with pricing, time estimates, and add-ons so you can drop them into a quote or appointment in one tap." },
+  { title: "Cloud Backup", body: "Sign in to back up your data to the cloud. Everything syncs across every device you sign in on, so you never lose a client, appointment, or receipt." },
+];
+
+const VIDEO_TUTORIALS: { title: string; url: string | null }[] = [
+  { title: "First 10 Minutes Setup", url: null },
+  { title: "How Booking Approval Works", url: null },
+  { title: "How Deposits Work", url: null },
+  { title: "How Contracts Work", url: null },
+  { title: "How to Use Pricing Calculator", url: null },
+  { title: "Managing Clients", url: null },
+];
+
+type StatusState = "operational" | "degraded" | "outage";
+const SYSTEM_STATUS: { label: string; value: string; state: StatusState }[] = [
+  { label: "Cloud Backup",   value: "Active",      state: "operational" },
+  { label: "Bookings",       value: "Operational", state: "operational" },
+  { label: "Payments",       value: "Operational", state: "operational" },
+  { label: "Email Delivery", value: "Operational", state: "operational" },
+  { label: "Database",       value: "Operational", state: "operational" },
+];
+
+const LEGAL_LINKS: { label: string; href: string }[] = [
+  { label: "Privacy Policy", href: "/privacy" },
+  { label: "Terms of Service", href: "/terms" },
+  { label: "Refund Policy", href: "/terms" },
+  { label: "Data Deletion Request", href: `mailto:${SUPPORT_EMAIL}?subject=Data%20Deletion%20Request` },
+];
+
+const StatusDot = ({ state }: { state: StatusState }) => {
+  const color = state === "operational" ? C.success : state === "degraded" ? C.gold : C.danger;
+  return <span aria-hidden style={{ width: 9, height: 9, borderRadius: 999, background: color, display: "inline-block", boxShadow: `0 0 0 3px ${color}22` }} />;
+};
+
+const SupportSection = ({ icon, title, desc, children }: { icon: React.ReactNode; title: string; desc?: string; children: React.ReactNode }) => (
+  <div>
+    <div className="flex items-center gap-2">
+      <span aria-hidden style={{ width: 26, height: 26, borderRadius: 8, display: "grid", placeItems: "center", background: GRADIENTS.primary, color: "#FFFFFF", flexShrink: 0 }}>{icon}</span>
+      <p className="text-[13px] font-bold uppercase tracking-widest" style={{ color: C.espresso, letterSpacing: "0.1em" }}>{title}</p>
+    </div>
+    {desc && <p className="text-[12px] mt-1 mb-2.5" style={{ color: C.muted }}>{desc}</p>}
+    {!desc && <div className="mb-2.5" />}
+    {children}
+  </div>
+);
+
+const BugReportSheet = ({ userId, onClose, onDone }: { userId: string | null; onClose: () => void; onDone: (msg: string) => void }) => {
+  const info = detectClientInfo();
+  const [title, setTitle] = useState("");
+  const [desc, setDesc] = useState("");
+  const [device, setDevice] = useState(info.device);
+  const [browser, setBrowser] = useState(info.browser);
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true); setErr(null);
+    let screenshotUrl: string | null = null;
+    if (file && userId) screenshotUrl = await uploadSupportScreenshot(userId, file);
+    const r = await submitBugReport(userId || "", { title, description: desc, device, browser, screenshotUrl });
+    setBusy(false);
+    if (r.ok) { onDone("Bug report sent — thank you!"); onClose(); }
+    else setErr(r.error);
+  };
+
+  return (
+    <Sheet open onClose={onClose} title="Report a bug">
+      <div className="space-y-4">
+        <Field label="Issue title"><Input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Calendar won't open" /></Field>
+        <Field label="Description"><Textarea value={desc} onChange={e => setDesc(e.target.value)} rows={4} placeholder="What happened? What did you expect?" /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Device"><Input value={device} onChange={e => setDevice(e.target.value)} /></Field>
+          <Field label="Browser"><Input value={browser} onChange={e => setBrowser(e.target.value)} /></Field>
+        </div>
+        <Field label="Screenshot (optional)">
+          <input type="file" accept="image/*" onChange={e => setFile(e.target.files?.[0] || null)}
+            className="text-[12px]" style={{ color: C.coffee }} />
+        </Field>
+        {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
+        <Button variant="primary" fullWidth disabled={busy || !title.trim()} onClick={submit}>
+          {busy ? "Sending…" : "Send bug report"}
+        </Button>
+      </div>
+    </Sheet>
+  );
+};
+
+const FeatureRequestSheet = ({ userId, onClose, onDone }: { userId: string | null; onClose: () => void; onDone: (msg: string) => void }) => {
+  const [title, setTitle] = useState("");
+  const [desc, setDesc] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true); setErr(null);
+    const r = await submitFeatureRequest(userId || "", { title, description: desc });
+    setBusy(false);
+    if (r.ok) { onDone("Feature request sent — thank you!"); onClose(); }
+    else setErr(r.error);
+  };
+  return (
+    <Sheet open onClose={onClose} title="Request a feature">
+      <div className="space-y-4">
+        <Field label="Feature title"><Input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Waitlist auto-fill" /></Field>
+        <Field label="Description"><Textarea value={desc} onChange={e => setDesc(e.target.value)} rows={4} placeholder="What would it do, and how would it help?" /></Field>
+        {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
+        <Button variant="primary" fullWidth disabled={busy || !title.trim()} onClick={submit}>
+          {busy ? "Sending…" : "Send feature request"}
+        </Button>
+      </div>
+    </Sheet>
+  );
+};
+
+const SupportCenterScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId || null;
+  const membership = useFoundingMembership(userId);
+  const { notes } = useReleaseNotes();
+  const memberSince = useMemberSince();
+  const [bugOpen, setBugOpen] = useState(false);
+  const [featureOpen, setFeatureOpen] = useState(false);
+  const [article, setArticle] = useState<{ title: string; body: string } | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); };
+
+  const planLabel = membership.grandfathered
+    ? "Lifetime · Founding"
+    : membership.subscriptionActive
+      ? (membership.subscriptionStatus === "trialing" ? "Free trial" : "Subscribed · $14.99/mo")
+      : store.premium ? "Pro" : "Free";
+  const cloudBackup = store.mode === "authed" || userId ? "Active" : "Off";
+  const fmtDate = (iso: string | null): string => {
+    if (!iso) return "—";
+    try { const d = new Date(iso); return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }); }
+    catch { return "—"; }
+  };
+
+  const QuickAction = ({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) => (
+    <button type="button" onClick={onClick}
+      className="rounded-2xl p-4 flex flex-col items-start gap-2 active:scale-[0.98] transition text-left"
+      style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+      <span aria-hidden style={{ width: 34, height: 34, borderRadius: 10, display: "grid", placeItems: "center", background: GRADIENTS.primary, color: "#FFFFFF" }}>{icon}</span>
+      <span className="text-[13px] font-semibold" style={{ color: C.espresso }}>{label}</span>
+    </button>
+  );
+
+  const ActionRow = ({ icon, label, onClick, href }: { icon: React.ReactNode; label: string; onClick?: () => void; href?: string }) => {
+    const inner = (
+      <div className="flex items-center justify-between gap-3 w-full">
+        <div className="flex items-center gap-3 min-w-0">
+          <span aria-hidden style={{ color: C.brandPrimary, flexShrink: 0 }}>{icon}</span>
+          <span className="text-[13.5px] font-medium" style={{ color: C.espresso }}>{label}</span>
+        </div>
+        <ChevronRight size={17} style={{ color: C.muted }} />
+      </div>
+    );
+    return href
+      ? <a href={href} className="block p-3.5 rounded-xl active:scale-[0.99] transition" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>{inner}</a>
+      : <button type="button" onClick={onClick} className="block w-full p-3.5 rounded-xl active:scale-[0.99] transition" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>{inner}</button>;
+  };
+
+  const aboutRows: [string, string][] = [
+    ["Current Version", APP_VERSION],
+    ["Build Number", BUILD_NUMBER],
+    ["Subscription Plan", planLabel],
+    ["Cloud Backup", cloudBackup],
+    ["Account Email", store.email || "—"],
+    ["Member Since", fmtDate(memberSince)],
+  ];
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Support Center"
+        subtitle="Everything you need to get the most out of Braid Boss Pro."
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-6">
+        {/* QUICK ACTIONS */}
+        <div className="grid grid-cols-2 gap-3">
+          <QuickAction icon={<Mail size={18} />} label="Contact Support" onClick={() => { window.location.href = `mailto:${SUPPORT_EMAIL}`; }} />
+          <QuickAction icon={<Lightbulb size={18} />} label="Request Feature" onClick={() => setFeatureOpen(true)} />
+          <QuickAction icon={<Bug size={18} />} label="Report Bug" onClick={() => setBugOpen(true)} />
+          <QuickAction icon={<PlayCircle size={18} />} label="Watch Tutorials" onClick={() => { document.getElementById("support-videos")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} />
+        </div>
+
+        {/* GET HELP */}
+        <SupportSection icon={<HelpCircle size={15} />} title="Get Help" desc="Contact support or report an issue.">
+          <div className="space-y-2">
+            <ActionRow icon={<Mail size={17} />} label="Contact Support" href={`mailto:${SUPPORT_EMAIL}`} />
+            <ActionRow icon={<Bug size={17} />} label="Report a Bug" onClick={() => setBugOpen(true)} />
+            <ActionRow icon={<Lightbulb size={17} />} label="Request a Feature" onClick={() => setFeatureOpen(true)} />
+          </div>
+        </SupportSection>
+
+        {/* SETUP GUIDE */}
+        <SupportSection icon={<ScrollText size={15} />} title="Getting Started" desc="Learn how to use Braid Boss Pro.">
+          <div className="space-y-2">
+            {SETUP_ARTICLES.map(a => (
+              <ActionRow key={a.title} icon={<ScrollText size={17} />} label={a.title} onClick={() => setArticle(a)} />
+            ))}
+          </div>
+        </SupportSection>
+
+        {/* VIDEO TUTORIALS */}
+        <div id="support-videos">
+          <SupportSection icon={<PlayCircle size={15} />} title="Video Tutorials" desc="Quick walkthroughs.">
+            <div className="grid grid-cols-2 gap-3">
+              {VIDEO_TUTORIALS.map(v => (
+                <button key={v.title} type="button"
+                  onClick={() => { if (v.url) window.open(v.url, "_blank", "noopener,noreferrer"); else flash("Tutorial coming soon."); }}
+                  className="rounded-2xl overflow-hidden active:scale-[0.98] transition text-left"
+                  style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+                  <div style={{ background: GRADIENTS.primary, height: 70, display: "grid", placeItems: "center", color: "#FFFFFF" }}>
+                    <PlayCircle size={26} />
+                  </div>
+                  <div className="p-3">
+                    <p className="text-[12.5px] font-semibold leading-tight" style={{ color: C.espresso }}>{v.title}</p>
+                    <p className="text-[10px] mt-1" style={{ color: C.muted }}>{v.url ? "Watch now" : "Coming soon"}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </SupportSection>
+        </div>
+
+        {/* FEATURE REQUESTS */}
+        <SupportSection icon={<Lightbulb size={15} />} title="Feature Requests" desc="Tell us what you'd like added.">
+          <Card className="p-4">
+            <p className="text-[12.5px]" style={{ color: C.coffee }}>Have an idea that would make your day smoother? Send it over — we read every one, and you'll be able to vote on requests soon.</p>
+            <div className="mt-3"><Button variant="primary" icon={<Lightbulb size={16} />} fullWidth onClick={() => setFeatureOpen(true)}>Request a feature</Button></div>
+          </Card>
+        </SupportSection>
+
+        {/* SYSTEM STATUS */}
+        <SupportSection icon={<ShieldCheck size={15} />} title="System Status" desc="Current platform health.">
+          <Card className="p-2">
+            {SYSTEM_STATUS.map((s, i) => (
+              <div key={s.label} className="flex items-center justify-between px-2 py-2.5"
+                style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+                <span className="text-[13px]" style={{ color: C.espresso }}>{s.label}</span>
+                <span className="flex items-center gap-2 text-[12px] font-semibold" style={{ color: C.coffee }}>
+                  <StatusDot state={s.state} /> {s.value}
+                </span>
+              </div>
+            ))}
+          </Card>
+        </SupportSection>
+
+        {/* RELEASE NOTES */}
+        <SupportSection icon={<Sparkles size={15} />} title="What's New" desc="Latest updates.">
+          {notes.length === 0 ? (
+            <Card className="p-4"><p className="text-[12px]" style={{ color: C.muted }}>No release notes yet.</p></Card>
+          ) : (
+            <div className="space-y-3">
+              {notes.map(n => (
+                <Card key={n.id} className="p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>Version {n.version}</p>
+                    <Pill tone="neutral">{(() => { try { return new Date(n.published_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }); } catch { return ""; } })()}</Pill>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {n.items.map((it, idx) => (
+                      <li key={idx} className="flex items-start gap-2 text-[13px]" style={{ color: C.coffee }}>
+                        <Check size={15} style={{ color: C.success, marginTop: 1, flexShrink: 0 }} /> {it}
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              ))}
+            </div>
+          )}
+        </SupportSection>
+
+        {/* ABOUT */}
+        <SupportSection icon={<LifeBuoy size={15} />} title="About Braid Boss Pro">
+          <Card className="p-2">
+            {aboutRows.map(([k, v], i) => (
+              <div key={k} className="flex items-center justify-between px-2 py-2.5"
+                style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+                <span className="text-[12.5px]" style={{ color: C.muted }}>{k}</span>
+                <span className="text-[12.5px] font-semibold text-right" style={{ color: C.espresso, wordBreak: "break-word" }}>{v}</span>
+              </div>
+            ))}
+          </Card>
+        </SupportSection>
+
+        {/* LEGAL */}
+        <SupportSection icon={<ShieldCheck size={15} />} title="Legal">
+          <div className="space-y-2">
+            {LEGAL_LINKS.map(l => (
+              <ActionRow key={l.label} icon={<ShieldCheck size={17} />} label={l.label}
+                href={l.href}
+                onClick={l.href.startsWith("mailto:") ? undefined : () => { window.location.href = l.href; }} />
+            ))}
+          </div>
+        </SupportSection>
+      </div>
+
+      {bugOpen && <BugReportSheet userId={userId} onClose={() => setBugOpen(false)} onDone={flash} />}
+      {featureOpen && <FeatureRequestSheet userId={userId} onClose={() => setFeatureOpen(false)} onDone={flash} />}
+      {article && (
+        <Sheet open onClose={() => setArticle(null)} title={article.title}>
+          <p className="text-[14px] leading-relaxed" style={{ color: C.coffee }}>{article.body}</p>
+          <div className="mt-5"><Button variant="outline" fullWidth onClick={() => setArticle(null)}>Close</Button></div>
+        </Sheet>
+      )}
+      {toast && (
+        <div className="fixed left-1/2 z-50 px-4 py-2 rounded-full text-sm font-semibold bbp-fade"
+          style={{ bottom: 100, transform: "translateX(-50%)", background: C.espresso, color: C.cream }}>
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts, openSupport }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void; openSupport?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -12890,6 +13234,32 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                     </div>
                   </Card>
                 )}
+              </>
+            )}
+
+            {openSupport && (
+              <>
+                <SectionTitle>Support</SectionTitle>
+                <Card className="p-4 active:scale-[0.99]" onClick={openSupport}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div
+                        aria-hidden
+                        style={{
+                          width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                          background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
+                        }}
+                      >
+                        <LifeBuoy size={15} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold" style={{ color: C.espresso }}>Support Center</p>
+                        <p className="text-[11px]" style={{ color: C.muted }}>Help, guides, feedback, and app updates</p>
+                      </div>
+                    </div>
+                    <ChevronRight size={18} style={{ color: C.muted }} />
+                  </div>
+                </Card>
               </>
             )}
 
@@ -27609,6 +27979,7 @@ export default function App() {
               openContracts={() => setSecondary("contracts")}
               openReviews={() => setSecondary("reviews")}
               openProducts={() => setSecondary("products")}
+              openSupport={() => setSecondary("support")}
             />
           )}
           {active === "calculator" && (
@@ -27657,7 +28028,7 @@ export default function App() {
 
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "marketplace" && <MarketplaceScreen store={store} onBack={() => setSecondary("settings")} />}
@@ -27667,6 +28038,7 @@ export default function App() {
       {secondary === "inventory" && <InventoryScreen store={store} onBack={() => setSecondary(inventoryBack)} />}
       {secondary === "contracts" && <ContractsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "bookingPolicies" && <BookingPoliciesScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "support" && <SupportCenterScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "intelligence" && <BookingIntelligenceScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "approvals" && <ApprovalQueueScreen store={store} onBack={() => setSecondary("settings")} focusRequestId={approvalFocusId} clearFocusRequestId={() => setApprovalFocusId(null)} />}
