@@ -11,7 +11,7 @@ import { C, SHADOWS } from "../components/marketing/tokens";
 export const metadata: Metadata = {
   title: "FAQ · Braid Boss Pro — booking app for braiders",
   description:
-    "Common questions about Braid Boss Pro — the booking + commerce app for braid stylists. Founding stylist lifetime access, Stripe Connect, deposits, storefront, PWA install on iPhone + Android.",
+    "Common questions about Braid Boss Pro — the booking + commerce app for braid stylists. 14-day free trial, Stripe Connect, deposits, storefront, PWA install on iPhone + Android.",
   alternates: { canonical: "/faq" },
   keywords: [
     "braider booking app FAQ",
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "FAQ · Braid Boss Pro",
     description:
-      "Common questions about Braid Boss Pro — booking, commerce, Stripe Connect, PWA install, founding stylist lifetime access.",
+      "Common questions about Braid Boss Pro — booking, commerce, Stripe Connect, PWA install, 14-day free trial.",
     url: "/faq",
     siteName: "Braid Boss Pro",
     type: "website",
@@ -44,26 +44,26 @@ export const metadata: Metadata = {
 // drift out of sync (which Google + Bing both rank against).
 type Faq = { q: string; a: string };
 
-const FAQS_FOUNDING: Faq[] = [
+const FAQS_PRICING: Faq[] = [
   {
-    q: "What is Founding Stylist access?",
-    a: "Founding Stylist access is a one-time payment that unlocks lifetime access to Braid Boss Pro — the business operating system for braiders. The first 100 stylists who sign up lock in lifetime platform access at the founding rate. After the first 100 spots are claimed, Braid Boss Pro transitions to monthly membership pricing.",
+    q: "How much does Braid Boss Pro cost?",
+    a: "Braid Boss Pro is $14.99/month with a 14-day free trial — every feature unlocked from day one. There are no contracts, no setup fees, and you can cancel anytime from inside the app.",
   },
   {
-    q: "How much does Founding Stylist access cost?",
-    a: "Founding Stylist access is a single one-time payment of $9.99 — no monthly fee, ever. After the first 100 spots are claimed, the platform moves to monthly subscription pricing. Founding stylists are grandfathered in at their one-time rate forever.",
+    q: "What's included in the free trial?",
+    a: "Every feature — unlimited clients and appointments, booking links, deposits, contracts, retail storefront, reminders, marketing tools, analytics. No limits, no locked features. After 14 days you're billed $14.99/month unless you cancel.",
   },
   {
-    q: "How do I claim founding stylist access?",
-    a: "Create your account at braidbosspro.app. As long as fewer than 100 stylists have signed up, your one-time payment locks in lifetime founding access — there's no separate waitlist or application.",
+    q: "How do I cancel?",
+    a: "From inside the app, go to Account → Manage subscription. That opens the Stripe billing portal where you can cancel in one tap. You'll keep access until the end of your current billing period.",
   },
   {
-    q: "What happens when the first 100 spots are gone?",
-    a: "Braid Boss Pro transitions to a monthly membership pricing structure for new sign-ups. Founding stylists keep their account exactly as it was — full platform access, no monthly bill, grandfathered in forever.",
+    q: "Is there a yearly plan?",
+    a: "Yes — $149/year (save $30.88 vs paying monthly). You can switch between monthly and annual at sign-up or anytime from the billing portal.",
   },
   {
-    q: "Do founding stylists get future platform upgrades?",
-    a: "Yes. Every future feature, integration, automation, and platform upgrade is included for founding stylists at no additional cost. Founding stylists also receive priority access to new tools as they ship.",
+    q: "I bought Founding Stylist access — what happens to my account?",
+    a: "Founding stylists keep full lifetime access at no monthly cost — your account is grandfathered in forever. Nothing changes, and there's nothing you need to do. The new monthly plan only applies to new stylists joining now.",
   },
 ];
 
@@ -102,7 +102,7 @@ const FAQS_PRODUCT: Faq[] = [
   },
   {
     q: "What features are included?",
-    a: "Every account gets: branded booking link (/@yourhandle), real-time calendar, deposit collection, Stripe Connect payments, contracts + e-sign, pricing calculator + saved quotes, client management, retail storefront with product variants + inventory, order tracking, reminder automation, mobile dashboard, and PWA install. Founding stylists lock in lifetime access to every current and future platform upgrade with a one-time payment.",
+    a: "Every account gets: branded booking link (/@yourhandle), real-time calendar, deposit collection, Stripe Connect payments, contracts + e-sign, pricing calculator + saved quotes, client management, retail storefront with product variants + inventory, order tracking, reminder automation, mobile dashboard, and PWA install. Every feature is unlocked during the 14-day free trial.",
   },
   {
     q: "How long does setup take?",
@@ -114,7 +114,7 @@ export default function FaqPage() {
   // FAQPage JSON-LD for rich-snippet eligibility on Google + Bing.
   // Keep mainEntity in lockstep with the rendered <Question/>s
   // below — both lists derive from the same Faq objects.
-  const allFaqs = [...FAQS_FOUNDING, ...FAQS_PRODUCT];
+  const allFaqs = [...FAQS_PRICING, ...FAQS_PRODUCT];
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "FAQPage",
@@ -162,11 +162,11 @@ export default function FaqPage() {
       />
 
       <Section
-        eyebrow="Founding Stylist access"
-        title="The first 100 spots."
+        eyebrow="Pricing & access"
+        title="Subscription, trial, and pricing."
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {FAQS_FOUNDING.map((f) => (
+          {FAQS_PRICING.map((f) => (
             <Question key={f.q} q={f.q} a={f.a} />
           ))}
         </div>
@@ -185,9 +185,9 @@ export default function FaqPage() {
       </Section>
 
       <CtaFooter
-        title="The first 100 spots. One-time payment. Lifetime access."
-        body="Founding stylists lock in lifetime access at a single one-time payment before Braid Boss Pro transitions to monthly membership pricing."
-        primaryCta={{ label: "Claim founding access", href: "/founding-access" }}
+        title="14 days free. Then $14.99/month. Cancel anytime."
+        body="Every feature unlocked from day one. No contracts. The business operating system braiders actually run their chairs with."
+        primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See features", href: "/features" }}
       />
     </MarketingShell>
