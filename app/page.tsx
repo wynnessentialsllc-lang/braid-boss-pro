@@ -16175,9 +16175,15 @@ const AuthGate = ({ onContinueGuest, initialTab = "signin" }: {
         <h1 className="text-center mt-2 mb-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 600, color: C.espresso }}>
           {tab === "signin" ? "Welcome back" : tab === "signup" ? "Create your account" : "Reset password"}
         </h1>
-        <p className="text-center text-sm mb-5" style={{ color: C.muted }}>
+        <p className="text-center text-sm mb-2" style={{ color: C.muted }}>
           {tab === "signin" ? "Sign in to sync your clients across devices." : tab === "signup" ? "Built specifically for braid stylists. Cloud-synced from day one." : "Enter your email and we&apos;ll send a reset link."}
         </p>
+        {tab === "signup" && (
+          <p className="text-center text-[12px] font-semibold mb-5" style={{ color: C.goldDeep }}>
+            {SUBSCRIPTION_TRIAL_DAYS}-day free trial · then {SUBSCRIPTION_PRICE_LABEL} · Cancel anytime
+          </p>
+        )}
+        {tab !== "signup" && <div className="mb-5" />}
         <Card className="p-5 space-y-3">
           <Field label="Email">
             <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@studio.com" />
@@ -16478,6 +16484,11 @@ const AuthSheet = ({ open, initialMode, onClose, onAuthed }: {
     <Sheet open={open} onClose={onClose} title={headline}>
       <div className="space-y-4 pb-2">
         <p className="text-sm" style={{ color: C.muted }}>{sub}</p>
+        {mode === "signup" && (
+          <p className="text-[12px] font-semibold" style={{ color: C.goldDeep }}>
+            {SUBSCRIPTION_TRIAL_DAYS}-day free trial · then {SUBSCRIPTION_PRICE_LABEL} · Cancel anytime
+          </p>
+        )}
 
         {mode === "reset_sent" ? (
           <Card className="p-4 text-center" style={{ background: "rgba(92,124,74,0.06)", border: `1px solid rgba(92,124,74,0.25)` }}>
