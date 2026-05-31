@@ -298,7 +298,16 @@ const handle = async (req: Request): Promise<Response> => {
             keys: { p256dh: s.keys.p256dh, auth: s.keys.auth },
           },
           message,
-          { TTL: 60 },
+          {
+            // 24h retry window so a briefly-offline phone still gets
+            // the push when it comes back online (vs the old 60s
+            // drop-on-failure default).
+            TTL: 86400,
+            // Tell APNs / FCM to deliver immediately instead of
+            // batching with low-priority notifications. Critical on
+            // iOS PWAs, which otherwise throttle hard.
+            urgency: "high",
+          },
         );
         result.ok += 1;
       } catch (err) {

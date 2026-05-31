@@ -16739,6 +16739,99 @@ const DeleteAccountSheet = ({ open, onClose, onSignOut }: {
   );
 };
 
+// Per-stylist server-side push toggles. Backed by
+// profiles.push_disabled_types text[]. Each row in PUSH_CATEGORIES
+// maps a human label to one or more notification_type values; when
+// the toggle is OFF, those types are added to push_disabled_types
+// and the SQL trigger trg_push_stylist_addressed skips the push call.
+// Email + in-app bell still fire — only the OS-level push is muted.
+const PUSH_CATEGORIES: { key: string; label: string; hint: string; types: string[] }[] = [
+  {
+    key: "reviews",
+    label: "New reviews",
+    hint: "When a client leaves a review on a completed appointment",
+    types: ["review_received"],
+  },
+  {
+    key: "booking_changes",
+    label: "Client booking changes",
+    hint: "When a client cancels or reschedules through their confirmation link",
+    types: ["stylist_booking_cancelled", "stylist_booking_rescheduled"],
+  },
+  {
+    key: "contracts",
+    label: "Contract activity",
+    hint: "When a client signs a contract, or the unsigned-contract reminder fires",
+    types: ["contract_signed_owner_alert", "contract_reminder_owner_alert"],
+  },
+];
+
+const ServerPushTogglesSection = ({ userId }: { userId: string }) => {
+  const [disabled, setDisabled] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from("profiles")
+        .select("push_disabled_types")
+        .eq("id", userId)
+        .maybeSingle();
+      if (cancelled) return;
+      setDisabled(Array.isArray(data?.push_disabled_types) ? data!.push_disabled_types as string[] : []);
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const persist = useCallback(async (next: string[]) => {
+    setBusy(true);
+    setDisabled(next);
+    try {
+      const supabase = getSupabase();
+      await supabase
+        .from("profiles")
+        .update({ push_disabled_types: next })
+        .eq("id", userId);
+    } finally {
+      setBusy(false);
+    }
+  }, [userId]);
+
+  if (disabled === null) return null;
+
+  return (
+    <div className="mt-4 pt-3 space-y-2" style={{ borderTop: `1px solid ${C.hairline}` }}>
+      <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+        Real-time activity pushes
+      </p>
+      <p className="text-[11px] mb-2" style={{ color: C.muted }}>
+        When off, you&apos;ll still get the email and in-app bell — only the OS banner is muted.
+      </p>
+      {PUSH_CATEGORIES.map(({ key, label, hint, types }) => {
+        const isEnabled = !types.some(t => disabled.includes(t));
+        return (
+          <div key={key} className="flex items-center justify-between py-1">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>{label}</p>
+              <p className="text-[11px]" style={{ color: C.muted }}>{hint}</p>
+            </div>
+            <Toggle
+              checked={isEnabled}
+              onChange={(v) => {
+                const without = disabled.filter(t => !types.includes(t));
+                void persist(v ? without : [...without, ...types]);
+              }}
+            />
+          </div>
+        );
+      })}
+      {busy && <p className="text-[11px] text-right" style={{ color: C.muted }}>Saving…</p>}
+    </div>
+  );
+};
+
 const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport, openBookingRequests }: {
   email: string | null;
   mode: AuthMode;
@@ -17348,6 +17441,9 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
                     </div>
                   ))}
                 </div>
+                {mode === "authed" && userId && (
+                  <ServerPushTogglesSection userId={userId} />
+                )}
                 <Button variant="outline" icon={<Bell size={14} />} fullWidth className="mt-3" onClick={handleTestNotification}>
                   Test notification
                 </Button>
