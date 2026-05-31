@@ -16390,6 +16390,26 @@ const SyncStatusCard = ({ mode, sync }: {
         </div>
       )}
 
+      {mode === "authed" && (
+        <Button
+          variant="outline"
+          icon={<RefreshCw size={14} className={sync.state === "syncing" ? "animate-spin" : ""} />}
+          fullWidth
+          className="mt-3"
+          disabled={sync.state === "syncing"}
+          onClick={() => {
+            try {
+              const evt = new CustomEvent("bbp:refresh", {
+                detail: { waitFor: (_p: Promise<unknown>) => {} },
+              });
+              window.dispatchEvent(evt);
+            } catch { /* CustomEvent unsupported — extremely rare */ }
+          }}
+        >
+          {sync.state === "syncing" ? "Syncing…" : "Sync now"}
+        </Button>
+      )}
+
       <button
         type="button" onClick={() => setExpanded((v) => !v)}
         className="w-full text-left mt-3 pt-3 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider"
