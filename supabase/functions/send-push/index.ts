@@ -178,12 +178,26 @@ const handle = async (req: Request): Promise<Response> => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  const { data: userResult, error: authError } = await admin.auth.getUser(jwt);
-  if (authError || !userResult?.user) {
-    console.warn("[send-push] auth.getUser failed:", authError?.message);
-    return json(401, { error: "invalid or expired token" });
+  // Internal service-role bypass — when the Bearer token is the
+  // project's SERVICE_ROLE_KEY itself, skip user auth. body.user_id
+  // (required for this branch) becomes the dispatch target. Used by
+  // SECURITY DEFINER SQL (via pg_net) to push from anon-authenticated
+  // flows like /review/<token> submissions.
+  const isInternalCall = jwt === SERVICE_ROLE_KEY;
+  let authedUserId: string;
+  if (isInternalCall) {
+    // Defer body parsing to the shared block below — but we need
+    // user_id now. Cheap peek without consuming the stream is
+    // impossible, so we'll resolve authedUserId after the parse.
+    authedUserId = ""; // placeholder; resolved below
+  } else {
+    const { data: userResult, error: authError } = await admin.auth.getUser(jwt);
+    if (authError || !userResult?.user) {
+      console.warn("[send-push] auth.getUser failed:", authError?.message);
+      return json(401, { error: "invalid or expired token" });
+    }
+    authedUserId = userResult.user.id;
   }
-  const authedUserId = userResult.user.id;
 
   // ── Parse body (optional)
   let body: RequestBody = {};
@@ -198,7 +212,13 @@ const handle = async (req: Request): Promise<Response> => {
     }
   }
 
-  if (body.user_id && body.user_id !== authedUserId) {
+  if (isInternalCall) {
+    // Internal call must specify body.user_id (the target stylist).
+    if (!body.user_id) {
+      return json(400, { error: "internal call requires user_id in body" });
+    }
+    authedUserId = body.user_id;
+  } else if (body.user_id && body.user_id !== authedUserId) {
     console.warn(
       "[send-push] cross-user dispatch refused. authed=%s requested=%s",
       authedUserId,
