@@ -45,6 +45,19 @@ export default function PrivacyPage() {
         ]} />
       </LegalSection>
 
+      <LegalSection title="SMS messaging">
+        <p>
+          When a stylist books a client through Braid Boss Pro and the client opts in to receive text messages, Braid Boss Pro sends transactional SMS on the stylist&rsquo;s behalf — appointment confirmations, reminders before scheduled appointments, balance-due notifications, and post-appointment rebooking nudges. Frequency depends on the client&rsquo;s appointment activity (typically 1–5 messages per appointment).
+        </p>
+        <LegalList items={[
+          <><strong>Opt-in</strong> — Clients consent by checking the SMS opt-in box on the stylist&rsquo;s public booking form before submitting their booking. Consent is logged with a timestamp on the client&rsquo;s record.</>,
+          <><strong>Opt-out</strong> — Clients can reply <strong>STOP</strong> (or STOPALL, UNSUBSCRIBE, CANCEL, END, QUIT) to any message at any time to unsubscribe immediately. Reply <strong>HELP</strong> for help.</>,
+          <><strong>Carriers &amp; rates</strong> — Message and data rates may apply depending on the recipient&rsquo;s mobile carrier and plan. Braid Boss Pro does not charge clients for SMS.</>,
+          <><strong>Sharing</strong> — Phone numbers and message content are shared only with our SMS delivery provider (Twilio) for the sole purpose of delivering the message. No SMS data is sold, rented, or shared with third parties for marketing.</>,
+          <><strong>Mobile information</strong> — Mobile opt-in data and consent is never shared with third parties or affiliates for marketing or promotional purposes.</>,
+        ]} />
+      </LegalSection>
+
       <LegalSection title="Guest mode">
         <p>
           If you use Braid Boss Pro without an account, your data is stored only on the device you’re using and never reaches our servers. Clearing browser storage or uninstalling will erase it permanently.
