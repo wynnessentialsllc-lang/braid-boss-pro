@@ -1832,8 +1832,11 @@ export default function PublicBookingPage() {
                       onChange={e => setSmsOptIn(e.target.checked)}
                       style={{ marginTop: 2, width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }}
                     />
-                    <span style={{ fontSize: 13, color: C.coffee, lineHeight: 1.45 }}>
-                      Text me appointment reminders. Standard message rates may apply.
+                    <span style={{ fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
+                      I agree to receive transactional SMS from Braid Boss Pro on behalf of my stylist about my appointment (confirmations, reminders, balance reminders, rebooking). Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out, <strong>HELP</strong> for help. See our{" "}
+                      <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Privacy Policy</a>{" "}
+                      and{" "}
+                      <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Terms</a>.
                     </span>
                   </label>
                 )}
