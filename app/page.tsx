@@ -14759,6 +14759,31 @@ const useNotifications = (store: any) => {
           };
         });
         setPersistedItems(items);
+
+        // Reconcile local-only dismissals up to the cloud. Anything
+        // the user has dismissed on this device but that still came
+        // back as dismissed=false in the cloud query is leftover from
+        // before cloud-persist was wired. Push the update so the
+        // dismissals stick across devices/sessions.
+        const localDismissedIds = (() => {
+          try {
+            const raw = window.localStorage.getItem(DISMISSED_NOTIF_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed.filter((x: unknown): x is string => typeof x === "string") : [];
+          } catch { return []; }
+        })();
+        const drifted = items
+          .filter((i: NotifItem) => localDismissedIds.includes(i.id))
+          .map((i: NotifItem) => i.id);
+        if (drifted.length > 0) {
+          try {
+            await supabase
+              .from("notifications")
+              .update({ dismissed: true })
+              .in("id", drifted)
+              .eq("user_id", userId);
+          } catch { /* best-effort */ }
+        }
       } catch { /* best-effort */ }
     };
     void load();
@@ -14822,15 +14847,36 @@ const useNotifications = (store: any) => {
     await safeStorage.set(key, next);
   };
 
+  // Cloud-persist dismissals to public.notifications so dismissed
+  // items don't reappear after sign-out / sign-in or on a second
+  // device. Local-only rule-generated ids (not present in the DB)
+  // just no-op the update — RLS filters by user_id and missing rows
+  // affect nothing. Best-effort: a network blip can't strand the
+  // local dismissal.
+  const cloudDismiss = useCallback(async (ids: string[]) => {
+    const userId: string | null = store?.userId || null;
+    if (!userId || ids.length === 0) return;
+    try {
+      const supabase = getSupabase();
+      await supabase
+        .from("notifications")
+        .update({ dismissed: true })
+        .in("id", ids)
+        .eq("user_id", userId);
+    } catch { /* best-effort */ }
+  }, [store?.userId]);
+
   const dismiss = useCallback((id: string) => {
     persist(DISMISSED_NOTIF_KEY, Array.from(new Set([...dismissed, id])), setDismissed);
-  }, [dismissed]);
+    void cloudDismiss([id]);
+  }, [dismissed, cloudDismiss]);
 
   const clearAll = useCallback(() => {
     if (items.length === 0) return;
     const ids = items.map(n => n.id);
     persist(DISMISSED_NOTIF_KEY, Array.from(new Set([...dismissed, ...ids])), setDismissed);
-  }, [items, dismissed]);
+    void cloudDismiss(ids);
+  }, [items, dismissed, cloudDismiss]);
 
   const markAllRead = useCallback(() => {
     if (items.length === 0) return;
