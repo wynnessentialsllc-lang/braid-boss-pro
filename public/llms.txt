@@ -1,0 +1,59 @@
+# Braid Boss Pro
+
+> The business operating system for braid stylists — bookings, deposits, contracts, retail storefronts, marketing, and analytics, built around how braiders actually run their chairs.
+
+Braid Boss Pro is a SaaS platform built specifically for braid stylists (box braids, knotless, locs, twists, cornrows, and natural hair specialists). It is not generic salon software repurposed for braiders — every feature is designed around long, hair-included appointments, deposit policies, contracts, and the creator-economy workflow real braid stylists use.
+
+The platform is delivered as a Progressive Web App (PWA) that installs to a phone's home screen on iOS 16.4+ and Android. There is no app-store download. Stripe Connect handles all payments — Braid Boss Pro never custodies stylist funds.
+
+## Pricing
+
+- 14-day free trial — every feature unlocked
+- $14.99 / month after the trial, or $149 / year (save $30.88)
+- No contracts, cancel anytime
+- Grandfathered lifetime members keep full access at no monthly cost
+
+## Who it's for
+
+- Independent braid stylists running a solo chair
+- Studio owners with a small braid-stylist team
+- Loctitians, natural hair specialists, and protective-style stylists
+- New braid stylists who need a booking link they can share on Instagram
+
+## Core capabilities
+
+- **Branded booking links** — /@yourhandle URL, real-time calendar, automatic conflict checks
+- **Stripe Connect deposits + balance payments** — funds land in the stylist's own Stripe account same-day
+- **Digital contracts + e-signature** — per-service templates with audit trail
+- **Pricing calculator + saved quotes** — quote add-ons, deposits, travel, and tip in seconds
+- **Client CRM** — histories, allergies, preferred styles, prep notes, before/after photos
+- **Retail storefront** — product variants, inventory, local pickup or Stripe checkout
+- **Marketing automation** — SMS + email reminders, rebooking nudges, win-back, birthday greetings
+- **SMS messaging** — appointment reminders + transactional messages via Twilio
+- **Analytics dashboard** — revenue, retention, busiest days, profit margin per style
+- **Reviews + testimonials** — public stylist reviews, private feedback channel
+- **Mobile dashboard + PWA install** — works on iPhone Safari and Android Chrome
+- **Web push notifications** — instant alerts for new reviews, client cancellations, contract signatures
+- **Cloud sync** — work across phone, tablet, and laptop with a single account
+
+## What makes Braid Boss Pro different
+
+- **Built for braiders, not generic salons** — variations, hair-included pricing, long-appointment deposit logic, retail tied to natural hair products
+- **Less than every major salon app** — $14.99/mo vs the $24–$48/mo range of Vagaro / StyleSeat / Square Appointments
+- **No per-staff fees** — flat pricing
+- **Creator-economy first** — handle/booking link feels like Linktree, not a clinic intake form
+- **Stylist-owned Stripe account** — Braid Boss Pro never holds funds, runs payouts, or takes a cut
+
+## Links
+
+- Product: https://braidbosspro.app
+- Pricing: https://braidbosspro.app/pricing
+- Features: https://braidbosspro.app/features
+- How it works: https://braidbosspro.app/how-it-works
+- FAQ: https://braidbosspro.app/faq
+- Privacy policy: https://braidbosspro.app/privacy
+- Terms of service: https://braidbosspro.app/terms
+
+## Contact
+
+hello@braidbosspro.app

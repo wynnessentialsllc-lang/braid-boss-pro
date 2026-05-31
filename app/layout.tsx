@@ -53,6 +53,69 @@ export default function RootLayout({
       className="h-full antialiased"
     >
       <body className="min-h-full flex flex-col">
+        {/* SoftwareApplication structured data — gives LLMs and
+            search engines a machine-readable summary of what this
+            product is, who it's for, and what it costs. Emitted once
+            on the root layout so every page carries it. */}
+        <script
+          type="application/ld+json"
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "SoftwareApplication",
+              name: "Braid Boss Pro",
+              description:
+                "The business operating system for braid stylists — branded booking links, deposits, contracts, retail storefronts, marketing, and analytics, built specifically for braiders.",
+              applicationCategory: "BusinessApplication",
+              applicationSubCategory: "Salon and Spa Management",
+              operatingSystem: "iOS, Android, Web (PWA)",
+              url: "https://braidbosspro.app",
+              image: "https://braidbosspro.app/icons/icon-512.png",
+              offers: [
+                {
+                  "@type": "Offer",
+                  name: "Monthly",
+                  price: "14.99",
+                  priceCurrency: "USD",
+                  category: "Subscription",
+                  description: "14-day free trial, then $14.99/month. Cancel anytime.",
+                },
+                {
+                  "@type": "Offer",
+                  name: "Annual",
+                  price: "149",
+                  priceCurrency: "USD",
+                  category: "Subscription",
+                  description: "$149/year — save $30.88 vs monthly. 14-day free trial.",
+                },
+              ],
+              featureList: [
+                "Branded /@handle booking links",
+                "Stripe Connect deposits and balance payments",
+                "Digital contracts with e-signature",
+                "Pricing calculator and saved quotes",
+                "Client CRM with histories, allergies, photos",
+                "Retail storefront with product variants and inventory",
+                "SMS and email reminder automation",
+                "Marketing automation (rebooking, win-back, birthday)",
+                "Analytics dashboard",
+                "Public reviews and testimonials",
+                "Web push notifications",
+                "Progressive Web App — installs to home screen, no app store",
+              ],
+              audience: {
+                "@type": "Audience",
+                audienceType: "Braid stylists, loctitians, natural hair specialists, protective-style braiders",
+              },
+              provider: {
+                "@type": "Organization",
+                name: "Wynn Essentials",
+                url: "https://braidbosspro.app",
+              },
+            }),
+          }}
+        />
         <PullToRefresh />
         {/* CartProvider wraps everything so the storefront + admin
             can read/write the same cart state. The floating badge
