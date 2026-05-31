@@ -14401,6 +14401,7 @@ export type NotificationTarget =
   | { kind: "client"; clientId: string }
   | { kind: "reminders" }
   | { kind: "schedule" }
+  | { kind: "reviews" }
   | { kind: "booking_approval"; requestId: string }
   | { kind: "email_log"; queueId: string }
   | { kind: "contract_view"; contractId: string };
@@ -14706,6 +14707,21 @@ const useNotifications = (store: any) => {
           // Contract signed → actionable, appointment-category bell
           // entry so it badges. Tap → opens the signed contract copy
           // (falls back to the appointment if no contract id is set).
+          // New client review → actionable, appointment-category bell
+          // entry so it badges. Tap → opens the Reviews screen.
+          if (cat === "reviews") {
+            return {
+              id: String(r.id),
+              category: "appointment" as NotifCategory,
+              kind: "review_received",
+              tone: "gold" as const,
+              icon: <Sparkles size={16} style={{ color: C.goldDeep }} />,
+              title: String(r.title || "New review"),
+              body: String(r.body || ""),
+              meta: r.created_at ? fmtRelative(r.created_at) : undefined,
+              target: { kind: "reviews" } as const,
+            };
+          }
           if (cat === "contract") {
             const contractId = d.bookingContractId || null;
             const apptId = d.appointmentId || null;
@@ -14872,6 +14888,9 @@ const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
     }
     case "reminders":
       ctx.setSecondary("reminders");
+      break;
+    case "reviews":
+      ctx.setSecondary("reviews");
       break;
     case "schedule":
       ctx.setActive("schedule");
