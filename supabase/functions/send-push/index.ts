@@ -178,12 +178,26 @@ const handle = async (req: Request): Promise<Response> => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  // Internal service-role bypass — when the Bearer token is the
-  // project's SERVICE_ROLE_KEY itself, skip user auth. body.user_id
-  // (required for this branch) becomes the dispatch target. Used by
-  // SECURITY DEFINER SQL (via pg_net) to push from anon-authenticated
-  // flows like /review/<token> submissions.
-  const isInternalCall = jwt === SERVICE_ROLE_KEY;
+  // Internal service-role bypass — when the Bearer token decodes as
+  // a service_role JWT, skip user auth. body.user_id (required for
+  // this branch) becomes the dispatch target. Used by SECURITY DEFINER
+  // SQL (via pg_net) to push from anon-authenticated flows like
+  // /review/<token> submissions. Decoding the role claim instead of
+  // string-matching SERVICE_ROLE_KEY makes this resilient to Supabase
+  // platform key rotation.
+  const decodeRole = (token: string): string | null => {
+    try {
+      const parts = token.split(".");
+      if (parts.length !== 3) return null;
+      const padded = parts[1] + "===".slice((parts[1].length + 3) % 4);
+      const decoded = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
+      const payload = JSON.parse(decoded) as { role?: string };
+      return typeof payload.role === "string" ? payload.role : null;
+    } catch {
+      return null;
+    }
+  };
+  const isInternalCall = jwt === SERVICE_ROLE_KEY || decodeRole(jwt) === "service_role";
   let authedUserId: string;
   if (isInternalCall) {
     // Defer body parsing to the shared block below — but we need
