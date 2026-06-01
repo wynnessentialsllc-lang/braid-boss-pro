@@ -325,6 +325,32 @@ const MarketingFooter = () => (
           Support
         </Link>
       </nav>
+      {/* Comparison pages — kept in their own labelled row so the
+          competitor-vs pages are discoverable from every marketing
+          page (and crawlable for SEO), without crowding the primary
+          footer nav above. */}
+      <nav className="flex flex-wrap items-center justify-center" style={{ gap: 16 }}>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 800,
+            letterSpacing: "0.16em",
+            textTransform: "uppercase",
+            color: C.mutedSoft,
+          }}
+        >
+          Compare
+        </span>
+        <Link href="/compare/braid-boss-pro-vs-styleseat" style={footerLink}>
+          vs StyleSeat
+        </Link>
+        <Link href="/compare/braid-boss-pro-vs-vagaro" style={footerLink}>
+          vs Vagaro
+        </Link>
+        <Link href="/compare/braid-boss-pro-vs-square-appointments" style={footerLink}>
+          vs Square Appointments
+        </Link>
+      </nav>
       <p style={{ fontSize: 11, color: C.mutedSoft }}>
         © {new Date().getFullYear()} Braid Boss Pro. Built for stylists, by stylists.
       </p>

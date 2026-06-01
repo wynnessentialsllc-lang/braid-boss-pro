@@ -24,6 +24,14 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
+  // metadataBase resolves every *relative* canonical / Open Graph URL
+  // declared on child pages (e.g. the /compare/* pages set
+  // `alternates.canonical: "/compare/..."`). Without it, Next.js falls
+  // back to http://localhost:3000 at build time, which would publish
+  // localhost canonicals and break SEO. Env var first (set on Vercel
+  // for prod/preview), with the production domain as the fallback —
+  // same resolution order as app/lib/site-url.ts.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://braidbosspro.app"),
   title: "Braid Boss Pro",
   description: "Appointments, clients, payments, and reminders for braid stylists.",
   applicationName: "Braid Boss Pro",
