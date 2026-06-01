@@ -227,7 +227,7 @@ export default function ReschedulePage() {
             Requested time: <strong>{fmtDateLong(done.date)} · {fmtTime(done.time)}</strong>
           </p>
           <p style={{ margin: 0, fontSize: 14, color: C.muted, lineHeight: 1.55 }}>
-            Your deposit rolls over — no new charge. Your stylist needs to confirm the new time; you'll get an email once it's approved.
+            Your deposit rolls over — no new charge. Your stylist needs to confirm the new time; you&apos;ll get an email once it&apos;s approved.
           </p>
         </Card>
       </Wrap>
@@ -251,7 +251,7 @@ export default function ReschedulePage() {
       <Wrap>
         <Card>
           <h1 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 26, margin: "0 0 12px", color: C.espresso }}>
-            Can't reschedule
+            Can&apos;t reschedule
           </h1>
           <p style={{ margin: 0, color: C.coffee, fontSize: 15, lineHeight: 1.55 }}>{msg}</p>
         </Card>

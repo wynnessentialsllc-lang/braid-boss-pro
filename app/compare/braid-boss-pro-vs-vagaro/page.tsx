@@ -64,13 +64,13 @@ export default function VsVagaroPage() {
 
       <Section eyebrow="Where Vagaro wins" title="Honest take" background="#FBFAFD">
         <p style={{ fontSize: 15.5, lineHeight: 1.7, color: "#3D3447", maxWidth: 720, margin: "0 auto" }}>
-          Vagaro is the right pick if you run a multi-chair salon with multiple service providers (hair, nails, skin, lashes) and need one back office for all of it. Its marketplace ("Find Beauty Pros") brings in walk-in discovery. The catch: pricing climbs fast with each staff member, and the workflow assumes a 60-minute clinical appointment — not an 8-hour boho knotless install with a $150 hair-included add-on and a 50% deposit. If you're a solo braider or run a small braid-focused chair, Vagaro is over-built and over-priced for your reality.
+          Vagaro is the right pick if you run a multi-chair salon with multiple service providers (hair, nails, skin, lashes) and need one back office for all of it. Its marketplace (&ldquo;Find Beauty Pros&rdquo;) brings in walk-in discovery. The catch: pricing climbs fast with each staff member, and the workflow assumes a 60-minute clinical appointment — not an 8-hour boho knotless install with a $150 hair-included add-on and a 50% deposit. If you&apos;re a solo braider or run a small braid-focused chair, Vagaro is over-built and over-priced for your reality.
         </p>
       </Section>
 
       <Section eyebrow="Where Braid Boss Pro wins" title="Built around your chair">
         <p style={{ fontSize: 15.5, lineHeight: 1.7, color: "#3D3447", maxWidth: 720, margin: "0 auto" }}>
-          Every feature in Braid Boss Pro starts from how braiders actually work. Service variations for take-down + length + hair type. Hair-included or hair-billed pricing per style. Long-appointment deposit logic that respects realistic timeline windows. A /@handle booking link that feels like Linktree, not a clinic intake form. Stripe Connect so payouts land in YOUR own Stripe account same-day. Contracts built for natural hair work, including allergy and aftercare clauses. And it's $14.99/month flat — less than half of Vagaro's entry tier, with no per-staff penalty if you add a chair.
+          Every feature in Braid Boss Pro starts from how braiders actually work. Service variations for take-down + length + hair type. Hair-included or hair-billed pricing per style. Long-appointment deposit logic that respects realistic timeline windows. A /@handle booking link that feels like Linktree, not a clinic intake form. Stripe Connect so payouts land in YOUR own Stripe account same-day. Contracts built for natural hair work, including allergy and aftercare clauses. And it&apos;s $14.99/month flat — less than half of Vagaro&apos;s entry tier, with no per-staff penalty if you add a chair.
         </p>
       </Section>
 

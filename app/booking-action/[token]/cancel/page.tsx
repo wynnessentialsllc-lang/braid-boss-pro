@@ -172,7 +172,7 @@ export default function CancelBookingPage() {
       <Wrap>
         <Card>
           <h1 style={{ fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 26, margin: "0 0 12px", color: C.espresso }}>
-            Can't cancel
+            Can&apos;t cancel
           </h1>
           <p style={{ margin: 0, color: C.coffee, fontSize: 15, lineHeight: 1.55 }}>{msg}</p>
         </Card>
@@ -206,7 +206,7 @@ export default function CancelBookingPage() {
           <p style={{ margin: 0, fontSize: 13, lineHeight: 1.55, color: C.danger }}>
             <strong>Heads up:</strong> Cancelling forfeits your deposit
             {state.deposit_amount && state.deposit_amount > 0 ? <> of ${Number(state.deposit_amount).toFixed(2)}</> : null}
-            {" "}per your stylist's policy. If you need to change the time instead, look for the reschedule link in your reminder email.
+            {" "}per your stylist&apos;s policy. If you need to change the time instead, look for the reschedule link in your reminder email.
           </p>
         </div>
 
@@ -259,7 +259,7 @@ export default function CancelBookingPage() {
           {submitting ? "Cancelling…" : "Cancel appointment and forfeit deposit"}
         </button>
         <p style={{ margin: "12px 0 0", textAlign: "center", fontSize: 12, color: C.muted }}>
-          This can't be undone. You'll need to book again if you change your mind.
+          This can&apos;t be undone. You&apos;ll need to book again if you change your mind.
         </p>
       </Card>
     </Wrap>
