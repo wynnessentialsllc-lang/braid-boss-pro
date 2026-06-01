@@ -1,0 +1,1116 @@
+"use client";
+
+// /payments/transactions — Payments & Transactions.
+//
+// A mobile-first ledger that pulls together everything the stylist has
+// collected, in the visual language of the Stripe app's payments
+// screen: a row of revenue cards up top, a filter rail, then a dense,
+// tappable transaction list. Tapping a row opens a full breakdown
+// (deposit, balance, tip, Stripe fee, net payout, refund history).
+//
+// Data comes from three places, merged in app/lib/transactions.ts:
+//   * appointments        — deposits + balance/final payments the
+//                           stylist already tracks (links every payment
+//                           to its booking).
+//   * Stripe (connected)   — live charges/refunds with fee + net payout,
+//                           pulled via /api/stripe-connect/transactions.
+//   * manual ledger        — Cash / Zelle / Cash App / Venmo rows the
+//                           stylist records here by hand.
+
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  ArrowLeft,
+  Download,
+  FileSpreadsheet,
+  Plus,
+  RefreshCw,
+  X,
+  ChevronRight,
+  Search,
+} from "lucide-react";
+import { getSupabase, syncAppointments, syncPaymentTransactions } from "../../lib/supabase";
+import { downloadCsv, downloadFile } from "../../lib/native-download";
+import {
+  FILTERS,
+  TYPE_LABEL,
+  METHOD_LABEL,
+  formatMoney,
+  deriveAppointmentTransactions,
+  fromManualRecord,
+  fromStripeRecord,
+  mergeTransactions,
+  filterTransactions,
+  computeSummary,
+  buildTransactionsCsv,
+  buildTransactionsXls,
+  type Transaction,
+  type TxnFilter,
+  type PaymentType,
+  type PaymentMethod,
+} from "../../lib/transactions";
+
+const C = {
+  espresso: "#15111A", coffee: "#3D3447", cream: "#FFFFFF",
+  ivory: "#F6F2EC", paper: "#FFFFFF", gold: "#7C3AED", goldDeep: "#5B21B6",
+  muted: "#6F6477", mutedSoft: "#9F95A8", hairline: "rgba(21, 17, 26, 0.10)",
+  success: "#16A34A", warning: "#C9762B", danger: "#9C3D2E",
+  bg: "#F5F3F8",
+};
+const GRADIENT = "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)";
+const FONT_DISPLAY = `"Cormorant Garamond", Georgia, serif`;
+const FONT_BODY = `"DM Sans", "Inter", system-ui, sans-serif`;
+
+const uid = (): string =>
+  `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+// Initials avatar — mirrors the Stripe app's circular monogram.
+const initials = (name: string): string =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() || "")
+    .join("") || "•";
+
+const METHOD_TONE: Record<PaymentMethod, string> = {
+  stripe: "#635BFF",
+  card: "#635BFF",
+  cash: "#16A34A",
+  zelle: "#6D1ED4",
+  cashapp: "#00C244",
+  venmo: "#008CFF",
+  other: C.muted,
+};
+
+const fmtRowDate = (iso: string): string => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+    " · " +
+    d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+};
+
+const fmtFullDate = (iso: string): string => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-US", {
+    weekday: "long", month: "long", day: "numeric", year: "numeric",
+  }) + " at " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+};
+
+export default function PaymentsTransactionsPage() {
+  return (
+    <Suspense fallback={<LoadingShell />}>
+      <Inner />
+    </Suspense>
+  );
+}
+
+function Inner() {
+  const router = useRouter();
+  const [userId, setUserId] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [appointments, setAppointments] = useState<any[]>([]);
+  const [manualRecords, setManualRecords] = useState<any[]>([]);
+  const [stripeTxns, setStripeTxns] = useState<Transaction[]>([]);
+  const [stripeConnected, setStripeConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [filter, setFilter] = useState<TxnFilter>("all");
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Transaction | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const currency = "USD";
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabase();
+      const { data } = await supabase.auth.getSession();
+      if (cancelled) return;
+      setUserId(data?.session?.user?.id || null);
+      setAuthChecked(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const loadLocal = useCallback(async (uid_: string) => {
+    const [appts, manual] = await Promise.all([
+      syncAppointments.pull(uid_).catch(() => [] as any[]),
+      syncPaymentTransactions.pull(uid_).catch(() => [] as any[]),
+    ]);
+    setAppointments(appts);
+    setManualRecords(manual);
+  }, []);
+
+  const pullStripe = useCallback(async () => {
+    const supabase = getSupabase();
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token;
+    if (!token) return;
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/stripe-connect/transactions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ access_token: token }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(body?.transactions)) {
+        setStripeTxns(body.transactions.map(fromStripeRecord));
+        setStripeConnected(!!body.connected);
+      }
+    } catch {
+      /* Stripe sync is best-effort; appointment data still renders. */
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!authChecked) return;
+    let cancelled = false;
+    (async () => {
+      if (!userId) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      await loadLocal(userId);
+      if (cancelled) return;
+      setLoading(false);
+      void pullStripe();
+    })();
+    return () => { cancelled = true; };
+  }, [authChecked, userId, loadLocal, pullStripe]);
+
+  const appointmentTxns = useMemo(
+    () => deriveAppointmentTransactions(appointments),
+    [appointments],
+  );
+  const manualTxns = useMemo(
+    () => manualRecords.map(fromManualRecord),
+    [manualRecords],
+  );
+  const allTxns = useMemo(
+    () => mergeTransactions(appointmentTxns, stripeTxns, manualTxns),
+    [appointmentTxns, stripeTxns, manualTxns],
+  );
+
+  const summary = useMemo(
+    () => computeSummary(allTxns, appointments),
+    [allTxns, appointments],
+  );
+
+  const visible = useMemo(() => {
+    let list = filterTransactions(allTxns, filter);
+    const q = query.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (t) =>
+          t.clientName.toLowerCase().includes(q) ||
+          t.serviceName.toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [allTxns, filter, query]);
+
+  const flashToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2600);
+  }, []);
+
+  const handleExportCsv = useCallback(async () => {
+    const csv = buildTransactionsCsv(visible);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const r = await downloadCsv(`transactions-${stamp}.csv`, csv);
+    flashToast(r.ok ? "CSV exported" : "Export failed");
+  }, [visible, flashToast]);
+
+  const handleExportXls = useCallback(async () => {
+    const xls = buildTransactionsXls(visible);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const r = await downloadFile({
+      filename: `transactions-${stamp}.xls`,
+      mimeType: "application/vnd.ms-excel",
+      data: xls,
+      shareTitle: "Transactions",
+    });
+    flashToast(r.ok ? "Excel exported" : "Export failed");
+  }, [visible, flashToast]);
+
+  const handleSaveManual = useCallback(
+    async (rec: ManualDraft) => {
+      if (!userId) return;
+      const record = {
+        id: uid(),
+        appointmentId: rec.appointmentId || null,
+        clientName: rec.clientName || "Client",
+        serviceName: rec.serviceName || "Manual payment",
+        amount: rec.amount,
+        tipAmount: rec.tip,
+        paymentType: rec.type,
+        paymentMethod: rec.method,
+        paidAt: rec.paidAt,
+        note: rec.note,
+        createdAt: new Date().toISOString(),
+      };
+      setManualRecords((prev) => [record, ...prev]);
+      setShowAdd(false);
+      try {
+        await syncPaymentTransactions.upsert(userId, record);
+        flashToast("Payment recorded");
+      } catch {
+        flashToast("Saved locally — will sync");
+      }
+    },
+    [userId, flashToast],
+  );
+
+  if (!authChecked || loading) return <LoadingShell />;
+
+  if (!userId) {
+    return (
+      <Shell onBack={() => router.push("/")}>
+        <div style={{ textAlign: "center", padding: "40px 0", color: C.coffee }}>
+          <p style={{ fontSize: 14 }}>Sign in to view your payments.</p>
+          <button type="button" onClick={() => router.push("/")} style={primaryBtn}>
+            Back to app
+          </button>
+        </div>
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell
+      onBack={() => router.push("/")}
+      onRefresh={() => void pullStripe()}
+      syncing={syncing}
+    >
+      {/* Summary cards — horizontal scroll, Stripe-app style. */}
+      <div
+        style={{
+          display: "flex", gap: 12, overflowX: "auto", padding: "4px 0 8px",
+          scrollbarWidth: "none", WebkitOverflowScrolling: "touch",
+        }}
+      >
+        <SummaryCard label="Today" value={formatMoney(summary.todayRevenue, currency)} lead />
+        <SummaryCard label="This Week" value={formatMoney(summary.weekRevenue, currency)} />
+        <SummaryCard label="This Month" value={formatMoney(summary.monthRevenue, currency)} />
+        <SummaryCard label="Tips Collected" value={formatMoney(summary.tips, currency)} />
+        <SummaryCard label="Deposits Collected" value={formatMoney(summary.deposits, currency)} />
+        <SummaryCard
+          label="Outstanding"
+          value={formatMoney(summary.outstanding, currency)}
+          tone={summary.outstanding > 0 ? "warning" : undefined}
+        />
+      </div>
+
+      {/* Search + actions */}
+      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+        <div
+          style={{
+            flex: 1, display: "flex", alignItems: "center", gap: 8,
+            background: C.paper, border: `1px solid ${C.hairline}`,
+            borderRadius: 12, padding: "0 12px", minHeight: 44,
+          }}
+        >
+          <Search size={16} style={{ color: C.muted, flexShrink: 0 }} />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search client or service"
+            style={{
+              flex: 1, border: 0, outline: "none", background: "transparent",
+              fontSize: 14, color: C.espresso, fontFamily: FONT_BODY, minWidth: 0,
+            }}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowAdd(true)}
+          aria-label="Record payment"
+          style={{
+            ...iconBtn, background: GRADIENT, color: "#fff", border: 0,
+          }}
+        >
+          <Plus size={20} />
+        </button>
+      </div>
+
+      {/* Filter rail */}
+      <div
+        style={{
+          display: "flex", gap: 8, overflowX: "auto", padding: "12px 0 4px",
+          scrollbarWidth: "none",
+        }}
+      >
+        {FILTERS.map((f) => {
+          const active = filter === f.key;
+          return (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setFilter(f.key)}
+              style={{
+                flexShrink: 0, padding: "8px 14px", borderRadius: 999,
+                fontSize: 12, fontWeight: 600, whiteSpace: "nowrap",
+                cursor: "pointer", fontFamily: FONT_BODY,
+                background: active ? C.espresso : C.paper,
+                color: active ? "#fff" : C.coffee,
+                border: `1px solid ${active ? C.espresso : C.hairline}`,
+              }}
+            >
+              {f.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Export row */}
+      <div style={{ display: "flex", gap: 8, margin: "8px 0 4px" }}>
+        <button type="button" onClick={handleExportCsv} style={exportBtn}>
+          <Download size={14} /> CSV
+        </button>
+        <button type="button" onClick={handleExportXls} style={exportBtn}>
+          <FileSpreadsheet size={14} /> Excel
+        </button>
+        <span style={{ marginLeft: "auto", alignSelf: "center", fontSize: 12, color: C.muted }}>
+          {visible.length} transaction{visible.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      {/* Transaction list */}
+      <div
+        style={{
+          marginTop: 8, background: C.paper, borderRadius: 16,
+          border: `1px solid ${C.hairline}`, overflow: "hidden",
+        }}
+      >
+        {visible.length === 0 ? (
+          <div style={{ padding: "44px 20px", textAlign: "center" }}>
+            <p style={{ fontSize: 14, color: C.coffee, fontWeight: 600 }}>No transactions yet</p>
+            <p style={{ fontSize: 12, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
+              {stripeConnected
+                ? "Payments will appear here as clients pay deposits and balances."
+                : "Connect Stripe in Settings → Payments, or record a manual payment with the + button."}
+            </p>
+          </div>
+        ) : (
+          visible.map((t, i) => (
+            <TxnRow
+              key={t.id}
+              txn={t}
+              currency={currency}
+              first={i === 0}
+              onClick={() => setSelected(t)}
+            />
+          ))
+        )}
+      </div>
+
+      <p style={{ fontSize: 11, color: C.mutedSoft, textAlign: "center", marginTop: 16, lineHeight: 1.5 }}>
+        Stripe payments sync automatically from your connected account.
+        Cash, Zelle, Cash App & Venmo are recorded by hand.
+      </p>
+
+      {selected && (
+        <DetailSheet txn={selected} currency={currency} onClose={() => setSelected(null)} />
+      )}
+      {showAdd && (
+        <ManualSheet
+          appointments={appointments}
+          onClose={() => setShowAdd(false)}
+          onSave={handleSaveManual}
+        />
+      )}
+      {toast && (
+        <div
+          style={{
+            position: "fixed", left: "50%", transform: "translateX(-50%)",
+            bottom: "calc(24px + env(safe-area-inset-bottom, 0px))",
+            background: C.espresso, color: "#fff", padding: "10px 18px",
+            borderRadius: 999, fontSize: 13, fontWeight: 600, zIndex: 60,
+            boxShadow: "0 8px 24px -8px rgba(0,0,0,0.4)",
+          }}
+        >
+          {toast}
+        </div>
+      )}
+    </Shell>
+  );
+}
+
+// ---- Transaction row ----------------------------------------------------
+
+function TxnRow({
+  txn, currency, first, onClick,
+}: { txn: Transaction; currency: string; first: boolean; onClick: () => void }) {
+  const isRefund = txn.type === "refund" || txn.amount < 0;
+  const tone = METHOD_TONE[txn.method];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 12,
+        padding: "14px 16px", background: "transparent", cursor: "pointer",
+        border: 0, borderTop: first ? 0 : `1px solid ${C.hairline}`,
+        textAlign: "left", fontFamily: FONT_BODY,
+      }}
+    >
+      <div
+        aria-hidden
+        style={{
+          width: 40, height: 40, borderRadius: 999, flexShrink: 0,
+          display: "grid", placeItems: "center", fontSize: 13, fontWeight: 700,
+          background: `${tone}1A`, color: tone,
+        }}
+      >
+        {initials(txn.clientName)}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p
+          style={{
+            fontSize: 14, fontWeight: 600, color: C.espresso,
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          }}
+        >
+          {txn.clientName}
+        </p>
+        <p
+          style={{
+            fontSize: 12, color: C.muted, marginTop: 2,
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          }}
+        >
+          {txn.serviceName}
+        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+          <Badge type={txn.type} />
+          <span style={{ fontSize: 11, color: C.mutedSoft }}>
+            {METHOD_LABEL[txn.method]} · {fmtRowDate(txn.paidAt)}
+          </span>
+        </div>
+      </div>
+      <div style={{ textAlign: "right", flexShrink: 0 }}>
+        <p
+          style={{
+            fontSize: 15, fontWeight: 700,
+            color: isRefund ? C.danger : C.espresso,
+          }}
+        >
+          {isRefund ? "−" : ""}{formatMoney(Math.abs(txn.amount + (txn.amount > 0 ? txn.tip : 0)), currency)}
+        </p>
+        {txn.tip > 0 && txn.amount > 0 && (
+          <p style={{ fontSize: 11, color: C.success, marginTop: 2 }}>
+            +{formatMoney(txn.tip, currency)} tip
+          </p>
+        )}
+      </div>
+      <ChevronRight size={16} style={{ color: C.mutedSoft, flexShrink: 0 }} />
+    </button>
+  );
+}
+
+function Badge({ type }: { type: PaymentType }) {
+  const map: Record<PaymentType, { bg: string; fg: string }> = {
+    deposit: { bg: "rgba(124,58,237,0.12)", fg: C.goldDeep },
+    final: { bg: "rgba(74,138,138,0.14)", fg: "#356B6B" },
+    full: { bg: "rgba(22,163,74,0.14)", fg: C.success },
+    refund: { bg: "rgba(156,61,46,0.12)", fg: C.danger },
+  };
+  const s = map[type];
+  return (
+    <span
+      style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: "0.03em",
+        textTransform: "uppercase", padding: "2px 7px", borderRadius: 6,
+        background: s.bg, color: s.fg,
+      }}
+    >
+      {TYPE_LABEL[type]}
+    </span>
+  );
+}
+
+// ---- Summary card -------------------------------------------------------
+
+function SummaryCard({
+  label, value, lead, tone,
+}: { label: string; value: string; lead?: boolean; tone?: "warning" }) {
+  return (
+    <div
+      style={{
+        flexShrink: 0, minWidth: 132, padding: "14px 16px", borderRadius: 16,
+        background: lead ? GRADIENT : C.paper,
+        border: lead ? 0 : `1px solid ${C.hairline}`,
+        boxShadow: lead ? "0 10px 28px -12px rgba(124,58,237,0.5)" : "none",
+      }}
+    >
+      <p
+        style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: lead ? "rgba(255,255,255,0.85)" : C.muted,
+        }}
+      >
+        {label}
+      </p>
+      <p
+        style={{
+          fontSize: 22, fontWeight: 700, marginTop: 6, fontFamily: FONT_DISPLAY,
+          color: lead ? "#fff" : tone === "warning" ? C.warning : C.espresso,
+        }}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+// ---- Detail sheet -------------------------------------------------------
+
+function DetailSheet({
+  txn, currency, onClose,
+}: { txn: Transaction; currency: string; onClose: () => void }) {
+  const isRefund = txn.type === "refund" || txn.amount < 0;
+  return (
+    <Overlay onClose={onClose}>
+      <div style={sheetStyle}>
+        <SheetHeader title="Transaction" onClose={onClose} />
+        <div style={{ padding: "8px 20px 28px", overflowY: "auto" }}>
+          {/* Hero amount */}
+          <div style={{ textAlign: "center", padding: "8px 0 18px" }}>
+            <p
+              style={{
+                fontSize: 38, fontWeight: 700, fontFamily: FONT_DISPLAY,
+                color: isRefund ? C.danger : C.espresso,
+              }}
+            >
+              {isRefund ? "−" : ""}{formatMoney(Math.abs(txn.amount), currency)}
+            </p>
+            <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 6 }}>
+              <Badge type={txn.type} />
+              <span style={{ fontSize: 12, color: C.muted }}>{METHOD_LABEL[txn.method]}</span>
+            </div>
+            <p style={{ fontSize: 12, color: C.mutedSoft, marginTop: 8 }}>
+              {fmtFullDate(txn.paidAt)}
+            </p>
+          </div>
+
+          <Section title="Client">
+            <Row label="Name" value={txn.clientName} />
+          </Section>
+
+          <Section title="Appointment">
+            <Row label="Service booked" value={txn.serviceName} />
+            {txn.appointmentId
+              ? <Row label="Linked booking" value={`#${txn.appointmentId.slice(0, 8)}`} />
+              : <Row label="Linked booking" value="Not linked" muted />}
+          </Section>
+
+          {txn.addOns.length > 0 && (
+            <Section title="Add-ons">
+              {txn.addOns.map((a, i) => (
+                <Row key={i} label={a.name} value={formatMoney(a.amount, currency)} />
+              ))}
+            </Section>
+          )}
+
+          <Section title="Payment breakdown">
+            {txn.depositAmount > 0 && (
+              <Row label="Deposit amount" value={formatMoney(txn.depositAmount, currency)} />
+            )}
+            {txn.balancePaid > 0 && (
+              <Row label="Balance paid" value={formatMoney(txn.balancePaid, currency)} />
+            )}
+            {txn.tip > 0 && (
+              <Row label="Tip amount" value={formatMoney(txn.tip, currency)} />
+            )}
+            {txn.fee > 0 && (
+              <Row label="Stripe fee" value={`− ${formatMoney(txn.fee, currency)}`} />
+            )}
+            <Row
+              label="Net payout"
+              value={formatMoney(txn.net || txn.amount + txn.tip - txn.fee, currency)}
+              strong
+            />
+          </Section>
+
+          <Section title="Refund history">
+            {txn.refunds.length === 0 ? (
+              <Row label="Refunds" value="None" muted />
+            ) : (
+              txn.refunds.map((r) => (
+                <Row
+                  key={r.id}
+                  label={`${fmtRowDate(r.date)}${r.reason ? ` · ${r.reason}` : ""}`}
+                  value={`− ${formatMoney(r.amount, currency)}`}
+                />
+              ))
+            )}
+          </Section>
+
+          {txn.note && (
+            <Section title="Note">
+              <p style={{ fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>{txn.note}</p>
+            </Section>
+          )}
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+// ---- Manual entry sheet -------------------------------------------------
+
+type ManualDraft = {
+  clientName: string;
+  serviceName: string;
+  amount: number;
+  tip: number;
+  type: PaymentType;
+  method: PaymentMethod;
+  paidAt: string;
+  appointmentId: string | null;
+  note: string;
+};
+
+const MANUAL_METHODS: { key: PaymentMethod; label: string }[] = [
+  { key: "cash", label: "Cash" },
+  { key: "zelle", label: "Zelle" },
+  { key: "cashapp", label: "Cash App" },
+  { key: "venmo", label: "Venmo" },
+  { key: "other", label: "Other" },
+];
+
+const MANUAL_TYPES: { key: PaymentType; label: string }[] = [
+  { key: "deposit", label: "Deposit" },
+  { key: "final", label: "Final Payment" },
+  { key: "full", label: "Full Payment" },
+  { key: "refund", label: "Refund" },
+];
+
+function ManualSheet({
+  appointments, onClose, onSave,
+}: {
+  appointments: any[];
+  onClose: () => void;
+  onSave: (d: ManualDraft) => void;
+}) {
+  const [clientName, setClientName] = useState("");
+  const [serviceName, setServiceName] = useState("");
+  const [amountStr, setAmountStr] = useState("");
+  const [tipStr, setTipStr] = useState("");
+  const [type, setType] = useState<PaymentType>("full");
+  const [method, setMethod] = useState<PaymentMethod>("cash");
+  const [apptId, setApptId] = useState<string>("");
+  const [note, setNote] = useState("");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+
+  // Picking an appointment auto-fills client + service so a manual cash
+  // payment links cleanly to the booking.
+  const linkOptions = useMemo(
+    () =>
+      (Array.isArray(appointments) ? appointments : [])
+        .filter((a) => String(a?.status || "").toLowerCase() !== "canceled")
+        .slice(0, 60)
+        .map((a) => ({
+          id: String(a.id),
+          label: `${a.clientName || "Client"} · ${a.style || a.serviceName || "Service"}`,
+          clientName: a.clientName || "",
+          serviceName: a.style || a.serviceName || "",
+        })),
+    [appointments],
+  );
+
+  const amount = parseFloat(amountStr) || 0;
+  const valid = amount > 0 && clientName.trim().length > 0;
+
+  const submit = () => {
+    if (!valid) return;
+    onSave({
+      clientName: clientName.trim(),
+      serviceName: serviceName.trim() || "Manual payment",
+      amount,
+      tip: parseFloat(tipStr) || 0,
+      type,
+      method,
+      paidAt: new Date(`${date}T12:00:00`).toISOString(),
+      appointmentId: apptId || null,
+      note: note.trim(),
+    });
+  };
+
+  return (
+    <Overlay onClose={onClose}>
+      <div style={sheetStyle}>
+        <SheetHeader title="Record payment" onClose={onClose} />
+        <div style={{ padding: "8px 20px 28px", overflowY: "auto", display: "grid", gap: 16 }}>
+          <p style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, margin: 0 }}>
+            Log a Cash, Zelle, Cash App or Venmo payment. Link it to a booking to
+            keep your appointment records in sync.
+          </p>
+
+          <Field label="Link to appointment (optional)">
+            <select
+              value={apptId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setApptId(id);
+                const opt = linkOptions.find((o) => o.id === id);
+                if (opt) {
+                  if (!clientName) setClientName(opt.clientName);
+                  if (!serviceName) setServiceName(opt.serviceName);
+                }
+              }}
+              style={inputStyle}
+            >
+              <option value="">Not linked</option>
+              {linkOptions.map((o) => (
+                <option key={o.id} value={o.id}>{o.label}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Client name">
+            <input
+              value={clientName}
+              onChange={(e) => setClientName(e.target.value)}
+              placeholder="Client name"
+              style={inputStyle}
+            />
+          </Field>
+
+          <Field label="Service">
+            <input
+              value={serviceName}
+              onChange={(e) => setServiceName(e.target.value)}
+              placeholder="e.g. Knotless braids"
+              style={inputStyle}
+            />
+          </Field>
+
+          <div style={{ display: "flex", gap: 12 }}>
+            <Field label="Amount" style={{ flex: 1 }}>
+              <input
+                value={amountStr}
+                onChange={(e) => setAmountStr(e.target.value.replace(/[^\d.]/g, ""))}
+                inputMode="decimal"
+                placeholder="0.00"
+                style={inputStyle}
+              />
+            </Field>
+            <Field label="Tip (optional)" style={{ flex: 1 }}>
+              <input
+                value={tipStr}
+                onChange={(e) => setTipStr(e.target.value.replace(/[^\d.]/g, ""))}
+                inputMode="decimal"
+                placeholder="0.00"
+                style={inputStyle}
+              />
+            </Field>
+          </div>
+
+          <Field label="Payment type">
+            <ChipGroup
+              options={MANUAL_TYPES}
+              value={type}
+              onChange={(v) => setType(v as PaymentType)}
+            />
+          </Field>
+
+          <Field label="Payment method">
+            <ChipGroup
+              options={MANUAL_METHODS}
+              value={method}
+              onChange={(v) => setMethod(v as PaymentMethod)}
+            />
+          </Field>
+
+          <Field label="Date">
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              style={inputStyle}
+            />
+          </Field>
+
+          <Field label="Note (optional)">
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Anything to remember"
+              style={inputStyle}
+            />
+          </Field>
+
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!valid}
+            style={{
+              ...primaryBtn, marginTop: 4,
+              opacity: valid ? 1 : 0.5, cursor: valid ? "pointer" : "default",
+            }}
+          >
+            Record payment
+          </button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+function ChipGroup({
+  options, value, onChange,
+}: {
+  options: { key: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      {options.map((o) => {
+        const active = o.key === value;
+        return (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => onChange(o.key)}
+            style={{
+              padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600,
+              cursor: "pointer", fontFamily: FONT_BODY,
+              background: active ? C.espresso : C.paper,
+              color: active ? "#fff" : C.coffee,
+              border: `1px solid ${active ? C.espresso : C.hairline}`,
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---- Shared chrome ------------------------------------------------------
+
+function Shell({
+  children, onBack, onRefresh, syncing,
+}: {
+  children: React.ReactNode;
+  onBack: () => void;
+  onRefresh?: () => void;
+  syncing?: boolean;
+}) {
+  return (
+    <div style={{ minHeight: "100dvh", background: C.bg, fontFamily: FONT_BODY, color: C.espresso }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap');
+        body { margin: 0; }
+        *::-webkit-scrollbar { display: none; }
+        @keyframes bbp-spin { to { transform: rotate(360deg); } }
+      `}</style>
+      <div
+        style={{
+          position: "sticky", top: 0, zIndex: 20, background: C.bg,
+          paddingTop: "env(safe-area-inset-top, 0px)",
+          borderBottom: `1px solid ${C.hairline}`,
+        }}
+      >
+        <div
+          className="mx-auto"
+          style={{
+            maxWidth: 520, padding: "12px 16px", display: "flex",
+            alignItems: "center", gap: 8,
+          }}
+        >
+          <button type="button" onClick={onBack} aria-label="Back" style={iconBtnGhost}>
+            <ArrowLeft size={20} />
+          </button>
+          <div style={{ flex: 1 }}>
+            <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0, fontFamily: FONT_DISPLAY }}>
+              Payments &amp; Transactions
+            </h1>
+          </div>
+          {onRefresh && (
+            <button type="button" onClick={onRefresh} aria-label="Sync Stripe" style={iconBtnGhost}>
+              <RefreshCw
+                size={18}
+                style={{ animation: syncing ? "bbp-spin 0.8s linear infinite" : undefined }}
+              />
+            </button>
+          )}
+        </div>
+      </div>
+      <div
+        className="mx-auto"
+        style={{
+          maxWidth: 520, padding: "16px",
+          paddingBottom: "calc(40px + env(safe-area-inset-bottom, 0px))",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function LoadingShell() {
+  return (
+    <div
+      style={{
+        minHeight: "100dvh", background: C.bg, display: "grid",
+        placeItems: "center", fontFamily: FONT_BODY, color: C.muted,
+      }}
+    >
+      <style>{`@keyframes bbp-spin { to { transform: rotate(360deg); } }`}</style>
+      <RefreshCw size={22} style={{ animation: "bbp-spin 0.8s linear infinite" }} />
+    </div>
+  );
+}
+
+function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 50,
+        background: "rgba(21,17,26,0.45)", display: "flex", alignItems: "flex-end",
+        justifyContent: "center",
+      }}
+    >
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 520 }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SheetHeader({ title, onClose }: { title: string; onClose: () => void }) {
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "16px 20px 8px", position: "sticky", top: 0, background: C.cream,
+        zIndex: 2,
+      }}
+    >
+      <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, fontFamily: FONT_DISPLAY }}>{title}</h2>
+      <button type="button" onClick={onClose} aria-label="Close" style={iconBtnGhost}>
+        <X size={20} />
+      </button>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginTop: 18 }}>
+      <p
+        style={{
+          fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
+          textTransform: "uppercase", color: C.muted, marginBottom: 8,
+        }}
+      >
+        {title}
+      </p>
+      <div
+        style={{
+          background: C.paper, borderRadius: 12, border: `1px solid ${C.hairline}`,
+          padding: "4px 14px",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Row({
+  label, value, strong, muted,
+}: { label: string; value: string; strong?: boolean; muted?: boolean }) {
+  return (
+    <div
+      style={{
+        display: "flex", justifyContent: "space-between", gap: 12,
+        padding: "10px 0", borderBottom: `1px solid ${C.hairline}`,
+      }}
+    >
+      <span style={{ fontSize: 13, color: C.muted, flexShrink: 0 }}>{label}</span>
+      <span
+        style={{
+          fontSize: 13, textAlign: "right",
+          fontWeight: strong ? 700 : 500,
+          color: muted ? C.mutedSoft : strong ? C.espresso : C.coffee,
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function Field({
+  label, children, style,
+}: { label: string; children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <label style={{ display: "block", ...style }}>
+      <span
+        style={{
+          fontSize: 12, fontWeight: 600, color: C.coffee, display: "block",
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+const sheetStyle: React.CSSProperties = {
+  background: C.cream,
+  borderTopLeftRadius: 22,
+  borderTopRightRadius: 22,
+  maxHeight: "90dvh",
+  display: "flex",
+  flexDirection: "column",
+  paddingBottom: "env(safe-area-inset-bottom, 0px)",
+  boxShadow: "0 -8px 40px -12px rgba(0,0,0,0.3)",
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%", padding: "12px 14px", borderRadius: 12,
+  border: `1px solid ${C.hairline}`, background: C.paper, fontSize: 15,
+  color: C.espresso, fontFamily: FONT_BODY, outline: "none",
+  minHeight: 46, WebkitAppearance: "none", appearance: "none",
+};
+
+const primaryBtn: React.CSSProperties = {
+  padding: "14px 16px", borderRadius: 14, background: GRADIENT,
+  color: "#fff", border: 0, fontSize: 15, fontWeight: 700, cursor: "pointer",
+  minHeight: 50, width: "100%", fontFamily: FONT_BODY,
+};
+
+const iconBtn: React.CSSProperties = {
+  width: 44, height: 44, borderRadius: 12, display: "grid", placeItems: "center",
+  cursor: "pointer", flexShrink: 0,
+};
+
+const iconBtnGhost: React.CSSProperties = {
+  ...iconBtn, background: "transparent", border: 0, color: C.coffee,
+};
+
+const exportBtn: React.CSSProperties = {
+  display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px",
+  borderRadius: 10, background: C.paper, border: `1px solid ${C.hairline}`,
+  fontSize: 13, fontWeight: 600, color: C.coffee, cursor: "pointer",
+  fontFamily: FONT_BODY,
+};
