@@ -32,9 +32,41 @@ export const metadata: Metadata = {
   // for prod/preview), with the production domain as the fallback —
   // same resolution order as app/lib/site-url.ts.
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://braidbosspro.app"),
-  title: "Braid Boss Pro",
-  description: "Appointments, clients, payments, and reminders for braid stylists.",
+  // These serve as the homepage's effective metadata (app/page.tsx is a
+  // client component and can't export its own) and as fallbacks for any
+  // page that doesn't set its own. Marketing subpages override title,
+  // description, and canonical individually.
+  title: "Braid Boss Pro — Booking & Business App Built for Braid Stylists",
+  description:
+    "The all-in-one booking and business app built specifically for braid stylists: branded booking links, Stripe deposits, contracts, retail, and reminders. $14.99/mo, 14-day free trial.",
   applicationName: "Braid Boss Pro",
+  keywords: [
+    "booking app for braiders",
+    "booking app for braid stylists",
+    "salon software for braiders",
+    "braider business app",
+    "take deposits as a braider",
+    "branded booking link for braiders",
+  ],
+  // NOTE: deliberately no `alternates.canonical` or `openGraph.url` here.
+  // Pages without their own metadata (privacy, terms, support, admin…)
+  // inherit root metadata, and a root canonical of "/" would wrongly
+  // declare every such page to be the homepage. Marketing pages each set
+  // their own canonical; the homepage is self-canonicalizing at the root.
+  openGraph: {
+    type: "website",
+    siteName: "Braid Boss Pro",
+    title: "Braid Boss Pro — Booking & Business App Built for Braid Stylists",
+    description:
+      "The all-in-one booking and business app built specifically for braid stylists. Branded booking links, Stripe deposits, contracts, retail, and reminders. $14.99/mo.",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Braid Boss Pro — Built for Braid Stylists",
+    description:
+      "Booking links, Stripe deposits, contracts, retail, and reminders — built specifically for braiders. $14.99/mo, 14-day free trial.",
+  },
   appleWebApp: {
     capable: true,
     title: "Braid Boss Pro",
