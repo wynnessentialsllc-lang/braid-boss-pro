@@ -45,7 +45,8 @@ export type SyncTable =
   | "photos"
   | "business_expenses"
   | "inventory_items"
-  | "inventory_movements";
+  | "inventory_movements"
+  | "payment_transactions";
 
 // What columns each table has beyond the standard (user_id, id,
 // data, created_at, updated_at). Used to build the upsert payload.
@@ -195,6 +196,23 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     photo_path: r => cleanString(r.photoPath),
     storefront_product_id: r => cleanString(r.storefrontProductId),
     archived_at: r => cleanString(r.archivedAt),
+  },
+  // Manual payment ledger (Cash / Zelle / Cash App / Venmo and one-off
+  // corrections). Stripe charges + appointment deposits live elsewhere;
+  // this table only stores what nothing else owns. Promoted columns
+  // mirror the table so the Payments list can query without parsing
+  // data jsonb.
+  payment_transactions: {
+    appointment_id: r => cleanString(r.appointmentId),
+    client_id: r => cleanString(r.clientId),
+    client_name: r => cleanString(r.clientName),
+    service_name: r => cleanString(r.serviceName),
+    amount: r => cleanNumber(r.amount),
+    tip_amount: r => cleanNumber(r.tipAmount),
+    payment_type: r => cleanString(r.paymentType) || "full",
+    payment_method: r => cleanString(r.paymentMethod) || "cash",
+    paid_at: r => cleanString(r.paidAt),
+    note: r => cleanString(r.note),
   },
   // Movements are append-only — we never round-trip an update on
   // them. The promoted columns mirror the table so list views can
@@ -362,6 +380,18 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.storefrontProductId = base.storefrontProductId ?? row.storefront_product_id;
       base.archivedAt = base.archivedAt ?? row.archived_at;
       break;
+    case "payment_transactions":
+      base.appointmentId = base.appointmentId ?? row.appointment_id;
+      base.clientId = base.clientId ?? row.client_id;
+      base.clientName = base.clientName ?? row.client_name;
+      base.serviceName = base.serviceName ?? row.service_name;
+      base.amount = base.amount ?? row.amount;
+      base.tipAmount = base.tipAmount ?? row.tip_amount;
+      base.paymentType = base.paymentType ?? row.payment_type;
+      base.paymentMethod = base.paymentMethod ?? row.payment_method;
+      base.paidAt = base.paidAt ?? row.paid_at;
+      base.note = base.note ?? row.note;
+      break;
     case "inventory_movements":
       base.itemId = base.itemId ?? row.item_id;
       base.delta = base.delta ?? row.delta;
@@ -453,6 +483,12 @@ export const syncInventoryItems = {
   upsert: (userId: string, record: any) => upsertOne("inventory_items", userId, record),
   delete: (userId: string, id: string) => deleteOne("inventory_items", userId, id),
   pull: (userId: string) => pullAll("inventory_items", userId),
+};
+
+export const syncPaymentTransactions = {
+  upsert: (userId: string, record: any) => upsertOne("payment_transactions", userId, record),
+  delete: (userId: string, id: string) => deleteOne("payment_transactions", userId, id),
+  pull: (userId: string) => pullAll("payment_transactions", userId),
 };
 
 // Movements are append-only — there's no delete and the only writes
