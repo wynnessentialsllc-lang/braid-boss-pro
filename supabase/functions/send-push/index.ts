@@ -11,10 +11,11 @@
 //   VAPID_SUBJECT        — mailto: or https: URI identifying the sender
 //
 // Optional secrets (supabase secrets set …):
-//   SUPABASE_JWT_SECRET  — when set, the internal service-role bypass
-//                          verifies the caller's JWT signature in-function
-//                          (HS256) rather than trusting the platform
-//                          verify_jwt gate alone. Recommended.
+//   JWT_SECRET  — when set, the internal service-role bypass verifies the
+//                 caller's JWT signature in-function (HS256) rather than
+//                 trusting the platform verify_jwt gate alone. Recommended.
+//                 NOTE: the Supabase platform reserves the SUPABASE_ prefix
+//                 for its own vars, so this secret cannot use that prefix.
 //
 // Auto-provided by the Supabase platform:
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
@@ -64,7 +65,7 @@ const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") || "";
 // verifies the caller's JWT signature in-function (HS256, keyed by this
 // secret) instead of trusting the platform's verify_jwt gate alone. Leave
 // unset to keep the legacy signature-blind role-claim behaviour.
-const JWT_SECRET = Deno.env.get("SUPABASE_JWT_SECRET") || "";
+const JWT_SECRET = Deno.env.get("JWT_SECRET") || "";
 
 const VAPID_READY = !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY && VAPID_SUBJECT);
 
@@ -271,12 +272,12 @@ const handle = async (req: Request): Promise<Response> => {
   } else {
     // Fallback: signature-blind role-claim decode. SAFE ONLY while the
     // platform's verify_jwt gate is enabled for this function (it verifies
-    // the signature before we run). Set SUPABASE_JWT_SECRET to enforce
+    // the signature before we run). Set JWT_SECRET to enforce
     // this in-function and drop the dependency on the gate config.
     isInternalCall = decodeRole(jwt) === "service_role";
     if (isInternalCall) {
       console.warn(
-        "[send-push] internal bypass via unverified role claim — set SUPABASE_JWT_SECRET to enforce the signature in-function",
+        "[send-push] internal bypass via unverified role claim — set JWT_SECRET to enforce the signature in-function",
       );
     }
   }
