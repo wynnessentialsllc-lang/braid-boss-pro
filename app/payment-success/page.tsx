@@ -39,15 +39,18 @@ function PaymentSuccessInner() {
   const params = useSearchParams();
   const sessionId = params.get("session_id");
 
-  const [status, setStatus] = useState<Status>("verifying");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Missing session id is derivable from the redirect URL, so seed the
+  // error at init rather than via a synchronous setState in the effect
+  // (which triggers a cascading re-render).
+  const [status, setStatus] = useState<Status>(() =>
+    sessionId ? "verifying" : "error",
+  );
+  const [errorMessage, setErrorMessage] = useState<string | null>(() =>
+    sessionId ? null : "Missing session id in the redirect URL.",
+  );
 
   useEffect(() => {
-    if (!sessionId) {
-      setStatus("error");
-      setErrorMessage("Missing session id in the redirect URL.");
-      return;
-    }
+    if (!sessionId) return; // error already seeded via initial state
     let cancelled = false;
     (async () => {
       try {
