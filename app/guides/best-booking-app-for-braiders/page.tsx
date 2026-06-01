@@ -100,9 +100,40 @@ const Card = ({
   </div>
 );
 
+// Article structured data — lets search engines and AI assistants treat
+// this page as an authored, dated guide (eligible for article rich
+// results and easier to cite) rather than an anonymous marketing page.
+const articleJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Article",
+  headline: "The Best Booking App for Braiders in 2026",
+  description:
+    "Honest, side-by-side guide to the best booking apps for braid stylists in 2026 — Braid Boss Pro, StyleSeat, Vagaro, Square Appointments, and GlossGenius compared on price, deposits, contracts, and braider-specific workflow.",
+  about: ["Booking software for braid stylists", "Salon software", "Hair appointment apps"],
+  datePublished: "2026-01-01",
+  dateModified: "2026-06-01",
+  inLanguage: "en-US",
+  mainEntityOfPage: {
+    "@type": "WebPage",
+    "@id": "https://braidbosspro.app/guides/best-booking-app-for-braiders",
+  },
+  author: { "@type": "Organization", name: "Braid Boss Pro", url: "https://braidbosspro.app" },
+  publisher: {
+    "@type": "Organization",
+    name: "Braid Boss Pro",
+    url: "https://braidbosspro.app",
+    logo: { "@type": "ImageObject", url: "https://braidbosspro.app/icons/icon-512.png" },
+  },
+};
+
 export default function GuidePage() {
   return (
     <MarketingShell>
+      <script
+        type="application/ld+json"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }}
+      />
       <MarketingHero
         eyebrow="Guide · Updated 2026"
         title={
