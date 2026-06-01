@@ -10,6 +10,12 @@
 //   VAPID_PRIVATE_KEY    — base64url-encoded VAPID private key
 //   VAPID_SUBJECT        — mailto: or https: URI identifying the sender
 //
+// Optional secrets (supabase secrets set …):
+//   SUPABASE_JWT_SECRET  — when set, the internal service-role bypass
+//                          verifies the caller's JWT signature in-function
+//                          (HS256) rather than trusting the platform
+//                          verify_jwt gate alone. Recommended.
+//
 // Auto-provided by the Supabase platform:
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 //
@@ -54,6 +60,11 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") || "";
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") || "";
 const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") || "";
+// Optional. When set, the internal service-role bypass cryptographically
+// verifies the caller's JWT signature in-function (HS256, keyed by this
+// secret) instead of trusting the platform's verify_jwt gate alone. Leave
+// unset to keep the legacy signature-blind role-claim behaviour.
+const JWT_SECRET = Deno.env.get("SUPABASE_JWT_SECRET") || "";
 
 const VAPID_READY = !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY && VAPID_SUBJECT);
 
@@ -64,6 +75,58 @@ if (VAPID_READY) {
     console.error("[send-push] Failed to set VAPID details:", err);
   }
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Internal-call JWT verification
+
+// Decode a base64url segment to raw bytes.
+const b64urlToBytes = (segment: string): Uint8Array => {
+  const padded = segment + "===".slice((segment.length + 3) % 4);
+  const bin = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+};
+
+// Cryptographically verify that `token` is a genuine, unexpired
+// service_role JWT signed by THIS project (HS256, keyed by JWT_SECRET).
+// Unlike a bare payload decode, this cannot be forged without the secret,
+// so the internal bypass stays closed even if the platform's verify_jwt
+// gate is ever disabled for this function. Returns false on any failure.
+const verifyServiceRoleJwt = async (
+  token: string,
+  secret: string,
+): Promise<boolean> => {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+    const [headerB64, payloadB64, sigB64] = parts;
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    const valid = await crypto.subtle.verify(
+      "HMAC",
+      key,
+      b64urlToBytes(sigB64),
+      new TextEncoder().encode(`${headerB64}.${payloadB64}`),
+    );
+    if (!valid) return false;
+    const payload = JSON.parse(
+      new TextDecoder().decode(b64urlToBytes(payloadB64)),
+    ) as { role?: string; exp?: number };
+    if (payload.role !== "service_role") return false;
+    if (typeof payload.exp === "number" && payload.exp * 1000 < Date.now()) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 // ────────────────────────────────────────────────────────────────────────────
 // CORS
@@ -178,26 +241,45 @@ const handle = async (req: Request): Promise<Response> => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  // Internal service-role bypass — when the Bearer token decodes as
-  // a service_role JWT, skip user auth. body.user_id (required for
-  // this branch) becomes the dispatch target. Used by SECURITY DEFINER
-  // SQL (via pg_net) to push from anon-authenticated flows like
-  // /review/<token> submissions. Decoding the role claim instead of
-  // string-matching SERVICE_ROLE_KEY makes this resilient to Supabase
-  // platform key rotation.
+  // Internal service-role bypass — when the Bearer token is a genuine
+  // service_role JWT, skip user auth. body.user_id (required for this
+  // branch) becomes the dispatch target. Used by SECURITY DEFINER SQL
+  // (via pg_net) to push from anon-authenticated flows like
+  // /review/<token> submissions.
   const decodeRole = (token: string): string | null => {
     try {
       const parts = token.split(".");
       if (parts.length !== 3) return null;
-      const padded = parts[1] + "===".slice((parts[1].length + 3) % 4);
-      const decoded = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
-      const payload = JSON.parse(decoded) as { role?: string };
+      const payload = JSON.parse(
+        new TextDecoder().decode(b64urlToBytes(parts[1])),
+      ) as { role?: string };
       return typeof payload.role === "string" ? payload.role : null;
     } catch {
       return null;
     }
   };
-  const isInternalCall = jwt === SERVICE_ROLE_KEY || decodeRole(jwt) === "service_role";
+  let isInternalCall: boolean;
+  if (jwt === SERVICE_ROLE_KEY) {
+    // Legacy exact match against the platform service-role key — secure
+    // on its own (requires knowledge of the secret).
+    isInternalCall = true;
+  } else if (JWT_SECRET) {
+    // Preferred: cryptographically verify the token is a genuine,
+    // unexpired service_role JWT signed by this project. Resilient to
+    // platform key rotation AND safe even if verify_jwt is disabled.
+    isInternalCall = await verifyServiceRoleJwt(jwt, JWT_SECRET);
+  } else {
+    // Fallback: signature-blind role-claim decode. SAFE ONLY while the
+    // platform's verify_jwt gate is enabled for this function (it verifies
+    // the signature before we run). Set SUPABASE_JWT_SECRET to enforce
+    // this in-function and drop the dependency on the gate config.
+    isInternalCall = decodeRole(jwt) === "service_role";
+    if (isInternalCall) {
+      console.warn(
+        "[send-push] internal bypass via unverified role claim — set SUPABASE_JWT_SECRET to enforce the signature in-function",
+      );
+    }
+  }
   let authedUserId: string;
   if (isInternalCall) {
     // Defer body parsing to the shared block below — but we need
