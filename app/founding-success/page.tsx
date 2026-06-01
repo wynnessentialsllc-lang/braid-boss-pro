@@ -109,7 +109,7 @@ function FoundingSuccessInner() {
           </h1>
           <p style={{ color: "#3D3447", fontSize: 15, lineHeight: 1.6, marginTop: 8 }}>
             Your one-time payment is in. The last step is creating your
-            account with the same email you used at checkout — that's how
+            account with the same email you used at checkout — that&apos;s how
             your founding access lands on your stylist profile.
           </p>
 

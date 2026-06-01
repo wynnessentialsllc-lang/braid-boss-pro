@@ -2629,7 +2629,7 @@ export default function PublicBookingPage() {
                   {svc.included_details && (
                     <div style={{ background: C.cream, borderRadius: 12, padding: 12 }}>
                       <span style={{ display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: C.coffee, marginBottom: 4 }}>
-                        What's included
+                        What&apos;s included
                       </span>
                       <p style={{ margin: 0, fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>{svc.included_details}</p>
                     </div>

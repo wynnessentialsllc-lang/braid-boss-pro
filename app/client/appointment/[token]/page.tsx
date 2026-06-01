@@ -227,7 +227,7 @@ export default function ClientAppointmentPortal() {
         )}
         {s.deposit_forfeited && (
           <p style={{ margin: "10px 0 0", fontSize: 12, color: C.danger, lineHeight: 1.5 }}>
-            Deposit forfeited per the stylist's cancellation policy.
+            Deposit forfeited per the stylist&apos;s cancellation policy.
           </p>
         )}
         {s.deposit_rollover && (
@@ -268,7 +268,7 @@ export default function ClientAppointmentPortal() {
           )}
           {meta.included_details && (
             <div style={{ marginTop: 12, background: C.cream, borderRadius: 12, padding: 12 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: C.coffee }}>What's included</span>
+              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: C.coffee }}>What&apos;s included</span>
               <p style={{ margin: "4px 0 0", fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>{meta.included_details}</p>
             </div>
           )}
@@ -320,7 +320,7 @@ export default function ClientAppointmentPortal() {
             </a>
           )}
           <p style={{ margin: "12px 0 0", fontSize: 11, color: C.muted, textAlign: "center", lineHeight: 1.5 }}>
-            Rescheduling keeps your deposit. Cancelling forfeits it per the stylist's policy.
+            Rescheduling keeps your deposit. Cancelling forfeits it per the stylist&apos;s policy.
           </p>
         </Card>
       )}

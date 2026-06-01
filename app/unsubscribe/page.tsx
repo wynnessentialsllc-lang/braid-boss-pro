@@ -108,7 +108,7 @@ const Inner = () => {
               fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600,
               textAlign: "center", margin: "0 0 10px", lineHeight: 1.15,
             }}>
-              You're unsubscribed
+              You&apos;re unsubscribed
               {state.clientName ? `, ${state.clientName}` : ""}.
             </h1>
             <p style={{ textAlign: "center", fontSize: 14, color: C.coffee, lineHeight: 1.5, margin: "0 0 18px" }}>
@@ -117,7 +117,7 @@ const Inner = () => {
                 : "You won't receive any more marketing emails."}
             </p>
             <p style={{ textAlign: "center", fontSize: 12, color: C.muted, lineHeight: 1.5, margin: 0 }}>
-              You'll still get transactional emails for any appointments you book (confirmations, balance receipts, etc.).
+              You&apos;ll still get transactional emails for any appointments you book (confirmations, balance receipts, etc.).
             </p>
           </>
         )}

@@ -132,7 +132,7 @@ export default function HowItWorksPage() {
             body={
               <>
                 Settings → Payments → Connect Stripe. Direct charges land in
-                your Stripe balance — we don't sit between you and your money.
+                your Stripe balance — we don&apos;t sit between you and your money.
                 Stripe handles deposits, balances, refunds, and 1099s.
               </>
             }
@@ -215,7 +215,7 @@ export default function HowItWorksPage() {
             body={
               <>
                 The installed app gets faster load times, push-notification
-                support, and a full-screen UI. Skip Safari/Chrome's URL bar
+                support, and a full-screen UI. Skip Safari/Chrome&apos;s URL bar
                 forever.
               </>
             }
@@ -277,7 +277,7 @@ export default function HowItWorksPage() {
             app before connecting Stripe.
           </Faq>
           <Faq q="Do I need an app-store download?">
-            No. Braid Boss Pro runs in your phone's browser and installs to your
+            No. Braid Boss Pro runs in your phone&apos;s browser and installs to your
             home screen as a PWA. Step 6 above shows how — iPhone Safari and
             Android Chrome both support it natively.
           </Faq>
@@ -288,7 +288,7 @@ export default function HowItWorksPage() {
           </Faq>
           <Faq q="Can I import my existing clients?">
             Yes. Settings → Clients → Import. Paste names + numbers + emails
-            from a spreadsheet and we'll de-duplicate against your existing
+            from a spreadsheet and we&apos;ll de-duplicate against your existing
             book.
           </Faq>
           <Faq q="What if I don't take deposits yet?">
