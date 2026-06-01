@@ -8,6 +8,7 @@
 // sees stylists who opted in and have an active booking link.
 
 import { Suspense, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   fetchDiscoverStylists,
   fetchStylistReviews,
@@ -317,7 +318,7 @@ const DiscoverInner = () => {
         <p style={{
           textAlign: "center", fontSize: 11, color: C.muted, marginTop: 24, lineHeight: 1.5,
         }}>
-          Are you a braider? <a href="/" style={{ color: C.goldDeep, fontWeight: 600 }}>Get Braid Boss Pro</a> to get listed.
+          Are you a braider? <Link href="/" style={{ color: C.goldDeep, fontWeight: 600 }}>Get Braid Boss Pro</Link> to get listed.
         </p>
       </div>
     </div>

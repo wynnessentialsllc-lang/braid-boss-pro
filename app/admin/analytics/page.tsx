@@ -9,6 +9,7 @@
 // readiness, recent events, error log.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { getSupabase } from "../../lib/supabase";
 import {
   PreviewStyleCard,
@@ -415,7 +416,7 @@ export default function AdminAnalyticsPage() {
         {/* Back to app — pill button at the top so the admin can
             return to the main shell without using the browser back
             button (which doesn't exist in the installed PWA). */}
-        <a
+        <Link
           href="/"
           style={{
             display: "inline-flex",
@@ -434,7 +435,7 @@ export default function AdminAnalyticsPage() {
           }}
         >
           ← Back to app
-        </a>
+        </Link>
 
         <header style={{ marginBottom: 18 }}>
           <SectionEyebrow>Admin</SectionEyebrow>

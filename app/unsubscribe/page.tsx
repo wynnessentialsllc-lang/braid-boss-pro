@@ -35,13 +35,17 @@ type State =
 const Inner = () => {
   const params = useSearchParams();
   const token = params?.get("token")?.trim() || "";
-  const [state, setState] = useState<State>({ kind: "loading" });
+  // Missing-token is derivable from the URL, so seed it at init rather
+  // than via a synchronous setState in the effect (which triggers a
+  // cascading re-render).
+  const [state, setState] = useState<State>(() =>
+    token
+      ? { kind: "loading" }
+      : { kind: "error", message: "This unsubscribe link is missing its token." },
+  );
 
   useEffect(() => {
-    if (!token) {
-      setState({ kind: "error", message: "This unsubscribe link is missing its token." });
-      return;
-    }
+    if (!token) return; // error already seeded via initial state
     let cancelled = false;
     (async () => {
       try {

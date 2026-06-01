@@ -8,6 +8,7 @@
 // the in-app premium hooks re-check on focus.
 
 import { Suspense } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
 const C = {
@@ -63,7 +64,7 @@ function SubscriptionSuccessInner() {
             <strong> Settings → Subscription</strong>.
           </p>
 
-          <a
+          <Link
             href="/"
             style={{
               display: "inline-block", marginTop: 22, padding: "14px 26px",
@@ -72,7 +73,7 @@ function SubscriptionSuccessInner() {
             }}
           >
             Open Braid Boss Pro
-          </a>
+          </Link>
 
           {sessionId && (
             <p style={{ fontSize: 11, color: C.muted, marginTop: 18, wordBreak: "break-all" }}>
