@@ -276,6 +276,8 @@ import {
   newVariationId,
   variationQuantity,
   isVariationLow,
+  fmtStock,
+  displayUnit,
 } from "./lib/inventory";
 import {
   parseInventoryCsv,
@@ -1722,31 +1724,38 @@ const useStorage = () => {
   // optimistic write the RPC-caller does in sync with the entity
   // record without re-running the whole upsert pipeline.
   const setInventoryItemQuantity = useCallback(async (id: string, quantity: number) => {
-    const raw = await safeStorage.get(`inventoryItems:${id}`);
-    const parsed = safeParse<EntityRecord | null>(raw, null);
-    if (!parsed) return;
-    const next = { ...parsed, quantityOnHand: quantity };
-    await safeStorage.set(`inventoryItems:${id}`, next);
-    setInventoryItems(prev => prev.map(x => x.id === id ? next : x));
+    // Source from current React state (not storage): cloud-pulled items
+    // live in state but may not have a local storage row yet, and the
+    // old read-from-storage version silently bailed on those — leaving
+    // the on-hand count stuck after a restock. Persist the result too.
+    setInventoryItems(prev => {
+      const next = prev.map(x => (x.id === id ? { ...x, quantityOnHand: quantity } : x));
+      const rec = next.find(x => x.id === id);
+      if (rec) void safeStorage.set(`inventoryItems:${id}`, rec);
+      return next;
+    });
   }, []);
   // Optimistic local mirror for a variation-scoped movement: set the
   // affected variation's on-hand and recompute the item's pooled
   // quantityOnHand as the sum, matching what the RPC just persisted.
   const setInventoryVariationQuantity = useCallback(async (id: string, variationId: string, quantity: number) => {
-    const raw = await safeStorage.get(`inventoryItems:${id}`);
-    const parsed = safeParse<any>(raw, null);
-    if (!parsed) return;
-    const vars = Array.isArray(parsed.variations) ? parsed.variations : [];
-    let sum = 0;
-    const nextVars = vars.map((v: any) => {
-      const isTarget = String(v?.id) === variationId;
-      const q = isTarget ? (Number(quantity) || 0) : (Number(v?.quantityOnHand) || 0);
-      sum += q;
-      return isTarget ? { ...v, quantityOnHand: Number(quantity) || 0 } : v;
+    setInventoryItems(prev => {
+      const next = prev.map((x: any) => {
+        if (x.id !== id) return x;
+        const vars = Array.isArray(x.variations) ? x.variations : [];
+        let sum = 0;
+        const nextVars = vars.map((v: any) => {
+          const isTarget = String(v?.id) === variationId;
+          const q = isTarget ? (Number(quantity) || 0) : (Number(v?.quantityOnHand) || 0);
+          sum += q;
+          return isTarget ? { ...v, quantityOnHand: Number(quantity) || 0 } : v;
+        });
+        return { ...x, variations: nextVars, quantityOnHand: sum };
+      });
+      const rec = next.find((x: any) => x.id === id);
+      if (rec) void safeStorage.set(`inventoryItems:${id}`, rec);
+      return next;
     });
-    const next = { ...parsed, variations: nextVars, quantityOnHand: sum };
-    await safeStorage.set(`inventoryItems:${id}`, next);
-    setInventoryItems(prev => prev.map(x => x.id === id ? next : x));
   }, []);
 
   const upsertPreset = useCallback(async (p) => {
@@ -20771,7 +20780,7 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{i.name}</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
-                        {[i.category, i.unit ? `per ${i.unit}` : null, i.sku ? `SKU ${i.sku}` : null].filter(Boolean).join(" · ") || "—"}
+                        {[i.category, displayUnit(i.unit) ? `per ${displayUnit(i.unit)}` : null, i.sku ? `SKU ${i.sku}` : null].filter(Boolean).join(" · ") || "—"}
                       </p>
                       {(() => {
                         const vars = itemVariations(i);
@@ -20780,18 +20789,26 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
                           <div className="flex flex-wrap gap-1 mt-1">
                             {vars.map(v => {
                               const vlow = isVariationLow(v, i);
+                              const edge = vlow ? "rgba(156,61,46,0.35)" : C.hairline;
+                              const ink = vlow ? C.danger : C.coffee;
                               return (
                                 <span
                                   key={v.id}
-                                  className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-                                  style={{
-                                    background: vlow ? "rgba(156,61,46,0.10)" : C.cream,
-                                    border: `1px solid ${vlow ? "rgba(156,61,46,0.35)" : C.hairline}`,
-                                    color: vlow ? C.danger : C.coffee,
-                                  }}
+                                  className="inline-flex items-stretch rounded-full overflow-hidden text-[10px] font-medium"
+                                  style={{ border: `1px solid ${edge}`, color: ink }}
+                                  title={`${v.name} — qty ${variationQuantity(v)}`}
                                 >
-                                  {v.name}
-                                  <span className="tabular-nums font-semibold">{variationQuantity(v)}</span>
+                                  {/* color/size name */}
+                                  <span className="px-1.5 py-0.5" style={{ background: vlow ? "rgba(156,61,46,0.08)" : "#fff" }}>
+                                    {v.name}
+                                  </span>
+                                  {/* quantity — separated segment so "6/30  ×1" never reads as one number */}
+                                  <span
+                                    className="px-1.5 py-0.5 tabular-nums font-semibold"
+                                    style={{ background: vlow ? "rgba(156,61,46,0.16)" : C.cream, borderLeft: `1px solid ${edge}` }}
+                                  >
+                                    ×{variationQuantity(v)}
+                                  </span>
                                 </span>
                               );
                             })}
@@ -20801,7 +20818,7 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
                     </div>
                     <div className="text-right ml-2 flex-shrink-0">
                       <p className="text-[13px] font-semibold tabular-nums" style={{ color: low ? C.danger : C.espresso }}>
-                        {qty}{i.unit ? ` ${i.unit}` : ""}
+                        {fmtStock(qty, i.unit)}
                       </p>
                       <p className="text-[10px] tabular-nums" style={{ color: C.muted }}>
                         {threshold > 0 ? `min ${threshold}` : fmtMoney(itemValue(i), currency)}
@@ -21310,8 +21327,8 @@ const InventoryMovementSheet = ({ item, currency, onClose, onApplied }: {
                     }}
                   >
                     {v.name}
-                    <span className="ml-1.5 tabular-nums" style={{ color: selected ? C.cream : C.muted, opacity: 0.8 }}>
-                      {variationQuantity(v)}
+                    <span className="ml-1.5 tabular-nums font-normal" style={{ color: selected ? C.cream : C.muted, opacity: 0.85 }}>
+                      ×{variationQuantity(v)}
                     </span>
                   </button>
                 );
@@ -21323,7 +21340,7 @@ const InventoryMovementSheet = ({ item, currency, onClose, onApplied }: {
         <p className="text-[12px]" style={{ color: C.muted }}>
           {activeVariation ? `${activeVariation.name} on hand: ` : "On hand: "}
           <span className="font-semibold tabular-nums" style={{ color: C.espresso }}>
-            {onHand}{item.unit ? ` ${item.unit}` : ""}
+            {fmtStock(onHand, item.unit)}
           </span>
         </p>
 
@@ -21596,7 +21613,7 @@ const InventoryImportSheet = ({ store, onClose }: { store: any; onClose: () => v
                           {r.item.name || <span style={{ color: C.danger }}>(no name)</span>}
                         </p>
                         <p className="text-[11px] tabular-nums" style={{ color: C.muted }}>
-                          {Number(r.item.quantityOnHand) || 0}{r.item.unit ? ` ${r.item.unit}` : ""}
+                          {fmtStock(Number(r.item.quantityOnHand) || 0, r.item.unit)}
                         </p>
                       </div>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -22288,7 +22305,7 @@ const MaterialsUsedSheet = ({ appointment, services, inventory, onClose }: {
                       />
                       Deduct
                     </label>
-                    <span>{onHand} {item?.unit || ""} on hand</span>
+                    <span>{fmtStock(onHand, item?.unit)} on hand</span>
                   </div>
                 </div>
               );
@@ -25677,7 +25694,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                   .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
                   .map(it => (
                     <option key={it.id} value={it.id}>
-                      {it.name}{it.unit ? ` (${it.unit})` : ""} — {itemQuantity(it)} on hand
+                      {it.name}{displayUnit(it.unit) ? ` (${displayUnit(it.unit)})` : ""} — {itemQuantity(it)} on hand
                     </option>
                   ))}
               </select>
