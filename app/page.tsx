@@ -272,6 +272,7 @@ import {
   itemRetailPrice,
   itemThreshold,
   itemValue,
+  itemVariations,
 } from "./lib/inventory";
 import {
   parseInventoryCsv,
@@ -20742,6 +20743,15 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
                       <p className="text-[11px]" style={{ color: C.muted }}>
                         {[i.category, i.unit ? `per ${i.unit}` : null, i.sku ? `SKU ${i.sku}` : null].filter(Boolean).join(" · ") || "—"}
                       </p>
+                      {(() => {
+                        const vars = itemVariations(i);
+                        if (!vars.length) return null;
+                        return (
+                          <p className="text-[11px] truncate" style={{ color: C.goldDeep }}>
+                            {vars.length} {vars.length === 1 ? "variation" : "variations"}: {vars.join(", ")}
+                          </p>
+                        );
+                      })()}
                     </div>
                     <div className="text-right ml-2 flex-shrink-0">
                       <p className="text-[13px] font-semibold tabular-nums" style={{ color: low ? C.danger : C.espresso }}>
@@ -20835,7 +20845,25 @@ const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }
   const [quantity, setQuantity] = useState(item?.quantityOnHand != null ? String(item.quantityOnHand) : "0");
   const [threshold, setThreshold] = useState(item?.lowStockThreshold != null ? String(item.lowStockThreshold) : "0");
   const [supplier, setSupplier] = useState(item?.supplier || "");
+  const [variations, setVariations] = useState<string[]>(() => itemVariations(item));
+  const [variationDraft, setVariationDraft] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Commit the in-progress variation text as a chip. Splits on commas
+  // so a paste like "1B, 27, 6/30" lands as three chips, and skips
+  // case-insensitive duplicates already present.
+  const addVariations = (text: string) => {
+    const next = [...variations];
+    for (const part of text.split(",")) {
+      const v = part.trim();
+      if (!v) continue;
+      if (next.some(x => x.toLowerCase() === v.toLowerCase())) continue;
+      next.push(v);
+    }
+    setVariations(next);
+    setVariationDraft("");
+  };
+  const removeVariation = (v: string) => setVariations(prev => prev.filter(x => x !== v));
 
   // Editing the on-hand quantity directly is rare — most changes go
   // through the +/− movement sheet. We expose it on initial creation
@@ -20861,6 +20889,16 @@ const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }
         photoPath: item?.photoPath ?? null,
         storefrontProductId: item?.storefrontProductId ?? null,
         archivedAt: item?.archivedAt ?? null,
+        variations: (() => {
+          // Fold any text still sitting in the input (user typed but
+          // didn't press enter) into the saved list so it isn't lost.
+          const merged = [...variations];
+          for (const part of variationDraft.split(",")) {
+            const v = part.trim();
+            if (v && !merged.some(x => x.toLowerCase() === v.toLowerCase())) merged.push(v);
+          }
+          return merged.length ? merged : null;
+        })(),
       };
       await onSave(rec);
     } finally {
@@ -20984,6 +21022,52 @@ const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }
               style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
             />
           </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Variations (colors / sizes)</label>
+          {variations.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
+              {variations.map(v => (
+                <span
+                  key={v}
+                  className="inline-flex items-center gap-1 rounded-full pl-3 pr-1.5 py-1 text-[12px] font-medium"
+                  style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+                >
+                  {v}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${v}`}
+                    onClick={() => removeVariation(v)}
+                    className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[11px] leading-none"
+                    style={{ color: C.muted }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <input
+            type="text"
+            value={variationDraft}
+            onChange={e => setVariationDraft(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter" || e.key === ",") {
+                e.preventDefault();
+                addVariations(variationDraft);
+              } else if (e.key === "Backspace" && !variationDraft && variations.length) {
+                removeVariation(variations[variations.length - 1]);
+              }
+            }}
+            onBlur={() => { if (variationDraft.trim()) addVariations(variationDraft); }}
+            placeholder="e.g. 1B, 27, 6/30 — Enter to add"
+            className="w-full mt-1.5 px-3 py-2.5 rounded-xl text-[14px]"
+            style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
+          />
+          <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+            Stock is tracked as one shared pool for all variations.
+          </p>
         </div>
 
         <div className="flex gap-2 pt-2">
