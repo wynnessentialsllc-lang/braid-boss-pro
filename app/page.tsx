@@ -20780,18 +20780,26 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
                           <div className="flex flex-wrap gap-1 mt-1">
                             {vars.map(v => {
                               const vlow = isVariationLow(v, i);
+                              const edge = vlow ? "rgba(156,61,46,0.35)" : C.hairline;
+                              const ink = vlow ? C.danger : C.coffee;
                               return (
                                 <span
                                   key={v.id}
-                                  className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-                                  style={{
-                                    background: vlow ? "rgba(156,61,46,0.10)" : C.cream,
-                                    border: `1px solid ${vlow ? "rgba(156,61,46,0.35)" : C.hairline}`,
-                                    color: vlow ? C.danger : C.coffee,
-                                  }}
+                                  className="inline-flex items-stretch rounded-full overflow-hidden text-[10px] font-medium"
+                                  style={{ border: `1px solid ${edge}`, color: ink }}
+                                  title={`${v.name} — qty ${variationQuantity(v)}`}
                                 >
-                                  {v.name}
-                                  <span className="tabular-nums font-semibold">{variationQuantity(v)}</span>
+                                  {/* color/size name */}
+                                  <span className="px-1.5 py-0.5" style={{ background: vlow ? "rgba(156,61,46,0.08)" : "#fff" }}>
+                                    {v.name}
+                                  </span>
+                                  {/* quantity — separated segment so "6/30  ×1" never reads as one number */}
+                                  <span
+                                    className="px-1.5 py-0.5 tabular-nums font-semibold"
+                                    style={{ background: vlow ? "rgba(156,61,46,0.16)" : C.cream, borderLeft: `1px solid ${edge}` }}
+                                  >
+                                    ×{variationQuantity(v)}
+                                  </span>
                                 </span>
                               );
                             })}
@@ -21310,8 +21318,8 @@ const InventoryMovementSheet = ({ item, currency, onClose, onApplied }: {
                     }}
                   >
                     {v.name}
-                    <span className="ml-1.5 tabular-nums" style={{ color: selected ? C.cream : C.muted, opacity: 0.8 }}>
-                      {variationQuantity(v)}
+                    <span className="ml-1.5 tabular-nums font-normal" style={{ color: selected ? C.cream : C.muted, opacity: 0.85 }}>
+                      ×{variationQuantity(v)}
                     </span>
                   </button>
                 );
