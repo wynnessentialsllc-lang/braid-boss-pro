@@ -20509,6 +20509,8 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
   const [importOpen, setImportOpen] = useState(false);
   const [shopSeedOpen, setShopSeedOpen] = useState(false);
   const [pushToShopOpen, setPushToShopOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 1800); };
 
   // Only show the "Seed from Shop" entry when there's something to
   // seed from — keeps the empty state tidy for stylists who haven't
@@ -20551,12 +20553,18 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
   // FK from inventory_movements would block it otherwise.
   const handleArchive = async (i: InventoryItem) => {
     if (!i?.id) return;
-    const verb = i.archivedAt ? "Restore" : "Archive";
+    const wasArchived = !!i.archivedAt;
+    const verb = wasArchived ? "Restore" : "Archive";
     if (!window.confirm(`${verb} "${i.name}"?`)) return;
     await store.upsertInventoryItem({
       ...i,
-      archivedAt: i.archivedAt ? null : new Date().toISOString(),
+      archivedAt: wasArchived ? null : new Date().toISOString(),
     });
+    // Close the editor sheet and confirm — otherwise the form lingers
+    // over the inventory list with no feedback.
+    setOpenSheet(false);
+    setEditing(null);
+    showToast(wasArchived ? "Item restored" : "Item archived");
   };
 
   return (
@@ -20869,6 +20877,13 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
           store={store}
           onClose={() => setPushToShopOpen(false)}
         />
+      )}
+
+      {toast && (
+        <div className="fixed left-1/2 z-50 px-4 py-2 rounded-full text-sm font-semibold bbp-fade"
+          style={{ bottom: 100, transform: "translateX(-50%)", background: C.espresso, color: C.cream, boxShadow: "0 8px 24px -6px rgba(0,0,0,0.3)" }}>
+          {toast}
+        </div>
       )}
     </div>
   );
