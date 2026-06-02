@@ -273,6 +273,9 @@ import {
   itemThreshold,
   itemValue,
   itemVariations,
+  newVariationId,
+  variationQuantity,
+  isVariationLow,
 } from "./lib/inventory";
 import {
   parseInventoryCsv,
@@ -1726,6 +1729,25 @@ const useStorage = () => {
     await safeStorage.set(`inventoryItems:${id}`, next);
     setInventoryItems(prev => prev.map(x => x.id === id ? next : x));
   }, []);
+  // Optimistic local mirror for a variation-scoped movement: set the
+  // affected variation's on-hand and recompute the item's pooled
+  // quantityOnHand as the sum, matching what the RPC just persisted.
+  const setInventoryVariationQuantity = useCallback(async (id: string, variationId: string, quantity: number) => {
+    const raw = await safeStorage.get(`inventoryItems:${id}`);
+    const parsed = safeParse<any>(raw, null);
+    if (!parsed) return;
+    const vars = Array.isArray(parsed.variations) ? parsed.variations : [];
+    let sum = 0;
+    const nextVars = vars.map((v: any) => {
+      const isTarget = String(v?.id) === variationId;
+      const q = isTarget ? (Number(quantity) || 0) : (Number(v?.quantityOnHand) || 0);
+      sum += q;
+      return isTarget ? { ...v, quantityOnHand: Number(quantity) || 0 } : v;
+    });
+    const next = { ...parsed, variations: nextVars, quantityOnHand: sum };
+    await safeStorage.set(`inventoryItems:${id}`, next);
+    setInventoryItems(prev => prev.map(x => x.id === id ? next : x));
+  }, []);
 
   const upsertPreset = useCallback(async (p) => {
     const r = { ...p, updatedAt: new Date().toISOString() };
@@ -1869,7 +1891,7 @@ const useStorage = () => {
     inventoryItems, inventory: inventoryItems,
     upsertInventoryItem, deleteInventoryItem,
     inventoryMovements,
-    recordInventoryMovement, setInventoryItemQuantity,
+    recordInventoryMovement, setInventoryItemQuantity, setInventoryVariationQuantity,
     replaceCloudState,
   };
 };
@@ -20747,9 +20769,25 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
                         const vars = itemVariations(i);
                         if (!vars.length) return null;
                         return (
-                          <p className="text-[11px] truncate" style={{ color: C.goldDeep }}>
-                            {vars.length} {vars.length === 1 ? "variation" : "variations"}: {vars.join(", ")}
-                          </p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {vars.map(v => {
+                              const vlow = isVariationLow(v, i);
+                              return (
+                                <span
+                                  key={v.id}
+                                  className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                                  style={{
+                                    background: vlow ? "rgba(156,61,46,0.10)" : C.cream,
+                                    border: `1px solid ${vlow ? "rgba(156,61,46,0.35)" : C.hairline}`,
+                                    color: vlow ? C.danger : C.coffee,
+                                  }}
+                                >
+                                  {v.name}
+                                  <span className="tabular-nums font-semibold">{variationQuantity(v)}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
                         );
                       })()}
                     </div>
@@ -20796,9 +20834,17 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
           onApplied={async (movement) => {
             // RPC succeeded — record locally for the ledger view, and
             // bump the on-hand count optimistically so the list
-            // updates before the next pull.
+            // updates before the next pull. Variation movements update
+            // the targeted color and re-sum the item; item-level
+            // movements set the pooled count directly.
             try { await store.recordInventoryMovement(movement.row); } catch { /* best-effort */ }
-            try { await store.setInventoryItemQuantity(movement.itemId, movement.quantityOnHand); } catch { /* best-effort */ }
+            try {
+              if (movement.variationId) {
+                await store.setInventoryVariationQuantity(movement.itemId, movement.variationId, movement.quantityOnHand);
+              } else {
+                await store.setInventoryItemQuantity(movement.itemId, movement.quantityOnHand);
+              }
+            } catch { /* best-effort */ }
             setRestocking(null);
           }}
         />
@@ -20845,34 +20891,60 @@ const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }
   const [quantity, setQuantity] = useState(item?.quantityOnHand != null ? String(item.quantityOnHand) : "0");
   const [threshold, setThreshold] = useState(item?.lowStockThreshold != null ? String(item.lowStockThreshold) : "0");
   const [supplier, setSupplier] = useState(item?.supplier || "");
-  const [variations, setVariations] = useState<string[]>(() => itemVariations(item));
-  const [variationDraft, setVariationDraft] = useState("");
+  // Per-variation editor rows. qty is editable as a STARTING count on
+  // create and on freshly-added rows; for existing rows on an edit it's
+  // shown read-only because stock moves through the restock sheet (so we
+  // never clobber a count that a movement changed since this opened).
+  type VariationRow = { id: string; name: string; qty: string; threshold: string; isNew: boolean };
+  const [variations, setVariations] = useState<VariationRow[]>(() =>
+    itemVariations(item).map(v => ({
+      id: v.id,
+      name: v.name,
+      qty: v.quantityOnHand != null ? String(v.quantityOnHand) : "0",
+      threshold: v.lowStockThreshold != null && v.lowStockThreshold !== "" ? String(v.lowStockThreshold) : "",
+      isNew: false,
+    })),
+  );
   const [busy, setBusy] = useState(false);
 
-  // Commit the in-progress variation text as a chip. Splits on commas
-  // so a paste like "1B, 27, 6/30" lands as three chips, and skips
-  // case-insensitive duplicates already present.
-  const addVariations = (text: string) => {
-    const next = [...variations];
-    for (const part of text.split(",")) {
-      const v = part.trim();
-      if (!v) continue;
-      if (next.some(x => x.toLowerCase() === v.toLowerCase())) continue;
-      next.push(v);
-    }
-    setVariations(next);
-    setVariationDraft("");
-  };
-  const removeVariation = (v: string) => setVariations(prev => prev.filter(x => x !== v));
+  const addVariationRow = () =>
+    setVariations(prev => [...prev, { id: newVariationId(), name: "", qty: "", threshold: "", isNew: true }]);
+  const updateVariationRow = (id: string, patch: Partial<VariationRow>) =>
+    setVariations(prev => prev.map(r => (r.id === id ? { ...r, ...patch } : r)));
+  const removeVariationRow = (id: string) =>
+    setVariations(prev => prev.filter(r => r.id !== id));
+
+  // Original per-variation counts keyed by id, so an edit-save preserves
+  // a movement-managed count instead of writing back a stale display.
+  const originalVarQty = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const v of itemVariations(item)) m.set(v.id, variationQuantity(v));
+    return m;
+  }, [item]);
 
   // Editing the on-hand quantity directly is rare — most changes go
   // through the +/− movement sheet. We expose it on initial creation
   // (so the user can seed their starting count) and hide it on edit,
-  // pointing the user to the restock sheet instead.
-  const showRawQuantity = !isEdit;
+  // pointing the user to the restock sheet instead. With variations the
+  // pooled count is derived from them, so the item-level field is hidden.
+  const showRawQuantity = !isEdit && variations.length === 0;
 
   const handleSave = async () => {
     if (!name.trim()) { alert("Name is required."); return; }
+    // Materialize the variation rows: trim names, drop blanks. Existing
+    // rows on an edit keep their movement-managed count; new rows and
+    // create-time rows take the entered starting qty.
+    const builtVariations = variations
+      .map(r => ({ ...r, name: r.name.trim() }))
+      .filter(r => r.name)
+      .map(r => ({
+        id: r.id,
+        name: r.name,
+        quantityOnHand: (isEdit && !r.isNew)
+          ? (originalVarQty.get(r.id) ?? 0)
+          : (parseMoney(r.qty) || 0),
+        lowStockThreshold: r.threshold.trim() === "" ? null : parseMoney(r.threshold),
+      }));
     setBusy(true);
     try {
       const rec: InventoryItem = {
@@ -20883,22 +20955,15 @@ const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }
         unit,
         unitCost: parseMoney(unitCost),
         retailPrice: retailPrice ? parseMoney(retailPrice) : null,
-        quantityOnHand: isEdit ? Number(item?.quantityOnHand) || 0 : parseMoney(quantity),
+        quantityOnHand: builtVariations.length
+          ? builtVariations.reduce((s, v) => s + (Number(v.quantityOnHand) || 0), 0)
+          : (isEdit ? Number(item?.quantityOnHand) || 0 : parseMoney(quantity)),
         lowStockThreshold: parseMoney(threshold),
         supplier: supplier.trim() || null,
         photoPath: item?.photoPath ?? null,
         storefrontProductId: item?.storefrontProductId ?? null,
         archivedAt: item?.archivedAt ?? null,
-        variations: (() => {
-          // Fold any text still sitting in the input (user typed but
-          // didn't press enter) into the saved list so it isn't lost.
-          const merged = [...variations];
-          for (const part of variationDraft.split(",")) {
-            const v = part.trim();
-            if (v && !merged.some(x => x.toLowerCase() === v.toLowerCase())) merged.push(v);
-          }
-          return merged.length ? merged : null;
-        })(),
+        variations: builtVariations.length ? builtVariations : null,
       };
       await onSave(rec);
     } finally {
@@ -21025,49 +21090,87 @@ const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }
         </div>
 
         <div>
-          <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Variations (colors / sizes)</label>
-          {variations.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-1.5">
-              {variations.map(v => (
-                <span
-                  key={v}
-                  className="inline-flex items-center gap-1 rounded-full pl-3 pr-1.5 py-1 text-[12px] font-medium"
-                  style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
-                >
-                  {v}
-                  <button
-                    type="button"
-                    aria-label={`Remove ${v}`}
-                    onClick={() => removeVariation(v)}
-                    className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[11px] leading-none"
-                    style={{ color: C.muted }}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Variations (colors / sizes)</label>
+            <button
+              type="button"
+              onClick={addVariationRow}
+              className="inline-flex items-center gap-1 text-[12px] font-semibold"
+              style={{ color: C.coffee }}
+            >
+              <Plus size={13} /> Add
+            </button>
+          </div>
+          {variations.length === 0 ? (
+            <p className="text-[11px] mt-1.5" style={{ color: C.muted }}>
+              Optional. Add a row per color/size — each tracks its own stock & low-stock alert.
+            </p>
+          ) : (
+            <div className="space-y-2 mt-2">
+              {variations.map(r => {
+                // On edit, an existing variation's count is managed by the
+                // restock sheet, so we show it read-only here.
+                const lockQty = isEdit && !r.isNew;
+                return (
+                  <div key={r.id} className="rounded-xl p-2.5" style={{ background: C.cream, border: `1px solid ${C.hairline}` }}>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={r.name}
+                        onChange={e => updateVariationRow(r.id, { name: e.target.value })}
+                        placeholder="Color / size (e.g. 6/30)"
+                        className="flex-1 min-w-0 px-3 py-2 rounded-lg text-[14px]"
+                        style={{ background: "#fff", border: `1px solid ${C.hairline}`, color: C.espresso }}
+                      />
+                      <button
+                        type="button"
+                        aria-label={`Remove ${r.name || "variation"}`}
+                        onClick={() => removeVariationRow(r.id)}
+                        className="flex-shrink-0 p-1.5"
+                        style={{ color: C.danger }}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+                          {lockQty ? "On hand" : "Starting qty"}
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={r.qty}
+                          disabled={lockQty}
+                          onChange={e => updateVariationRow(r.id, { qty: sanitizeMoneyInput(e.target.value) })}
+                          placeholder="0"
+                          className="w-full mt-0.5 px-3 py-2 rounded-lg text-[14px] tabular-nums"
+                          style={{ background: lockQty ? C.cream : "#fff", border: `1px solid ${C.hairline}`, color: lockQty ? C.muted : C.espresso }}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Low-stock at</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={r.threshold}
+                          onChange={e => updateVariationRow(r.id, { threshold: sanitizeMoneyInput(e.target.value) })}
+                          placeholder={threshold && threshold !== "0" ? `${threshold} (default)` : "0 = none"}
+                          className="w-full mt-0.5 px-3 py-2 rounded-lg text-[14px] tabular-nums"
+                          style={{ background: "#fff", border: `1px solid ${C.hairline}`, color: C.espresso }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {isEdit && (
+                <p className="text-[11px]" style={{ color: C.muted }}>
+                  Use the + restock button to change a variation&apos;s stock.
+                </p>
+              )}
             </div>
           )}
-          <input
-            type="text"
-            value={variationDraft}
-            onChange={e => setVariationDraft(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "Enter" || e.key === ",") {
-                e.preventDefault();
-                addVariations(variationDraft);
-              } else if (e.key === "Backspace" && !variationDraft && variations.length) {
-                removeVariation(variations[variations.length - 1]);
-              }
-            }}
-            onBlur={() => { if (variationDraft.trim()) addVariations(variationDraft); }}
-            placeholder="e.g. 1B, 27, 6/30 — Enter to add"
-            className="w-full mt-1.5 px-3 py-2.5 rounded-xl text-[14px]"
-            style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
-          />
-          <p className="text-[11px] mt-1" style={{ color: C.muted }}>
-            Stock is tracked as one shared pool for all variations.
-          </p>
         </div>
 
         <div className="flex gap-2 pt-2">
@@ -21114,8 +21217,11 @@ const InventoryMovementSheet = ({ item, currency, onClose, onApplied }: {
   item: InventoryItem;
   currency: string;
   onClose: () => void;
-  onApplied: (m: { row: any; itemId: string; quantityOnHand: number }) => void | Promise<void>;
+  onApplied: (m: { row: any; itemId: string; quantityOnHand: number; variationId: string | null }) => void | Promise<void>;
 }) => {
+  const variations = itemVariations(item);
+  const hasVars = variations.length > 0;
+  const [variationId, setVariationId] = useState<string | null>(hasVars ? variations[0].id : null);
   const [reason, setReason] = useState<MovementReason>("purchase");
   const [qty, setQty] = useState("");
   const [unitCost, setUnitCost] = useState(item.unitCost != null ? String(item.unitCost) : "");
@@ -21125,11 +21231,14 @@ const InventoryMovementSheet = ({ item, currency, onClose, onApplied }: {
 
   const isIn = reason === "purchase" || reason === "return";
   const showCost = reason === "purchase"; // only meaningful for restocks
+  const activeVariation = hasVars ? (variations.find(v => v.id === variationId) || variations[0]) : null;
+  const onHand = activeVariation ? variationQuantity(activeVariation) : itemQuantity(item);
 
   const handleApply = async () => {
     setErr(null);
     const q = parseMoney(qty);
     if (!Number.isFinite(q) || q <= 0) { setErr("Quantity must be greater than zero."); return; }
+    if (hasVars && !variationId) { setErr("Pick a variation."); return; }
     const delta = isIn ? q : -q;
     setBusy(true);
     try {
@@ -21137,6 +21246,7 @@ const InventoryMovementSheet = ({ item, currency, onClose, onApplied }: {
         itemId: item.id,
         delta,
         reason,
+        variationId: hasVars ? variationId : null,
         unitCostSnapshot: showCost && unitCost ? parseMoney(unitCost) : null,
         note: note.trim() || null,
       });
@@ -21144,6 +21254,7 @@ const InventoryMovementSheet = ({ item, currency, onClose, onApplied }: {
         row: {
           id: `mov_local_${Date.now().toString(36)}`, // server has the real id; this is for optimistic ledger
           itemId: item.id,
+          variationId: hasVars ? variationId : null,
           delta,
           reason,
           unitCostSnapshot: showCost && unitCost ? parseMoney(unitCost) : null,
@@ -21152,6 +21263,7 @@ const InventoryMovementSheet = ({ item, currency, onClose, onApplied }: {
         },
         itemId: res.itemId,
         quantityOnHand: res.quantityOnHand,
+        variationId: hasVars ? variationId : null,
       });
     } catch (e: any) {
       console.error("[inventory] apply movement failed", e);
@@ -21164,9 +21276,39 @@ const InventoryMovementSheet = ({ item, currency, onClose, onApplied }: {
   return (
     <Sheet open onClose={onClose} title={item.name}>
       <div className="space-y-4 pb-4">
+        {hasVars && (
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Variation</label>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {variations.map(v => {
+                const selected = v.id === variationId;
+                return (
+                  <button
+                    type="button"
+                    key={v.id}
+                    onClick={() => setVariationId(v.id)}
+                    className="px-3 py-2 rounded-xl text-[13px] font-semibold"
+                    style={{
+                      background: selected ? C.espresso : "#fff",
+                      color: selected ? C.cream : C.coffee,
+                      border: `1px solid ${selected ? C.espresso : C.hairline}`,
+                    }}
+                  >
+                    {v.name}
+                    <span className="ml-1.5 tabular-nums" style={{ color: selected ? C.cream : C.muted, opacity: 0.8 }}>
+                      {variationQuantity(v)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <p className="text-[12px]" style={{ color: C.muted }}>
-          On hand: <span className="font-semibold tabular-nums" style={{ color: C.espresso }}>
-            {itemQuantity(item)}{item.unit ? ` ${item.unit}` : ""}
+          {activeVariation ? `${activeVariation.name} on hand: ` : "On hand: "}
+          <span className="font-semibold tabular-nums" style={{ color: C.espresso }}>
+            {onHand}{item.unit ? ` ${item.unit}` : ""}
           </span>
         </p>
 

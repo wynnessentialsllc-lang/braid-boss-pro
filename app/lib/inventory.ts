@@ -23,37 +23,81 @@ export type InventoryItem = {
   storefrontProductId?: string | null;
   archivedAt?: string | null;
   // Optional color / size variations of the same product (e.g. a
-  // braiding hair sold in colors 1B, 27, 6/30). Descriptive only —
-  // stock is a single shared pool tracked on the parent item via
-  // quantityOnHand, not per-variation. Persisted through the
-  // inventory_items.data jsonb blob, so no schema column is needed.
-  variations?: string[] | null;
+  // braiding hair stocked in colors 1B, 27, 6/30). Each variation
+  // carries its OWN on-hand count and (optional) low-stock alert;
+  // cost and retail price stay shared on the parent. The parent's
+  // quantityOnHand is kept as the SUM of its variations by the
+  // inventory_apply_movement RPC, so item-level totals stay correct.
+  // Persisted through the inventory_items.data jsonb blob, so no
+  // schema column is needed.
+  variations?: InventoryVariation[] | null;
   createdAt?: string | null;
   updatedAt?: string | null;
 };
 
-// Normalize the variations field into a clean string[] — trims,
-// drops blanks, and de-dupes case-insensitively while keeping the
-// first-seen casing. Tolerates the legacy/comma-string shapes that
-// could land in the data blob.
-export const itemVariations = (i: InventoryItem | null | undefined): string[] => {
+export type InventoryVariation = {
+  id: string;
+  name: string;
+  quantityOnHand?: number | string | null;
+  // Optional per-variation low-stock threshold. When unset, the
+  // variation falls back to the parent item's lowStockThreshold.
+  lowStockThreshold?: number | string | null;
+};
+
+// Stable id for a new variation row.
+export const newVariationId = (): string =>
+  `var_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+// Normalize the variations field into clean InventoryVariation objects:
+// trims names, drops blanks/dupes (case-insensitive on name), coerces
+// quantities. Tolerates the legacy string[] / comma-string shapes that
+// an earlier build could have written into the data blob (those become
+// zero-count variations).
+export const itemVariations = (i: InventoryItem | null | undefined): InventoryVariation[] => {
   const raw = i?.variations;
-  const parts = Array.isArray(raw)
+  const list: any[] = Array.isArray(raw)
     ? raw
     : typeof raw === "string"
       ? String(raw).split(",")
       : [];
   const seen = new Set<string>();
-  const out: string[] = [];
-  for (const p of parts) {
-    const v = String(p ?? "").trim();
-    if (!v) continue;
-    const key = v.toLowerCase();
+  const out: InventoryVariation[] = [];
+  for (const entry of list) {
+    const v = typeof entry === "string" ? { name: entry } : (entry || {});
+    const name = String(v.name ?? "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(v);
+    out.push({
+      id: v.id ? String(v.id) : newVariationId(),
+      name,
+      quantityOnHand: num(v.quantityOnHand),
+      lowStockThreshold:
+        v.lowStockThreshold == null || v.lowStockThreshold === ""
+          ? null
+          : num(v.lowStockThreshold),
+    });
   }
   return out;
+};
+
+export const hasVariations = (i: InventoryItem | null | undefined): boolean =>
+  itemVariations(i).length > 0;
+
+export const variationQuantity = (v: InventoryVariation): number => num(v?.quantityOnHand);
+
+// A variation's effective low-stock threshold: its own when set,
+// otherwise the parent item's.
+export const variationThreshold = (v: InventoryVariation, item: InventoryItem): number =>
+  v?.lowStockThreshold == null || v.lowStockThreshold === ""
+    ? itemThreshold(item)
+    : num(v.lowStockThreshold);
+
+export const isVariationLow = (v: InventoryVariation, item: InventoryItem): boolean => {
+  const t = variationThreshold(v, item);
+  if (t <= 0) return false;
+  return variationQuantity(v) <= t;
 };
 
 export type InventoryMovement = {
@@ -120,6 +164,11 @@ export const itemValue = (i: InventoryItem): number => round2(itemQuantity(i) * 
 // that SKU, so we don't surface it as low.
 export const isLowStock = (i: InventoryItem): boolean => {
   if (!i || i.archivedAt) return false;
+  // When an item has variations, "low" means any one color/size is at
+  // or below its own threshold — that's what the stylist needs to
+  // reorder, even if the combined pool looks healthy.
+  const variations = itemVariations(i);
+  if (variations.length > 0) return variations.some(v => isVariationLow(v, i));
   const t = itemThreshold(i);
   if (t <= 0) return false;
   return itemQuantity(i) <= t;
@@ -286,6 +335,9 @@ export type ApplyMovementInput = {
   itemId: string;
   delta: number;
   reason: MovementReason;
+  // When set, the movement targets a single color/size variation and
+  // the RPC keeps the parent item's quantity_on_hand as the new sum.
+  variationId?: string | null;
   appointmentId?: string | null;
   storefrontOrderId?: string | null;
   businessExpenseId?: string | null;
@@ -319,6 +371,7 @@ export const applyMovement = async (
     business_expense_id_in: input.businessExpenseId ?? null,
     unit_cost_snapshot_in: input.unitCostSnapshot ?? null,
     note_in: input.note ?? null,
+    variation_id_in: input.variationId ?? null,
   });
   if (error) throw error;
   // RPC returns SETOF — pick the first row.
