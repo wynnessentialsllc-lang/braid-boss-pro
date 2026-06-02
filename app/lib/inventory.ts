@@ -22,8 +22,38 @@ export type InventoryItem = {
   photoPath?: string | null;
   storefrontProductId?: string | null;
   archivedAt?: string | null;
+  // Optional color / size variations of the same product (e.g. a
+  // braiding hair sold in colors 1B, 27, 6/30). Descriptive only —
+  // stock is a single shared pool tracked on the parent item via
+  // quantityOnHand, not per-variation. Persisted through the
+  // inventory_items.data jsonb blob, so no schema column is needed.
+  variations?: string[] | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+};
+
+// Normalize the variations field into a clean string[] — trims,
+// drops blanks, and de-dupes case-insensitively while keeping the
+// first-seen casing. Tolerates the legacy/comma-string shapes that
+// could land in the data blob.
+export const itemVariations = (i: InventoryItem | null | undefined): string[] => {
+  const raw = i?.variations;
+  const parts = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? String(raw).split(",")
+      : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of parts) {
+    const v = String(p ?? "").trim();
+    if (!v) continue;
+    const key = v.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(v);
+  }
+  return out;
 };
 
 export type InventoryMovement = {
