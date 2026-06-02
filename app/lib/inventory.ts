@@ -159,6 +159,20 @@ export const itemRetailPrice = (i: InventoryItem): number => num(i?.retailPrice)
 export const itemThreshold = (i: InventoryItem): number => num(i?.lowStockThreshold);
 export const itemValue = (i: InventoryItem): number => round2(itemQuantity(i) * itemUnitCost(i));
 
+// "each" is the catch-all unit for individual items, so "10 each" reads
+// awkwardly — it just means 10 in stock. Hide it in display; real units
+// (bundle, bottle, pack, …) still render.
+export const displayUnit = (unit?: string | null): string => {
+  const u = String(unit ?? "").trim();
+  return u.toLowerCase() === "each" ? "" : u;
+};
+// Format a quantity with its unit for display, e.g. "7 bundle" or just
+// "10" when the unit is the generic "each".
+export const fmtStock = (qty: number, unit?: string | null): string => {
+  const u = displayUnit(unit);
+  return u ? `${qty} ${u}` : `${qty}`;
+};
+
 // "Low stock" if at or below the user-set threshold AND the item is
 // active. A threshold of 0 means the stylist doesn't want alerts on
 // that SKU, so we don't surface it as low.
