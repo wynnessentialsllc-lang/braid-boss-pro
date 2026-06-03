@@ -70,6 +70,81 @@ const sanitize = (v: string | null | undefined) => {
   return t.length === 0 ? null : t;
 };
 
+// ---- Last-minute opening broadcast -----------------------------------
+//
+// Emails active waitlist clients about a freed/last-minute opening so
+// someone can grab it. Email-only (no SMS). First come, first served —
+// the email links straight to the public booking page. Each recipient
+// gets a uniquely-keyed queue row so re-broadcasting a later opening
+// isn't deduped away.
+
+export type OpeningDetails = {
+  date: string;
+  time?: string | null;
+  serviceName?: string | null;
+  note?: string | null;
+};
+
+export const broadcastWaitlistOpening = async (
+  userId: string,
+  opening: OpeningDetails,
+  recipients: WaitlistRequest[],
+): Promise<{ sent: number; total: number }> => {
+  if (!userId) return { sent: 0, total: 0 };
+  const targets = recipients.filter(
+    (r) => r.client_email && (r.status === "waiting" || r.status === "contacted"),
+  );
+  if (targets.length === 0) return { sent: 0, total: 0 };
+
+  const supabase = getSupabase();
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://braidbosspro.app";
+
+  // Resolve the studio name + public booking URL for the email CTA.
+  const { data: bl } = await supabase
+    .from("booking_links")
+    .select("slug, business_name")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const slug = (bl as any)?.slug as string | undefined;
+  const bookUrl = slug ? `${origin}/book/${slug}` : origin;
+  let studioName = ((bl as any)?.business_name as string | undefined) || "your stylist";
+  try {
+    const { data: studio } = await supabase.rpc("public_get_studio_name", { user_id_in: userId });
+    if (typeof studio === "string" && studio.trim()) studioName = studio.trim();
+  } catch { /* fall back to business_name */ }
+
+  const stamp = Date.now();
+  const whenBits = [opening.date, opening.time].filter(Boolean).join(" · ");
+  let sent = 0;
+  for (const r of targets) {
+    try {
+      const { error } = await supabase.rpc("queue_notification", {
+        user_id_in: userId,
+        channel_in: "email",
+        notification_type_in: "waitlist_opening",
+        body_in: `A last-minute opening just came up${whenBits ? ` (${whenBits})` : ""}. First to book it gets it: ${bookUrl}`,
+        subject_in: `${studioName}: a last-minute opening just came up`,
+        recipient_email_in: r.client_email,
+        recipient_name_in: r.client_name || null,
+        payload_in: {
+          clientName: r.client_name || "there",
+          studioName,
+          date: opening.date || null,
+          time: opening.time || null,
+          serviceName: opening.serviceName || null,
+          note: opening.note || null,
+          bookUrl,
+        },
+        dedupe_key_in: `waitlist_opening:${r.id}:${stamp}`,
+      });
+      if (!error) sent += 1;
+    } catch { /* skip this recipient */ }
+  }
+  return { sent, total: targets.length };
+};
+
 // ---- Owner-side hook -------------------------------------------------
 
 export const useWaitlist = (
