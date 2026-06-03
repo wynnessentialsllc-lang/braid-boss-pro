@@ -2390,12 +2390,23 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
             <button type="button" onClick={onClose} aria-label="Close" className="p-2 -mr-2 rounded-full" style={{ color: C.coffee }}><X size={22} /></button>
           </div>
         </div>
-        <div className="flex-1 bbp-scroll px-5 pt-4"
+        <div className="bbp-scroll px-5 pt-4"
           style={{
             overflowY: "auto",
             WebkitOverflowScrolling: "touch",
-            // Flex column children default to min-height: auto, so a
-            // flex-1 child won't shrink below its content height and
+            // Body grows to fill the sheet and scrolls when content
+            // overflows. We use `flex: 1 1 auto` (NOT Tailwind's
+            // `flex-1`, which is `1 1 0%`): a 0% flex-basis resolved
+            // against the sheet's indefinite/max-height main size is
+            // ambiguous and on iOS WKWebView collapses the body so the
+            // lower fields (e.g. the Save button on the long Customize
+            // sheet) render past the clip and can't be scrolled to. An
+            // `auto` basis counts the body's content toward the sheet's
+            // intrinsic height, so it clamps to max-height and overflow
+            // scrolling engages reliably.
+            flex: "1 1 auto",
+            // Flex column children default to min-height: auto, so the
+            // body won't shrink below its content height and
             // overflow-y: auto never engages — the sheet ends up
             // content-sized (cut off) or the content escapes past
             // the parent's max-height. minHeight: 0 lets this child
@@ -14090,165 +14101,6 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
         <Button variant="primary" onClick={save} fullWidth icon={saved ? <Check size={16} /> : <Save size={16} />}>
           {saved ? "Saved" : "Save settings"}
         </Button>
-      </div>
-    </div>
-  );
-};
-
-// ============================================================
-//  TIMER SESSIONS LIST (drilled from productivity)
-// ============================================================
-type BookingRequestRow = {
-  id: string;
-  user_id: string;
-  link_slug: string;
-  client_name: string;
-  client_phone: string | null;
-  client_email: string | null;
-  service_name: string | null;
-  service_duration: number | null;
-  service_price: number | null;
-  preferred_date: string | null;
-  preferred_time: string | null;
-  notes: string | null;
-  status: "pending" | "approved" | "declined" | "converted";
-  appointment_id: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-const BookingRequestsScreen = ({ userId, onBack, onApprove }: {
-  userId: string | null;
-  onBack: () => void;
-  onApprove: (req: BookingRequestRow) => Promise<string>;
-}) => {
-  const [rows, setRows] = useState<BookingRequestRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"pending" | "all">("pending");
-
-  const fetchRows = useCallback(async () => {
-    if (!userId) return;
-    setLoading(true);
-    try {
-      const supabase = getSupabase();
-      const { data } = await supabase
-        .from("booking_requests")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
-      setRows((data as BookingRequestRow[]) || []);
-    } finally {
-      setLoading(false);
-    }
-  }, [userId]);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetchRows is async and setState is inside its body via setRows; intentional
-  useEffect(() => { fetchRows(); }, [fetchRows]);
-
-  const filtered = useMemo(() =>
-    filter === "pending"
-      ? rows.filter(r => r.status === "pending")
-      : rows,
-    [rows, filter]);
-
-  const setStatus = async (req: BookingRequestRow, status: BookingRequestRow["status"], appointmentId?: string) => {
-    setBusyId(req.id);
-    try {
-      const supabase = getSupabase();
-      const patch: any = { status };
-      if (appointmentId) patch.appointment_id = appointmentId;
-      await supabase.from("booking_requests").update(patch).eq("id", req.id);
-      setRows(prev => prev.map(r => r.id === req.id ? { ...r, ...patch } as BookingRequestRow : r));
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  return (
-    <div className="bbp-fade pb-24">
-      <Header title="Booking requests" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
-      <div className="px-5 pt-4 space-y-3">
-        <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
-          {[{ id: "pending", label: "Pending" }, { id: "all", label: "All" }].map(t => (
-            <button type="button" key={t.id} onClick={() => setFilter(t.id as any)}
-              className="flex-1 py-2 rounded-lg text-[13px] font-semibold transition"
-              style={{ background: filter === t.id ? C.espresso : "transparent", color: filter === t.id ? C.cream : C.coffee }}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {loading ? (
-          <SkeletonList count={4} lines={2} />
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            icon={<CalendarPlus size={28} style={{ color: C.gold }} />}
-            title="No booking requests yet"
-            body="Share your booking link — incoming requests will land here for you to approve."
-          />
-        ) : (
-          filtered.map(r => (
-            <Card key={r.id} className="p-3.5">
-              <div className="flex items-start justify-between gap-2 mb-1.5 flex-wrap">
-                <div className="min-w-0">
-                  <p className="font-semibold text-sm" style={{ color: C.espresso }}>
-                    {r.client_name}
-                  </p>
-                  <p className="text-[11px]" style={{ color: C.muted }}>
-                    {[r.client_phone, r.client_email].filter(Boolean).join(" · ")}
-                  </p>
-                </div>
-                <Pill tone={r.status === "pending" ? "warning"
-                  : r.status === "approved" ? "gold"
-                  : r.status === "converted" ? "success"
-                  : "danger"}>
-                  {r.status.toUpperCase()}
-                </Pill>
-              </div>
-              {(r.service_name || r.preferred_date) && (
-                <p className="text-[12px] mt-1" style={{ color: C.coffee }}>
-                  {r.service_name || "Service"}
-                  {r.preferred_date ? ` · ${fmtDate(r.preferred_date)}` : ""}
-                  {r.preferred_time ? ` at ${fmtTime(r.preferred_time)}` : ""}
-                </p>
-              )}
-              {r.notes && (
-                <p className="text-[11px] mt-1.5 italic" style={{ color: C.muted }}>&quot;{r.notes}&quot;</p>
-              )}
-              <p className="text-[10px] mt-2" style={{ color: C.muted }}>
-                Received {fmtRelative(r.created_at)}
-              </p>
-              {r.status === "pending" && (
-                <div className="grid grid-cols-2 gap-2 mt-3">
-                  <Button variant="outline" disabled={busyId === r.id}
-                    onClick={() => setStatus(r, "declined")}>
-                    Decline
-                  </Button>
-                  <Button variant="primary" disabled={busyId === r.id}
-                    onClick={async () => {
-                      // Latch synchronously so a double-tap on a slow
-                      // network can't fire two approvals before the
-                      // first setStatus settles.
-                      if (busyId === r.id) return;
-                      setBusyId(r.id);
-                      try {
-                        const apptId = await onApprove(r);
-                        await setStatus(r, "converted", apptId);
-                      } catch (err) {
-                        console.error("[bookings] approve failed:", err);
-                        alert("Couldn't approve that booking. Please try again.");
-                      } finally {
-                        setBusyId(null);
-                      }
-                    }}>
-                    Approve &amp; book
-                  </Button>
-                </div>
-              )}
-            </Card>
-          ))
-        )}
       </div>
     </div>
   );
@@ -29228,73 +29080,16 @@ export default function App() {
           onBack={() => setSecondary(null)}
         />
       )}
+      {/* The shop page's "Booking requests" shortcut and Settings →
+          Approvals are the same feature, so both now open the single
+          ApprovalQueueScreen. This entry point only differs in its
+          back target (returns to the shop/account screen). */}
       {secondary === "bookingRequests" && (
-        <BookingRequestsScreen
-          userId={auth.userId}
-          onBack={() => setSecondary(null)}
-          onApprove={async (req) => {
-            // Client matching: email first, phone fallback. If a
-            // single existing client matches, link the appointment
-            // to them. If multiple match, the V1 fallback is to
-            // pick the first (the dedicated picker lives in the
-            // Waitlist convert flow; booking-request approval
-            // doesn't have an interactive picker yet — Phase B).
-            // If none match, create a new client so the appointment
-            // is linked from day one.
-            const match = matchClientByContact(
-              { email: req.client_email, phone: req.client_phone },
-              (store.clients as ClientLike[]) || [],
-            );
-            let client: ClientLike | null = null;
-            if (match.kind === "single") client = match.client;
-            else if (match.kind === "ambiguous") client = match.candidates[0] || null;
-            if (!client) {
-              const created = await store.upsertClient({
-                name: req.client_name,
-                phone: req.client_phone || "",
-                email: req.client_email || "",
-              });
-              client = (created as ClientLike) || null;
-            }
-
-            const apptId = `appt_${uid()}`;
-            const newAppt: any = {
-              id: apptId,
-              clientId: client?.id || "",
-              clientName: client?.name || req.client_name,
-              clientPhone: client?.phone || req.client_phone || "",
-              clientEmail: client?.email || req.client_email || "",
-              style: req.service_name || "",
-              serviceId: (req as any).service_id || null,
-              date: req.preferred_date || todayISO(),
-              time: req.preferred_time || "10:00",
-              durationHours: req.service_duration ?? "",
-              totalPrice: req.service_price ?? 0,
-              depositPaid: 0,
-              status: "scheduled",
-              source: "public_booking",
-              referralSource: "direct_link",
-              createdFromPublic: true,
-              notes: req.notes || "",
-              createdAt: new Date().toISOString(),
-            };
-            await store.upsertAppointment(newAppt);
-            if (auth.userId) {
-              void emitAnalyticsEvent({
-                ownerUserId: auth.userId,
-                type: "booking_approved",
-                source: "app",
-                payload: { requestId: (req as any).id, appointmentId: apptId, clientId: client?.id || null },
-              });
-              void emitAnalyticsEvent({
-                ownerUserId: auth.userId,
-                type: "appointment_created",
-                source: "app",
-                payload: { appointmentId: apptId, source: "public_booking" },
-              });
-            }
-            return apptId;
-          }}
+        <ApprovalQueueScreen
+          store={store}
+          onBack={() => setSecondary("account")}
+          focusRequestId={approvalFocusId}
+          clearFocusRequestId={() => setApprovalFocusId(null)}
         />
       )}
 
