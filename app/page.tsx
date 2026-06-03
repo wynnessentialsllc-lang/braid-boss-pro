@@ -7759,6 +7759,12 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         customization: (a?.customization && typeof a.customization === "object")
           ? { ...a.customization, summary: { ...(a.customization.summary || {}) } }
           : {},
+        // Family member this appointment is for (kids/dependents). The
+        // client (clientId) stays the contact + payer; this is just who
+        // the style is for. Null when the appointment is for the client
+        // themselves. Rides through the save in the data jsonb.
+        dependentId: a?.dependentId ?? null,
+        dependentName: a?.dependentName ?? null,
         id: a?.id,
         seriesId: a?.seriesId,
       });
@@ -8690,7 +8696,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             ) : (
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <Select value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}
+                  <Select value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value, dependentId: null, dependentName: null })}
                     options={[{ value: "", label: "— Select client —" }, ...clients.map(c => ({ value: c.id, label: c.name }))]} />
                 </div>
                 <Button variant="outline" icon={<UserPlus size={16} />} onClick={() => setShowNewClient(true)}>New</Button>
@@ -8698,6 +8704,32 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             )}
           </Field>
         )}
+
+        {/* Booking for — when the selected client has family members on
+            file, choose whether this appointment is for them or for one
+            of their dependents (kids). The client stays the contact +
+            payer; dependentName just records who the style is for. */}
+        {isAppointment && (() => {
+          const selected = clients.find((c: any) => c.id === form.clientId);
+          const deps: any[] = Array.isArray(selected?.dependents) ? selected.dependents : [];
+          if (deps.length === 0) return null;
+          return (
+            <Field label="Booking for" hint="Who this appointment is for. Billing + reminders still go to the client.">
+              <Select
+                value={form.dependentId || ""}
+                onChange={(e: any) => {
+                  const id = e.target.value || null;
+                  const dep = deps.find((d) => String(d.id) === String(id));
+                  setForm({ ...form, dependentId: id, dependentName: dep ? dep.name : null });
+                }}
+                options={[
+                  { value: "", label: `${selected?.name || "Client"} (the client)` },
+                  ...deps.map((d) => ({ value: d.id, label: d.name || "Family member" })),
+                ]}
+              />
+            </Field>
+          );
+        })()}
 
         {isAppointment && (
           <div className="grid grid-cols-2 gap-3">
@@ -11017,6 +11049,13 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
         birthday: client?.birthday || "",
         marketingEmailsEnabled: client?.marketingEmailsEnabled !== false,
         referredByClientId: client?.referredByClientId || "",
+        // Family members (kids/dependents) booked under this client.
+        // The client stays the contact + payer; a dependent is just
+        // "who the style is for". Cloned so edits don't mutate the
+        // canonical record; rides through upsertClient in the data jsonb.
+        dependents: Array.isArray(client?.dependents)
+          ? client.dependents.map((d: any) => ({ ...d }))
+          : [],
       });
       setTab("info");
     }
@@ -11048,9 +11087,21 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
     setForm({ ...form, preferredStyles: has ? form.preferredStyles.filter((x: string) => x !== s) : [...form.preferredStyles, s] });
   };
 
+  // Family members (dependents) — add / edit / remove.
+  const addDependent = () =>
+    setForm((f: any) => ({ ...f, dependents: [...(f.dependents || []), { id: `dep-${uid()}`, name: "", note: "" }] }));
+  const updateDependent = (id: string, patch: any) =>
+    setForm((f: any) => ({ ...f, dependents: (f.dependents || []).map((d: any) => (d.id === id ? { ...d, ...patch } : d)) }));
+  const removeDependent = (id: string) =>
+    setForm((f: any) => ({ ...f, dependents: (f.dependents || []).filter((d: any) => d.id !== id) }));
+
   const handleSave = async () => {
     if (!form.name.trim()) return;
-    await upsertClient(form);
+    // Drop family members with no name so a stray empty row doesn't persist.
+    const dependents = (form.dependents || [])
+      .filter((d: any) => String(d?.name || "").trim())
+      .map((d: any) => ({ id: d.id, name: String(d.name).trim(), note: String(d.note || "").trim() }));
+    await upsertClient({ ...form, dependents });
     onClose();
   };
 
@@ -11135,6 +11186,38 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
                 options={SENSITIVITY.map(s => ({ value: s, label: s }))} />
             </Field>
             <Field label="Allergies"><Input value={form.allergies} onChange={e => setForm({ ...form, allergies: e.target.value })} placeholder="e.g. tea tree, lanolin" /></Field>
+            {/* Family members — kids or others booked under this client.
+                When scheduling, you pick who the appointment is for; the
+                client stays the contact + payer. */}
+            <Field label="Family members" hint="Kids or others you book under this client. Pick who an appointment is for when scheduling.">
+              <div className="space-y-2">
+                {(form.dependents || []).length === 0 && (
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    None yet. Add a child or family member you book for under this client.
+                  </p>
+                )}
+                {(form.dependents || []).map((d: any) => (
+                  <div key={d.id} className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <Input value={d.name} onChange={(e: any) => updateDependent(d.id, { name: e.target.value })} placeholder="Name (e.g. Maya)" />
+                    </div>
+                    <div className="flex-1">
+                      <Input value={d.note || ""} onChange={(e: any) => updateDependent(d.id, { note: e.target.value })} placeholder="Note (optional)" />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeDependent(d.id)}
+                      className="p-2 rounded-lg"
+                      style={{ color: C.danger, flex: "0 0 auto" }}
+                      aria-label={`Remove ${d.name || "family member"}`}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+                <Button variant="outline" icon={<Plus size={14} />} onClick={addDependent}>Add family member</Button>
+              </div>
+            </Field>
             <Field label="Birthday" hint="Optional. We'll send a happy-birthday email each year.">
               <Input
                 type="date"
