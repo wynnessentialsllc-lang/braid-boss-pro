@@ -8002,18 +8002,25 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       const dateOrTimeChanged = changedDate || changedTime;
       const anyChanged = dateOrTimeChanged || changedPrice || changedAddons;
 
-      // Keep the linked booking_request's schedule in sync. The client
-      // portal (public_get_booking_portal_state) reads
-      // preferred_date/preferred_time straight off booking_requests, so
-      // a stylist edit that only touched the appointment row left "View
-      // appointment details" showing the OLD time. Sync whenever the
-      // date/time changed — independent of whether an email goes out.
-      if (wasExisting && isRealAppt && dateOrTimeChanged && notCancelled && store.userId) {
+      // Keep the linked booking_request in sync with the edit. The
+      // client portal (public_get_booking_portal_state) and the
+      // worker's email enrichment both read schedule, price, and
+      // add-ons straight off booking_requests, so an edit that only
+      // touched the appointment row left "View appointment details"
+      // showing the OLD time / price / add-ons. Sync whenever anything
+      // relevant moved — independent of whether an email goes out.
+      if (wasExisting && isRealAppt && anyChanged && notCancelled && store.userId) {
         try {
-          await getSupabase().rpc("sync_booking_request_schedule", {
+          await getSupabase().rpc("sync_booking_request_after_edit", {
             appointment_id_in: saved.id,
             new_date: newDate || null,
             new_time: newTime || null,
+            // null leaves the stored ticket price intact (avoids
+            // zeroing a row when the total isn't a positive number).
+            new_total_price: (Number.isFinite(newPrice) && newPrice > 0) ? newPrice : null,
+            // Pass the current add-on set (may be empty when removed)
+            // so the portal reflects exactly what's booked now.
+            new_addons: newAddons,
           });
         } catch { /* portal sync is best-effort */ }
       }
