@@ -171,6 +171,7 @@ import {
   type ServiceMaterial,
   SERVICES_EMPTY_COPY,
   formatServicePrice,
+  resolveVariationPricing,
   suggestRebookWeeks,
   useServices,
   validateService,
@@ -7693,6 +7694,13 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         // include_in_deposit }. Spreading onto the canonical record at
         // save preserves anything else the snapshot carries.
         addons: Array.isArray(a?.addons) ? a.addons.map((x: any) => ({ ...x })) : [],
+        // Service variation/option snapshot (the booking page's "Choose
+        // an option" pick — e.g. Standard vs Boho Hair Included). Null
+        // when the base service was booked. Editable below so a stylist
+        // can switch the option for a client who booked the wrong one;
+        // the switch re-prices the appointment.
+        variationId: a?.variationId ?? a?.variation_id ?? null,
+        variationName: a?.variationName ?? a?.variation_name ?? null,
         id: a?.id,
         seriesId: a?.seriesId,
       });
@@ -7994,13 +8002,20 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       const newAddons = Array.isArray(saved.addons)
         ? saved.addons
         : (Array.isArray(form.addons) ? form.addons : []);
+      // Service option (variation). Compared by id so a relabeled
+      // option still counts as the same pick.
+      const oldVariationId = (original as any)?.variationId ?? (original as any)?.variation_id ?? null;
+      const newVariationId = saved.variationId ?? form.variationId ?? null;
+      const newVariationName = saved.variationName ?? form.variationName ?? null;
+      const newServiceName = form.style || saved.style || null;
 
       const changedDate = wasExisting && oldDate !== newDate;
       const changedTime = wasExisting && oldTime !== newTime;
       const changedPrice = wasExisting && Math.abs(oldPrice - newPrice) > 0.005;
       const changedAddons = wasExisting && addonSig(oldAddons) !== addonSig(newAddons);
+      const changedOption = wasExisting && String(oldVariationId ?? "") !== String(newVariationId ?? "");
       const dateOrTimeChanged = changedDate || changedTime;
-      const anyChanged = dateOrTimeChanged || changedPrice || changedAddons;
+      const anyChanged = dateOrTimeChanged || changedPrice || changedAddons || changedOption;
 
       // Keep the linked booking_request in sync with the edit. The
       // client portal (public_get_booking_portal_state) and the
@@ -8021,6 +8036,16 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             // Pass the current add-on set (may be empty when removed)
             // so the portal reflects exactly what's booked now.
             new_addons: newAddons,
+            // Service option (variation). The portal reads
+            // coalesce(selected_variation_name, service_name); sync both
+            // the variation id/name and the composed service name so
+            // "View appointment details" shows the switched option.
+            // Gated by update_option so an unrelated edit (e.g. just the
+            // date) never rewrites the option/service name.
+            new_variation_id: newVariationId,
+            new_variation_name: newVariationName,
+            new_service_name: newServiceName,
+            update_option: changedOption,
           });
         } catch { /* portal sync is best-effort */ }
       }
@@ -8056,6 +8081,9 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             changedTime,
             changedPrice,
             changedAddons,
+            changedOption,
+            // New option label, when the option was switched.
+            optionName: changedOption ? (newVariationName || "Standard") : null,
             // Old values only when that category actually moved.
             fromDate: changedDate ? (oldDate || null) : null,
             fromTime: changedTime ? (oldTime || null) : null,
@@ -8074,7 +8102,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             // linked booking request).
             appBase: typeof window !== "undefined" ? window.location.origin : null,
           },
-          dedupe_key_in: `appt_updated:${saved.id}:${newDate || "nodate"}:${newTime || "notime"}:${Math.round(newPrice * 100)}:${addonSig(newAddons)}`,
+          dedupe_key_in: `appt_updated:${saved.id}:${newDate || "nodate"}:${newTime || "notime"}:${Math.round(newPrice * 100)}:${addonSig(newAddons)}:${newVariationId ?? "novar"}`,
           appointment_id_in: saved.id,
         });
       }
@@ -8432,6 +8460,42 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     setCustomAddonHours("");
   };
 
+  // ---- Service options (variations) -------------------------------
+  // The booking page's "Choose an option" picker maps to the service's
+  // add_ons (variations) — each can carry its own price/duration/
+  // deposit. Surface them here so a stylist can switch the option for a
+  // client who booked the wrong one; switching re-prices the ticket.
+  const serviceVariations = useMemo(
+    () => (Array.isArray(apptService?.add_ons) ? (apptService!.add_ons as ServiceAddOn[]) : []),
+    [apptService],
+  );
+  // Sum of the currently-picked extras (add-ons) — folded back on top
+  // of the base/variation whenever the option changes so the total
+  // stays "variation price + extras", matching the booking page.
+  const extrasPriceTotal = currentAddons.reduce((s, a) => s + (Number(a?.price) || 0), 0);
+  const extrasDurationTotal = currentAddons.reduce((s, a) => s + (Number(a?.duration_hours_delta) || 0), 0);
+  // Switch the option. Passing null selects the base ("Standard").
+  // Re-prices total + duration off the resolved variation (plus the
+  // picked extras), updates the variation snapshot, and rewrites the
+  // style/service label to the canonical "Service — Option" form so
+  // the calendar + client emails read correctly. The already-collected
+  // deposit is left untouched — the new balance reflects the change.
+  const selectVariation = (variationId: string | null) => {
+    if (!apptService) return;
+    const resolved = resolveVariationPricing(apptService, variationId);
+    const composedName = resolved.variationName
+      ? `${apptService.name} — ${resolved.variationName}`
+      : apptService.name;
+    setForm((prev: any) => ({
+      ...prev,
+      variationId: resolved.variationId,
+      variationName: resolved.variationName,
+      style: composedName,
+      totalPrice: sanitizeMoneyInput(roundCents(resolved.price + extrasPriceTotal)),
+      durationHours: durationStr(resolved.durationHours + extrasDurationTotal),
+    }));
+  };
+
   const sheetTitle = (() => {
     if (form.id) {
       if (isPersonal) return "Edit personal event";
@@ -8534,6 +8598,82 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
         {isAppointment && (
           <Field label="Style / Service"><Input value={form.style} onChange={e => setForm({ ...form, style: e.target.value })} placeholder="e.g. Knotless mid-back" /></Field>
+        )}
+
+        {/* Service option (variation) picker. Mirrors the booking
+            page's "Choose an option" — each option carries its own
+            price/duration/deposit. Switching re-prices the ticket
+            (Total price + Duration above) and rewrites the Style /
+            Service label. Only shows when the linked service actually
+            offers options. The already-collected deposit isn't touched
+            — switching to a pricier option just raises the balance. */}
+        {isAppointment && serviceVariations.length > 0 && (
+          <Field label="Option" hint="Switching re-prices this appointment">
+            <div className="space-y-1.5">
+              {(() => {
+                const base = resolveVariationPricing(apptService!, null);
+                const rows = [
+                  { id: null as string | null, resolved: base, description: null as string | null },
+                  ...serviceVariations.map((v) => ({
+                    id: v.id as string | null,
+                    resolved: resolveVariationPricing(apptService!, v.id),
+                    description: (v.variation_description || "").trim() || null,
+                  })),
+                ];
+                const currentId = form.variationId || null;
+                return rows.map((row) => {
+                  const selected = String(row.id ?? "") === String(currentId ?? "");
+                  const label = row.resolved.variationName || "Standard";
+                  const meta: string[] = [];
+                  if (row.resolved.durationHours > 0) meta.push(`${row.resolved.durationHours}h`);
+                  if (row.resolved.depositRequired && row.resolved.depositAmount > 0) {
+                    meta.push(`${fmtMoney(row.resolved.depositAmount, business?.currency)} deposit`);
+                  }
+                  return (
+                    <button
+                      key={row.id ?? "__base__"}
+                      type="button"
+                      onClick={() => selectVariation(row.id)}
+                      aria-pressed={selected}
+                      className="w-full flex items-start gap-2.5 text-left rounded-xl p-2.5"
+                      style={{
+                        background: selected ? C.ivory : "transparent",
+                        border: `1px solid ${selected ? C.goldDeep : C.hairline}`,
+                      }}
+                    >
+                      <span
+                        aria-hidden
+                        className="flex items-center justify-center rounded-full mt-0.5"
+                        style={{
+                          width: 18,
+                          height: 18,
+                          flex: "0 0 auto",
+                          background: selected ? C.goldDeep : "transparent",
+                          border: `1px solid ${selected ? C.goldDeep : C.hairline}`,
+                        }}
+                      >
+                        {selected && <Check size={12} color={C.cream} />}
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="text-[13px] font-semibold" style={{ color: C.espresso }}>{label}</span>
+                          <span className="text-[13px] font-semibold" style={{ color: C.goldDeep, whiteSpace: "nowrap" }}>
+                            {fmtMoney(row.resolved.price, business?.currency)}
+                          </span>
+                        </span>
+                        {meta.length > 0 && (
+                          <span className="block text-[11px] mt-0.5" style={{ color: C.muted }}>{meta.join(" · ")}</span>
+                        )}
+                        {row.description && (
+                          <span className="block text-[11px] mt-0.5" style={{ color: C.coffee, lineHeight: 1.4 }}>{row.description}</span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                });
+              })()}
+            </div>
+          </Field>
         )}
 
         <div className="grid grid-cols-2 gap-3">
