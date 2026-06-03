@@ -7528,6 +7528,7 @@ const NoShowProtectionCard = ({
   const charge = async () => {
     const amt = parseMoney(amount);
     if (busy) return;
+    if (!info?.consentAt) { setErr("This client didn't agree to a no-show fee at booking, so the card can't be charged."); return; }
     if (!(amt >= 1)) { setErr("Enter a fee of at least $1."); return; }
     setBusy(true); setErr(null); setDone(null);
     try {
@@ -7566,17 +7567,17 @@ const NoShowProtectionCard = ({
             : " Set a default fee in Booking policies."}
         </p>
       </div>
-      <p className="text-[11px]" style={{ color: info.consentAt ? C.success : C.muted, lineHeight: 1.4 }}>
+      <p className="text-[11px]" style={{ color: info.consentAt ? C.success : C.danger, lineHeight: 1.4 }}>
         {info.consentAt
           ? `Client agreed to the no-show policy on ${fmtRelative(info.consentAt)}.`
-          : "No recorded consent on this booking — confirm the client agreed to your policy before charging."}
+          : "This client didn't agree to a no-show fee at booking, so the card can't be charged."}
       </p>
       <Field label="Fee to charge">
         <MoneyInput value={amount} onChange={(v) => setAmount(v)} />
       </Field>
       {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
       {done && <p className="text-[12px]" style={{ color: C.success }}>{done}</p>}
-      <Button onClick={charge} disabled={busy} fullWidth icon={<DollarSign size={16} />}>
+      <Button onClick={charge} disabled={busy || !info.consentAt} fullWidth icon={<DollarSign size={16} />}>
         {busy ? "Charging…" : "Charge no-show fee"}
       </Button>
     </Card>

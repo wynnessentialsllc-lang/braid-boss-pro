@@ -75,7 +75,7 @@ export async function POST(req: Request) {
   const { data: row, error: rowErr } = await admin
     .from("booking_requests")
     .select(
-      "id, user_id, client_name, stripe_connect_account_id, stripe_customer_id, stripe_payment_method_id, nshow_card_last4, no_show_fee_charged_at",
+      "id, user_id, client_name, stripe_connect_account_id, stripe_customer_id, stripe_payment_method_id, nshow_card_last4, no_show_fee_charged_at, no_show_consent_at",
     )
     .eq("appointment_id", appointmentId)
     .eq("user_id", userId)
@@ -85,6 +85,11 @@ export async function POST(req: Request) {
   if (!row) return fail(404, "No booking on file for this appointment.");
   if (row.no_show_fee_charged_at) {
     return fail(409, "A no-show fee was already charged for this appointment.");
+  }
+  // Hard requirement: the client must have agreed to the no-show policy
+  // (proof captured at booking time). No consent on file → no charge.
+  if (!row.no_show_consent_at) {
+    return fail(403, "This client didn't agree to a no-show fee at booking, so the card can't be charged.");
   }
 
   const acctId = row.stripe_connect_account_id;
