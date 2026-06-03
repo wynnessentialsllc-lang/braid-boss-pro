@@ -1025,15 +1025,24 @@ export default function PublicBookingPage() {
         // wrapper enqueue_public_booking_emails for the booking
         // confirmation only. Contract generation/signing emails are
         // intentionally delayed until owner approval.
-        try {
-          const base = typeof window !== "undefined" ? window.location.origin : null;
-          await supabase.rpc("enqueue_public_booking_emails", {
-            request_id_in: newRequestId,
-            app_base_url_in: base,
-          });
-        } catch {
-          // Stylist can always resend signing links manually from
-          // the Approvals queue Contracts mini-card.
+        //
+        // Deposit-first bookings hold ALL notifications until the
+        // deposit actually clears — otherwise the client (and the
+        // stylist) get pinged about a request that was never paid for.
+        // The deposit webhook (app/api/booking-deposit/webhook) fires
+        // the post-payment notifications instead. No-deposit bookings
+        // have no payment gate, so we acknowledge immediately as before.
+        if (!needsDeposit) {
+          try {
+            const base = typeof window !== "undefined" ? window.location.origin : null;
+            await supabase.rpc("enqueue_public_booking_emails", {
+              request_id_in: newRequestId,
+              app_base_url_in: base,
+            });
+          } catch {
+            // Stylist can always resend signing links manually from
+            // the Approvals queue Contracts mini-card.
+          }
         }
 
         // Style customization — best-effort, never blocks the

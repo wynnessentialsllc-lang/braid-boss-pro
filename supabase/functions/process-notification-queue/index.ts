@@ -465,6 +465,26 @@ const renderDepositReceived = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- stylist_deposit_paid (notify stylist: paid booking to review) -
+// Fires from the deposit webhook once a deposit clears. This is the
+// stylist's first ping about the request — unpaid requests stay quiet.
+const renderStylistDepositPaid = (p: Record<string, any>) => {
+  const clientName  = p.clientName  || "A client";
+  const serviceName = p.serviceName || null;
+  const date        = p.preferredDate || null;
+  const time        = p.preferredTime || null;
+  const when        = [date, time].filter(Boolean).join(" · ");
+  const subject = `New paid booking — ${clientName}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Deposit paid</p>
+    <h1 style="font-size:20px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">${escape(clientName)} paid their deposit.</h1>
+    <p style="font-size:14px;line-height:22px;margin:0 0 10px;color:${C.coffee};">${serviceName ? `<strong>${escape(serviceName)}</strong>` : ""}${serviceName && when ? " · " : ""}${when ? `<strong>${escape(when)}</strong>` : ""}</p>
+    <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">The deposit has cleared and the request is waiting for your approval. Open Braid Boss Pro to review and confirm.</p>
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:18px;">You're only notified once a deposit clears — unpaid requests stay quiet.</p>
+  `);
+  return { subject, html };
+};
+
 // ---- balance_paid (with review link) -------------------------------
 const renderBalancePaid = (p: Record<string, any>) => {
   const clientName  = p.clientName  || "there";
@@ -1398,6 +1418,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderAppointmentApproved(row.payload || {});
     case "deposit_received":
       return renderDepositReceived(row.payload || {});
+    case "stylist_deposit_paid":
+      return renderStylistDepositPaid(row.payload || {});
     case "balance_paid":
       return renderBalancePaid(row.payload || {});
     case "review_request":
