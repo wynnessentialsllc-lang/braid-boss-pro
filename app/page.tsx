@@ -303,6 +303,7 @@ import {
   EMPTY_POLICY,
   POLICY_PRESETS,
   useBookingPolicy,
+  computeNoShowFee,
 } from "./lib/policies";
 import {
   type AvailabilityRule,
@@ -7454,6 +7455,146 @@ const ServicePicker = ({
   );
 };
 
+// No-show protection — shown in the appointment sheet when the status is
+// No-show. Reads the card saved at deposit time (off the linked
+// booking_request) and lets the stylist charge a configurable fee to it
+// off-session, one tap. Charge goes through /api/no-show-charge.
+const NoShowProtectionCard = ({
+  store,
+  appointmentId,
+  servicePrice,
+}: {
+  store: any;
+  appointmentId: string;
+  servicePrice: number;
+}) => {
+  const currency = store?.business?.currency || "USD";
+  const policy: BookingPolicy | null = store?.policiesApi?.policy || null;
+  const [loading, setLoading] = useState(true);
+  const [info, setInfo] = useState<{
+    brand: string | null;
+    last4: string | null;
+    chargedAt: string | null;
+    chargedAmount: number | null;
+    consentAt: string | null;
+  } | null>(null);
+  const [amount, setAmount] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  const suggested = computeNoShowFee(policy, servicePrice);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!appointmentId || !store?.userId) { setLoading(false); return; }
+      try {
+        const supabase = getSupabase();
+        const { data } = await supabase
+          .from("booking_requests")
+          .select("nshow_card_brand, nshow_card_last4, no_show_fee_charged_at, no_show_fee_amount, no_show_consent_at")
+          .eq("appointment_id", appointmentId)
+          .eq("user_id", store.userId)
+          .maybeSingle();
+        if (cancelled) return;
+        setInfo({
+          brand: data?.nshow_card_brand ?? null,
+          last4: data?.nshow_card_last4 ?? null,
+          chargedAt: data?.no_show_fee_charged_at ?? null,
+          chargedAmount: data?.no_show_fee_amount ?? null,
+          consentAt: data?.no_show_consent_at ?? null,
+        });
+        if (suggested > 0) setAmount(String(suggested));
+      } catch {
+        if (!cancelled) setInfo(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointmentId, store?.userId]);
+
+  if (loading) return null;
+  // No card on file → nothing to charge (deposit wasn't paid / pre-dates
+  // the feature). Stay quiet rather than show a dead control.
+  if (!info || !info.last4) return null;
+
+  if (info.chargedAt) {
+    return (
+      <Card className="p-3.5" style={{ border: `1px solid ${C.hairline}` }}>
+        <div className="flex items-center gap-2">
+          <CheckCircle2 size={15} style={{ color: C.success }} />
+          <p className="text-sm font-semibold" style={{ color: C.espresso }}>No-show fee charged</p>
+        </div>
+        <p className="text-[12px] mt-1" style={{ color: C.muted }}>
+          {fmtMoney(Number(info.chargedAmount) || 0, currency)} charged to the card on file
+          {info.last4 ? ` ···· ${info.last4}` : ""}.
+        </p>
+      </Card>
+    );
+  }
+
+  const charge = async () => {
+    const amt = parseMoney(amount);
+    if (busy) return;
+    if (!info?.consentAt) { setErr("This client didn't agree to a no-show fee at booking, so the card can't be charged."); return; }
+    if (!(amt >= 1)) { setErr("Enter a fee of at least $1."); return; }
+    setBusy(true); setErr(null); setDone(null);
+    try {
+      const supabase = getSupabase();
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) { setErr("Please sign in again."); setBusy(false); return; }
+      const res = await fetch("/api/no-show-charge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ access_token: token, appointment_id: appointmentId, amount_cents: Math.round(amt * 100) }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        setErr(json?.error || "Couldn't charge the card.");
+        setBusy(false);
+        return;
+      }
+      setDone(`Charged ${fmtMoney(amt, currency)}.`);
+      setInfo((prev) => prev ? { ...prev, chargedAt: new Date().toISOString(), chargedAmount: amt } : prev);
+    } catch {
+      setErr("Couldn't reach the server. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="p-3.5 space-y-2.5" style={{ border: `1px solid ${C.hairline}` }}>
+      <div>
+        <p className="text-sm font-semibold" style={{ color: C.espresso }}>No-show protection</p>
+        <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+          Card on file: {info.brand ? `${info.brand} ` : ""}···· {info.last4}.
+          {suggested > 0
+            ? ` Suggested fee ${fmtMoney(suggested, currency)} per your policy.`
+            : " Set a default fee in Booking policies."}
+        </p>
+      </div>
+      <p className="text-[11px]" style={{ color: info.consentAt ? C.success : C.danger, lineHeight: 1.4 }}>
+        {info.consentAt
+          ? `Client agreed to the no-show policy on ${fmtRelative(info.consentAt)}.`
+          : "This client didn't agree to a no-show fee at booking, so the card can't be charged."}
+      </p>
+      <Field label="Fee to charge">
+        <MoneyInput value={amount} onChange={(v) => setAmount(v)} />
+      </Field>
+      {err && <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>}
+      {done && <p className="text-[12px]" style={{ color: C.success }}>{done}</p>}
+      <Button onClick={charge} disabled={busy || !info.consentAt} fullWidth icon={<DollarSign size={16} />}>
+        {busy ? "Charging…" : "Charge no-show fee"}
+      </Button>
+    </Card>
+  );
+};
+
 const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCommunication, openReceipt }: { open: any; appt: any; store: any; onClose: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void; openReceipt?: (rcp: ReceiptRecord) => void }) => {
   const {
     upsertAppointment, deleteAppointment, clients, upsertClient, business,
@@ -8241,6 +8382,13 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                   { value: "no_show", label: "No-show" },
                 ]} />
             </Field>
+          )}
+          {isAppointment && form.status === "no_show" && form.id && (
+            <NoShowProtectionCard
+              store={store}
+              appointmentId={String(form.id)}
+              servicePrice={parseMoney(form.totalPrice)}
+            />
           )}
           {isAppointment && <Field label="Total price"><MoneyInput value={form.totalPrice} onChange={(v) => setForm({ ...form, totalPrice: v })} /></Field>}
           {isAppointment && (() => {
@@ -22422,6 +22570,9 @@ const BookingPoliciesScreen = ({ store, onBack }: { store: any; onBack: () => vo
         guests_policy: policy.guests_policy,
         reschedule_policy: policy.reschedule_policy,
         custom_notes: policy.custom_notes,
+        no_show_fee_enabled: policy.no_show_fee_enabled ?? false,
+        no_show_fee_type: policy.no_show_fee_type ?? "flat",
+        no_show_fee_value: policy.no_show_fee_value ?? null,
       });
     }
   }, [policy?.updated_at, policy?.user_id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -22455,6 +22606,51 @@ const BookingPoliciesScreen = ({ store, onBack }: { store: any; onBack: () => vo
             <p className="text-[12px]" style={{ color: C.muted }}>Loading policies…</p>
           </Card>
         )}
+
+        <Card className="p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>No-show protection</p>
+              <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+                Charge a fee to the card saved when a client pays their deposit. You confirm each charge from the appointment.
+              </p>
+            </div>
+            <Toggle
+              checked={!!draft.no_show_fee_enabled}
+              onChange={(v) => setDraft({ ...draft, no_show_fee_enabled: v })}
+            />
+          </div>
+          {draft.no_show_fee_enabled && (
+            <div className="space-y-2.5 pt-1">
+              <Field label="Fee type">
+                <Select
+                  value={draft.no_show_fee_type || "flat"}
+                  onChange={(e) => setDraft({ ...draft, no_show_fee_type: e.target.value === "percent" ? "percent" : "flat" })}
+                  options={[
+                    { value: "flat", label: "Flat amount ($)" },
+                    { value: "percent", label: "Percent of service (%)" },
+                  ]}
+                />
+              </Field>
+              <Field
+                label={draft.no_show_fee_type === "percent" ? "Percent of service price" : "Flat fee"}
+                hint={draft.no_show_fee_type === "percent"
+                  ? "e.g. 50 charges half the service price."
+                  : "e.g. 25 charges $25 per no-show."}
+              >
+                <MoneyInput
+                  prefix={draft.no_show_fee_type === "percent" ? "" : "$"}
+                  suffix={draft.no_show_fee_type === "percent" ? "%" : ""}
+                  value={draft.no_show_fee_value == null ? "" : String(draft.no_show_fee_value)}
+                  onChange={(v) => setDraft({ ...draft, no_show_fee_value: v === "" ? null : parseMoney(v) })}
+                />
+              </Field>
+              <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+                Only bookings that paid a deposit have a card on file. You can always adjust the amount before charging.
+              </p>
+            </div>
+          )}
+        </Card>
 
         {POLICY_FIELDS.map(f => (
           <Card key={f.key} className="p-4 space-y-2">
