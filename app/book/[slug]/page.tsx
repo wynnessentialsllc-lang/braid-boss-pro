@@ -7,6 +7,11 @@ import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LA
 import { emitAnalyticsEvent } from "../../lib/analytics-events";
 import { SMS_ENABLED } from "../../lib/features";
 import {
+  type PublicNoShowFee,
+  fetchPublicNoShowFee,
+  recordNoShowConsent,
+} from "../../lib/policies";
+import {
   type IntakeForm,
   type IntakeQuestion,
   fetchIntakeForm,
@@ -428,6 +433,10 @@ export default function PublicBookingPage() {
   // booking request before the deposit step (optional / skippable).
   const [intakeForm, setIntakeForm] = useState<IntakeForm | null>(null);
   const [intakeAnswers, setIntakeAnswers] = useState<Record<string, string>>({});
+  // No-show fee disclosure + consent. Shown only when the stylist has
+  // no-show protection on AND the booking will save a card (deposit).
+  const [noShowFee, setNoShowFee] = useState<PublicNoShowFee | null>(null);
+  const [noShowConsent, setNoShowConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -593,8 +602,13 @@ export default function PublicBookingPage() {
     if (!uid) return;
     let cancelled = false;
     (async () => {
-      const form = await fetchIntakeForm(uid);
-      if (!cancelled) setIntakeForm(form);
+      const [form, fee] = await Promise.all([
+        fetchIntakeForm(uid),
+        fetchPublicNoShowFee(uid),
+      ]);
+      if (cancelled) return;
+      setIntakeForm(form);
+      setNoShowFee(fee);
     })();
     return () => { cancelled = true; };
   }, [link?.user_id]);
@@ -926,6 +940,18 @@ export default function PublicBookingPage() {
         }
       }
     }
+    // No-show fee consent gate — required when the stylist has no-show
+    // protection on AND this booking will save a card (deposit).
+    {
+      const depositApplies =
+        (!!resolved && resolved.depositRequired && resolved.depositAmount > 0) ||
+        (!!selectedCatalogService?.deposit_required &&
+          Number(selectedCatalogService?.deposit_amount) > 0 && !hasVariations);
+      if (noShowFee?.enabled && noShowFee.value && depositApplies && !noShowConsent) {
+        setSubmitError("Please agree to the no-show fee policy to continue.");
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       // When catalog is in play we send the real service snapshot
@@ -1075,6 +1101,15 @@ export default function PublicBookingPage() {
             } catch {
               /* booking already saved — intake is non-fatal */
             }
+          }
+        }
+
+        // Stamp no-show-fee consent as proof, before the deposit step.
+        if (noShowConsent && noShowFee?.enabled) {
+          try {
+            await recordNoShowConsent(newRequestId);
+          } catch {
+            /* booking already saved — consent stamp is non-fatal */
           }
         }
       }
@@ -2902,6 +2937,41 @@ export default function PublicBookingPage() {
                     </Field>
                   ))}
                 </div>
+              );
+            })()}
+            {(() => {
+              const depositApplies =
+                (!!resolved && resolved.depositRequired && resolved.depositAmount > 0) ||
+                (!!selectedCatalogService?.deposit_required &&
+                  Number(selectedCatalogService?.deposit_amount) > 0 && !hasVariations);
+              if (!noShowFee?.enabled || !noShowFee.value || !depositApplies) return null;
+              const feeText = (() => {
+                if (noShowFee.type === "percent") {
+                  const price = resolved?.price ?? Number(selectedCatalogService?.base_price) ?? 0;
+                  const computed = price > 0 ? price * (Number(noShowFee.value) / 100) : 0;
+                  return computed > 0
+                    ? `$${computed.toFixed(2)} (${noShowFee.value}% of the service price)`
+                    : `${noShowFee.value}% of the service price`;
+                }
+                return `$${Number(noShowFee.value).toFixed(2)}`;
+              })();
+              const studio = link?.business_name || "your stylist";
+              return (
+                <label style={{
+                  display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer",
+                  background: C.ivory, border: `1px solid ${C.hairline}`, borderRadius: 12, padding: 12,
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={noShowConsent}
+                    onChange={e => setNoShowConsent(e.target.checked)}
+                    style={{ marginTop: 2, width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }}
+                  />
+                  <span style={{ fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
+                    I understand a no-show fee of <strong>{feeText}</strong> may be charged to my card if I miss this
+                    appointment without notice, per {studio}&apos;s policy, and I authorize my card to be saved for that purpose.
+                  </span>
+                </label>
               );
             })()}
             {submitError && (

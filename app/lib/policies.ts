@@ -59,6 +59,44 @@ export const computeNoShowFee = (
   return value; // flat
 };
 
+// Public booking-page read of a stylist's no-show fee config (anon).
+export type PublicNoShowFee = {
+  enabled: boolean;
+  type: "flat" | "percent";
+  value: number | null;
+};
+
+export const fetchPublicNoShowFee = async (
+  userId: string,
+): Promise<PublicNoShowFee | null> => {
+  if (!userId) return null;
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase.rpc("public_get_no_show_fee", { user_id_in: userId });
+    if (error || !data || (data as any).ok !== true) return null;
+    const v = data as any;
+    return {
+      enabled: v.enabled === true,
+      type: v.type === "percent" ? "percent" : "flat",
+      value: v.value == null ? null : Number(v.value),
+    };
+  } catch {
+    return null;
+  }
+};
+
+// Stamp the client's no-show-fee consent on their booking request (anon).
+export const recordNoShowConsent = async (requestId: string): Promise<boolean> => {
+  if (!requestId) return false;
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase.rpc("public_record_no_show_consent", { request_id_in: requestId });
+    return !error && !!data && (data as any).ok === true;
+  } catch {
+    return false;
+  }
+};
+
 // Calm presets the UI surfaces as quick-fill chips. The user can
 // always override with their own copy.
 export const POLICY_PRESETS = {

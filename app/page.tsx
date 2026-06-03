@@ -7465,6 +7465,7 @@ const NoShowProtectionCard = ({
     last4: string | null;
     chargedAt: string | null;
     chargedAmount: number | null;
+    consentAt: string | null;
   } | null>(null);
   const [amount, setAmount] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -7481,7 +7482,7 @@ const NoShowProtectionCard = ({
         const supabase = getSupabase();
         const { data } = await supabase
           .from("booking_requests")
-          .select("nshow_card_brand, nshow_card_last4, no_show_fee_charged_at, no_show_fee_amount")
+          .select("nshow_card_brand, nshow_card_last4, no_show_fee_charged_at, no_show_fee_amount, no_show_consent_at")
           .eq("appointment_id", appointmentId)
           .eq("user_id", store.userId)
           .maybeSingle();
@@ -7491,6 +7492,7 @@ const NoShowProtectionCard = ({
           last4: data?.nshow_card_last4 ?? null,
           chargedAt: data?.no_show_fee_charged_at ?? null,
           chargedAmount: data?.no_show_fee_amount ?? null,
+          consentAt: data?.no_show_consent_at ?? null,
         });
         if (suggested > 0) setAmount(String(suggested));
       } catch {
@@ -7564,6 +7566,11 @@ const NoShowProtectionCard = ({
             : " Set a default fee in Booking policies."}
         </p>
       </div>
+      <p className="text-[11px]" style={{ color: info.consentAt ? C.success : C.muted, lineHeight: 1.4 }}>
+        {info.consentAt
+          ? `Client agreed to the no-show policy on ${fmtRelative(info.consentAt)}.`
+          : "No recorded consent on this booking — confirm the client agreed to your policy before charging."}
+      </p>
       <Field label="Fee to charge">
         <MoneyInput value={amount} onChange={(v) => setAmount(v)} />
       </Field>
