@@ -9766,6 +9766,49 @@ const ClientProfileSheet = ({
           </Card>
         )}
 
+        {/* INTAKE / CONSULTATION — the client's booking answers, kept
+            on the profile so they can be referred back to on any visit.
+            Prefers the answers stamped on the client record; falls back
+            to the most recent appointment that carried answers. */}
+        {(() => {
+          let entries = intakeAnswerEntries(client);
+          let when: string | null =
+            typeof (client as any)?.intakeUpdatedAt === "string" ? (client as any).intakeUpdatedAt : null;
+          if (entries.length === 0) {
+            const withAnswers = [...cAppts]
+              .filter(a => intakeAnswerEntries(a).length > 0)
+              .sort((a, b) => String(b?.date || "").localeCompare(String(a?.date || "")))[0];
+            if (withAnswers) {
+              entries = intakeAnswerEntries(withAnswers);
+              when = withAnswers.date || null;
+            }
+          }
+          if (entries.length === 0) return null;
+          return (
+            <Card className="p-4" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+              <div className="flex items-center gap-2 mb-1">
+                <ScrollText size={14} style={{ color: C.goldDeep }} />
+                <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.goldDeep, letterSpacing: "0.18em" }}>
+                  Consultation
+                </p>
+              </div>
+              {when && (
+                <p className="text-[11px] mb-2" style={{ color: C.muted }}>
+                  From {fmtRelative(when)}
+                </p>
+              )}
+              <ul className="space-y-2" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {entries.map((e, i) => (
+                  <li key={i} className="text-[12px]" style={{ lineHeight: 1.45 }}>
+                    <span style={{ color: C.muted, display: "block" }}>{e.q}</span>
+                    <span style={{ color: C.espresso, fontWeight: 600 }}>{e.a}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          );
+        })()}
+
         {/* CONTACT */}
         <Section
           title="Contact"
@@ -23438,6 +23481,23 @@ const ApprovalQueueScreen = ({
       };
       const saved = await store.upsertAppointment(newAppt);
       if (!saved) throw new Error("Couldn't create appointment");
+
+      // Persist the consultation answers onto the client profile too,
+      // so the stylist can refer back to them on future visits even
+      // independent of this appointment. Stamps the latest set.
+      const intakeAns = Array.isArray((req as any).intake_answers) ? (req as any).intake_answers : [];
+      if (intakeAns.length > 0 && client?.id) {
+        try {
+          await store.upsertClient({
+            ...client,
+            intakeAnswers: intakeAns,
+            intakeUpdatedAt: new Date().toISOString(),
+          });
+        } catch {
+          /* appointment already created — client stamp is non-fatal */
+        }
+      }
+
       await api.confirmApproval(req.id, apptId);
     } finally {
       setBusyId(null);
