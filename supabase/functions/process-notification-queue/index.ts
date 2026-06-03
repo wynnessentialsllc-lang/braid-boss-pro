@@ -934,6 +934,84 @@ const renderAppointmentRescheduled = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- appointment_updated (stylist edited an existing appt) ---------
+// One consolidated notice when a stylist changes any mix of date/time,
+// total price, or add-ons on an existing appointment. The save path
+// detects everything that moved and enqueues this once, so the client
+// gets a single email instead of one per field. Per-category flags
+// (changedDate / changedTime / changedPrice / changedAddons) drive
+// which "what changed" lines show; the details table always reflects
+// the new state. Add-on names come in explicitly via currentAddonNames
+// (the edit isn't mirrored to booking_requests, so enrichment would be
+// stale).
+const renderAppointmentUpdated = (p: Record<string, any>) => {
+  const clientName  = p.clientName  || "there";
+  const studioName  = p.studioName  || "your stylist";
+  const serviceName = p.serviceName || null;
+  const currency    = String(p.currency || "USD").toUpperCase();
+  const money = (n: unknown): string => {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return "—";
+    try { return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(v); }
+    catch { return `$${v.toFixed(2)}`; }
+  };
+  const newWhen = [p.preferredDate || null, p.preferredTime || null].filter(Boolean).join(" · ");
+  const oldWhen = [p.fromDate || null, p.fromTime || null].filter(Boolean).join(" · ");
+  const cancelUrl = String(p.cancelUrl || "").trim();
+  const addonNames: string[] = Array.isArray(p.currentAddonNames)
+    ? p.currentAddonNames.map((a: unknown) => String(a ?? "").trim()).filter(Boolean)
+    : [];
+  const changedDateOrTime = !!p.changedDate || !!p.changedTime;
+  const changedPrice  = !!p.changedPrice;
+  const changedAddons = !!p.changedAddons;
+  const hasPrice = p.totalPrice != null && Number.isFinite(Number(p.totalPrice)) && Number(p.totalPrice) > 0;
+
+  // "What changed" — only the categories that actually moved.
+  const liStyle = `font-size:14px;line-height:22px;margin:0 0 8px;color:${C.coffee};`;
+  const changeLines: string[] = [];
+  if (changedDateOrTime && newWhen) {
+    changeLines.push(`<li style="${liStyle}">New date &amp; time: <strong>${escape(newWhen)}</strong>${oldWhen ? ` <span style="color:${C.muted};">(was ${escape(oldWhen)})</span>` : ""}</li>`);
+  }
+  if (changedAddons) {
+    changeLines.push(`<li style="${liStyle}">Add-ons: <strong>${addonNames.length ? escape(addonNames.join(", ")) : "none"}</strong></li>`);
+  }
+  if (changedPrice) {
+    const wasPrice = (p.fromPrice != null && Number.isFinite(Number(p.fromPrice)))
+      ? ` <span style="color:${C.muted};">(was ${escape(money(p.fromPrice))})</span>` : "";
+    changeLines.push(`<li style="${liStyle}">Updated total: <strong>${escape(money(p.totalPrice))}</strong>${wasPrice}</li>`);
+  }
+  const changedList = changeLines.length
+    ? `<ul style="margin:0 0 4px;padding-left:18px;">${changeLines.join("")}</ul>`
+    : "";
+
+  // Current-state details — always the new booking.
+  const trow = (label: string, value: string) =>
+    `<tr><td style="padding:4px 0;color:${C.muted};font-size:13px;vertical-align:top;">${escape(label)}</td><td style="padding:4px 0 4px 14px;text-align:right;color:${C.espresso};font-size:13px;font-weight:600;vertical-align:top;">${value}</td></tr>`;
+  const detailRows: string[] = [];
+  if (serviceName)      detailRows.push(trow("Service", escape(serviceName)));
+  if (newWhen)          detailRows.push(trow("When", escape(newWhen)));
+  if (addonNames.length) detailRows.push(trow("Add-ons", addonNames.map((a) => escape(a)).join(", ")));
+  if (hasPrice)         detailRows.push(trow("Total", escape(money(p.totalPrice))));
+  const detailsTable = detailRows.length
+    ? `<p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.goldDeep};margin:18px 0 6px;font-weight:700;">Your appointment</p><table style="width:100%;border-collapse:collapse;border-top:1px solid ${C.hairline};border-bottom:1px solid ${C.hairline};">${detailRows.join("")}</table>`
+    : "";
+
+  const subject = `Your appointment with ${studioName} was updated`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Appointment updated</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Here's your updated appointment, ${escape(clientName)}.</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
+      ${escape(studioName)} made a change to your${serviceName ? ` <strong>${escape(serviceName)}</strong>` : ""} appointment. Here's what's new:
+    </p>
+    ${changedList}
+    ${detailsTable}
+    ${portalButton(p)}
+    <p style="font-size:13px;color:${C.muted};line-height:20px;margin:14px 0;">No action needed — your booking and any deposit carry over. If something doesn't look right, reply to this email and your stylist will help.</p>
+    ${cancelUrl ? `<hr style="border:none;border-top:1px solid ${C.hairline};margin:18px 0;" /><p style="margin:0 0 8px;font-size:13px;font-weight:600;color:${C.espresso};">Need to cancel?</p><p style="margin:0 0 10px;font-size:12px;line-height:18px;color:${C.coffee};">You can cancel from the link below. Your deposit is handled per your stylist's policy.</p><p style="margin:0;"><a href="${escape(cancelUrl)}" style="display:inline-block;background:transparent;color:${C.espresso};text-decoration:none;padding:10px 20px;border-radius:999px;font-weight:600;font-size:12px;letter-spacing:0.04em;border:1.5px solid ${C.espresso};">Cancel appointment</a></p>` : ""}
+  `);
+  return { subject, html };
+};
+
 // ---- order_confirmation (customer-facing receipt) ------------------
 // Fires from the product-checkout webhook the moment Stripe confirms
 // payment. Payload shape:
@@ -1475,6 +1553,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderStylistBookingRescheduled(row.payload || {});
     case "appointment_rescheduled":
       return renderAppointmentRescheduled(row.payload || {});
+    case "appointment_updated":
+      return renderAppointmentUpdated(row.payload || {});
     case "founding_welcome":
       return renderFoundingWelcome(row.payload || {});
     case "order_confirmation":
@@ -1686,6 +1766,7 @@ const CUSTOMIZATION_TYPES = new Set([
   "appointment_reminder",
   "balance_paid",
   "appointment_rescheduled",
+  "appointment_updated",
 ]);
 
 const enrichCustomization = async (
@@ -1785,6 +1866,7 @@ const STUDIO_NAME_TYPES = new Set([
   "client_booking_cancelled",
   "client_booking_rescheduled",
   "appointment_rescheduled",
+  "appointment_updated",
 ]);
 
 const enrichStudioName = async (
