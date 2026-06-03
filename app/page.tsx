@@ -338,6 +338,13 @@ import {
   INTAKE_TYPE_LABEL,
   DEFAULT_INTAKE_QUESTIONS,
 } from "./lib/intake";
+import {
+  type ClientPackage,
+  type PackageTemplate,
+  type PackageKind,
+  useClientPackages,
+  packageRemainingLabel,
+} from "./lib/packages";
 import { SMS_ENABLED } from "./lib/features";
 import {
   type ClientLike,
@@ -9573,6 +9580,123 @@ const COMM_PREF_OPTIONS = [
   { value: "none",  label: "No reminders" },
 ] as const;
 
+// Prepaid packages on the client profile — sell a bundle to this client,
+// see active ones, and redeem a visit / draw down credit.
+const ClientPackagesCard = ({ store, client }: { store: any; client: any }) => {
+  const api = store?.packagesApi;
+  const currency = store?.business?.currency || "USD";
+  const clientId = String(client?.id || "");
+  const mine: ClientPackage[] = (api?.packages || []).filter((p: ClientPackage) => p.client_id === clientId);
+  const active = mine.filter((p) => p.status === "active");
+  const templates: PackageTemplate[] = (api?.templates || []).filter((t: PackageTemplate) => t.active);
+  const [selling, setSelling] = useState(false);
+  const [tplId, setTplId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [creditDraft, setCreditDraft] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState<string | null>(null);
+
+  if (!clientId) return null;
+
+  const sell = async () => {
+    const t = templates.find((x) => x.id === tplId);
+    if (!t || busy) return;
+    setBusy(true);
+    await api.issuePackage({
+      clientId,
+      clientName: client?.name || null,
+      templateId: t.id,
+      name: t.name,
+      kind: t.kind,
+      visits: t.visits,
+      creditAmount: t.credit_amount,
+      price: t.price,
+      serviceLabel: t.service_label,
+    });
+    setBusy(false);
+    setSelling(false);
+    setTplId("");
+    setMsg("Package sold.");
+    window.setTimeout(() => setMsg(null), 1600);
+  };
+
+  const redeemVisit = async (p: ClientPackage) => {
+    if (busy) return;
+    setBusy(true);
+    const r = await api.redeem(p.id, { visits: 1 });
+    setBusy(false);
+    if (!r.ok) setMsg(r.reason === "insufficient_visits" ? "No visits left." : "Couldn't redeem.");
+  };
+  const redeemCredit = async (p: ClientPackage) => {
+    const amt = parseMoney(creditDraft[p.id] || "");
+    if (busy || !(amt > 0)) return;
+    setBusy(true);
+    const r = await api.redeem(p.id, { amount: amt });
+    setBusy(false);
+    setCreditDraft((d) => ({ ...d, [p.id]: "" }));
+    if (!r.ok) setMsg(r.reason === "insufficient_balance" ? "Not enough balance." : "Couldn't redeem.");
+  };
+
+  return (
+    <Card className="p-4" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <Gift size={14} style={{ color: C.goldDeep }} />
+          <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.goldDeep, letterSpacing: "0.18em" }}>Packages</p>
+        </div>
+        <button type="button" onClick={() => setSelling((s) => !s)} className="text-[11px] font-semibold px-2 py-1" style={{ color: C.goldDeep }}>
+          {selling ? "Close" : "Sell a package"}
+        </button>
+      </div>
+
+      {selling && (
+        <div className="space-y-2 mb-2">
+          {templates.length === 0 ? (
+            <p className="text-[12px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+              No packages defined yet. Create one in Settings → Packages, then sell it here.
+            </p>
+          ) : (
+            <>
+              <Select value={tplId} onChange={(e) => setTplId(e.target.value)}
+                options={[{ value: "", label: "Choose a package…" },
+                  ...templates.map((t) => ({
+                    value: t.id,
+                    label: `${t.name} — ${t.kind === "visits" ? `${t.visits} visits` : fmtMoney(Number(t.credit_amount) || 0, currency)} · ${fmtMoney(Number(t.price) || 0, currency)}`,
+                  }))]} />
+              <Button onClick={sell} disabled={busy || !tplId} fullWidth>{busy ? "Saving…" : "Sell to this client"}</Button>
+            </>
+          )}
+        </div>
+      )}
+
+      {active.length === 0 && !selling && (
+        <p className="text-[12px]" style={{ color: C.muted, lineHeight: 1.5 }}>No active packages. Sell one to track prepaid visits or credit.</p>
+      )}
+
+      <div className="space-y-2">
+        {active.map((p) => (
+          <div key={p.id} className="rounded-lg p-2.5" style={{ background: C.cream, border: `1px solid ${C.hairline}` }}>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{p.name}</p>
+              <span className="text-[11px] flex-shrink-0" style={{ color: C.coffee }}>{packageRemainingLabel(p, currency)}</span>
+            </div>
+            {p.kind === "visits" ? (
+              <Button variant="outline" size="sm" onClick={() => redeemVisit(p)} disabled={busy} className="mt-1.5">Use a visit</Button>
+            ) : (
+              <div className="flex gap-2 items-center mt-1.5">
+                <div style={{ width: 120 }}>
+                  <MoneyInput value={creditDraft[p.id] || ""} onChange={(v) => setCreditDraft((d) => ({ ...d, [p.id]: v }))} />
+                </div>
+                <Button variant="outline" size="sm" onClick={() => redeemCredit(p)} disabled={busy}>Apply</Button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {msg && <p className="text-[11px] mt-2" style={{ color: C.coffee }}>{msg}</p>}
+    </Card>
+  );
+};
+
 const ClientProfileSheet = ({
   open, client, store, onClose, onEdit, onOpenAppointment, onMessage, onBookAppointment,
 }: {
@@ -9868,6 +9992,9 @@ const ClientProfileSheet = ({
             completedVisits={completed.length}
           />
         )}
+
+        {/* Prepaid packages — sell / redeem / view. */}
+        {client?.id && <ClientPackagesCard store={store} client={client} />}
 
         {/* INSIGHTS — pure derivation from existing appointments.
             Hidden for brand-new clients with nothing to summarize. */}
@@ -13336,7 +13463,7 @@ const SupportCenterScreen = ({
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openInbox, openIntakeForm, openProducts, openSupport }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openProducts?: () => void; openSupport?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openSupport }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openSupport?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -14044,6 +14171,30 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Intake form</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
                         Consultation questions before deposit
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openPackages && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openPackages}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
+                      }}
+                    >
+                      <Gift size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Packages</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        Prepaid visit & credit bundles
                       </p>
                     </div>
                   </div>
@@ -25591,6 +25742,147 @@ const ClientReviewCard = ({ r, api }: { r: ClientReview; api: any }) => {
 //  lives on the public appointment portal. See app/lib/messages.ts.
 // ============================================================
 // ============================================================
+//  PACKAGES — prepaid bundle templates + issued list.
+//  Issuing to a client happens from the client profile.
+//  See app/lib/packages.ts.
+// ============================================================
+const blankTemplate = (): any => ({ name: "", kind: "visits", visits: 5, credit_amount: 100, price: 0, service_label: "", active: true });
+
+const PackagesScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const api = store?.packagesApi;
+  const currency = store?.business?.currency || "USD";
+  const templates: PackageTemplate[] = api?.templates || [];
+  const packages: ClientPackage[] = api?.packages || [];
+  const [editing, setEditing] = useState<any | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const clientName = (clientId: string | null): string => {
+    if (!clientId) return "Unassigned";
+    const c = (store.clients as any[])?.find((x) => x?.id === clientId);
+    return c?.name || "Client";
+  };
+
+  const saveTemplate = async () => {
+    if (!editing || busy || !editing.name?.trim()) return;
+    setBusy(true);
+    await api.saveTemplate(editing);
+    setBusy(false);
+    setEditing(null);
+  };
+
+  const active = packages.filter((p) => p.status === "active");
+  const inactive = packages.filter((p) => p.status !== "active");
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Packages"
+        subtitle="Prepaid visit & credit bundles"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        rightAction={
+          <button type="button" onClick={() => setEditing(blankTemplate())}
+            className="p-2 rounded-full" style={{ background: C.gold, color: C.espresso, border: 0 }} aria-label="Add package">
+            <Plus size={20} />
+          </button>
+        }
+      />
+      <div className="px-5 pt-2 space-y-3">
+        {api?.error && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{api.error}</p>
+          </Card>
+        )}
+
+        {editing && (
+          <Card className="p-4 space-y-2.5" style={{ border: `1px solid ${C.gold}` }}>
+            <p className="text-sm font-semibold" style={{ color: C.espresso }}>{editing.id ? "Edit package" : "New package"}</p>
+            <Field label="Name">
+              <Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="5 Knotless Maintenance" />
+            </Field>
+            <Field label="Type">
+              <Select value={editing.kind} onChange={(e) => setEditing({ ...editing, kind: e.target.value })}
+                options={[{ value: "visits", label: "Visits (a count of appointments)" }, { value: "credit", label: "Credit (a dollar balance)" }]} />
+            </Field>
+            {editing.kind === "visits" ? (
+              <Field label="Number of visits">
+                <MoneyInput prefix="" suffix="visits" allowDecimal={false}
+                  value={String(editing.visits ?? "")} onChange={(v) => setEditing({ ...editing, visits: parseMoney(v) || 0 })} />
+              </Field>
+            ) : (
+              <Field label="Credit amount">
+                <MoneyInput value={String(editing.credit_amount ?? "")} onChange={(v) => setEditing({ ...editing, credit_amount: parseMoney(v) || 0 })} />
+              </Field>
+            )}
+            <Field label="Price" hint="What the client pays for this bundle.">
+              <MoneyInput value={String(editing.price ?? "")} onChange={(v) => setEditing({ ...editing, price: parseMoney(v) || 0 })} />
+            </Field>
+            <Field label="Service / style" hint="Optional — e.g. the style this bundle is for.">
+              <Input value={editing.service_label || ""} onChange={(e) => setEditing({ ...editing, service_label: e.target.value })} placeholder="Knotless maintenance" />
+            </Field>
+            <div className="flex gap-2 pt-1">
+              <Button onClick={saveTemplate} disabled={busy || !editing.name?.trim()} fullWidth>
+                {busy ? "Saving…" : "Save package"}
+              </Button>
+              <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+            </div>
+          </Card>
+        )}
+
+        <p className="text-[11px] font-semibold uppercase tracking-wide pt-1" style={{ color: C.muted }}>Packages you offer</p>
+        {templates.length === 0 && !editing && (
+          <Card className="p-5 text-center">
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>No packages yet</p>
+            <p className="text-[12px] mt-1" style={{ color: C.muted, lineHeight: 1.5 }}>
+              Create a bundle (like &quot;5 maintenance visits&quot;), then sell it to a client from their profile.
+            </p>
+          </Card>
+        )}
+        {templates.map((t) => (
+          <Card key={t.id} className="p-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{t.name}</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>
+                  {t.kind === "visits" ? `${t.visits} visits` : `${fmtMoney(Number(t.credit_amount) || 0, currency)} credit`}
+                  {" · "}{fmtMoney(Number(t.price) || 0, currency)}
+                  {t.service_label ? ` · ${t.service_label}` : ""}
+                  {!t.active ? " · hidden" : ""}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button type="button" onClick={() => setEditing({ ...t })} className="p-1.5 rounded-full" style={{ color: C.muted }} aria-label="Edit"><Edit3 size={15} /></button>
+                <button type="button" onClick={() => api.deleteTemplate(t.id)} className="p-1.5 rounded-full" style={{ color: C.muted }} aria-label="Delete"><Trash2 size={15} /></button>
+              </div>
+            </div>
+          </Card>
+        ))}
+
+        {packages.length > 0 && (
+          <>
+            <p className="text-[11px] font-semibold uppercase tracking-wide pt-2" style={{ color: C.muted }}>Sold packages</p>
+            {[...active, ...inactive].map((p) => (
+              <Card key={p.id} className="p-3.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{p.name}</p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      {clientName(p.client_id)} · {packageRemainingLabel(p, currency)}
+                    </p>
+                  </div>
+                  {p.status === "active"
+                    ? <Pill tone="success">Active</Pill>
+                    : <Pill tone="neutral">{p.status === "depleted" ? "Used up" : "Void"}</Pill>}
+                </div>
+              </Card>
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
 //  INTAKE FORM — stylist editor for the booking-page consultation
 //  form. Editable standard set: toggle questions on/off, edit labels,
 //  pick a type, add/remove custom questions. See app/lib/intake.ts.
@@ -29039,6 +29331,7 @@ export default function App() {
   const approvalsApi = useBookingApprovalQueue(auth.userId);
   const messagesApi = useClientMessages(auth.userId);
   const intakeFormApi = useIntakeForm(auth.userId);
+  const packagesApi = useClientPackages(auth.userId);
 
   // Bridge: the Approvals queue pulls booking_requests LIVE on every
   // refresh, so it reliably knows when a client cancelled (via the
@@ -29113,6 +29406,7 @@ export default function App() {
       approvalsApi,
       messagesApi,
       intakeFormApi,
+      packagesApi,
       upsertClient: gateNew("clients", rawStore.clients, rawStore.upsertClient),
       // Personal events and blocked time live in the same table but
       // aren't bookings, so they (a) don't count toward the appointment
@@ -29134,7 +29428,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, clientReviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi, messagesApi, intakeFormApi]);
+  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, clientReviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi, messagesApi, intakeFormApi, packagesApi]);
 
   const sync = useCloudSync(auth.userId, store);
 
@@ -29532,7 +29826,7 @@ export default function App() {
 
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "marketplace" && <MarketplaceScreen store={store} onBack={() => setSecondary("settings")} />}
@@ -29633,6 +29927,7 @@ export default function App() {
       {secondary === "reviews" && <ReviewsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "inbox" && <InboxScreen store={store} onBack={() => setSecondary(null)} />}
       {secondary === "intakeForm" && <IntakeFormScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "packages" && <PackagesScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "products" && (
         <ProductsScreen
           store={store}
