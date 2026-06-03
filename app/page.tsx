@@ -7623,6 +7623,13 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   // confirmation; gated server-side on phone + credits + opt-out.
   const [smsOptIn, setSmsOptIn] = useState(false);
 
+  // Custom (one-off) add-on draft. Committed to form.addons via the
+  // "Add" button so the total/duration only move on an explicit action,
+  // never mid-typing.
+  const [customAddonName, setCustomAddonName] = useState("");
+  const [customAddonPrice, setCustomAddonPrice] = useState("");
+  const [customAddonHours, setCustomAddonHours] = useState("");
+
   useEffect(() => {
     if (open) {
       // CRITICAL: seed from the CANONICAL stored appointment, not the
@@ -7679,9 +7686,19 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         // (e.g. "Doctor's appointment" / "Lunch with Mom"). Stored on
         // the same record; falls back to clientName for existing rows.
         eventTitle: a?.eventTitle || a?.event_title || "",
+        // Add-ons snapshot — booking-flow extras the client picked, now
+        // editable here so the stylist can correct what was selected
+        // (e.g. add the "hair included" option after the fact). Each
+        // entry: { id, name, price, duration_hours_delta,
+        // include_in_deposit }. Spreading onto the canonical record at
+        // save preserves anything else the snapshot carries.
+        addons: Array.isArray(a?.addons) ? a.addons.map((x: any) => ({ ...x })) : [],
         id: a?.id,
         seriesId: a?.seriesId,
       });
+      setCustomAddonName("");
+      setCustomAddonPrice("");
+      setCustomAddonHours("");
       setShowNewClient(false);
       setNewClientName("");
       setMakeRecurring(!!existingSeries);
@@ -8259,6 +8276,109 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   const isAppointment = form.kind === "appointment" || !form.kind;
   const isPersonal = form.kind === "personal";
   const isBlocked = form.kind === "blocked";
+
+  // ---- Editable add-ons -------------------------------------------
+  // Resolve the service this appointment came from so we can offer its
+  // defined optional extras as toggles. Manual / unlinked appointments
+  // (no serviceId, or a service since deleted) simply get the custom
+  // add-on entry below.
+  const apptService = useMemo(() => {
+    const list = (store.servicesApi?.services as Service[]) || [];
+    return form.serviceId ? (list.find((s) => s.id === form.serviceId) || null) : null;
+  }, [store.servicesApi?.services, form.serviceId]);
+  const availableExtras = useMemo(
+    () => ((apptService?.extras || []) as ServiceExtra[]).filter((e) => e?.active !== false),
+    [apptService],
+  );
+  const currentAddons: any[] = Array.isArray(form.addons) ? form.addons : [];
+  const isExtraSelected = (id: string) => currentAddons.some((a) => String(a?.id) === String(id));
+  // Add-ons not backed by a current menu extra (custom one-offs, or
+  // client-picked extras the service no longer lists). Rendered with a
+  // remove control so they're still manageable.
+  const orphanAddons = currentAddons.filter(
+    (a) => !availableExtras.some((e) => String(e.id) === String(a?.id)),
+  );
+  // Round a duration to whole minutes to keep float noise out of the
+  // hours field; "" when it lands at/under zero.
+  const durationStr = (h: number) => {
+    const r = Math.round(h * 60) / 60;
+    return r > 0 ? String(r) : "";
+  };
+  // Add or remove a service extra, auto-adjusting total price and
+  // duration by the extra's deltas. Manual edits to either field still
+  // stick — we only move them on this explicit toggle.
+  const toggleExtra = (extra: ServiceExtra) => {
+    setForm((prev: any) => {
+      const addons: any[] = Array.isArray(prev.addons) ? prev.addons : [];
+      const exists = addons.some((a) => String(a?.id) === String(extra.id));
+      const price = Number(extra.price) || 0;
+      const durDelta = Number(extra.duration_hours_delta) || 0;
+      const curTotal = parseMoney(prev.totalPrice);
+      const curDur = Number(prev.durationHours) || 0;
+      if (exists) {
+        return {
+          ...prev,
+          addons: addons.filter((a) => String(a?.id) !== String(extra.id)),
+          totalPrice: sanitizeMoneyInput(Math.max(0, roundCents(curTotal - price))),
+          durationHours: durationStr(curDur - durDelta),
+        };
+      }
+      return {
+        ...prev,
+        addons: [
+          ...addons,
+          {
+            id: extra.id,
+            name: extra.name,
+            price,
+            duration_hours_delta: durDelta,
+            include_in_deposit: extra.include_in_deposit === true,
+          },
+        ],
+        totalPrice: sanitizeMoneyInput(roundCents(curTotal + price)),
+        durationHours: durationStr(curDur + durDelta),
+      };
+    });
+  };
+  const removeAddon = (id: string) => {
+    setForm((prev: any) => {
+      const addons: any[] = Array.isArray(prev.addons) ? prev.addons : [];
+      const target = addons.find((a) => String(a?.id) === String(id));
+      if (!target) return prev;
+      const curTotal = parseMoney(prev.totalPrice);
+      const curDur = Number(prev.durationHours) || 0;
+      return {
+        ...prev,
+        addons: addons.filter((a) => String(a?.id) !== String(id)),
+        totalPrice: sanitizeMoneyInput(Math.max(0, roundCents(curTotal - (Number(target.price) || 0)))),
+        durationHours: durationStr(curDur - (Number(target.duration_hours_delta) || 0)),
+      };
+    });
+  };
+  const addCustomAddon = () => {
+    const name = customAddonName.trim();
+    const price = parseMoney(customAddonPrice);
+    const durDelta = Number(customAddonHours) || 0;
+    if (!name) return;
+    setForm((prev: any) => {
+      const addons: any[] = Array.isArray(prev.addons) ? prev.addons : [];
+      const curTotal = parseMoney(prev.totalPrice);
+      const curDur = Number(prev.durationHours) || 0;
+      return {
+        ...prev,
+        addons: [
+          ...addons,
+          { id: `custom-${uid()}`, name, price, duration_hours_delta: durDelta, include_in_deposit: false, custom: true },
+        ],
+        totalPrice: sanitizeMoneyInput(roundCents(curTotal + price)),
+        durationHours: durationStr(curDur + durDelta),
+      };
+    });
+    setCustomAddonName("");
+    setCustomAddonPrice("");
+    setCustomAddonHours("");
+  };
+
   const sheetTitle = (() => {
     if (form.id) {
       if (isPersonal) return "Edit personal event";
@@ -8429,34 +8549,138 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           </Card>
         )}
 
-        {/* Booked add-ons — read-only snapshot from the public
-            booking flow. Only renders when the client actually picked
-            extras. Manual appointments edit price/duration directly
-            instead, so we never show an empty card here. */}
-        {isAppointment && Array.isArray((appt as any)?.addons) && (appt as any).addons.length > 0 && (
+        {/* Add-ons — editable. Lets the stylist add or remove the
+            service's optional extras (or a one-off custom add-on)
+            after booking — e.g. a client who forgot to pick the "hair
+            included" option. Toggling an extra auto-adjusts Total
+            price + Duration above; both stay editable by hand. Always
+            available on real appointments so a manual booking can get
+            a custom add-on even with no service menu behind it. */}
+        {isAppointment && (
           <Card className="p-3.5">
-            <p className="text-sm font-semibold mb-1" style={{ color: C.espresso }}>Booked add-ons</p>
+            <p className="text-sm font-semibold mb-1" style={{ color: C.espresso }}>Add-ons</p>
             <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
-              Picked by the client at booking. Already included in this appointment's total price.
+              Optional extras for this appointment. Adding or removing one updates the total price and duration above — you can still edit those by hand.
             </p>
-            <ul className="mt-2 space-y-1.5" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              {(appt as any).addons.map((a: any, i: number) => (
-                <li
-                  key={a?.id || i}
-                  className="text-[12px] flex items-start justify-between gap-2"
-                  style={{ color: C.coffee, lineHeight: 1.4 }}
+
+            {/* Service menu extras as toggles. Checked = on this
+                appointment (covers both client-picked and ones you
+                add here). */}
+            {availableExtras.length > 0 && (
+              <ul className="mt-3 space-y-1.5" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {availableExtras.map((e) => {
+                  const selected = isExtraSelected(e.id);
+                  const durDelta = Number(e.duration_hours_delta) || 0;
+                  return (
+                    <li key={e.id}>
+                      <button
+                        type="button"
+                        onClick={() => toggleExtra(e)}
+                        aria-pressed={selected}
+                        className="w-full flex items-center gap-2.5 text-left rounded-xl p-2.5"
+                        style={{
+                          background: selected ? C.ivory : "transparent",
+                          border: `1px solid ${selected ? C.goldDeep : C.hairline}`,
+                        }}
+                      >
+                        <span
+                          aria-hidden
+                          className="flex items-center justify-center rounded-md"
+                          style={{
+                            width: 20,
+                            height: 20,
+                            flex: "0 0 auto",
+                            background: selected ? C.goldDeep : "transparent",
+                            border: `1px solid ${selected ? C.goldDeep : C.hairline}`,
+                          }}
+                        >
+                          {selected && <Check size={14} color={C.cream} />}
+                        </span>
+                        <span className="flex-1 min-w-0 text-[12px]" style={{ lineHeight: 1.4 }}>
+                          <span style={{ color: C.espresso, fontWeight: 600 }}>{e.name || "Add-on"}</span>
+                          <span style={{ color: C.muted }}>
+                            {" "}+{fmtMoney(Number(e.price) || 0, business?.currency)}
+                            {durDelta > 0 ? ` · +${durDelta}h` : ""}
+                            {e.include_in_deposit ? " · in deposit" : ""}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {/* Add-ons on the appointment that aren't in the current
+                service menu — custom ones you added, or client-picked
+                extras the service no longer lists. Editable via remove
+                so they're never stranded. */}
+            {orphanAddons.length > 0 && (
+              <ul className="mt-2 space-y-1.5" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {orphanAddons.map((a: any, i: number) => (
+                  <li
+                    key={a?.id || i}
+                    className="flex items-center justify-between gap-2 rounded-xl p-2.5"
+                    style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}
+                  >
+                    <span className="flex-1 min-w-0 text-[12px]" style={{ color: C.coffee, lineHeight: 1.4 }}>
+                      <span style={{ color: C.espresso, fontWeight: 600 }}>{a?.name || "Add-on"}</span>
+                      <span style={{ color: C.muted }}>
+                        {" "}+{fmtMoney(Number(a?.price) || 0, business?.currency)}
+                        {Number(a?.duration_hours_delta) > 0 ? ` · +${Number(a.duration_hours_delta)}h` : ""}
+                        {a?.include_in_deposit ? " · in deposit" : ""}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeAddon(a?.id)}
+                      className="p-1.5 rounded-lg"
+                      style={{ color: C.danger, flex: "0 0 auto" }}
+                      aria-label={`Remove ${a?.name || "add-on"}`}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/* One-off custom add-on. Commits on the Add button so the
+                total/duration only move on an explicit action. */}
+            <div className="mt-3 rounded-xl p-3" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              <p className="text-[12px] font-semibold mb-2" style={{ color: C.espresso }}>Add a custom add-on</p>
+              <Input
+                value={customAddonName}
+                onChange={(ev: any) => setCustomAddonName(ev.target.value)}
+                placeholder="Name (e.g. Hair included)"
+              />
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <Field label="Price">
+                  <MoneyInput value={customAddonPrice} onChange={(v: any) => setCustomAddonPrice(v)} />
+                </Field>
+                <Field label="Extra time (hrs)" hint="Optional">
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    step="0.25"
+                    min={0}
+                    value={customAddonHours}
+                    onChange={(ev: any) => setCustomAddonHours(ev.target.value)}
+                    placeholder="0"
+                  />
+                </Field>
+              </div>
+              <div className="mt-2">
+                <Button
+                  variant="outline"
+                  icon={<Plus size={14} />}
+                  onClick={addCustomAddon}
+                  disabled={!customAddonName.trim()}
                 >
-                  <span className="flex-1 min-w-0">
-                    {a?.name || "Add-on"}
-                    {Number(a?.duration_hours_delta) > 0 ? ` · +${Number(a.duration_hours_delta)}h` : ""}
-                    {a?.include_in_deposit ? " · in deposit" : ""}
-                  </span>
-                  <span style={{ color: C.goldDeep, fontWeight: 600, whiteSpace: "nowrap" }}>
-                    +{fmtMoney(Number(a?.price) || 0, business?.currency)}
-                  </span>
-                </li>
-              ))}
-            </ul>
+                  Add add-on
+                </Button>
+              </div>
+            </div>
           </Card>
         )}
 
