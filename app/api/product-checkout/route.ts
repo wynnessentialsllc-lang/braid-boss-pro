@@ -327,7 +327,15 @@ export async function POST(req: Request) {
   const baseUrl = baseUrlOf(req);
   const form = new URLSearchParams();
   form.set("mode", "payment");
-  form.set("payment_method_types[]", "card");
+  // Payment methods: omit payment_method_types so Checkout uses Stripe
+  // "dynamic payment methods" — it surfaces card PLUS any Buy-Now-Pay-
+  // Later option (Affirm, Klarna, Afterpay/Clearpay) the stylist has
+  // enabled on their connected account, filtered to what's eligible for
+  // the order amount and the direct-charge + application-fee shape.
+  // This is resilient: a stylist who hasn't activated a BNPL method
+  // simply doesn't see it (no hard 400, unlike an explicit
+  // payment_method_types list). Stylists turn BNPL on in their own
+  // Stripe dashboard → Settings → Payment methods.
   resolved.forEach((r, i) => {
     const name = r.variant_name ? `${r.title} · ${r.variant_name}` : r.title;
     form.set(`line_items[${i}][quantity]`, String(r.quantity));
