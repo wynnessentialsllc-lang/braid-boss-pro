@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
 import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LABEL } from "../../lib/waitlist";
 import { emitAnalyticsEvent } from "../../lib/analytics-events";
+import { SMS_ENABLED } from "../../lib/features";
 import {
   fetchPublicServices,
   fetchPublicServiceCategories,
@@ -952,7 +953,7 @@ export default function PublicBookingPage() {
             : null,
           // SMS reminder opt-in. The reminder scheduler only sends a
           // text when this is true AND a phone was given.
-          sms_opt_in_in: smsOptIn && !!phone.trim(),
+          sms_opt_in_in: SMS_ENABLED && smsOptIn && !!phone.trim(),
         },
       );
       if (!rpcErr && rpcRows) {
@@ -1824,7 +1825,7 @@ export default function PublicBookingPage() {
                     <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" autoComplete="email" />
                   </Field>
                 </div>
-                {phone.trim() && (
+                {SMS_ENABLED && phone.trim() && (
                   <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
                     <input
                       type="checkbox"

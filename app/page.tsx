@@ -326,6 +326,11 @@ import {
   useWaitlist,
 } from "./lib/waitlist";
 import {
+  type MessageThread,
+  useClientMessages,
+} from "./lib/messages";
+import { SMS_ENABLED } from "./lib/features";
+import {
   type ClientLike,
   matchClientByContact,
 } from "./lib/clients-match";
@@ -408,6 +413,9 @@ import {
    BRAID BOSS PRO — V2 (Phase 2)
    Reminders · Photos · Recurring · Timer · Style Presets
    ============================================================ */
+
+// SMS / text-message (Twilio) surfaces are gated behind a single flag.
+// See app/lib/features.ts.
 
 const C = {
   espresso: "#15111A", coffee: "#3D3447", caramel: "#6F6477",
@@ -3504,6 +3512,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   const [instagramUrl, setInstagramUrl] = useState<string>(link?.instagram_url || "");
   const [tiktokUrl, setTiktokUrl] = useState<string>(link?.tiktok_url || "");
   const [websiteUrl, setWebsiteUrl] = useState<string>(link?.website_url || "");
+  const [googleReviewUrl, setGoogleReviewUrl] = useState<string>(link?.google_review_url || "");
   const [yearsInBusiness, setYearsInBusiness] = useState<string>(
     link?.years_in_business != null ? String(link.years_in_business) : ""
   );
@@ -3537,6 +3546,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
     setInstagramUrl(link?.instagram_url || "");
     setTiktokUrl(link?.tiktok_url || "");
     setWebsiteUrl(link?.website_url || "");
+    setGoogleReviewUrl(link?.google_review_url || "");
     setYearsInBusiness(link?.years_in_business != null ? String(link.years_in_business) : "");
     setGallery(
       Array.isArray(link?.gallery_photos)
@@ -3586,6 +3596,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         instagram_url: instagramUrl.trim() || null,
         tiktok_url: tiktokUrl.trim() || null,
         website_url: websiteUrl.trim() || null,
+        google_review_url: googleReviewUrl.trim() || null,
         years_in_business: yearsParsed,
         // Re-number sort on save so the persisted order matches what
         // the stylist sees in the editor. CHECK constraint in the DB
@@ -3914,6 +3925,9 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
             </Field>
             <Field label="Website URL" hint="Optional">
               <Input value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder="https://yourstudio.com" />
+            </Field>
+            <Field label="Google review link" hint="Optional — happy clients (4-5★) get a 'Review us on Google' button after they leave a review.">
+              <Input value={googleReviewUrl} onChange={(e) => setGoogleReviewUrl(e.target.value)} placeholder="https://g.page/r/…/review" />
             </Field>
           </div>
         </div>
@@ -8549,7 +8563,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
               </p>
             </div>
           )}
-          {(form.clientPhone || "").trim() && (
+          {SMS_ENABLED && (form.clientPhone || "").trim() && (
             <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
@@ -9770,7 +9784,7 @@ const ClientProfileSheet = ({
         <Section title="Appointment notifications">
           <Card className="p-3.5">
             <div className="flex flex-wrap gap-2">
-              {COMM_PREF_OPTIONS.map(o => {
+              {COMM_PREF_OPTIONS.filter(o => SMS_ENABLED || o.value !== "text").map(o => {
                 const on = commPref === o.value;
                 return (
                   <button
@@ -11188,6 +11202,7 @@ const ReminderSettings = ({ store, onBack }: {
           </Field>
         </Card>
 
+        {SMS_ENABLED && <>
         <SectionTitle>Text message notifications</SectionTitle>
         <Card className="p-4 space-y-3">
           <p className="text-[12px]" style={{ color: C.muted, lineHeight: 1.5 }}>
@@ -11227,6 +11242,7 @@ const ReminderSettings = ({ store, onBack }: {
             />
           </Field>
         </Card>
+        </>}
 
         <SectionTitle>Quiet hours</SectionTitle>
         <Card className="p-4 grid grid-cols-2 gap-3">
@@ -11241,7 +11257,7 @@ const ReminderSettings = ({ store, onBack }: {
           </Field>
         </Card>
 
-        <SectionTitle action={{ label: "New", onClick: () => setOpenTpl({ id: `tpl_${uid()}`, purpose: "reminder_24h", channel: "sms", body: "" }) }}>
+        <SectionTitle action={{ label: "New", onClick: () => setOpenTpl({ id: `tpl_${uid()}`, purpose: "reminder_24h", channel: SMS_ENABLED ? "sms" : "email", body: "" }) }}>
           Templates
         </SectionTitle>
         <div className="space-y-2">
@@ -13086,7 +13102,7 @@ const SupportCenterScreen = ({
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openProducts, openSupport }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openProducts?: () => void; openSupport?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openInbox, openProducts, openSupport }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openProducts?: () => void; openSupport?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -13464,7 +13480,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                 </div>
               </Card>
             )}
-            {openSmsCredits && (
+            {SMS_ENABLED && openSmsCredits && (
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openSmsCredits}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -13739,6 +13755,41 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openInbox && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openInbox}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
+                      }}
+                    >
+                      <MessageSquare size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Inbox</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        Messages from your clients
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {(store?.messagesApi?.unreadCount ?? 0) > 0 && (
+                      <span style={{
+                        background: C.gold, color: "#FFFFFF", fontSize: 11, fontWeight: 700,
+                        borderRadius: 99, minWidth: 18, height: 18, padding: "0 6px",
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        {store.messagesApi.unreadCount}
+                      </span>
+                    )}
+                    <ChevronRight size={18} style={{ color: C.muted }} />
+                  </div>
                 </div>
               </Card>
             )}
@@ -14462,6 +14513,7 @@ export type NotificationTarget =
   | { kind: "reminders" }
   | { kind: "schedule" }
   | { kind: "reviews" }
+  | { kind: "inbox" }
   | { kind: "booking_approval"; requestId: string }
   | { kind: "email_log"; queueId: string }
   | { kind: "contract_view"; contractId: string };
@@ -14782,6 +14834,21 @@ const useNotifications = (store: any) => {
               target: { kind: "reviews" } as const,
             };
           }
+          // New client message → actionable, appointment-category bell
+          // so it badges. Tap → opens the Inbox.
+          if (cat === "client_message") {
+            return {
+              id: String(r.id),
+              category: "appointment" as NotifCategory,
+              kind: "client_message",
+              tone: "gold" as const,
+              icon: <MessageSquare size={16} style={{ color: C.goldDeep }} />,
+              title: String(r.title || "New message"),
+              body: String(r.body || ""),
+              meta: r.created_at ? fmtRelative(r.created_at) : undefined,
+              target: { kind: "inbox" } as const,
+            };
+          }
           if (cat === "contract") {
             const contractId = d.bookingContractId || null;
             const apptId = d.appointmentId || null;
@@ -14997,6 +15064,9 @@ const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
       break;
     case "reviews":
       ctx.setSecondary("reviews");
+      break;
+    case "inbox":
+      ctx.setSecondary("inbox");
       break;
     case "schedule":
       ctx.setActive("schedule");
@@ -25169,6 +25239,163 @@ const ClientReviewCard = ({ r, api }: { r: ClientReview; api: any }) => {
   );
 };
 
+// ============================================================
+//  INBOX — in-app client messaging (no SMS / Twilio).
+//  Threads are anchored to a booking_request; the client side
+//  lives on the public appointment portal. See app/lib/messages.ts.
+// ============================================================
+const InboxScreen = ({
+  store,
+  onBack,
+  initialThreadId,
+}: {
+  store: any;
+  onBack: () => void;
+  initialThreadId?: string | null;
+}) => {
+  const api = store?.messagesApi;
+  const threads: MessageThread[] = api?.threads || [];
+  const [openId, setOpenId] = useState<string | null>(initialThreadId || null);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  const openThread = threads.find((t) => t.bookingRequestId === openId) || null;
+
+  // Mark a thread read when it's opened.
+  useEffect(() => {
+    if (openId && api?.markThreadRead) void api.markThreadRead(openId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId]);
+
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [openThread?.messages.length]);
+
+  const handleSend = async () => {
+    const body = draft.trim();
+    if (!body || !openId || sending) return;
+    setSending(true);
+    const ok = await api.send(openId, body);
+    setSending(false);
+    if (ok) setDraft("");
+  };
+
+  // ---- Thread view ----
+  if (openThread) {
+    return (
+      <div className="bbp-fade pb-32">
+        <Header
+          title={openThread.clientName}
+          subtitle={openThread.serviceName || "Conversation"}
+          leftAction={{ icon: <ChevronLeft size={20} />, onClick: () => { setOpenId(null); setDraft(""); } }}
+        />
+        <div className="px-5 pt-2">
+          <div
+            ref={listRef}
+            className="space-y-2"
+            style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto", paddingBottom: 8 }}
+          >
+            {openThread.messages.map((m) => {
+              const mine = m.sender === "stylist";
+              return (
+                <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+                  <div style={{ maxWidth: "82%" }}>
+                    <div style={{
+                      background: mine ? C.gold : C.ivory,
+                      color: mine ? "#FFFFFF" : C.espresso,
+                      borderRadius: 14, padding: "9px 13px", fontSize: 14, lineHeight: 1.45,
+                      border: mine ? "none" : `1px solid ${C.hairline}`,
+                      whiteSpace: "pre-wrap", wordBreak: "break-word",
+                    }}>
+                      {m.body}
+                    </div>
+                    <p style={{ margin: "3px 4px 0", fontSize: 10.5, color: C.muted, textAlign: mine ? "right" : "left" }}>
+                      {mine ? "You" : openThread.clientName} · {fmtRelative(m.created_at)}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex gap-2 items-end pt-3">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
+              placeholder={`Message ${openThread.clientName.split(" ")[0]}…`}
+              rows={2}
+              className="flex-1 rounded-xl px-3 py-2 text-sm"
+              style={{ resize: "none", border: `1px solid ${C.hairline}`, background: C.paper, color: C.espresso, outline: "none" }}
+            />
+            <Button onClick={() => void handleSend()} disabled={sending || !draft.trim()} icon={<Send size={16} />}>
+              {sending ? "…" : "Send"}
+            </Button>
+          </div>
+          <p className="text-[11px] text-center pt-3" style={{ color: C.muted, lineHeight: 1.5 }}>
+            {openThread.clientName.split(" ")[0]} sees your replies on their appointment link.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- Thread list ----
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Inbox"
+        subtitle="Messages from your clients"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-3">
+        {threads.length === 0 ? (
+          <Card className="p-6 text-center">
+            <div className="mx-auto mb-3 flex items-center justify-center" style={{ width: 52, height: 52, borderRadius: 99, background: C.ivory, color: C.gold }}>
+              <MessageSquare size={24} />
+            </div>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>
+              No messages yet
+            </p>
+            <p className="text-[13px] mt-1" style={{ color: C.muted, lineHeight: 1.55 }}>
+              When a client sends you a message from their appointment link, it&apos;ll show up here — with a bell and a push notification.
+            </p>
+          </Card>
+        ) : (
+          threads.map((t) => (
+            <button
+              key={t.bookingRequestId}
+              type="button"
+              onClick={() => setOpenId(t.bookingRequestId)}
+              className="w-full text-left rounded-2xl p-4"
+              style={{ background: C.paper, border: `1px solid ${C.hairline}` }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <p className="font-semibold truncate" style={{ color: C.espresso, fontSize: 15 }}>{t.clientName}</p>
+                  {t.unread > 0 && (
+                    <span style={{
+                      flexShrink: 0, background: C.gold, color: "#FFFFFF", fontSize: 11, fontWeight: 700,
+                      borderRadius: 99, minWidth: 18, height: 18, padding: "0 6px",
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    }}>
+                      {t.unread}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] flex-shrink-0" style={{ color: C.muted }}>{fmtRelative(t.lastMessageAt)}</span>
+              </div>
+              <p className="text-[13px] mt-1 truncate" style={{ color: t.unread > 0 ? C.espresso : C.muted, fontWeight: t.unread > 0 ? 600 : 400 }}>
+                {t.lastSender === "stylist" ? "You: " : ""}{t.lastMessageBody}
+              </p>
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
 const ReviewsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const api = store.reviewsApi;
   const crApi = store.clientReviewsApi;
@@ -28350,6 +28577,7 @@ export default function App() {
   const availabilityApi = useAvailability(auth.userId);
   const waitlistApi = useWaitlist(auth.userId);
   const approvalsApi = useBookingApprovalQueue(auth.userId);
+  const messagesApi = useClientMessages(auth.userId);
 
   // Bridge: the Approvals queue pulls booking_requests LIVE on every
   // refresh, so it reliably knows when a client cancelled (via the
@@ -28422,6 +28650,7 @@ export default function App() {
       availabilityApi,
       waitlistApi,
       approvalsApi,
+      messagesApi,
       upsertClient: gateNew("clients", rawStore.clients, rawStore.upsertClient),
       // Personal events and blocked time live in the same table but
       // aren't bookings, so they (a) don't count toward the appointment
@@ -28443,7 +28672,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, clientReviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi]);
+  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, clientReviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi, messagesApi]);
 
   const sync = useCloudSync(auth.userId, store);
 
@@ -28841,7 +29070,7 @@ export default function App() {
 
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "marketplace" && <MarketplaceScreen store={store} onBack={() => setSecondary("settings")} />}
@@ -28940,6 +29169,7 @@ export default function App() {
       )}
       {secondary === "discounts" && <DiscountsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "reviews" && <ReviewsScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "inbox" && <InboxScreen store={store} onBack={() => setSecondary(null)} />}
       {secondary === "products" && (
         <ProductsScreen
           store={store}

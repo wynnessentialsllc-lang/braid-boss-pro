@@ -127,6 +127,7 @@ const ReviewInner = ({ token }: { token: string }) => {
   const [displayName, setDisplayName] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [googleUrl, setGoogleUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,6 +185,16 @@ const ReviewInner = ({ token }: { token: string }) => {
       }
       setSubmitted(true);
       trackEvent("review_submitted", { category: "feature", metadata: { stars, has_notes: !!notes.trim() } });
+      // Google review boost: funnel happy clients (4-5 stars) to the
+      // stylist's public Google profile. Negative feedback stays
+      // private. Best-effort — never blocks the thank-you screen.
+      if (stars >= 4) {
+        try {
+          const { data: boost } = await supabase.rpc("public_get_review_boost", { token_in: token });
+          const url = (boost as { ok?: boolean; google_review_url?: string | null } | null)?.google_review_url;
+          if (url && typeof url === "string") setGoogleUrl(url);
+        } catch { /* best-effort */ }
+      }
     } catch (e: any) {
       setErr(e?.message || "Couldn't save your review.");
       trackEvent("review_submit_failed", { category: "error" });
@@ -233,6 +244,26 @@ const ReviewInner = ({ token }: { token: string }) => {
               Your review went to {studioOrFallback}. They appreciate you taking the time.
             </p>
           </div>
+          {googleUrl && (
+            <div style={{ marginTop: 18, paddingTop: 18, borderTop: `1px solid ${C.hairline}`, textAlign: "center" }}>
+              <p style={{ ...muted, marginBottom: 12 }}>
+                Loved your visit? Help others find {studioOrFallback} — share it on Google.
+              </p>
+              <a
+                href={googleUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => trackEvent("google_review_boost_clicked", { category: "feature", metadata: { stars } })}
+                style={{
+                  display: "inline-block", padding: "13px 24px", borderRadius: 999,
+                  background: C.espresso, color: C.cream, textDecoration: "none",
+                  fontSize: 14, fontWeight: 700, letterSpacing: "0.03em",
+                }}
+              >
+                Review us on Google · ★★★★★
+              </a>
+            </div>
+          )}
         </div>
       </Shell>
     );

@@ -10,9 +10,10 @@
 // needs to understand their appointment without texting the
 // stylist, plus the cancel/reschedule links when still actionable.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { getSupabase } from "../../../lib/supabase";
+import { listPortalMessages, postPortalMessage, type PortalMessage } from "../../../lib/messages";
 
 const C = {
   espresso: "#15111A", coffee: "#3D3447", paper: "#FFFFFF",
@@ -126,6 +127,141 @@ const SectionTitle = ({ children }: { children: React.ReactNode }) => (
     {children}
   </p>
 );
+
+const fmtMsgTime = (iso: string): string => {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+};
+
+// In-app two-way thread between the client and their stylist. Reads +
+// writes go through the anon SECURITY DEFINER RPCs keyed by the portal
+// token — no auth, no Twilio. The stylist sees replies in their
+// dashboard Inbox and gets a bell + push when the client sends one.
+const MessageThread = ({ token, studioName }: { token: string; studioName: string }) => {
+  const [messages, setMessages] = useState<PortalMessage[]>([]);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  const load = async () => {
+    const res = await listPortalMessages(token);
+    if (res.ok) setMessages(res.messages);
+    setLoaded(true);
+  };
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => { if (!cancelled) await load(); })();
+    const interval = window.setInterval(() => { void load(); }, 30_000);
+    const onFocus = () => { void load(); };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [messages.length]);
+
+  const send = async () => {
+    const body = draft.trim();
+    if (!body || sending) return;
+    setSending(true);
+    const ok = await postPortalMessage(token, body);
+    setSending(false);
+    if (ok) {
+      setDraft("");
+      // Optimistic append so the bubble shows immediately; reconciled
+      // by the next poll.
+      setMessages((prev) => [
+        ...prev,
+        { id: `local-${Date.now()}`, sender: "client", body, created_at: new Date().toISOString() },
+      ]);
+    }
+  };
+
+  return (
+    <Card>
+      <SectionTitle>Message {studioName}</SectionTitle>
+      <div
+        ref={listRef}
+        style={{
+          maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column",
+          gap: 8, marginBottom: 12, paddingRight: 2,
+        }}
+      >
+        {!loaded && (
+          <p style={{ margin: 0, fontSize: 13, color: C.muted, textAlign: "center", padding: "12px 0" }}>Loading…</p>
+        )}
+        {loaded && messages.length === 0 && (
+          <p style={{ margin: 0, fontSize: 13, color: C.muted, textAlign: "center", lineHeight: 1.5, padding: "8px 0" }}>
+            Have a question about your appointment? Send {studioName} a message — they&apos;ll see it right away.
+          </p>
+        )}
+        {messages.map((m) => {
+          const mine = m.sender === "client";
+          return (
+            <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+              <div style={{ maxWidth: "82%" }}>
+                <div style={{
+                  background: mine ? C.brandPrimary : C.cream,
+                  color: mine ? "#FFFFFF" : C.espresso,
+                  borderRadius: 14, padding: "9px 13px", fontSize: 13.5, lineHeight: 1.45,
+                  border: mine ? "none" : `1px solid ${C.hairline}`, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                }}>
+                  {m.body}
+                </div>
+                <p style={{
+                  margin: "3px 4px 0", fontSize: 10.5, color: C.muted, textAlign: mine ? "right" : "left",
+                }}>
+                  {mine ? "You" : studioName} · {fmtMsgTime(m.created_at)}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); }
+          }}
+          placeholder="Write a message…"
+          rows={2}
+          style={{
+            flex: 1, resize: "none", borderRadius: 12, border: `1px solid ${C.hairline}`,
+            padding: "10px 12px", fontSize: 13.5, fontFamily: FONT_BODY, color: C.espresso,
+            background: C.paper, outline: "none",
+          }}
+        />
+        <button
+          onClick={() => void send()}
+          disabled={sending || !draft.trim()}
+          style={{
+            padding: "11px 16px", borderRadius: 12, border: "none",
+            background: draft.trim() ? C.espresso : C.hairline,
+            color: "#FFFFFF", fontSize: 13, fontWeight: 700, cursor: draft.trim() ? "pointer" : "default",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {sending ? "…" : "Send"}
+        </button>
+      </div>
+    </Card>
+  );
+};
 
 export default function ClientAppointmentPortal() {
   const params = useParams();
@@ -294,6 +430,8 @@ export default function ClientAppointmentPortal() {
           <p style={{ margin: 0, fontSize: 13, color: C.coffee, lineHeight: 1.6 }}>{meta.prep_instructions}</p>
         </Card>
       )}
+
+      <MessageThread token={token} studioName={s.studio_name} />
 
       {!isCancelled && (s.cancel_token || s.reschedule_token) && (
         <Card>
