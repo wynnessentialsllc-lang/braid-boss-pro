@@ -98,6 +98,30 @@ export async function POST(req: Request) {
     return NextResponse.json({ transactions: [], connected: true, stale: true });
   }
 
+  // Deposit charges only carry `booking_request_id` in their metadata —
+  // the actual appointment id and the authoritative client/service live
+  // on the booking_requests row (stamped at approval time). Resolve them
+  // here so each Stripe row can (a) be labeled with the real client +
+  // service instead of the cardholder's billing name + a "Stripe payment"
+  // placeholder, and (b) share the appointment id with the appointment-
+  // derived deposit row so the Payments page can de-dupe the two into one.
+  const bookingRequestIds = Array.from(
+    new Set(
+      charges
+        .map((c: any) => c?.metadata?.booking_request_id || c?.metadata?.bookingRequestId)
+        .filter((v: any): v is string => typeof v === "string" && v.length > 0),
+    ),
+  );
+  const bookingRequestMap = new Map<string, any>();
+  if (bookingRequestIds.length > 0) {
+    const { data: brRows } = await admin
+      .from("booking_requests")
+      .select("id, appointment_id, client_name, service_name, service_name_snapshot")
+      .eq("user_id", userId)
+      .in("id", bookingRequestIds);
+    for (const row of brRows || []) bookingRequestMap.set(String(row.id), row);
+  }
+
   const transactions = charges
     .filter((c: any) => c?.status === "succeeded" || c?.paid)
     .map((c: any) => {
@@ -108,6 +132,8 @@ export async function POST(req: Request) {
       const tipCents = Number(meta.tip_cents ?? meta.tip ?? 0);
       const refundList = Array.isArray(c?.refunds?.data) ? c.refunds.data : [];
       const refundedTotal = cents(c?.amount_refunded);
+      const bookingRequestId = meta.booking_request_id || meta.bookingRequestId || null;
+      const br = bookingRequestId ? bookingRequestMap.get(String(bookingRequestId)) : null;
       return {
         id: String(c.id),
         amount: cents(c.amount),
@@ -115,12 +141,32 @@ export async function POST(req: Request) {
         net,
         tip: Number.isFinite(tipCents) && tipCents > 0 ? Math.round(tipCents) / 100 : 0,
         paid_at: new Date((c.created || 0) * 1000).toISOString(),
+        // Prefer the booking's client over the card's billing name: the
+        // person being served is who the stylist recognizes, not whoever
+        // happened to pay (a friend/parent paying a deposit is common).
         client_name:
-          c?.billing_details?.name || meta.client_name || meta.clientName || "Stripe customer",
-        service_name: c?.description || meta.service_name || meta.serviceName || "Stripe payment",
+          br?.client_name ||
+          c?.billing_details?.name ||
+          meta.client_name ||
+          meta.clientName ||
+          "Stripe customer",
+        service_name:
+          br?.service_name_snapshot ||
+          br?.service_name ||
+          c?.description ||
+          meta.service_name ||
+          meta.serviceName ||
+          "Stripe payment",
         payment_intent: typeof c?.payment_intent === "string" ? c.payment_intent : null,
         charge: String(c.id),
-        appointment_id: meta.appointment_id || meta.appointmentId || meta.booking_request_id || null,
+        // Real appointment id when the booking has been approved; fall back
+        // to the booking_request id so a still-pending deposit stays linked.
+        appointment_id:
+          meta.appointment_id ||
+          meta.appointmentId ||
+          br?.appointment_id ||
+          bookingRequestId ||
+          null,
         payment_type:
           meta.type === "balance_payment"
             ? "final"
