@@ -7752,6 +7752,13 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         // the switch re-prices the appointment.
         variationId: a?.variationId ?? a?.variation_id ?? null,
         variationName: a?.variationName ?? a?.variation_name ?? null,
+        // Style customization snapshot — braiding-hair color, boho/curl
+        // pattern, and style notes the client picked at booking. Cloned
+        // so the editor below can change them without mutating the
+        // canonical record; rides through the PATCH-style save.
+        customization: (a?.customization && typeof a.customization === "object")
+          ? { ...a.customization, summary: { ...(a.customization.summary || {}) } }
+          : {},
         id: a?.id,
         seriesId: a?.seriesId,
       });
@@ -8059,14 +8066,31 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       const newVariationId = saved.variationId ?? form.variationId ?? null;
       const newVariationName = saved.variationName ?? form.variationName ?? null;
       const newServiceName = form.style || saved.style || null;
+      // Style customization (braiding-hair color / boho curl / notes).
+      // Same read precedence as the editor + display.
+      const custFields = (c: any) => {
+        const o = (c && typeof c === "object") ? c : {};
+        const s = (o.summary && typeof o.summary === "object") ? o.summary : {};
+        return {
+          hairColor: String(o.hairColor ?? s.custom_hair_color ?? "").trim(),
+          curlPattern: String(o.curlPattern ?? s.custom_curl_pattern ?? "").trim(),
+          styleNotes: String(o.styleNotes ?? s.notes ?? "").trim(),
+        };
+      };
+      const oldCust = custFields((original as any)?.customization);
+      const newCust = custFields(saved.customization ?? form.customization);
 
       const changedDate = wasExisting && oldDate !== newDate;
       const changedTime = wasExisting && oldTime !== newTime;
       const changedPrice = wasExisting && Math.abs(oldPrice - newPrice) > 0.005;
       const changedAddons = wasExisting && addonSig(oldAddons) !== addonSig(newAddons);
       const changedOption = wasExisting && String(oldVariationId ?? "") !== String(newVariationId ?? "");
+      const changedHairColor = wasExisting && oldCust.hairColor !== newCust.hairColor;
+      const changedCurl = wasExisting && oldCust.curlPattern !== newCust.curlPattern;
+      const changedNotes = wasExisting && oldCust.styleNotes !== newCust.styleNotes;
+      const changedCustomization = changedHairColor || changedCurl || changedNotes;
       const dateOrTimeChanged = changedDate || changedTime;
-      const anyChanged = dateOrTimeChanged || changedPrice || changedAddons || changedOption;
+      const anyChanged = dateOrTimeChanged || changedPrice || changedAddons || changedOption || changedCustomization;
 
       // Keep the linked booking_request in sync with the edit. The
       // client portal (public_get_booking_portal_state) and the
@@ -8097,6 +8121,14 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             new_variation_name: newVariationName,
             new_service_name: newServiceName,
             update_option: changedOption,
+            // Style customization — the portal reads selected_hair_color
+            // / selected_curl_pattern / client_style_notes directly, so
+            // sync them. Gated by update_customization so an unrelated
+            // edit never overwrites them with a thin snapshot.
+            new_hair_color: newCust.hairColor || null,
+            new_curl_pattern: newCust.curlPattern || null,
+            new_style_notes: newCust.styleNotes || null,
+            update_customization: changedCustomization,
           });
         } catch { /* portal sync is best-effort */ }
       }
@@ -8133,8 +8165,14 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             changedPrice,
             changedAddons,
             changedOption,
+            changedHairColor,
+            changedCurl,
             // New option label, when the option was switched.
             optionName: changedOption ? (newVariationName || "Standard") : null,
+            // New customization values, when changed (notes stay out of
+            // the client email — they can be long / internal).
+            hairColor: changedHairColor ? (newCust.hairColor || "—") : null,
+            curlPattern: changedCurl ? (newCust.curlPattern || "—") : null,
             // Old values only when that category actually moved.
             fromDate: changedDate ? (oldDate || null) : null,
             fromTime: changedTime ? (oldTime || null) : null,
@@ -8153,7 +8191,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             // linked booking request).
             appBase: typeof window !== "undefined" ? window.location.origin : null,
           },
-          dedupe_key_in: `appt_updated:${saved.id}:${newDate || "nodate"}:${newTime || "notime"}:${Math.round(newPrice * 100)}:${addonSig(newAddons)}:${newVariationId ?? "novar"}`,
+          dedupe_key_in: `appt_updated:${saved.id}:${newDate || "nodate"}:${newTime || "notime"}:${Math.round(newPrice * 100)}:${addonSig(newAddons)}:${newVariationId ?? "novar"}:${newCust.hairColor || "-"}:${newCust.curlPattern || "-"}`,
           appointment_id_in: saved.id,
         });
       }
@@ -8547,6 +8585,35 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     }));
   };
 
+  // ---- Style customization (braiding-hair color / boho curl) -------
+  // The booking page lets the client pick a braiding-hair color and,
+  // for boho/curly options, a curl pattern (from the service's allowed
+  // lists, or a custom value). Surface them here so a stylist can
+  // correct a client's pick. Current values read the same precedence as
+  // the read-only display did.
+  const cust = (form.customization && typeof form.customization === "object") ? form.customization : {};
+  const custSummary = (cust.summary && typeof cust.summary === "object") ? cust.summary : {};
+  const hairColorValue = String(cust.hairColor ?? custSummary.custom_hair_color ?? "");
+  const curlPatternValue = String(cust.curlPattern ?? custSummary.custom_curl_pattern ?? "");
+  const styleNotesValue = String(cust.styleNotes ?? custSummary.notes ?? "");
+  const allowedHairColors: string[] = Array.isArray((apptService as any)?.allowed_hair_colors)
+    ? (apptService as any).allowed_hair_colors.filter(Boolean) : [];
+  const allowedCurlPatterns: string[] = Array.isArray((apptService as any)?.allowed_curl_patterns)
+    ? (apptService as any).allowed_curl_patterns.filter(Boolean) : [];
+  // Show the hair-color editor when the service includes hair / offers
+  // colors, or a value was already booked. Curl likewise. Keeps the
+  // card off manual appointments that have no customization at all.
+  const showHairColorEditor = !!(apptService as any)?.hair_included
+    || allowedHairColors.length > 0 || !!hairColorValue;
+  const showCurlEditor = !!(apptService as any)?.allow_client_curl_pattern_selection
+    || allowedCurlPatterns.length > 0 || !!curlPatternValue;
+  const setCustomizationField = (field: "hairColor" | "curlPattern" | "styleNotes", value: string) => {
+    setForm((prev: any) => {
+      const prevCust = (prev.customization && typeof prev.customization === "object") ? prev.customization : {};
+      return { ...prev, customization: { ...prevCust, [field]: value } };
+    });
+  };
+
   const sheetTitle = (() => {
     if (form.id) {
       if (isPersonal) return "Edit personal event";
@@ -8936,32 +9003,93 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           </Card>
         )}
 
-        {/* Style Customization — read-only snapshot from the public
-            booking flow. Same data as the booking/confirmation emails.
-            Add-ons stay in their own card above; this is hair/curl/
-            notes + any future customization fields, rendered
-            dynamically so new fields need no code change here. */}
+        {/* Style customization — editable. The braiding-hair color and
+            boho/curl pattern the client picked at booking can be
+            corrected here; quick-pick chips come from the service's
+            allowed lists, with a free-text override. Any other
+            customization fields (e.g. "Hair included") stay read-only
+            below. Edits sync to the booking_request so the client
+            portal + emails reflect them. */}
         {isAppointment && (() => {
-          const cust = customizationEntries((appt as any)?.customization);
-          if (cust.length === 0) return null;
+          const otherEntries = customizationEntries(form.customization).filter(
+            (e) => e.label !== "Hair color" && e.label !== "Curl pattern" && e.label !== "Style notes",
+          );
+          if (!showHairColorEditor && !showCurlEditor && otherEntries.length === 0 && !styleNotesValue) {
+            return null;
+          }
+          const chipRow = (options: string[], value: string, field: "hairColor" | "curlPattern") =>
+            options.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {options.map((opt) => {
+                  const active = value.trim().toLowerCase() === opt.trim().toLowerCase();
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setCustomizationField(field, opt)}
+                      className="text-[12px] px-2.5 py-1 rounded-full"
+                      style={{
+                        background: active ? C.goldDeep : C.ivory,
+                        color: active ? C.cream : C.espresso,
+                        border: `1px solid ${active ? C.goldDeep : C.hairline}`,
+                      }}
+                    >
+                      {opt}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null;
           return (
             <Card className="p-3.5">
               <p className="text-sm font-semibold mb-1" style={{ color: C.espresso }}>Style customization</p>
               <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
-                Selected by the client at booking.
+                Picked by the client at booking. Edit to correct it — changes sync to their appointment details.
               </p>
-              <ul className="mt-2 space-y-1.5" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                {cust.map((e, i) => (
-                  <li
-                    key={i}
-                    className="text-[12px] flex items-start justify-between gap-3"
-                    style={{ color: C.coffee, lineHeight: 1.4 }}
-                  >
-                    <span style={{ color: C.muted, whiteSpace: "nowrap" }}>{e.label}</span>
-                    <span style={{ color: C.espresso, fontWeight: 600, textAlign: "right" }}>{e.value}</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="mt-3 space-y-3">
+                {showHairColorEditor && (
+                  <Field label="Braiding hair color">
+                    {chipRow(allowedHairColors, hairColorValue, "hairColor")}
+                    <Input
+                      value={hairColorValue}
+                      onChange={(e: any) => setCustomizationField("hairColor", e.target.value)}
+                      placeholder="e.g. 1B"
+                    />
+                  </Field>
+                )}
+                {showCurlEditor && (
+                  <Field label="Curl pattern (boho hair)">
+                    {chipRow(allowedCurlPatterns, curlPatternValue, "curlPattern")}
+                    <Input
+                      value={curlPatternValue}
+                      onChange={(e: any) => setCustomizationField("curlPattern", e.target.value)}
+                      placeholder="e.g. 4C, Spanish wave"
+                    />
+                  </Field>
+                )}
+                <Field label="Style notes" hint="Optional">
+                  <Textarea
+                    value={styleNotesValue}
+                    onChange={(e: any) => setCustomizationField("styleNotes", e.target.value)}
+                    rows={2}
+                    placeholder="Anything the client noted about the look"
+                  />
+                </Field>
+                {otherEntries.length > 0 && (
+                  <ul className="space-y-1.5 pt-1" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                    {otherEntries.map((e, i) => (
+                      <li
+                        key={i}
+                        className="text-[12px] flex items-start justify-between gap-3"
+                        style={{ color: C.coffee, lineHeight: 1.4 }}
+                      >
+                        <span style={{ color: C.muted, whiteSpace: "nowrap" }}>{e.label}</span>
+                        <span style={{ color: C.espresso, fontWeight: 600, textAlign: "right" }}>{e.value}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </Card>
           );
         })()}
