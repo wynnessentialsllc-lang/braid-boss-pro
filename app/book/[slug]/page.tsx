@@ -7,6 +7,13 @@ import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LA
 import { emitAnalyticsEvent } from "../../lib/analytics-events";
 import { SMS_ENABLED } from "../../lib/features";
 import {
+  type IntakeForm,
+  type IntakeQuestion,
+  fetchIntakeForm,
+  attachIntakeAnswers,
+  visibleQuestions,
+} from "../../lib/intake";
+import {
   fetchPublicServices,
   fetchPublicServiceCategories,
   fetchPublicAvailability,
@@ -416,6 +423,11 @@ export default function PublicBookingPage() {
   const [customHairColor, setCustomHairColor] = useState("");
   const [curlPattern, setCurlPattern] = useState("");
   const [customCurlPattern, setCustomCurlPattern] = useState("");
+  // Digital intake / consultation form. Loaded once the slug resolves
+  // to a user_id; answers are keyed by question id and attached to the
+  // booking request before the deposit step (optional / skippable).
+  const [intakeForm, setIntakeForm] = useState<IntakeForm | null>(null);
+  const [intakeAnswers, setIntakeAnswers] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -573,6 +585,19 @@ export default function PublicBookingPage() {
     })();
     return () => { cancelled = true; };
   }, [slug]);
+
+  // Intake / consultation form. Loaded once the slug resolves to a
+  // user_id. Renders before the deposit step when the stylist enabled it.
+  useEffect(() => {
+    const uid = link?.user_id;
+    if (!uid) return;
+    let cancelled = false;
+    (async () => {
+      const form = await fetchIntakeForm(uid);
+      if (!cancelled) setIntakeForm(form);
+    })();
+    return () => { cancelled = true; };
+  }, [link?.user_id]);
 
   // Categories load in parallel. The RPC only returns categories with
   // at least one active service, so we won't render ghost tabs.
@@ -1033,6 +1058,23 @@ export default function PublicBookingPage() {
             });
           } catch {
             /* booking already saved — customization is non-fatal */
+          }
+        }
+
+        // Intake / consultation answers — attached before the deposit
+        // step so they're on the request when the stylist approves and
+        // ride into the confirmation email. Best-effort; never blocks.
+        const askedQs = visibleQuestions(intakeForm);
+        if (askedQs.length > 0) {
+          const answers = askedQs
+            .map((q) => ({ q: q.label, a: String(intakeAnswers[q.id] ?? "").trim() }))
+            .filter((x) => x.a);
+          if (answers.length > 0) {
+            try {
+              await attachIntakeAnswers(newRequestId, answers);
+            } catch {
+              /* booking already saved — intake is non-fatal */
+            }
           }
         }
       }
@@ -2814,6 +2856,54 @@ export default function PublicBookingPage() {
                 placeholder="Hair length, anything you want me to know…"
                 style={{ ...inputStyle, padding: 12, resize: "none", lineHeight: 1.5 }} />
             </Field>
+            {(() => {
+              const qs = visibleQuestions(intakeForm);
+              if (qs.length === 0) return null;
+              const studio = link?.business_name || "your stylist";
+              const setAns = (id: string, v: string) =>
+                setIntakeAnswers(prev => ({ ...prev, [id]: v }));
+              return (
+                <div style={{ borderTop: `1px solid ${C.hairline}`, paddingTop: 16, marginTop: 4, display: "grid", gap: 14 }}>
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: C.espresso, margin: 0 }}>Consultation</p>
+                    <p style={{ fontSize: 11.5, color: C.muted, margin: "2px 0 0", lineHeight: 1.5 }}>
+                      Optional — a few questions from {studio} so your appointment is tailored to you.
+                    </p>
+                  </div>
+                  {qs.map((q: IntakeQuestion) => (
+                    <Field key={q.id} label={q.label}>
+                      {q.type === "textarea" ? (
+                        <textarea
+                          value={intakeAnswers[q.id] ?? ""}
+                          onChange={e => setAns(q.id, e.target.value)}
+                          rows={2}
+                          placeholder="Your answer…"
+                          style={{ ...inputStyle, padding: 12, resize: "none", lineHeight: 1.5 }}
+                        />
+                      ) : q.type === "yes_no" ? (
+                        <select value={intakeAnswers[q.id] ?? ""} onChange={e => setAns(q.id, e.target.value)} style={{ ...inputStyle, padding: 12 }}>
+                          <option value="">Select…</option>
+                          <option value="Yes">Yes</option>
+                          <option value="No">No</option>
+                        </select>
+                      ) : q.type === "choice" ? (
+                        <select value={intakeAnswers[q.id] ?? ""} onChange={e => setAns(q.id, e.target.value)} style={{ ...inputStyle, padding: 12 }}>
+                          <option value="">Select…</option>
+                          {(q.options ?? []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
+                      ) : (
+                        <input
+                          value={intakeAnswers[q.id] ?? ""}
+                          onChange={e => setAns(q.id, e.target.value)}
+                          placeholder="Your answer…"
+                          style={{ ...inputStyle }}
+                        />
+                      )}
+                    </Field>
+                  ))}
+                </div>
+              );
+            })()}
             {submitError && (
               <p style={{ fontSize: 12, color: C.danger }}>{submitError}</p>
             )}
