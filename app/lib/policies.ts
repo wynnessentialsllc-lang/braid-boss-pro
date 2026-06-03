@@ -18,6 +18,10 @@ export type BookingPolicy = {
   guests_policy: string | null;
   reschedule_policy: string | null;
   custom_notes: string | null;
+  // No-show protection — charge a fee to the card saved at deposit time.
+  no_show_fee_enabled: boolean | null;
+  no_show_fee_type: "flat" | "percent" | null;
+  no_show_fee_value: number | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -34,6 +38,63 @@ export const EMPTY_POLICY: BookingPolicyInput = {
   guests_policy: null,
   reschedule_policy: null,
   custom_notes: null,
+  no_show_fee_enabled: false,
+  no_show_fee_type: "flat",
+  no_show_fee_value: null,
+};
+
+// Resolve the no-show fee amount (in dollars) for a given service price,
+// per the stylist's policy. Returns 0 when protection is off / unset.
+export const computeNoShowFee = (
+  policy: Pick<BookingPolicy, "no_show_fee_enabled" | "no_show_fee_type" | "no_show_fee_value"> | null | undefined,
+  servicePrice: number,
+): number => {
+  if (!policy || !policy.no_show_fee_enabled) return 0;
+  const value = Number(policy.no_show_fee_value) || 0;
+  if (value <= 0) return 0;
+  if (policy.no_show_fee_type === "percent") {
+    const price = Number(servicePrice) || 0;
+    return Math.max(0, Math.round(price * (value / 100) * 100) / 100);
+  }
+  return value; // flat
+};
+
+// Public booking-page read of a stylist's no-show fee config (anon).
+export type PublicNoShowFee = {
+  enabled: boolean;
+  type: "flat" | "percent";
+  value: number | null;
+};
+
+export const fetchPublicNoShowFee = async (
+  userId: string,
+): Promise<PublicNoShowFee | null> => {
+  if (!userId) return null;
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase.rpc("public_get_no_show_fee", { user_id_in: userId });
+    if (error || !data || (data as any).ok !== true) return null;
+    const v = data as any;
+    return {
+      enabled: v.enabled === true,
+      type: v.type === "percent" ? "percent" : "flat",
+      value: v.value == null ? null : Number(v.value),
+    };
+  } catch {
+    return null;
+  }
+};
+
+// Stamp the client's no-show-fee consent on their booking request (anon).
+export const recordNoShowConsent = async (requestId: string): Promise<boolean> => {
+  if (!requestId) return false;
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase.rpc("public_record_no_show_consent", { request_id_in: requestId });
+    return !error && !!data && (data as any).ok === true;
+  } catch {
+    return false;
+  }
 };
 
 // Calm presets the UI surfaces as quick-fill chips. The user can
@@ -128,6 +189,12 @@ export const useBookingPolicy = (userId: string | null): {
       guests_policy: text(draft.guests_policy),
       reschedule_policy: text(draft.reschedule_policy),
       custom_notes: text(draft.custom_notes),
+      no_show_fee_enabled: !!draft.no_show_fee_enabled,
+      no_show_fee_type: draft.no_show_fee_type === "percent" ? "percent" : "flat",
+      no_show_fee_value:
+        draft.no_show_fee_value == null || !Number.isFinite(Number(draft.no_show_fee_value))
+          ? null
+          : Number(draft.no_show_fee_value),
     };
     const supabase = getSupabase();
     const { data, error: err } = await supabase

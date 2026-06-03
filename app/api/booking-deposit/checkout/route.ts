@@ -211,6 +211,13 @@ export async function POST(req: Request) {
   if (applicationFeeCents > 0) {
     form.set("payment_intent_data[application_fee_amount]", String(applicationFeeCents));
   }
+  // No-show protection: save the card so the stylist can charge a
+  // no-show fee off-session later. customer_creation=always mints a
+  // Customer on the connected account; setup_future_usage attaches the
+  // payment method to it for off-session reuse. The deposit webhook
+  // records the resulting customer + payment method on the booking row.
+  form.set("customer_creation", "always");
+  form.set("payment_intent_data[setup_future_usage]", "off_session");
 
   const stripeRes = await fetch(`${STRIPE_API}/checkout/sessions`, {
     method: "POST",
