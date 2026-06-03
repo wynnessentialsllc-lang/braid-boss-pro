@@ -146,6 +146,46 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: rpcErr.message }, { status: 500 });
   }
 
+  // No-show protection: record the saved card (off-session reusable) on
+  // the connected account so the stylist can later charge a no-show fee
+  // via /api/no-show-charge. Best-effort — never blocks the deposit ack.
+  try {
+    const acctId = typeof evt?.account === "string" ? evt.account : null;
+    const stripeSecret = process.env.STRIPE_SECRET_KEY;
+    if (acctId && paymentIntent && stripeSecret) {
+      const piRes = await fetch(
+        `https://api.stripe.com/v1/payment_intents/${paymentIntent}?expand[]=payment_method`,
+        {
+          headers: {
+            Authorization: `Bearer ${stripeSecret}`,
+            "Stripe-Version": "2024-06-20",
+            "Stripe-Account": acctId,
+          },
+          cache: "no-store",
+        },
+      );
+      if (piRes.ok) {
+        const pi = await piRes.json();
+        const pm = pi?.payment_method;
+        const pmId = typeof pm === "string" ? pm : pm?.id || null;
+        const card = pm && typeof pm === "object" ? pm.card : null;
+        const cust =
+          (typeof session?.customer === "string" ? session.customer : null) ||
+          (typeof pi?.customer === "string" ? pi.customer : null);
+        const patch: Record<string, unknown> = {};
+        if (cust) patch.stripe_customer_id = cust;
+        if (pmId) patch.stripe_payment_method_id = pmId;
+        if (card?.brand) patch.nshow_card_brand = card.brand;
+        if (card?.last4) patch.nshow_card_last4 = card.last4;
+        if (Object.keys(patch).length > 0) {
+          await admin.from("booking_requests").update(patch).eq("id", requestId);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[booking-deposit/webhook] no-show card capture failed:", e);
+  }
+
   // Best-effort: enqueue the "deposit received — your appointment is
   // confirmed" email. The RPC's idempotency contract means this only
   // runs after a successful state transition, and queue_notification
