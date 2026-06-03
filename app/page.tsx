@@ -2390,12 +2390,23 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
             <button type="button" onClick={onClose} aria-label="Close" className="p-2 -mr-2 rounded-full" style={{ color: C.coffee }}><X size={22} /></button>
           </div>
         </div>
-        <div className="flex-1 bbp-scroll px-5 pt-4"
+        <div className="bbp-scroll px-5 pt-4"
           style={{
             overflowY: "auto",
             WebkitOverflowScrolling: "touch",
-            // Flex column children default to min-height: auto, so a
-            // flex-1 child won't shrink below its content height and
+            // Body grows to fill the sheet and scrolls when content
+            // overflows. We use `flex: 1 1 auto` (NOT Tailwind's
+            // `flex-1`, which is `1 1 0%`): a 0% flex-basis resolved
+            // against the sheet's indefinite/max-height main size is
+            // ambiguous and on iOS WKWebView collapses the body so the
+            // lower fields (e.g. the Save button on the long Customize
+            // sheet) render past the clip and can't be scrolled to. An
+            // `auto` basis counts the body's content toward the sheet's
+            // intrinsic height, so it clamps to max-height and overflow
+            // scrolling engages reliably.
+            flex: "1 1 auto",
+            // Flex column children default to min-height: auto, so the
+            // body won't shrink below its content height and
             // overflow-y: auto never engages — the sheet ends up
             // content-sized (cut off) or the content escapes past
             // the parent's max-height. minHeight: 0 lets this child
@@ -14095,165 +14106,6 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
   );
 };
 
-// ============================================================
-//  TIMER SESSIONS LIST (drilled from productivity)
-// ============================================================
-type BookingRequestRow = {
-  id: string;
-  user_id: string;
-  link_slug: string;
-  client_name: string;
-  client_phone: string | null;
-  client_email: string | null;
-  service_name: string | null;
-  service_duration: number | null;
-  service_price: number | null;
-  preferred_date: string | null;
-  preferred_time: string | null;
-  notes: string | null;
-  status: "pending" | "approved" | "declined" | "converted";
-  appointment_id: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-const BookingRequestsScreen = ({ userId, onBack, onApprove }: {
-  userId: string | null;
-  onBack: () => void;
-  onApprove: (req: BookingRequestRow) => Promise<string>;
-}) => {
-  const [rows, setRows] = useState<BookingRequestRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"pending" | "all">("pending");
-
-  const fetchRows = useCallback(async () => {
-    if (!userId) return;
-    setLoading(true);
-    try {
-      const supabase = getSupabase();
-      const { data } = await supabase
-        .from("booking_requests")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
-      setRows((data as BookingRequestRow[]) || []);
-    } finally {
-      setLoading(false);
-    }
-  }, [userId]);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetchRows is async and setState is inside its body via setRows; intentional
-  useEffect(() => { fetchRows(); }, [fetchRows]);
-
-  const filtered = useMemo(() =>
-    filter === "pending"
-      ? rows.filter(r => r.status === "pending")
-      : rows,
-    [rows, filter]);
-
-  const setStatus = async (req: BookingRequestRow, status: BookingRequestRow["status"], appointmentId?: string) => {
-    setBusyId(req.id);
-    try {
-      const supabase = getSupabase();
-      const patch: any = { status };
-      if (appointmentId) patch.appointment_id = appointmentId;
-      await supabase.from("booking_requests").update(patch).eq("id", req.id);
-      setRows(prev => prev.map(r => r.id === req.id ? { ...r, ...patch } as BookingRequestRow : r));
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  return (
-    <div className="bbp-fade pb-24">
-      <Header title="Booking requests" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
-      <div className="px-5 pt-4 space-y-3">
-        <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
-          {[{ id: "pending", label: "Pending" }, { id: "all", label: "All" }].map(t => (
-            <button type="button" key={t.id} onClick={() => setFilter(t.id as any)}
-              className="flex-1 py-2 rounded-lg text-[13px] font-semibold transition"
-              style={{ background: filter === t.id ? C.espresso : "transparent", color: filter === t.id ? C.cream : C.coffee }}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {loading ? (
-          <SkeletonList count={4} lines={2} />
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            icon={<CalendarPlus size={28} style={{ color: C.gold }} />}
-            title="No booking requests yet"
-            body="Share your booking link — incoming requests will land here for you to approve."
-          />
-        ) : (
-          filtered.map(r => (
-            <Card key={r.id} className="p-3.5">
-              <div className="flex items-start justify-between gap-2 mb-1.5 flex-wrap">
-                <div className="min-w-0">
-                  <p className="font-semibold text-sm" style={{ color: C.espresso }}>
-                    {r.client_name}
-                  </p>
-                  <p className="text-[11px]" style={{ color: C.muted }}>
-                    {[r.client_phone, r.client_email].filter(Boolean).join(" · ")}
-                  </p>
-                </div>
-                <Pill tone={r.status === "pending" ? "warning"
-                  : r.status === "approved" ? "gold"
-                  : r.status === "converted" ? "success"
-                  : "danger"}>
-                  {r.status.toUpperCase()}
-                </Pill>
-              </div>
-              {(r.service_name || r.preferred_date) && (
-                <p className="text-[12px] mt-1" style={{ color: C.coffee }}>
-                  {r.service_name || "Service"}
-                  {r.preferred_date ? ` · ${fmtDate(r.preferred_date)}` : ""}
-                  {r.preferred_time ? ` at ${fmtTime(r.preferred_time)}` : ""}
-                </p>
-              )}
-              {r.notes && (
-                <p className="text-[11px] mt-1.5 italic" style={{ color: C.muted }}>&quot;{r.notes}&quot;</p>
-              )}
-              <p className="text-[10px] mt-2" style={{ color: C.muted }}>
-                Received {fmtRelative(r.created_at)}
-              </p>
-              {r.status === "pending" && (
-                <div className="grid grid-cols-2 gap-2 mt-3">
-                  <Button variant="outline" disabled={busyId === r.id}
-                    onClick={() => setStatus(r, "declined")}>
-                    Decline
-                  </Button>
-                  <Button variant="primary" disabled={busyId === r.id}
-                    onClick={async () => {
-                      // Latch synchronously so a double-tap on a slow
-                      // network can't fire two approvals before the
-                      // first setStatus settles.
-                      if (busyId === r.id) return;
-                      setBusyId(r.id);
-                      try {
-                        const apptId = await onApprove(r);
-                        await setStatus(r, "converted", apptId);
-                      } catch (err) {
-                        console.error("[bookings] approve failed:", err);
-                        alert("Couldn't approve that booking. Please try again.");
-                      } finally {
-                        setBusyId(null);
-                      }
-                    }}>
-                    Approve &amp; book
-                  </Button>
-                </div>
-              )}
-            </Card>
-          ))
-        )}
-      </div>
-    </div>
-  );
-};
-
 const AnalyticsStatRow = ({ label, value, hint }: { label: string; value: any; hint?: string }) => (
   <div className="flex items-baseline justify-between py-2" style={{ borderBottom: `1px solid ${C.hairline}` }}>
     <div>
@@ -17028,7 +16880,7 @@ const ServerPushTogglesSection = ({ userId }: { userId: string }) => {
   );
 };
 
-const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport, openBookingRequests }: {
+const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport, openBookingRequests, pendingRequests = 0 }: {
   email: string | null;
   mode: AuthMode;
   sync: { state: SyncState; lastOk: string | null; pendingCount: number };
@@ -17037,6 +16889,10 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   onSignOut: () => Promise<void>;
   onExport: () => void;
   openBookingRequests?: () => void;
+  // Count of requests needing attention, derived from the shared
+  // approvals queue (ACTIVE_STATES) so this badge matches the
+  // Approvals screen's "Active" tab exactly.
+  pendingRequests?: number;
 }) => {
   const [pushCap, setPushCap] = useState<PushCapability>("unsupported");
   const [pushBusy, setPushBusy] = useState(false);
@@ -17278,7 +17134,6 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   const [bookingCopied, setBookingCopied] = useState(false);
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [bookingCustomizeOpen, setBookingCustomizeOpen] = useState(false);
-  const [pendingRequests, setPendingRequests] = useState<number>(0);
 
   // Branded slug — the editable, memorable form of the booking URL.
   // savedBrandedSlug mirrors profiles.public_slug; brandedDraft is
@@ -17302,35 +17157,30 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clears booking state when auth context changes, intentional
-    if (mode !== "authed" || !userId) { setBookingLink(null); setPendingRequests(0); return; }
+    if (mode !== "authed" || !userId) { setBookingLink(null); return; }
     let cancelled = false;
     (async () => {
       const supabase = getSupabase();
-      const [{ data: link }, { count }] = await Promise.all([
-        supabase
-          .from("booking_links")
-          // Storefront fields (banner_image_url, business_city,
-          // business_state, instagram_url, tiktok_url, website_url,
-          // years_in_business) MUST be in the SELECT — otherwise the
-          // Customize sheet hydrates them to empty strings even when
-          // they're populated, and the user sees \"empty\" fields
-          // while the public booking page renders the saved values.
-          .select(
-            "slug, active, intro, business_name, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business"
-          )
-          .eq("user_id", userId)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase
-          .from("booking_requests")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", userId)
-          .eq("status", "pending"),
-      ]);
+      // Storefront fields (banner_image_url, business_city,
+      // business_state, instagram_url, tiktok_url, website_url,
+      // years_in_business) MUST be in the SELECT — otherwise the
+      // Customize sheet hydrates them to empty strings even when
+      // they're populated, and the user sees \"empty\" fields
+      // while the public booking page renders the saved values.
+      // The pending-request badge no longer queries here — it comes in
+      // as a prop derived from the shared approvals queue so it stays
+      // in lockstep with the Approvals screen's Active count.
+      const { data: link } = await supabase
+        .from("booking_links")
+        .select(
+          "slug, active, intro, business_name, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business"
+        )
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
       if (cancelled) return;
       setBookingLink(link as any);
-      setPendingRequests(count || 0);
     })();
     return () => { cancelled = true; };
   }, [mode, userId]);
@@ -22810,6 +22660,27 @@ const ServiceBar = ({ pct, color }: { pct: number; color: string }) => (
 // ============================================================
 //  APPROVAL QUEUE — Phase B5a
 // ============================================================
+// Phase B10 buckets, hoisted to module scope so the Approvals queue
+// AND the shop-page badge share one definition and can never drift:
+//   active  → anything that wants the stylist's attention
+//   history → terminal states (approved/confirmed/denied/declined/cancelled/expired)
+const ACTIVE_STATES: ApprovalStatus[] = [
+  "pending_review",
+  "approved_pending_deposit",
+  "awaiting_deposit",
+  "deposit_paid_pending_approval",
+];
+const HISTORY_STATES: ApprovalStatus[] = [
+  "approved", "confirmed", "denied", "declined", "cancelled", "expired",
+];
+// Count of requests in the "Active" bucket — the same number the
+// Approvals queue shows under its Active filter, so the shop-page
+// "Booking requests" badge reads consistently with the queue.
+const countActiveApprovals = (
+  requests: readonly BookingRequestRecord[] | null | undefined,
+): number =>
+  (requests || []).filter(r => ACTIVE_STATES.includes(r.approval_status as ApprovalStatus)).length;
+
 const APPROVAL_FILTERS: { id: "active" | "all" | "history"; label: (n: { active: number; all: number; history: number }) => string }[] = [
   { id: "active",  label: n => `Active · ${n.active}` },
   { id: "all",     label: n => `All · ${n.all}` },
@@ -23303,7 +23174,10 @@ const ApprovalQueueScreen = ({
   clearFocusRequestId?: () => void;
 }) => {
   const api = store.approvalsApi;
-  const requests: BookingRequestRecord[] = api?.requests || [];
+  // Stable reference so the counts/filtered memos below don't see a
+  // fresh [] every render (the `|| []` fallback would otherwise make
+  // their `requests` dependency change on each pass).
+  const requests: BookingRequestRecord[] = useMemo(() => api?.requests || [], [api?.requests]);
   const currency = store.business?.currency || "USD";
   const [filter, setFilter] = useState<"active" | "all" | "history">("active");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -23331,30 +23205,18 @@ const ApprovalQueueScreen = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequestId]);
 
-  // Phase B10 buckets:
-  //   active  → anything that wants the stylist's attention
-  //   history → terminal states (approved/confirmed/denied/declined/cancelled/expired)
-  const ACTIVE_STATES: ApprovalStatus[] = [
-    "pending_review",
-    "approved_pending_deposit",
-    "awaiting_deposit",
-    "deposit_paid_pending_approval",
-  ];
-  const HISTORY_STATES: ApprovalStatus[] = [
-    "approved", "confirmed", "denied", "declined", "cancelled", "expired",
-  ];
+  // active / history buckets are module-level (ACTIVE_STATES /
+  // HISTORY_STATES) so the shop-page badge shares the same definition.
   const counts = useMemo(() => {
     const active = requests.filter(r => ACTIVE_STATES.includes(r.approval_status)).length;
     const history = requests.filter(r => HISTORY_STATES.includes(r.approval_status)).length;
     return { active, all: requests.length, history };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requests]);
 
   const filtered = useMemo(() => {
     if (filter === "all") return requests;
     if (filter === "history") return requests.filter(r => HISTORY_STATES.includes(r.approval_status));
     return requests.filter(r => ACTIVE_STATES.includes(r.approval_status));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requests, filter]);
 
   const handleApprove = async (req: BookingRequestRecord) => {
@@ -29188,6 +29050,7 @@ export default function App() {
           sync={sync}
           userId={auth.userId}
           openBookingRequests={() => setSecondary("bookingRequests")}
+          pendingRequests={countActiveApprovals(store.approvalsApi?.requests)}
           onBack={() => setSecondary("settings")}
           onSignOut={async () => { await auth.signOut(); setSecondary(null); }}
           onExport={() => {
@@ -29228,73 +29091,16 @@ export default function App() {
           onBack={() => setSecondary(null)}
         />
       )}
+      {/* The shop page's "Booking requests" shortcut and Settings →
+          Approvals are the same feature, so both now open the single
+          ApprovalQueueScreen. This entry point only differs in its
+          back target (returns to the shop/account screen). */}
       {secondary === "bookingRequests" && (
-        <BookingRequestsScreen
-          userId={auth.userId}
-          onBack={() => setSecondary(null)}
-          onApprove={async (req) => {
-            // Client matching: email first, phone fallback. If a
-            // single existing client matches, link the appointment
-            // to them. If multiple match, the V1 fallback is to
-            // pick the first (the dedicated picker lives in the
-            // Waitlist convert flow; booking-request approval
-            // doesn't have an interactive picker yet — Phase B).
-            // If none match, create a new client so the appointment
-            // is linked from day one.
-            const match = matchClientByContact(
-              { email: req.client_email, phone: req.client_phone },
-              (store.clients as ClientLike[]) || [],
-            );
-            let client: ClientLike | null = null;
-            if (match.kind === "single") client = match.client;
-            else if (match.kind === "ambiguous") client = match.candidates[0] || null;
-            if (!client) {
-              const created = await store.upsertClient({
-                name: req.client_name,
-                phone: req.client_phone || "",
-                email: req.client_email || "",
-              });
-              client = (created as ClientLike) || null;
-            }
-
-            const apptId = `appt_${uid()}`;
-            const newAppt: any = {
-              id: apptId,
-              clientId: client?.id || "",
-              clientName: client?.name || req.client_name,
-              clientPhone: client?.phone || req.client_phone || "",
-              clientEmail: client?.email || req.client_email || "",
-              style: req.service_name || "",
-              serviceId: (req as any).service_id || null,
-              date: req.preferred_date || todayISO(),
-              time: req.preferred_time || "10:00",
-              durationHours: req.service_duration ?? "",
-              totalPrice: req.service_price ?? 0,
-              depositPaid: 0,
-              status: "scheduled",
-              source: "public_booking",
-              referralSource: "direct_link",
-              createdFromPublic: true,
-              notes: req.notes || "",
-              createdAt: new Date().toISOString(),
-            };
-            await store.upsertAppointment(newAppt);
-            if (auth.userId) {
-              void emitAnalyticsEvent({
-                ownerUserId: auth.userId,
-                type: "booking_approved",
-                source: "app",
-                payload: { requestId: (req as any).id, appointmentId: apptId, clientId: client?.id || null },
-              });
-              void emitAnalyticsEvent({
-                ownerUserId: auth.userId,
-                type: "appointment_created",
-                source: "app",
-                payload: { appointmentId: apptId, source: "public_booking" },
-              });
-            }
-            return apptId;
-          }}
+        <ApprovalQueueScreen
+          store={store}
+          onBack={() => setSecondary("account")}
+          focusRequestId={approvalFocusId}
+          clearFocusRequestId={() => setApprovalFocusId(null)}
         />
       )}
 
