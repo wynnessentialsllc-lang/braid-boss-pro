@@ -775,6 +775,18 @@ export default function PublicBookingPage() {
     };
   }, [baseResolved, pickedExtras]);
 
+  // No-show consent is required to book whenever the stylist has no-show
+  // protection on AND this booking will save a card (a deposit applies).
+  // Single source of truth for the disclosure, the submit gate, and the
+  // disabled state of the book button.
+  const noShowConsentRequired = useMemo(() => {
+    const depositApplies =
+      (!!resolved && resolved.depositRequired && resolved.depositAmount > 0) ||
+      (!!selectedCatalogService?.deposit_required &&
+        Number(selectedCatalogService?.deposit_amount) > 0 && !hasVariations);
+    return !!(noShowFee?.enabled && noShowFee.value && depositApplies);
+  }, [noShowFee, resolved, selectedCatalogService, hasVariations]);
+
   // Reset picked add-ons whenever the service changes so a stale
   // pick from another service can't carry over.
   useEffect(() => {
@@ -942,15 +954,9 @@ export default function PublicBookingPage() {
     }
     // No-show fee consent gate — required when the stylist has no-show
     // protection on AND this booking will save a card (deposit).
-    {
-      const depositApplies =
-        (!!resolved && resolved.depositRequired && resolved.depositAmount > 0) ||
-        (!!selectedCatalogService?.deposit_required &&
-          Number(selectedCatalogService?.deposit_amount) > 0 && !hasVariations);
-      if (noShowFee?.enabled && noShowFee.value && depositApplies && !noShowConsent) {
-        setSubmitError("Please agree to the no-show fee policy to continue.");
-        return;
-      }
+    if (noShowConsentRequired && !noShowConsent) {
+      setSubmitError("Please agree to the no-show fee policy to continue.");
+      return;
     }
     setSubmitting(true);
     try {
@@ -2939,12 +2945,7 @@ export default function PublicBookingPage() {
                 </div>
               );
             })()}
-            {(() => {
-              const depositApplies =
-                (!!resolved && resolved.depositRequired && resolved.depositAmount > 0) ||
-                (!!selectedCatalogService?.deposit_required &&
-                  Number(selectedCatalogService?.deposit_amount) > 0 && !hasVariations);
-              if (!noShowFee?.enabled || !noShowFee.value || !depositApplies) return null;
+            {noShowConsentRequired && noShowFee && (() => {
               const feeText = (() => {
                 if (noShowFee.type === "percent") {
                   const price = resolved?.price ?? Number(selectedCatalogService?.base_price) ?? 0;
@@ -2956,18 +2957,24 @@ export default function PublicBookingPage() {
                 return `$${Number(noShowFee.value).toFixed(2)}`;
               })();
               const studio = link?.business_name || "your stylist";
+              // Highlight the box in red once the client has tried to
+              // submit without agreeing.
+              const unmet = !noShowConsent && !!submitError;
               return (
                 <label style={{
                   display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer",
-                  background: C.ivory, border: `1px solid ${C.hairline}`, borderRadius: 12, padding: 12,
+                  background: C.ivory, border: `1.5px solid ${unmet ? C.danger : C.hairline}`,
+                  borderRadius: 12, padding: 12,
                 }}>
                   <input
                     type="checkbox"
                     checked={noShowConsent}
                     onChange={e => setNoShowConsent(e.target.checked)}
+                    required
                     style={{ marginTop: 2, width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }}
                   />
                   <span style={{ fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
+                    <strong style={{ color: C.espresso }}>Required.</strong>{" "}
                     I understand a no-show fee of <strong>{feeText}</strong> may be charged to my card if I miss this
                     appointment without notice, per {studio}&apos;s policy, and I authorize my card to be saved for that purpose.
                   </span>
@@ -2977,7 +2984,7 @@ export default function PublicBookingPage() {
             {submitError && (
               <p style={{ fontSize: 12, color: C.danger }}>{submitError}</p>
             )}
-            <button type="submit" disabled={submitting}
+            <button type="submit" disabled={submitting || (noShowConsentRequired && !noShowConsent)}
               // 2026 refresh: primary booking CTA now uses the brand
               // purple→coral gradient with a soft halo shadow. The
               // stylist's accent still drives borders/chips, but the
@@ -2995,8 +3002,8 @@ export default function PublicBookingPage() {
                 fontSize: 15,
                 letterSpacing: "0.02em",
                 boxShadow: submitting ? "none" : SHADOWS.primaryGlow,
-                cursor: submitting ? "default" : "pointer",
-                opacity: submitting ? 0.6 : 1,
+                cursor: submitting || (noShowConsentRequired && !noShowConsent) ? "default" : "pointer",
+                opacity: submitting || (noShowConsentRequired && !noShowConsent) ? 0.6 : 1,
                 transition: "transform 120ms ease, box-shadow 120ms ease",
               }}>
               {submitting
