@@ -272,8 +272,8 @@ export async function POST(req: Request) {
               user_id_in: br.user_id,
               channel_in: "email",
               notification_type_in: "deposit_received",
-              body_in: "Deposit received — your appointment is confirmed.",
-              subject_in: "Deposit received — your appointment is confirmed",
+              body_in: "Deposit received — pending approval.",
+              subject_in: "Deposit received — pending approval",
               recipient_email_in: br.client_email,
               recipient_name_in: br.client_name || null,
               payload_in: {

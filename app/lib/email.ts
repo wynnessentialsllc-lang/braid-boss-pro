@@ -129,15 +129,18 @@ export const buildDepositReceivedEmail = (args: {
   preferredDate?: string | null;
   preferredTime?: string | null;
 }) => {
-  const subject = `Deposit received — your appointment with ${args.studioName} is confirmed`;
+  const subject = `Deposit received — pending ${args.studioName}'s approval`;
   const when = formatAppointmentDate(args.preferredDate, args.preferredTime);
   const html = wrapHtml(subject, `
-    <h1 style="font-size:20px;margin:0 0 12px;color:#1F140A;">You're confirmed.</h1>
+    <h1 style="font-size:20px;margin:0 0 12px;color:#1F140A;">Thanks, ${escapeHtml(args.clientName)}.</h1>
     <p style="font-size:14px;line-height:22px;">
-      Thanks ${escapeHtml(args.clientName)} — your deposit landed and ${escapeHtml(args.studioName)} has your${args.serviceName ? ` ${escapeHtml(args.serviceName)}` : ""} appointment locked in${when ? ` for <strong>${escapeHtml(when)}</strong>` : ""}.
+      We received your deposit for your${args.serviceName ? ` ${escapeHtml(args.serviceName)}` : ""} request${when ? ` on <strong>${escapeHtml(when)}</strong>` : ""}.
+    </p>
+    <p style="font-size:14px;line-height:22px;">
+      <strong>Your appointment isn't confirmed yet.</strong> ${escapeHtml(args.studioName)} still needs to review and approve it — we'll email you to confirm as soon as that happens.
     </p>
     <p style="font-size:12px;color:#9A8B72;line-height:18px;">
-      You'll get a reminder closer to the day. Reach out if anything changes.
+      No action needed right now. Reach out if anything changes.
     </p>
   `);
   return { subject, html };
