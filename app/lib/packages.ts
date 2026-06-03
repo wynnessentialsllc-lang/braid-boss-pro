@@ -39,6 +39,7 @@ export type ClientPackage = {
   service_label: string | null;
   status: PackageStatus;
   source: "manual" | "online";
+  purchaser_name: string | null;
   purchaser_email: string | null;
   notes: string | null;
   purchased_at: string;
@@ -103,6 +104,7 @@ export const useClientPackages = (
   issuePackage: (draft: IssueDraft) => Promise<ClientPackage | null>;
   redeem: (packageId: string, opts?: { appointmentId?: string | null; visits?: number; amount?: number }) => Promise<{ ok: boolean; reason?: string }>;
   voidPackage: (id: string) => Promise<boolean>;
+  assignPackage: (id: string, clientId: string, clientName: string | null) => Promise<boolean>;
   activeForClient: (clientId: string) => ClientPackage[];
 } => {
   const [templates, setTemplates] = useState<PackageTemplate[]>([]);
@@ -242,6 +244,21 @@ export const useClientPackages = (
     } catch { return false; }
   }, [userId]);
 
+  const assignPackage = useCallback(async (id: string, clientId: string, clientName: string | null): Promise<boolean> => {
+    if (!userId || !clientId) return false;
+    try {
+      const supabase = getSupabase();
+      const { error: err } = await supabase
+        .from("client_packages")
+        .update({ client_id: clientId, client_name: clientName })
+        .eq("id", id)
+        .eq("user_id", userId);
+      if (err) throw err;
+      setPackages(prev => prev.map(p => p.id === id ? { ...p, client_id: clientId, client_name: clientName } : p));
+      return true;
+    } catch { return false; }
+  }, [userId]);
+
   const activeForClient = useCallback(
     (clientId: string): ClientPackage[] =>
       packages.filter(p => p.client_id === clientId && p.status === "active"),
@@ -250,6 +267,6 @@ export const useClientPackages = (
 
   return useMemo(() => ({
     templates, packages, loading, error, refresh,
-    saveTemplate, deleteTemplate, issuePackage, redeem, voidPackage, activeForClient,
-  }), [templates, packages, loading, error, refresh, saveTemplate, deleteTemplate, issuePackage, redeem, voidPackage, activeForClient]);
+    saveTemplate, deleteTemplate, issuePackage, redeem, voidPackage, assignPackage, activeForClient,
+  }), [templates, packages, loading, error, refresh, saveTemplate, deleteTemplate, issuePackage, redeem, voidPackage, assignPackage, activeForClient]);
 };

@@ -127,6 +127,77 @@ export async function POST(req: Request) {
   const paymentIntent: string | undefined =
     typeof session?.payment_intent === "string" ? session.payment_intent : undefined;
 
+  // Online package purchase — this endpoint is the configured Stripe
+  // webhook for connected-account checkout.session.completed, so package
+  // buys (created by /api/package-checkout) land here too. Dispatch on
+  // the metadata and issue the package, then ack.
+  const packageTemplateId: string | undefined = session?.metadata?.package_template_id;
+  if (packageTemplateId) {
+    if (session?.payment_status && session.payment_status !== "paid") {
+      return NextResponse.json({ received: true, ignored: `payment_status=${session.payment_status}` }, { status: 200 });
+    }
+    try {
+      // Idempotency: never issue twice for the same Checkout session.
+      if (sessionId) {
+        const { data: existing } = await admin
+          .from("client_packages")
+          .select("id")
+          .eq("stripe_session_id", sessionId)
+          .maybeSingle();
+        if (existing) {
+          return NextResponse.json({ received: true, duplicate: true }, { status: 200 });
+        }
+      }
+      const { data: tpl } = await admin
+        .from("package_templates")
+        .select("id, user_id, name, kind, visits, credit_amount, price, service_label")
+        .eq("id", packageTemplateId)
+        .maybeSingle();
+      if (!tpl) {
+        return NextResponse.json({ received: true, ignored: "template_not_found" }, { status: 200 });
+      }
+      const isVisits = tpl.kind === "visits";
+      const visits = isVisits ? Math.max(1, Number(tpl.visits) || 1) : null;
+      const credit = !isVisits ? Math.max(0, Number(tpl.credit_amount) || 0) : null;
+      const buyerName = session?.metadata?.buyer_name || null;
+      const buyerEmail = session?.metadata?.buyer_email || session?.customer_details?.email || null;
+      await admin.from("client_packages").insert({
+        user_id: tpl.user_id,
+        client_id: null,
+        client_name: buyerName,
+        template_id: tpl.id,
+        name: tpl.name,
+        kind: tpl.kind,
+        total_visits: visits,
+        remaining_visits: visits,
+        initial_amount: credit,
+        balance: credit,
+        price: Number(tpl.price) || 0,
+        service_label: tpl.service_label,
+        status: "active",
+        source: "online",
+        purchaser_name: buyerName,
+        purchaser_email: buyerEmail,
+        stripe_session_id: sessionId || null,
+      });
+      // In-app bell so the stylist knows to assign the package.
+      try {
+        await admin.from("notifications").insert({
+          id: `package:${sessionId}`,
+          user_id: tpl.user_id,
+          category: "package",
+          title: "New package purchased",
+          body: `${buyerName || buyerEmail || "Someone"} bought "${tpl.name}". Assign it to a client.`,
+          data: { templateId: tpl.id, buyerEmail },
+        });
+      } catch { /* bell is best-effort */ }
+    } catch (e) {
+      console.error("[booking-deposit/webhook] package issuance failed:", e);
+      return NextResponse.json({ error: "package issuance failed" }, { status: 500 });
+    }
+    return NextResponse.json({ received: true, package: true }, { status: 200 });
+  }
+
   if (!requestId) {
     // Not one of ours — ack so Stripe doesn't retry forever.
     return NextResponse.json({ received: true, ignored: "no_booking_request_id" }, { status: 200 });

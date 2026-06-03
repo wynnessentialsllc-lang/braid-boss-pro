@@ -1,0 +1,132 @@
+// Create a Stripe Checkout Session to buy a prepaid package online.
+//
+// Mirrors /api/booking-deposit/checkout: a Stripe Connect direct charge
+// created AS the stylist's connected account. The package itself is
+// issued by the shared deposit webhook on checkout.session.completed
+// (it dispatches on the `package_template_id` metadata).
+//
+// Anon: anyone with the buy link can purchase. We read the template via
+// the service role, resolve the stylist's connected account, and create
+// the session. No package row is written here — the webhook does that.
+
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const STRIPE_API = "https://api.stripe.com/v1";
+
+const env = (k: string): string => {
+  const v = process.env[k];
+  if (!v) throw new Error(`Missing env: ${k}`);
+  return v;
+};
+const fail = (status: number, message: string) =>
+  NextResponse.json({ error: message }, { status });
+
+const baseUrlOf = (req: Request): string => {
+  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+  if (explicit) return explicit;
+  try { return new URL(req.url).origin; } catch { return ""; }
+};
+
+export async function POST(req: Request) {
+  let body: { template_id?: string; buyer_name?: string; buyer_email?: string };
+  try { body = await req.json(); } catch { return fail(400, "Invalid JSON body."); }
+
+  const templateId = body?.template_id?.trim();
+  if (!templateId || !/^[0-9a-f-]{36}$/i.test(templateId)) {
+    return fail(400, "Missing or malformed template_id.");
+  }
+  const buyerName = String(body?.buyer_name || "").trim().slice(0, 120) || null;
+  const buyerEmail = String(body?.buyer_email || "").trim().slice(0, 200) || null;
+  if (!buyerEmail || !buyerEmail.includes("@")) {
+    return fail(400, "A valid email is required.");
+  }
+
+  let stripeSecret: string;
+  let supabaseUrl: string;
+  let serviceKey: string;
+  try {
+    stripeSecret = env("STRIPE_SECRET_KEY");
+    supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || env("SUPABASE_URL");
+    serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
+  } catch (e: any) {
+    return fail(500, e?.message || "Server is not configured.");
+  }
+
+  const admin = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const { data: tpl, error: tplErr } = await admin
+    .from("package_templates")
+    .select("id, user_id, name, kind, visits, credit_amount, price, service_label, active")
+    .eq("id", templateId)
+    .maybeSingle();
+  if (tplErr || !tpl) return fail(404, "Package not found.");
+  if (!tpl.active) return fail(409, "This package isn't available.");
+
+  const price = Number(tpl.price) || 0;
+  if (price <= 0) return fail(400, "This package isn't purchasable online.");
+  const cents = Math.round(price * 100);
+
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("stripe_connect_account_id, stripe_connect_charges_enabled")
+    .eq("id", tpl.user_id)
+    .maybeSingle();
+  const acctId = profile?.stripe_connect_account_id || null;
+  if (!acctId) return fail(409, "This stylist hasn't connected Stripe yet.");
+  if (!profile?.stripe_connect_charges_enabled) {
+    return fail(409, "This stylist's Stripe account isn't ready to take charges.");
+  }
+
+  const feeBps = (() => {
+    const raw = Number(process.env.PLATFORM_FEE_BPS || 0);
+    if (!Number.isFinite(raw) || raw < 0 || raw > 10_000) return 0;
+    return Math.floor(raw);
+  })();
+  const applicationFeeCents = feeBps > 0 ? Math.floor((cents * feeBps) / 10_000) : 0;
+
+  const baseUrl = baseUrlOf(req);
+  const form = new URLSearchParams();
+  form.set("mode", "payment");
+  form.set("payment_method_types[]", "card");
+  form.set("line_items[0][quantity]", "1");
+  form.set("line_items[0][price_data][currency]", "usd");
+  form.set("line_items[0][price_data][unit_amount]", String(cents));
+  form.set("line_items[0][price_data][product_data][name]", String(tpl.name || "Package"));
+  form.set("success_url", `${baseUrl}/buy/package/${tpl.id}?status=success`);
+  form.set("cancel_url", `${baseUrl}/buy/package/${tpl.id}?status=cancel`);
+  form.set("customer_email", buyerEmail);
+  form.set("metadata[package_template_id]", String(tpl.id));
+  form.set("metadata[stylist_user_id]", String(tpl.user_id));
+  if (buyerName) form.set("metadata[buyer_name]", buyerName);
+  form.set("metadata[buyer_email]", buyerEmail);
+  form.set("payment_intent_data[metadata][package_template_id]", String(tpl.id));
+  if (applicationFeeCents > 0) {
+    form.set("payment_intent_data[application_fee_amount]", String(applicationFeeCents));
+  }
+
+  const stripeRes = await fetch(`${STRIPE_API}/checkout/sessions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${stripeSecret}`,
+      "Stripe-Version": "2024-06-20",
+      "Stripe-Account": acctId,
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: form.toString(),
+    cache: "no-store",
+  });
+  if (!stripeRes.ok) {
+    const text = await stripeRes.text().catch(() => "");
+    return fail(502, `Stripe rejected the session (${stripeRes.status}). ${text.slice(0, 200)}`);
+  }
+  const session = (await stripeRes.json()) as { id?: string; url?: string };
+  if (!session.url) return fail(502, "Stripe returned an unusable session.");
+
+  return NextResponse.json({ url: session.url });
+}

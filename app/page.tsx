@@ -14923,6 +14923,7 @@ export type NotificationTarget =
   | { kind: "schedule" }
   | { kind: "reviews" }
   | { kind: "inbox" }
+  | { kind: "packages" }
   | { kind: "booking_approval"; requestId: string }
   | { kind: "email_log"; queueId: string }
   | { kind: "contract_view"; contractId: string };
@@ -15243,6 +15244,21 @@ const useNotifications = (store: any) => {
               target: { kind: "reviews" } as const,
             };
           }
+          // New online package purchase → actionable; tap opens Packages
+          // so the stylist can assign it to a client.
+          if (cat === "package") {
+            return {
+              id: String(r.id),
+              category: "appointment" as NotifCategory,
+              kind: "package_purchased",
+              tone: "gold" as const,
+              icon: <Gift size={16} style={{ color: C.goldDeep }} />,
+              title: String(r.title || "New package purchased"),
+              body: String(r.body || ""),
+              meta: r.created_at ? fmtRelative(r.created_at) : undefined,
+              target: { kind: "packages" } as const,
+            };
+          }
           // New client message → actionable, appointment-category bell
           // so it badges. Tap → opens the Inbox.
           if (cat === "client_message") {
@@ -15476,6 +15492,9 @@ const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
       break;
     case "inbox":
       ctx.setSecondary("inbox");
+      break;
+    case "packages":
+      ctx.setSecondary("packages");
       break;
     case "schedule":
       ctx.setActive("schedule");
@@ -25755,12 +25774,32 @@ const PackagesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
   const packages: ClientPackage[] = api?.packages || [];
   const [editing, setEditing] = useState<any | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [assignDraft, setAssignDraft] = useState<Record<string, string>>({});
 
   const clientName = (clientId: string | null): string => {
     if (!clientId) return "Unassigned";
     const c = (store.clients as any[])?.find((x) => x?.id === clientId);
     return c?.name || "Client";
   };
+
+  const copyBuyLink = async (templateId: string) => {
+    const url = `${typeof window !== "undefined" ? window.location.origin : ""}/buy/package/${templateId}`;
+    try { await navigator.clipboard.writeText(url); } catch { /* clipboard blocked */ }
+    setCopiedId(templateId);
+    window.setTimeout(() => setCopiedId((c) => (c === templateId ? null : c)), 1600);
+  };
+
+  const assign = async (pkgId: string) => {
+    const clientId = assignDraft[pkgId];
+    if (!clientId || busy) return;
+    const c = (store.clients as any[])?.find((x) => x?.id === clientId);
+    setBusy(true);
+    await api.assignPackage(pkgId, clientId, c?.name || null);
+    setBusy(false);
+  };
+
+  const unassigned = packages.filter((p) => !p.client_id && p.status === "active");
 
   const saveTemplate = async () => {
     if (!editing || busy || !editing.name?.trim()) return;
@@ -25854,8 +25893,45 @@ const PackagesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
                 <button type="button" onClick={() => api.deleteTemplate(t.id)} className="p-1.5 rounded-full" style={{ color: C.muted }} aria-label="Delete"><Trash2 size={15} /></button>
               </div>
             </div>
+            {Number(t.price) > 0 && (
+              <button type="button" onClick={() => copyBuyLink(t.id)}
+                className="mt-2 w-full py-2 rounded-lg text-[12px] font-semibold flex items-center justify-center gap-1.5"
+                style={{ background: C.ivory, color: C.espresso, border: `1px solid ${C.hairline}` }}>
+                {copiedId === t.id ? <Check size={13} /> : <Copy size={13} />}
+                {copiedId === t.id ? "Link copied" : "Copy buy link"}
+              </button>
+            )}
           </Card>
         ))}
+
+        {unassigned.length > 0 && (
+          <>
+            <p className="text-[11px] font-semibold uppercase tracking-wide pt-2" style={{ color: C.muted }}>
+              Online purchases · assign to a client
+            </p>
+            {unassigned.map((p) => (
+              <Card key={p.id} className="p-3.5 space-y-2" style={{ border: `1px solid ${C.gold}` }}>
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>{p.name}</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    Bought by {p.purchaser_name || p.purchaser_email || "a client"} · {packageRemainingLabel(p, currency)}
+                  </p>
+                </div>
+                <div className="flex gap-2 items-center">
+                  <div className="flex-1">
+                    <Select
+                      value={assignDraft[p.id] || ""}
+                      onChange={(e) => setAssignDraft((d) => ({ ...d, [p.id]: e.target.value }))}
+                      options={[{ value: "", label: "Choose a client…" },
+                        ...(((store.clients as any[]) || []).map((c) => ({ value: String(c.id), label: c.name || "Client" })))]}
+                    />
+                  </div>
+                  <Button onClick={() => assign(p.id)} disabled={busy || !assignDraft[p.id]}>Assign</Button>
+                </div>
+              </Card>
+            ))}
+          </>
+        )}
 
         {packages.length > 0 && (
           <>
