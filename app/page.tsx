@@ -15261,11 +15261,6 @@ type NotifItem = {
   target?: NotificationTarget;
 };
 
-// Categories that contribute to the bell badge. communication_status
-// items are informational only and never count as "unread / actionable".
-const ACTIONABLE_CATEGORIES: ReadonlyArray<NotifCategory> = ["system", "finance", "retention", "appointment"];
-const isActionableCategory = (c: NotifCategory) => ACTIONABLE_CATEGORIES.includes(c);
-
 // Builder for typed internal notifications. Lets feature code create
 // new alerts without re-stating the discriminator each time and gives us
 // a single place to enforce the "no message body" rule for outbound
@@ -15677,10 +15672,14 @@ const useNotifications = (store: any) => {
      store.approvalsApi?.requests, persistedItems],
   );
   const items = useMemo(() => allItems.filter(n => !dismissed.includes(n.id)), [allItems, dismissed]);
-  // Badge counts only actionable (system / finance / retention /
-  // appointment) categories. Communication-status rows are info-only.
+  // Badge counts EVERY unread notification, including communication
+  // rows (emails sent on the stylist's behalf, failed reminders, etc.).
+  // The bell is opened via markAllRead, so the count is effectively
+  // "activity since you last opened it" and clears the moment you tap.
+  // It used to exclude communication rows, which left the bell dark for
+  // salons whose alerts are mostly outbound-email logs.
   const unreadCount = useMemo(
-    () => items.filter(n => isActionableCategory(n.category) && !read.includes(n.id)).length,
+    () => items.filter(n => !read.includes(n.id)).length,
     [items, read],
   );
 
