@@ -7958,39 +7958,68 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       // Confirmation is best-effort — never block the save.
     }
 
-    // Stylist-initiated reschedule notice. When the stylist changes
-    // the date or time of an EXISTING real appointment, email the
-    // client so they know it moved. Best-effort + idempotent (dedupe
-    // key carries the new slot, so re-saving the same date won't
-    // resend; moving again to a different date will). Skipped for
+    // Stylist-initiated change notice. When the stylist edits an
+    // EXISTING real appointment and anything client-relevant moved —
+    // date, time, total price, or add-ons — email the client ONE
+    // consolidated "appointment updated" notice covering everything
+    // that changed (rather than a separate email per field). Best-effort
+    // + idempotent: the dedupe key carries the new slot + price + add-on
+    // signature, so re-saving unchanged data won't resend, while any
+    // further change produces a new key and a fresh email. Skipped for
     // brand-new creates, personal/blocked holds, cancelled rows, and
     // when there's no client email.
     try {
       const wasExisting = !!appt?.id;
       const isRealAppt = (form.kind || "appointment") === "appointment";
       const clientEmail = (form.clientEmail || saved.clientEmail || "").trim();
-      const oldDate = appt?.date || "";
-      const oldTime = appt?.time || "";
-      const dateChanged = wasExisting && (oldDate !== form.date || oldTime !== form.time);
       const notCancelled = (saved.status || "") !== "cancelled" && (saved.status || "") !== "canceled";
-      // Keep the linked booking_request's schedule in sync. The
-      // client portal (public_get_booking_portal_state) reads
-      // preferred_date/preferred_time straight off booking_requests,
-      // so a stylist edit that only touched the appointment row left
-      // "View appointment details" showing the OLD time. Sync it
-      // whenever the date/time changed — independent of whether a
-      // client email goes out. Best-effort; never blocks the save.
-      if (wasExisting && isRealAppt && dateChanged && notCancelled && store.userId) {
+
+      // Old values come from the canonical pre-edit record (`original`),
+      // not the possibly-slim `appt` prop, so a sheet opened from a
+      // synthesized object can't misreport what changed.
+      const oldDate = (original as any)?.date || "";
+      const oldTime = (original as any)?.time || "";
+      const newDate = form.date || "";
+      const newTime = form.time || "";
+      const oldPrice = parseMoney((original as any)?.totalPrice);
+      const newPrice = parseMoney(saved.totalPrice ?? form.totalPrice);
+      // Stable signature of an add-on set (order-independent) so a
+      // reorder isn't mistaken for a change but a price/qty edit is.
+      const addonSig = (list: any): string =>
+        (Array.isArray(list) ? list : [])
+          .map((a: any) => `${a?.id ?? a?.name ?? ""}:${Number(a?.price) || 0}:${Number(a?.duration_hours_delta) || 0}`)
+          .sort()
+          .join("|");
+      const oldAddons = Array.isArray((original as any)?.addons) ? (original as any).addons : [];
+      const newAddons = Array.isArray(saved.addons)
+        ? saved.addons
+        : (Array.isArray(form.addons) ? form.addons : []);
+
+      const changedDate = wasExisting && oldDate !== newDate;
+      const changedTime = wasExisting && oldTime !== newTime;
+      const changedPrice = wasExisting && Math.abs(oldPrice - newPrice) > 0.005;
+      const changedAddons = wasExisting && addonSig(oldAddons) !== addonSig(newAddons);
+      const dateOrTimeChanged = changedDate || changedTime;
+      const anyChanged = dateOrTimeChanged || changedPrice || changedAddons;
+
+      // Keep the linked booking_request's schedule in sync. The client
+      // portal (public_get_booking_portal_state) reads
+      // preferred_date/preferred_time straight off booking_requests, so
+      // a stylist edit that only touched the appointment row left "View
+      // appointment details" showing the OLD time. Sync whenever the
+      // date/time changed — independent of whether an email goes out.
+      if (wasExisting && isRealAppt && dateOrTimeChanged && notCancelled && store.userId) {
         try {
           await getSupabase().rpc("sync_booking_request_schedule", {
             appointment_id_in: saved.id,
-            new_date: form.date || null,
-            new_time: form.time || null,
+            new_date: newDate || null,
+            new_time: newTime || null,
           });
         } catch { /* portal sync is best-effort */ }
       }
+
       if (
-        wasExisting && isRealAppt && dateChanged && notCancelled &&
+        wasExisting && isRealAppt && anyChanged && notCancelled &&
         clientEmail && store.userId
       ) {
         const supabase = getSupabase();
@@ -8000,28 +8029,45 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             .rpc("public_get_studio_name", { user_id_in: store.userId });
           if (typeof studio === "string" && studio.trim()) studioName = studio.trim();
         } catch { /* studio name best-effort */ }
+        const currentAddonNames = (newAddons as any[])
+          .map((a: any) => String(a?.name ?? "").trim())
+          .filter(Boolean);
         await supabase.rpc("queue_notification", {
           user_id_in: store.userId,
           channel_in: "email",
-          notification_type_in: "appointment_rescheduled",
-          body_in: "Your appointment time has changed.",
-          subject_in: "Your appointment has been rescheduled — Braid Boss Pro",
+          notification_type_in: "appointment_updated",
+          body_in: "Your appointment details were updated.",
+          subject_in: `Your appointment with ${studioName} was updated`,
           recipient_email_in: clientEmail,
           recipient_name_in: form.clientName || saved.clientName || null,
           payload_in: {
             clientName: form.clientName || saved.clientName || "there",
             studioName,
             serviceName: form.style || saved.style || null,
-            fromDate: oldDate || null,
-            fromTime: oldTime || null,
-            preferredDate: form.date || null,
-            preferredTime: form.time || null,
+            // Per-category flags drive which "what changed" lines show.
+            changedDate,
+            changedTime,
+            changedPrice,
+            changedAddons,
+            // Old values only when that category actually moved.
+            fromDate: changedDate ? (oldDate || null) : null,
+            fromTime: changedTime ? (oldTime || null) : null,
+            fromPrice: changedPrice ? oldPrice : null,
+            // Current state — always reflects the new booking.
+            preferredDate: newDate || null,
+            preferredTime: newTime || null,
+            totalPrice: Number.isFinite(newPrice) ? newPrice : null,
+            currency: business?.currency || "USD",
+            // Edited add-ons aren't synced to booking_requests, so pass
+            // the current names explicitly rather than relying on the
+            // worker's (stale) customization enrichment.
+            currentAddonNames,
             // Lets the worker build the portal + cancel links against
-            // this deployment's origin (it resolves the tokens from
-            // the linked booking request).
+            // this deployment's origin (it resolves the tokens from the
+            // linked booking request).
             appBase: typeof window !== "undefined" ? window.location.origin : null,
           },
-          dedupe_key_in: `appt_rescheduled:${saved.id}:${form.date || "nodate"}:${form.time || "notime"}`,
+          dedupe_key_in: `appt_updated:${saved.id}:${newDate || "nodate"}:${newTime || "notime"}:${Math.round(newPrice * 100)}:${addonSig(newAddons)}`,
           appointment_id_in: saved.id,
         });
       }
