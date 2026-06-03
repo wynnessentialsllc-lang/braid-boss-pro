@@ -178,6 +178,25 @@ const customizationBlock = (p: Record<string, any>): string => {
     ${whatsBlock}
   `;
 };
+// Intake / consultation answers. Renders the client's booking-time
+// answers as a labeled Q/A list. Empty / absent → renders nothing.
+const intakeBlock = (p: Record<string, any>): string => {
+  const raw = Array.isArray(p.intakeAnswers) ? p.intakeAnswers : [];
+  const items = raw
+    .map((x: any) => ({ q: String(x?.q ?? "").trim(), a: String(x?.a ?? "").trim() }))
+    .filter((x: { q: string; a: string }) => x.q && x.a);
+  if (items.length === 0) return "";
+  const rows = items
+    .map(
+      (x: { q: string; a: string }) =>
+        `<div style="margin:0 0 10px;"><p style="font-size:12px;color:${C.muted};margin:0 0 2px;">${escape(x.q)}</p><p style="font-size:14px;color:${C.espresso};margin:0;font-weight:600;">${escape(x.a)}</p></div>`,
+    )
+    .join("");
+  return `
+    <p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.goldDeep};margin:16px 0 8px;font-weight:700;">Consultation</p>
+    <div style="border-top:1px solid ${C.hairline};padding-top:10px;">${rows}</div>
+  `;
+};
 // Contract signing section. Only renders when the approved service
 // has an active contract template attached (payload.contracts is a
 // non-empty list of {title,url}). Supports multiple agreements.
@@ -410,6 +429,7 @@ const renderAppointmentApproved = (p: Record<string, any>) => {
       ${escape(studioName)} approved your${serviceName ? ` ${escape(serviceName)}` : ""} request${when ? ` for ${escape(when)}` : ""}.
     </p>
     ${customizationBlock(p)}
+    ${intakeBlock(p)}
     ${dep}
     ${cta}
     ${expiresLine}
@@ -1625,7 +1645,7 @@ const enrichCustomization = async (
 ): Promise<void> => {
   if (!CUSTOMIZATION_TYPES.has(row.notification_type)) return;
   const cols =
-    "selected_hair_color, selected_curl_pattern, client_style_notes, inspiration_photo_urls, customization_summary, selected_addons, selected_variation_name, portal_token, cancel_token";
+    "selected_hair_color, selected_curl_pattern, client_style_notes, inspiration_photo_urls, customization_summary, selected_addons, selected_variation_name, portal_token, cancel_token, intake_answers";
   let br: any = null;
   try {
     if (row.booking_request_id) {
@@ -1682,6 +1702,12 @@ const enrichCustomization = async (
   const base = String(p.appBase || "").replace(/\/$/, "") || "https://braidbosspro.app";
   if (br.portal_token) fill("portalUrl", `${base}/client/appointment/${br.portal_token}`);
   if (br.cancel_token) fill("cancelUrl", `${base}/booking-action/${br.cancel_token}/cancel`);
+
+  // Intake / consultation answers — array of { q, a }. Surfaces in the
+  // approval ("appointment_approved") email via intakeBlock.
+  if (Array.isArray(br.intake_answers) && br.intake_answers.length > 0) {
+    fill("intakeAnswers", br.intake_answers);
+  }
 };
 
 // =====================================================================

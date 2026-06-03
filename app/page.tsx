@@ -329,6 +329,14 @@ import {
   type MessageThread,
   useClientMessages,
 } from "./lib/messages";
+import {
+  type IntakeForm,
+  type IntakeQuestion,
+  type IntakeQuestionType,
+  useIntakeForm,
+  INTAKE_TYPE_LABEL,
+  DEFAULT_INTAKE_QUESTIONS,
+} from "./lib/intake";
 import { SMS_ENABLED } from "./lib/features";
 import {
   type ClientLike,
@@ -663,6 +671,20 @@ const customizationEntries = (
   const notes = src.styleNotes ?? src.client_style_notes ?? cs.notes;
   push("Style notes", notes);
   return entries;
+};
+
+// --- Intake / consultation answers ----------------------------------
+// Reads the denormalized answer list off an appointment (intakeAnswers)
+// or a booking_request row (intake_answers). Each entry is { q, a } with
+// the question label baked in, so display needs no form config.
+const intakeAnswerEntries = (
+  src: Record<string, any> | null | undefined,
+): Array<{ q: string; a: string }> => {
+  const raw = (src as any)?.intakeAnswers ?? (src as any)?.intake_answers;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((x: any) => ({ q: String(x?.q ?? "").trim(), a: String(x?.a ?? "").trim() }))
+    .filter((x) => x.q && x.a);
 };
 
 
@@ -8309,6 +8331,27 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           );
         })()}
 
+        {isAppointment && (() => {
+          const intake = intakeAnswerEntries(appt as any);
+          if (intake.length === 0) return null;
+          return (
+            <Card className="p-3.5">
+              <p className="text-sm font-semibold mb-1" style={{ color: C.espresso }}>Consultation</p>
+              <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+                Answered by the client at booking.
+              </p>
+              <ul className="mt-2 space-y-2" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {intake.map((e, i) => (
+                  <li key={i} className="text-[12px]" style={{ lineHeight: 1.45 }}>
+                    <span style={{ color: C.muted, display: "block" }}>{e.q}</span>
+                    <span style={{ color: C.espresso, fontWeight: 600 }}>{e.a}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          );
+        })()}
+
         {isAppointment && (
         <Field
           label="Discount"
@@ -13102,7 +13145,7 @@ const SupportCenterScreen = ({
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openInbox, openProducts, openSupport }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openProducts?: () => void; openSupport?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openInbox, openIntakeForm, openProducts, openSupport }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openProducts?: () => void; openSupport?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -13790,6 +13833,30 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                     )}
                     <ChevronRight size={18} style={{ color: C.muted }} />
                   </div>
+                </div>
+              </Card>
+            )}
+            {openIntakeForm && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openIntakeForm}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
+                      }}
+                    >
+                      <ScrollText size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Intake form</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        Consultation questions before deposit
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
                 </div>
               </Card>
             )}
@@ -23503,6 +23570,9 @@ const ApprovalQueueScreen = ({
             ? req.customization_summary
             : {},
         },
+        // Intake / consultation answers captured at booking, carried
+        // onto the appointment so they live in the client's record.
+        intakeAnswers: Array.isArray((req as any).intake_answers) ? (req as any).intake_answers : [],
       };
       const saved = await store.upsertAppointment(newAppt);
       if (!saved) throw new Error("Couldn't create appointment");
@@ -23630,6 +23700,26 @@ const ApprovalQueueScreen = ({
                         <li key={i} className="flex items-start justify-between gap-3" style={{ color: C.coffee }}>
                           <span style={{ color: C.muted, whiteSpace: "nowrap" }}>{e.label}</span>
                           <span style={{ color: C.espresso, fontWeight: 600, textAlign: "right" }}>{e.value}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })()}
+
+              {(() => {
+                const intake = intakeAnswerEntries(req as any);
+                if (intake.length === 0) return null;
+                return (
+                  <div className="rounded-lg p-2.5 text-[12px]" style={{ background: C.cream, border: `1px solid ${C.hairline}` }}>
+                    <p className="font-bold uppercase tracking-wider mb-1.5" style={{ color: C.goldDeep, fontSize: 10, letterSpacing: "0.12em" }}>
+                      Consultation
+                    </p>
+                    <ul style={{ listStyle: "none", padding: 0, margin: 0 }} className="space-y-1.5">
+                      {intake.map((e, i) => (
+                        <li key={i} style={{ color: C.coffee, lineHeight: 1.45 }}>
+                          <span style={{ color: C.muted, display: "block" }}>{e.q}</span>
+                          <span style={{ color: C.espresso, fontWeight: 600 }}>{e.a}</span>
                         </li>
                       ))}
                     </ul>
@@ -25244,6 +25334,120 @@ const ClientReviewCard = ({ r, api }: { r: ClientReview; api: any }) => {
 //  Threads are anchored to a booking_request; the client side
 //  lives on the public appointment portal. See app/lib/messages.ts.
 // ============================================================
+// ============================================================
+//  INTAKE FORM — stylist editor for the booking-page consultation
+//  form. Editable standard set: toggle questions on/off, edit labels,
+//  pick a type, add/remove custom questions. See app/lib/intake.ts.
+// ============================================================
+const IntakeFormScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const api = store?.intakeFormApi;
+  const [draft, setDraft] = useState<IntakeForm>(api?.form ?? { enabled: false, questions: DEFAULT_INTAKE_QUESTIONS });
+  const [busy, setBusy] = useState(false);
+  const [savedTick, setSavedTick] = useState(false);
+
+  // Re-hydrate from the loaded form once (and when it changes identity).
+  useEffect(() => {
+    if (api?.form) setDraft(api.form);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api?.form]);
+
+  const updateQuestion = (id: string, patch: Partial<IntakeQuestion>) =>
+    setDraft(d => ({ ...d, questions: d.questions.map(q => (q.id === id ? { ...q, ...patch } : q)) }));
+  const removeQuestion = (id: string) =>
+    setDraft(d => ({ ...d, questions: d.questions.filter(q => q.id !== id) }));
+  const addQuestion = () =>
+    setDraft(d => ({
+      ...d,
+      questions: [...d.questions, { id: `q_${uid()}`, label: "", type: "text" as IntakeQuestionType, enabled: true }],
+    }));
+  const restoreDefaults = () => setDraft(d => ({ ...d, questions: DEFAULT_INTAKE_QUESTIONS }));
+
+  const handleSave = async () => {
+    if (busy || !api?.save) return;
+    setBusy(true);
+    const ok = await api.save(draft);
+    setBusy(false);
+    if (ok) { setSavedTick(true); window.setTimeout(() => setSavedTick(false), 1800); }
+  };
+
+  const typeOptions = (["text", "textarea", "yes_no", "choice"] as IntakeQuestionType[])
+    .map(t => ({ value: t, label: INTAKE_TYPE_LABEL[t] }));
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Intake form"
+        subtitle="Consultation questions on your booking page"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        rightAction={
+          <button type="button" onClick={() => void handleSave()} disabled={busy}
+            className="px-3 py-1.5 rounded-full text-[13px] font-semibold"
+            style={{ background: C.espresso, color: C.cream, border: 0, opacity: busy ? 0.6 : 1 }}>
+            {busy ? "Saving…" : savedTick ? "Saved ✓" : "Save"}
+          </button>
+        }
+      />
+      <div className="px-5 pt-2 space-y-3">
+        <Card className="p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Collect intake forms</p>
+              <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+                Show these questions on your booking page after the client picks a style + date, before they pay the deposit. Optional for clients to fill.
+              </p>
+            </div>
+            <Toggle checked={draft.enabled} onChange={(v) => setDraft(d => ({ ...d, enabled: v }))} />
+          </div>
+        </Card>
+
+        {draft.enabled && (
+          <>
+            {draft.questions.map((q) => (
+              <Card key={q.id} className="p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <Toggle checked={q.enabled} onChange={(v) => updateQuestion(q.id, { enabled: v })} />
+                  <button type="button" onClick={() => removeQuestion(q.id)} aria-label="Remove question"
+                    className="p-1.5 rounded-full" style={{ color: C.muted }}>
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+                <Field label="Question">
+                  <Input value={q.label} onChange={(e) => updateQuestion(q.id, { label: e.target.value })}
+                    placeholder="e.g. Any allergies I should know about?" />
+                </Field>
+                <Field label="Answer type">
+                  <Select value={q.type} options={typeOptions}
+                    onChange={(e) => updateQuestion(q.id, { type: e.target.value as IntakeQuestionType })} />
+                </Field>
+                {q.type === "choice" && (
+                  <Field label="Choices" hint="Comma-separated.">
+                    <Input
+                      value={(q.options ?? []).join(", ")}
+                      onChange={(e) => updateQuestion(q.id, { options: e.target.value.split(",").map(s => s.trim()).filter(Boolean) })}
+                      placeholder="Tighter, Medium, Looser"
+                    />
+                  </Field>
+                )}
+              </Card>
+            ))}
+            <div className="flex gap-2">
+              <Button variant="outline" icon={<Plus size={16} />} fullWidth onClick={addQuestion}>
+                Add question
+              </Button>
+              <Button variant="outline" icon={<RefreshCw size={16} />} onClick={restoreDefaults}>
+                Defaults
+              </Button>
+            </div>
+            <p className="text-[11px] text-center pt-1" style={{ color: C.muted, lineHeight: 1.5 }}>
+              Answers save to each client&apos;s record and appear on the confirmation email once you approve the booking.
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const InboxScreen = ({
   store,
   onBack,
@@ -28578,6 +28782,7 @@ export default function App() {
   const waitlistApi = useWaitlist(auth.userId);
   const approvalsApi = useBookingApprovalQueue(auth.userId);
   const messagesApi = useClientMessages(auth.userId);
+  const intakeFormApi = useIntakeForm(auth.userId);
 
   // Bridge: the Approvals queue pulls booking_requests LIVE on every
   // refresh, so it reliably knows when a client cancelled (via the
@@ -28651,6 +28856,7 @@ export default function App() {
       waitlistApi,
       approvalsApi,
       messagesApi,
+      intakeFormApi,
       upsertClient: gateNew("clients", rawStore.clients, rawStore.upsertClient),
       // Personal events and blocked time live in the same table but
       // aren't bookings, so they (a) don't count toward the appointment
@@ -28672,7 +28878,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, clientReviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi, messagesApi]);
+  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, clientReviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi, messagesApi, intakeFormApi]);
 
   const sync = useCloudSync(auth.userId, store);
 
@@ -29070,7 +29276,7 @@ export default function App() {
 
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "marketplace" && <MarketplaceScreen store={store} onBack={() => setSecondary("settings")} />}
@@ -29170,6 +29376,7 @@ export default function App() {
       {secondary === "discounts" && <DiscountsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "reviews" && <ReviewsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "inbox" && <InboxScreen store={store} onBack={() => setSecondary(null)} />}
+      {secondary === "intakeForm" && <IntakeFormScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "products" && (
         <ProductsScreen
           store={store}
