@@ -357,10 +357,18 @@ export const fromStripeRecord = (r: any): Transaction => {
 // Merge + de-dupe
 // =====================================================================
 // Appointment-derived rows are canonical for the booking context;
-// when a live Stripe charge carries the same payment_intent we'd
-// otherwise double-count, so Stripe rows that match an appointment
-// row's stripeId are dropped (the appointment row already has the
-// client/service context the Stripe row lacks).
+// when a live Stripe charge represents the same money we'd otherwise
+// double-count, so matching Stripe rows are dropped (the appointment
+// row already has the client/service context the Stripe row lacks).
+//
+// Two keys are used because deposits and balance payments differ in
+// what they carry:
+//   • payment_intent — present on balance charges and any appointment
+//     stamped with one.
+//   • appointmentId + type — the reliable key for deposits, whose
+//     payment_intent lives on the booking_request rather than the
+//     appointment. The transactions API resolves the booking_request to
+//     the real appointment id so this match fires.
 
 export const mergeTransactions = (
   appointmentTxns: Transaction[],
@@ -368,12 +376,16 @@ export const mergeTransactions = (
   manualTxns: Transaction[],
 ): Transaction[] => {
   const seenIntents = new Set<string>();
+  const seenApptKeys = new Set<string>();
   for (const t of appointmentTxns) {
     if (t.stripeId) seenIntents.add(t.stripeId);
+    if (t.appointmentId) seenApptKeys.add(`${t.appointmentId}:${t.type}`);
   }
-  const dedupedStripe = stripeTxns.filter(
-    (t) => !(t.stripeId && seenIntents.has(t.stripeId)),
-  );
+  const dedupedStripe = stripeTxns.filter((t) => {
+    if (t.stripeId && seenIntents.has(t.stripeId)) return false;
+    if (t.appointmentId && seenApptKeys.has(`${t.appointmentId}:${t.type}`)) return false;
+    return true;
+  });
   const all = [...appointmentTxns, ...dedupedStripe, ...manualTxns];
   all.sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
   return all;
