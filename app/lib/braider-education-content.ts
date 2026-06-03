@@ -391,6 +391,22 @@ export const EDUCATION_CATEGORIES: EducationCategory[] = [
           "Ask your next three happy clients for a review and reshare one you already have.",
         relatedTool: "Settings → Reviews",
       },
+      {
+        id: "set-up-google-reviews",
+        title: "How to set up Google reviews",
+        readMinutes: 4,
+        body: [
+          "Google reviews are how new clients find and trust you before they ever message. A strong rating on your Google profile shows up in Search and Maps, so it works for you around the clock — unlike a post that scrolls away.",
+          "First, you need a free Google Business Profile. Go to business.google.com, add your business, and verify it (Google confirms you're real before reviews can show). Once verified, your business appears on Search and Maps with a star rating.",
+          "Next, grab your direct review link. The quickest way: open the Google Maps app, tap your business, tap Reviews, then \"Write a review\" or the share icon, and Copy link. You'll get a short link (g.page or maps.app.goo.gl) that opens the star box for the client instantly.",
+          "Braid Boss Pro can then funnel happy clients straight to that link. Open Customize booking page and paste your link into the \"Google review link\" field, then save. After a client leaves you a review and rates you 4–5 stars, they're shown a \"Review us on Google\" button on the thank-you screen.",
+          "Clients who rate lower aren't sent to Google — that feedback stays private with you. So only your happiest clients are guided to your public profile, which protects your rating while it grows.",
+          "Make it a habit to ask while the client is happiest — right after the reveal. The in-app review request already goes out after appointments, so once your link is saved the rest runs on its own.",
+        ],
+        tryThisWeek:
+          "Create or verify your Google Business Profile, copy your review link, and paste it into Customize booking page → Google review link.",
+        relatedTool: "Settings → Customize booking page",
+      },
     ],
   },
   {
