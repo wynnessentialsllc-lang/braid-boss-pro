@@ -186,42 +186,80 @@ export async function POST(req: Request) {
     console.warn("[booking-deposit/webhook] no-show card capture failed:", e);
   }
 
-  // Best-effort: enqueue the "deposit received — your appointment is
-  // confirmed" email. The RPC's idempotency contract means this only
+  // Best-effort: enqueue the post-payment notifications. This is the
+  // FIRST automated touch for both the client and the stylist — the
+  // booking page intentionally holds the "request received"
+  // acknowledgment until the deposit clears, so nobody is pinged about
+  // an unpaid request. The RPC's idempotency contract means this only
   // runs after a successful state transition, and queue_notification
-  // dedupes on `deposit_received:<request_id>` so a Stripe replay
-  // can't double-send.
+  // dedupes per request so a Stripe replay can't double-send.
   try {
     const { data: br } = await admin
       .from("booking_requests")
       .select("user_id, client_email, client_name, service_name_snapshot, service_name, preferred_date, preferred_time")
       .eq("id", requestId)
       .maybeSingle();
-    if (br?.client_email) {
+    if (br?.user_id) {
       const { data: studio } = await admin
         .rpc("public_get_studio_name", { user_id_in: br.user_id });
-      await admin.rpc("queue_notification", {
-        user_id_in: br.user_id,
-        channel_in: "email",
-        notification_type_in: "deposit_received",
-        body_in: "Deposit received — your appointment is confirmed.",
-        subject_in: "Deposit received — your appointment is confirmed",
-        recipient_email_in: br.client_email,
-        recipient_name_in: br.client_name || null,
-        payload_in: {
-          clientName: br.client_name || "there",
-          studioName: (typeof studio === "string" && studio.trim()) ? studio.trim() : "your stylist",
-          serviceName: br.service_name_snapshot || br.service_name || null,
-          preferredDate: br.preferred_date || null,
-          preferredTime: br.preferred_time || null,
-        },
-        dedupe_key_in: `deposit_received:${requestId}`,
-        booking_request_id_in: requestId,
-      });
+      const studioName =
+        typeof studio === "string" && studio.trim() ? studio.trim() : null;
+      const serviceName = br.service_name_snapshot || br.service_name || null;
+
+      // Client — "deposit received, pending approval". Dedupes on
+      // `deposit_received:<request_id>`.
+      if (br.client_email) {
+        await admin.rpc("queue_notification", {
+          user_id_in: br.user_id,
+          channel_in: "email",
+          notification_type_in: "deposit_received",
+          body_in: "Deposit received — pending approval.",
+          subject_in: "Deposit received — pending approval",
+          recipient_email_in: br.client_email,
+          recipient_name_in: br.client_name || null,
+          payload_in: {
+            clientName: br.client_name || "there",
+            studioName: studioName || "your stylist",
+            serviceName,
+            preferredDate: br.preferred_date || null,
+            preferredTime: br.preferred_time || null,
+          },
+          dedupe_key_in: `deposit_received:${requestId}`,
+          booking_request_id_in: requestId,
+        });
+      }
+
+      // Stylist — notify now that a real (paid) booking has landed and
+      // needs review. A stylist-addressed notification_queue row is
+      // turned into a push automatically by the insert trigger
+      // (trg_push_stylist_addressed), so this is the stylist's first
+      // ping about the request. Dedupes on `deposit_paid_owner:<id>`.
+      const { data: ownerInfo } = await admin.auth.admin.getUserById(br.user_id);
+      const ownerEmail = ownerInfo?.user?.email || null;
+      if (ownerEmail) {
+        await admin.rpc("queue_notification", {
+          user_id_in: br.user_id,
+          channel_in: "email",
+          notification_type_in: "stylist_deposit_paid",
+          body_in: `${br.client_name || "A client"} paid their deposit — review and approve the booking.`,
+          subject_in: "New paid booking — ready to review",
+          recipient_email_in: ownerEmail,
+          recipient_name_in: null,
+          payload_in: {
+            clientName: br.client_name || "A client",
+            studioName: studioName || "your studio",
+            serviceName,
+            preferredDate: br.preferred_date || null,
+            preferredTime: br.preferred_time || null,
+          },
+          dedupe_key_in: `deposit_paid_owner:${requestId}`,
+          booking_request_id_in: requestId,
+        });
+      }
     }
   } catch (e) {
-    // Email enqueue failure is non-fatal — the row is already paid.
-    console.warn("[booking-deposit/webhook] email enqueue failed:", e);
+    // Enqueue failure is non-fatal — the row is already paid.
+    console.warn("[booking-deposit/webhook] notification enqueue failed:", e);
   }
 
   return NextResponse.json({ received: true }, { status: 200 });
