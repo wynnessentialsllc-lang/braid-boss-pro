@@ -1359,6 +1359,31 @@ const renderReorderNudge = (p: Record<string, any>) => {
 };
 
 // ---- generic fallback -----------------------------------------------
+// ---- waitlist_opening (last-minute opening broadcast) --------------
+const renderWaitlistOpening = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const date = String(p.date || "").trim();
+  const time = String(p.time || "").trim();
+  const serviceName = String(p.serviceName || "").trim();
+  const note = String(p.note || "").trim();
+  const bookUrl = String(p.bookUrl || "").trim();
+  const when = [date, time].filter(Boolean).join(" · ");
+  const subject = `${studioName}: a last-minute opening just came up`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Opening available</p>
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">Hey ${escape(clientName)} — a spot just opened up.</h1>
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0 0 8px;">
+      ${escape(studioName)} has a last-minute opening${when ? ` <strong>${escape(when)}</strong>` : ""}${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}.
+      It's first come, first served — book now to claim it.
+    </p>
+    ${note ? `<p style="font-size:13px;line-height:20px;color:${C.coffee};margin:0 0 8px;">${escape(note)}</p>` : ""}
+    ${bookUrl ? ctaButton("Book this opening", bookUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:14px 0 0;">You're getting this because you joined ${escape(studioName)}'s waitlist.</p>
+  `);
+  return { subject, html };
+};
+
 const renderGeneric = (row: ClaimedRow) => {
   const subject = row.subject || "Notification from Braid Boss Pro";
   const html = wrapHtml(subject, `
@@ -1448,6 +1473,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderMarketingCampaign(row.payload || {});
     case "reorder_nudge":
       return renderReorderNudge(row.payload || {});
+    case "waitlist_opening":
+      return renderWaitlistOpening(row.payload || {});
     default:
       return renderGeneric(row);
   }

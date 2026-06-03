@@ -325,6 +325,7 @@ import {
   WAITLIST_STATUS_LABEL,
   WAITLIST_FLEX_LABEL,
   useWaitlist,
+  broadcastWaitlistOpening,
 } from "./lib/waitlist";
 import {
   type MessageThread,
@@ -23088,6 +23089,36 @@ const WaitlistScreen = ({
     onConvertToAppointment(req, null);
   };
 
+  // Last-minute opening broadcast.
+  const [broadcasting, setBroadcasting] = useState(false);
+  const [bDate, setBDate] = useState(todayISO());
+  const [bTime, setBTime] = useState("");
+  const [bService, setBService] = useState("");
+  const [bNote, setBNote] = useState("");
+  const [bBusy, setBBusy] = useState(false);
+  const [bResult, setBResult] = useState<string | null>(null);
+  const reachable = requests.filter(
+    (r) => r.client_email && (r.status === "waiting" || r.status === "contacted"),
+  ).length;
+
+  const sendBroadcast = async () => {
+    if (bBusy || !store.userId) return;
+    setBBusy(true); setBResult(null);
+    const res = await broadcastWaitlistOpening(
+      store.userId,
+      { date: bDate, time: bTime || null, serviceName: bService.trim() || null, note: bNote.trim() || null },
+      requests,
+    );
+    setBBusy(false);
+    if (res.total === 0) {
+      setBResult("No waitlist clients have an email on file to notify.");
+    } else {
+      setBResult(`Emailed ${res.sent} of ${res.total} waitlist client${res.total === 1 ? "" : "s"}.`);
+      setBroadcasting(false);
+      setBNote("");
+    }
+  };
+
   return (
     <div className="bbp-fade pb-32">
       <Header
@@ -23101,6 +23132,43 @@ const WaitlistScreen = ({
             <p className="text-[12px]" style={{ color: C.danger }}>{api.error}</p>
           </Card>
         )}
+
+        {/* Last-minute opening broadcast */}
+        <Card className="p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Zap size={15} style={{ color: C.goldDeep }} />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold" style={{ color: C.espresso }}>Broadcast an opening</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>
+                  Email {reachable} waitlist client{reachable === 1 ? "" : "s"} about a freed-up slot.
+                </p>
+              </div>
+            </div>
+            <button type="button" onClick={() => { setBroadcasting((s) => !s); setBResult(null); }}
+              className="text-[12px] font-semibold px-3 py-1.5 rounded-full flex-shrink-0"
+              style={{ background: broadcasting ? "transparent" : C.espresso, color: broadcasting ? C.coffee : C.cream, border: broadcasting ? `1px solid ${C.hairline}` : 0 }}>
+              {broadcasting ? "Close" : "New"}
+            </button>
+          </div>
+          {broadcasting && (
+            <div className="mt-3 space-y-2.5">
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Date"><Input type="date" value={bDate} onChange={(e) => setBDate(e.target.value)} /></Field>
+                <Field label="Time"><Input type="time" value={bTime} onChange={(e) => setBTime(e.target.value)} /></Field>
+              </div>
+              <Field label="Service / style" hint="Optional"><Input value={bService} onChange={(e) => setBService(e.target.value)} placeholder="Knotless braids" /></Field>
+              <Field label="Note" hint="Optional"><Input value={bNote} onChange={(e) => setBNote(e.target.value)} placeholder="Cancellation just opened — grab it!" /></Field>
+              <Button onClick={sendBroadcast} disabled={bBusy || reachable === 0} fullWidth icon={<Send size={16} />}>
+                {bBusy ? "Sending…" : `Email ${reachable} client${reachable === 1 ? "" : "s"}`}
+              </Button>
+              <p className="text-[11px] text-center" style={{ color: C.muted, lineHeight: 1.5 }}>
+                First come, first served — the email links straight to your booking page.
+              </p>
+            </div>
+          )}
+          {bResult && <p className="text-[12px] mt-2" style={{ color: C.coffee }}>{bResult}</p>}
+        </Card>
 
         <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
           {[
