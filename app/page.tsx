@@ -7592,6 +7592,49 @@ const NoShowProtectionCard = ({
   );
 };
 
+// Shown in the appointment sheet when a booking is cancelled — one tap
+// to email the waitlist about the freed slot, pre-filled from the
+// appointment's date/time/style.
+const CancelledWaitlistNotify = ({
+  store, date, time, style,
+}: { store: any; date: string; time?: string | null; style?: string | null }) => {
+  const requests: any[] = store?.waitlistApi?.requests || [];
+  const reachable = requests.filter((r) => r?.client_email && (r.status === "waiting" || r.status === "contacted")).length;
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  if (reachable === 0) return null;
+
+  const notify = async () => {
+    if (busy || !store?.userId || !date) return;
+    setBusy(true); setResult(null);
+    const res = await broadcastWaitlistOpening(
+      store.userId,
+      { date, time: time || null, serviceName: style || null },
+      requests,
+    );
+    setBusy(false);
+    setResult(res.total === 0 ? "No waitlist clients have an email on file." : `Emailed ${res.sent} of ${res.total} waitlist client${res.total === 1 ? "" : "s"}.`);
+  };
+
+  return (
+    <Card className="p-3.5" style={{ border: `1px solid ${C.hairline}` }}>
+      <div className="flex items-center gap-2 mb-1">
+        <Zap size={14} style={{ color: C.goldDeep }} />
+        <p className="text-sm font-semibold" style={{ color: C.espresso }}>This slot just opened up</p>
+      </div>
+      <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
+        Notify your {reachable} active waitlist client{reachable === 1 ? "" : "s"} so someone can grab it
+        {date ? ` · ${date}${time ? ` at ${time}` : ""}` : ""}.
+      </p>
+      {result && <p className="text-[12px] mt-2" style={{ color: C.coffee }}>{result}</p>}
+      <Button variant="outline" size="sm" onClick={notify} disabled={busy || !date} icon={<Send size={15} />} className="mt-2">
+        {busy ? "Sending…" : "Notify waitlist"}
+      </Button>
+    </Card>
+  );
+};
+
 const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCommunication, openReceipt }: { open: any; appt: any; store: any; onClose: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void; openReceipt?: (rcp: ReceiptRecord) => void }) => {
   const {
     upsertAppointment, deleteAppointment, clients, upsertClient, business,
@@ -8385,6 +8428,14 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
               store={store}
               appointmentId={String(form.id)}
               servicePrice={parseMoney(form.totalPrice)}
+            />
+          )}
+          {isAppointment && (form.status === "cancelled" || form.status === "canceled") && (
+            <CancelledWaitlistNotify
+              store={store}
+              date={form.date}
+              time={form.time}
+              style={form.style}
             />
           )}
           {isAppointment && <Field label="Total price"><MoneyInput value={form.totalPrice} onChange={(v) => setForm({ ...form, totalPrice: v })} /></Field>}
