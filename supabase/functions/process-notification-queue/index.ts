@@ -966,6 +966,10 @@ const renderAppointmentUpdated = (p: Record<string, any>) => {
   const changedAddons = !!p.changedAddons;
   const changedOption = !!p.changedOption;
   const optionName = String(p.optionName ?? "").trim();
+  const changedHairColor = !!p.changedHairColor;
+  const changedCurl = !!p.changedCurl;
+  const hairColor = String(p.hairColor ?? "").trim();
+  const curlPattern = String(p.curlPattern ?? "").trim();
   const hasPrice = p.totalPrice != null && Number.isFinite(Number(p.totalPrice)) && Number(p.totalPrice) > 0;
 
   // "What changed" — only the categories that actually moved.
@@ -976,6 +980,12 @@ const renderAppointmentUpdated = (p: Record<string, any>) => {
   }
   if (changedOption && optionName) {
     changeLines.push(`<li style="${liStyle}">Option: <strong>${escape(optionName)}</strong></li>`);
+  }
+  if (changedHairColor && hairColor) {
+    changeLines.push(`<li style="${liStyle}">Hair color: <strong>${escape(hairColor)}</strong></li>`);
+  }
+  if (changedCurl && curlPattern) {
+    changeLines.push(`<li style="${liStyle}">Curl pattern: <strong>${escape(curlPattern)}</strong></li>`);
   }
   if (changedAddons) {
     changeLines.push(`<li style="${liStyle}">Add-ons: <strong>${addonNames.length ? escape(addonNames.join(", ")) : "none"}</strong></li>`);
