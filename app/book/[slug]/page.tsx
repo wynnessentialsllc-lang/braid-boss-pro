@@ -1981,7 +1981,7 @@ export default function PublicBookingPage() {
                       <Input
                         value={recipientName}
                         onChange={e => setRecipientName(e.target.value)}
-                        placeholder="e.g. Maya (your daughter)"
+                        placeholder="e.g. Maya (daughter)"
                         autoComplete="off"
                       />
                     </Field>
