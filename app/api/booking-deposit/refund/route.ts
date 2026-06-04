@@ -107,7 +107,7 @@ export async function POST(req: Request) {
   const { data: reqRow, error: readErr } = await admin
     .from("booking_requests")
     .select(
-      "id, user_id, approval_status, status, deposit_paid, payment_status, deposit_amount, stripe_payment_intent_id, stripe_connect_account_id, client_name, client_email, service_name, service_name_snapshot, preferred_date, preferred_time, denied_email_sent_at, refund_email_sent_at, refund_manual_email_sent_at",
+      "id, user_id, approval_status, status, deposit_paid, paid_in_full, amount_paid, payment_status, deposit_amount, stripe_payment_intent_id, stripe_connect_account_id, client_name, client_email, service_name, service_name_snapshot, preferred_date, preferred_time, denied_email_sent_at, refund_email_sent_at, refund_manual_email_sent_at",
     )
     .eq("id", requestId)
     .eq("user_id", user.id)
@@ -225,18 +225,22 @@ export async function POST(req: Request) {
         });
       }
     } else if (disposition === "refunded" && clientEmail) {
+      const wasPaidInFull = !!reqRow.paid_in_full;
       if (await claimFlag("refund_email_sent_at")) {
         await admin.rpc("queue_notification", {
           user_id_in: user.id,
           channel_in: "email",
           notification_type_in: "booking_denied_refunded",
-          body_in: "Your booking request was not approved. Your deposit has been refunded.",
+          body_in: wasPaidInFull
+            ? "Your booking request was not approved. Your payment has been refunded."
+            : "Your booking request was not approved. Your deposit has been refunded.",
           subject_in: "Booking request refunded — Braid Boss Pro",
           recipient_email_in: clientEmail,
           recipient_name_in: reqRow.client_name || null,
           payload_in: {
             ...basePayload,
-            refundAmount: refundedAmount ?? (Number(reqRow.deposit_amount) || null),
+            refundAmount: refundedAmount ?? (Number(reqRow.amount_paid) || Number(reqRow.deposit_amount) || null),
+            paidInFull: wasPaidInFull,
           },
           dedupe_key_in: `booking_denied:${requestId}`,
           booking_request_id_in: requestId,

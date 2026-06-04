@@ -457,12 +457,21 @@ const renderDepositReceived = (p: Record<string, any>) => {
   const date        = p.preferredDate || null;
   const time        = p.preferredTime || null;
   const when        = [date, time].filter(Boolean).join(" · ");
-  const subject = `Deposit received — pending ${studioName}'s approval`;
+  // Pay-in-full BNPL bookings reuse this notification type but should
+  // read as a full payment, not a deposit.
+  const paidInFull  = !!p.paidInFull;
+  const amountPaid  = Number(p.amountPaid) > 0 ? Number(p.amountPaid) : null;
+  const eyebrow     = paidInFull ? "Payment received" : "Deposit received";
+  const subject = paidInFull
+    ? `Payment received — pending ${studioName}'s approval`
+    : `Deposit received — pending ${studioName}'s approval`;
   const html = wrapHtml(subject, `
-    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Deposit received</p>
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">${eyebrow}</p>
     <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">Thanks, ${escape(clientName)}.</h1>
     <p style="font-size:14px;line-height:22px;color:${C.coffee};">
-      We received your deposit for your${serviceName ? ` <strong>${escape(serviceName)}</strong>` : ""} request${when ? ` on <strong>${escape(when)}</strong>` : ""}.
+      ${paidInFull
+        ? `We received your payment${amountPaid ? ` of <strong>$${amountPaid.toFixed(2)}</strong>` : " in full"} for your`
+        : "We received your deposit for your"}${serviceName ? ` <strong>${escape(serviceName)}</strong>` : ""} request${when ? ` on <strong>${escape(when)}</strong>` : ""}.
     </p>
     <p style="font-size:14px;line-height:22px;color:${C.coffee};">
       <strong>Your appointment isn't confirmed yet.</strong> ${escape(studioName)} still needs to review and approve it — we'll email you to confirm as soon as that happens.
@@ -869,12 +878,14 @@ const renderBookingDeniedRefunded = (p: Record<string, any>) => {
   const studioName = p.studioName || "your stylist";
   const serviceName = p.serviceName || null;
   const refundAmount = Number(p.refundAmount) > 0 ? Number(p.refundAmount) : null;
+  const paidInFull = !!p.paidInFull;
+  const refundedWhat = paidInFull ? "payment" : "deposit";
   const subject = `Booking request refunded — ${studioName}`;
   const html = wrapHtml(subject, `
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Refund issued</p>
     <h1 style="font-size:20px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Hi ${escape(clientName)},</h1>
     <p style="font-size:14px;line-height:22px;margin:0 0 12px;color:${C.coffee};">
-      Your booking request${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""} with ${escape(studioName)} was not approved. <strong>Your deposit${refundAmount ? ` of $${refundAmount.toFixed(2)}` : ""} has been refunded.</strong>
+      Your booking request${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""} with ${escape(studioName)} was not approved. <strong>Your ${refundedWhat}${refundAmount ? ` of $${refundAmount.toFixed(2)}` : ""} has been refunded.</strong>
     </p>
     ${whenLine(p)}
     <p style="font-size:13px;color:${C.muted};line-height:20px;margin-top:14px;">Refund timing depends on your bank or card provider — it typically takes a few business days to appear.</p>

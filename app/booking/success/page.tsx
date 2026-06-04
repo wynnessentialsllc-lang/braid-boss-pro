@@ -26,6 +26,10 @@ type Status = {
   payment_status: string;
   deposit_paid: boolean;
   deposit_amount: number | null;
+  // Pay-in-full bookings set these; the page reads "payment" instead of
+  // "deposit" copy when paid_in_full is true.
+  paid_in_full: boolean | null;
+  amount_paid: number | null;
   service_name: string | null;
   preferred_date: string | null;
   preferred_time: string | null;
@@ -39,7 +43,7 @@ const fmtPrice = (n: number | null): string =>
 
 export default function BookingSuccessPage() {
   return (
-    <Suspense fallback={<SuccessShell body="Confirming your deposit…" />}>
+    <Suspense fallback={<SuccessShell header="Confirming" body="Confirming your payment…" />}>
       <BookingSuccessInner />
     </Suspense>
   );
@@ -101,23 +105,29 @@ function BookingSuccessInner() {
     return () => { cancelled = true; };
   }, [requestId]);
 
+  const paidInFull = !!status?.paid_in_full;
+
   const bodyText = (() => {
     if (error) return error;
-    if (loading) return "Confirming your deposit…";
+    if (loading) return "Confirming your payment…";
     if (!status) return "We couldn't find this booking request.";
     if (status.approval_status === "deposit_paid_pending_approval") {
-      return "Deposit received. Your appointment request is waiting for stylist approval.";
+      return paidInFull
+        ? "Payment received. Your appointment request is waiting for stylist approval."
+        : "Deposit received. Your appointment request is waiting for stylist approval.";
     }
     if (status.approval_status === "approved" || status.approval_status === "confirmed") {
       return "Your stylist has confirmed your appointment. See you soon.";
     }
     if (status.approval_status === "denied") {
-      return "Your stylist couldn't accommodate this request. The deposit is being refunded.";
+      return paidInFull
+        ? "Your stylist couldn't accommodate this request. Your payment is being refunded."
+        : "Your stylist couldn't accommodate this request. The deposit is being refunded.";
     }
     if (timedOut) {
       return "Your payment is still being processed. We'll email you once your stylist reviews the request.";
     }
-    return "Confirming your deposit…";
+    return "Confirming your payment…";
   })();
 
   const headerText = (() => {
@@ -126,14 +136,18 @@ function BookingSuccessInner() {
       return "You're confirmed";
     }
     if (status?.approval_status === "denied") return "Couldn't accommodate";
-    return "Deposit received";
+    return paidInFull ? "Payment received" : "Deposit received";
   })();
 
   return (
     <SuccessShell body={bodyText} header={headerText}>
-      {status && status.deposit_amount != null && status.deposit_paid && (
+      {status && status.deposit_paid && (paidInFull ? status.amount_paid != null : status.deposit_amount != null) && (
         <p style={{ marginTop: 12, fontSize: 12, color: C.muted }}>
-          Deposit · <strong style={{ color: C.goldDeep }}>{fmtPrice(Number(status.deposit_amount))}</strong> paid
+          {paidInFull ? "Paid in full · " : "Deposit · "}
+          <strong style={{ color: C.goldDeep }}>
+            {fmtPrice(Number(paidInFull ? status.amount_paid : status.deposit_amount))}
+          </strong>
+          {paidInFull ? "" : " paid"}
           {status.service_name ? ` for ${status.service_name}` : ""}
           {(() => {
             const when = formatAppointmentDate(status.preferred_date, status.preferred_time);
@@ -143,7 +157,7 @@ function BookingSuccessInner() {
       )}
       {status && status.approval_status === "deposit_paid_pending_approval" && (
         <p style={{ marginTop: 16, fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
-          Deposit payment doesn&apos;t guarantee approval until your stylist confirms.
+          {paidInFull ? "Payment" : "Deposit payment"} doesn&apos;t guarantee approval until your stylist confirms.
           You&apos;ll get a message once they review.
         </p>
       )}
