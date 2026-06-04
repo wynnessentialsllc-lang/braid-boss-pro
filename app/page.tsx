@@ -30232,6 +30232,35 @@ export default function App() {
   const [moneyPeriod, setMoneyPeriod] = useState<string | null>(null);
   const goToMoney = (p: string) => { setMoneyPeriod(p); setActive("money"); };
   const [secondary, setSecondary] = useState<string | null>(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
+
+  // Persist the current screen so a page refresh / pull-to-refresh stays
+  // put instead of dumping back to Home. `active` is the bottom-nav tab
+  // and `secondary` is the overlay sub-screen (settings, intake form,
+  // reports, …); restoring both reproduces exactly where the user was.
+  // We gate persistence until the one-time restore has run, so the
+  // default "dashboard" can't overwrite the saved value on mount.
+  const NAV_ACTIVE_KEY = "nav:active";
+  const NAV_SECONDARY_KEY = "nav:secondary";
+  const navRestored = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [savedActive, savedSecondary] = await Promise.all([
+        safeStorage.get(NAV_ACTIVE_KEY),
+        safeStorage.get(NAV_SECONDARY_KEY),
+      ]);
+      if (cancelled) return;
+      if (savedActive) setActive(savedActive);
+      if (savedSecondary) setSecondary(savedSecondary);
+      navRestored.current = true;
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
+    if (!navRestored.current) return;
+    void safeStorage.set(NAV_ACTIVE_KEY, active);
+    void safeStorage.set(NAV_SECONDARY_KEY, secondary ?? "");
+  }, [active, secondary]);
   // Inventory can be reached from two surfaces (Settings → Catalog
   // and Shop). The back button should return to the screen the user
   // came from, so we remember the origin when navigating in.
