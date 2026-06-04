@@ -26667,7 +26667,7 @@ const IntakeFormScreen = ({ store, onBack }: { store: any; onBack: () => void })
     if (ok) { setSavedTick(true); window.setTimeout(() => setSavedTick(false), 1800); }
   };
 
-  const typeOptions = (["text", "textarea", "yes_no", "choice"] as IntakeQuestionType[])
+  const typeOptions = (["text", "textarea", "yes_no", "choice", "multichoice"] as IntakeQuestionType[])
     .map(t => ({ value: t, label: INTAKE_TYPE_LABEL[t] }));
 
   return (
@@ -26716,7 +26716,7 @@ const IntakeFormScreen = ({ store, onBack }: { store: any; onBack: () => void })
                   <Select value={q.type} options={typeOptions}
                     onChange={(e) => updateQuestion(q.id, { type: e.target.value as IntakeQuestionType })} />
                 </Field>
-                {q.type === "choice" && (
+                {(q.type === "choice" || q.type === "multichoice") && (
                   <Field label="Choices" hint="Comma-separated.">
                     <IntakeChoicesInput
                       options={q.options ?? []}

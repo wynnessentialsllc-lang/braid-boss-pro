@@ -11,13 +11,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { getSupabase } from "./supabase";
 
-export type IntakeQuestionType = "text" | "textarea" | "yes_no" | "choice";
+export type IntakeQuestionType = "text" | "textarea" | "yes_no" | "choice" | "multichoice";
 
 export type IntakeQuestion = {
   id: string;
   label: string;
   type: IntakeQuestionType;
-  options?: string[]; // for type "choice"
+  options?: string[]; // for "choice" (pick one) + "multichoice" (pick any)
   enabled: boolean;
 };
 
@@ -38,6 +38,7 @@ export const INTAKE_TYPE_LABEL: Record<IntakeQuestionType, string> = {
   textarea: "Paragraph",
   yes_no: "Yes / No",
   choice: "Multiple choice",
+  multichoice: "Choose all that apply",
 };
 
 // Standard braider consultation set. Shipped enabled; the stylist can
@@ -71,15 +72,17 @@ export const normalizeIntakeForm = (raw: unknown): IntakeForm => {
       const label = String(o.label ?? "").trim();
       if (!label) return null;
       const type: IntakeQuestionType =
-        o.type === "textarea" || o.type === "yes_no" || o.type === "choice" ? o.type : "text";
+        o.type === "textarea" || o.type === "yes_no" || o.type === "choice" || o.type === "multichoice"
+          ? o.type : "text";
       const options = Array.isArray(o.options)
         ? o.options.map((x) => String(x ?? "").trim()).filter(Boolean)
         : undefined;
+      const hasChoices = type === "choice" || type === "multichoice";
       return {
         id: String(o.id ?? `q_${Math.random().toString(36).slice(2, 9)}`),
         label,
         type,
-        options: type === "choice" ? (options && options.length ? options : ["Yes", "No"]) : undefined,
+        options: hasChoices ? (options && options.length ? options : ["Yes", "No"]) : undefined,
         enabled: o.enabled !== false,
       };
     })

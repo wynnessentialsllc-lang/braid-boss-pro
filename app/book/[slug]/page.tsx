@@ -3019,6 +3019,30 @@ export default function PublicBookingPage() {
                           <option value="">Select…</option>
                           {(q.options ?? []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
                         </select>
+                      ) : q.type === "multichoice" ? (
+                        <div style={{ display: "grid", gap: 8 }}>
+                          {(q.options ?? []).map(opt => {
+                            const current = (intakeAnswers[q.id] ?? "")
+                              .split(",").map(s => s.trim()).filter(Boolean);
+                            const checked = current.includes(opt);
+                            return (
+                              <label key={opt} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 14, color: C.coffee }}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    const next = checked
+                                      ? current.filter(x => x !== opt)
+                                      : [...current, opt];
+                                    setAns(q.id, next.join(", "));
+                                  }}
+                                  style={{ width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }}
+                                />
+                                <span>{opt}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
                       ) : (
                         <input
                           value={intakeAnswers[q.id] ?? ""}
