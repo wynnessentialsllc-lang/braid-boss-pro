@@ -197,6 +197,14 @@ export async function POST(req: Request) {
         const paymentStatus: string | undefined = dataObject?.payment_status;
         const amountTotalCents: number | undefined =
           typeof dataObject?.amount_total === "number" ? dataObject.amount_total : undefined;
+        // Pay-in-full BNPL bookings (created by /api/booking-full/checkout)
+        // tag the session with payment_kind=full. They flip into the same
+        // paid-pending-approval state but via mark_full_payment_paid_via_
+        // webhook, which records paid_in_full + amount_paid so the
+        // resulting appointment shows a $0 balance (NOT the quoted deposit).
+        const isFullPayment: boolean =
+          dataObject?.metadata?.payment_kind === "full" ||
+          dataObject?.payment_intent_data?.metadata?.payment_kind === "full";
 
         console.info(
           "[stripe-connect/webhook] checkout.session.completed received",
@@ -221,17 +229,27 @@ export async function POST(req: Request) {
         }
 
         // Step 1 — flip approval_status / payment_status / deposit_paid
-        // via the security-definer RPC. The RPC is idempotent: a
+        // via the security-definer RPC. Both RPCs are idempotent: a
         // retried Stripe delivery is a no-op once the row is past
         // awaiting_deposit, so duplicate retries don't double-process.
-        const { error: rpcErr } = await admin.rpc("mark_deposit_paid_via_webhook", {
-          request_id_in: requestId,
-          stripe_session_id_in: sessionId || null,
-          stripe_payment_intent_in: paymentIntent || null,
-        });
+        // A full payment routes through the full-payment RPC so the row
+        // records paid_in_full + amount_paid.
+        const { error: rpcErr } = isFullPayment
+          ? await admin.rpc("mark_full_payment_paid_via_webhook", {
+              request_id_in: requestId,
+              stripe_session_id_in: sessionId || null,
+              stripe_payment_intent_in: paymentIntent || null,
+              amount_paid_in:
+                typeof amountTotalCents === "number" ? amountTotalCents / 100 : null,
+            })
+          : await admin.rpc("mark_deposit_paid_via_webhook", {
+              request_id_in: requestId,
+              stripe_session_id_in: sessionId || null,
+              stripe_payment_intent_in: paymentIntent || null,
+            });
         if (rpcErr) {
           console.error(
-            `[stripe-connect/webhook] mark_deposit_paid_via_webhook failed for ${requestId}: ${rpcErr.message}`,
+            `[stripe-connect/webhook] mark paid failed for ${requestId}: ${rpcErr.message}`,
           );
           return NextResponse.json({ error: rpcErr.message }, { status: 500 });
         }
@@ -240,8 +258,10 @@ export async function POST(req: Request) {
         // amount_total when present, so the queue UI shows the truth
         // instead of the originally-quoted deposit if they ever
         // diverge. Only writes when the row's deposit_amount is null
-        // or zero so a manual override stays intact.
-        if (typeof amountTotalCents === "number" && amountTotalCents > 0) {
+        // or zero so a manual override stays intact. Skipped for full
+        // payments — mark_full_payment_paid_via_webhook already records
+        // amount_paid, and deposit_amount stays as the quoted deposit.
+        if (!isFullPayment && typeof amountTotalCents === "number" && amountTotalCents > 0) {
           const amountDollars = Math.round(amountTotalCents) / 100;
           const { error: amountErr } = await admin
             .from("booking_requests")
@@ -272,8 +292,12 @@ export async function POST(req: Request) {
               user_id_in: br.user_id,
               channel_in: "email",
               notification_type_in: "deposit_received",
-              body_in: "Deposit received — pending approval.",
-              subject_in: "Deposit received — pending approval",
+              body_in: isFullPayment
+                ? "Payment received — pending approval."
+                : "Deposit received — pending approval.",
+              subject_in: isFullPayment
+                ? "Payment received — pending approval"
+                : "Deposit received — pending approval",
               recipient_email_in: br.client_email,
               recipient_name_in: br.client_name || null,
               payload_in: {
@@ -307,11 +331,28 @@ export async function POST(req: Request) {
 
       case "payment_intent.succeeded": {
         // Backstop in case checkout.session.completed never arrived or
-        // its metadata was stripped. We mirror booking_request_id into
-        // payment_intent metadata at session creation time, so look
-        // there first.
+        // its metadata was stripped. We mirror booking_request_id (and
+        // payment_kind) into payment_intent metadata at session creation
+        // time, so look there first.
         const requestId: string | undefined = dataObject?.metadata?.booking_request_id;
         const paymentIntentId: string | undefined = dataObject?.id;
+        // A full payment carries payment_kind=full in the PI metadata.
+        // Pass amount_paid_in=null so the RPC falls back to service_price
+        // (which is exactly what the full-payment checkout charged).
+        const isFullPayment: boolean = dataObject?.metadata?.payment_kind === "full";
+        const markPaid = (id: string) =>
+          isFullPayment
+            ? admin.rpc("mark_full_payment_paid_via_webhook", {
+                request_id_in: id,
+                stripe_session_id_in: null,
+                stripe_payment_intent_in: paymentIntentId || null,
+                amount_paid_in: null,
+              })
+            : admin.rpc("mark_deposit_paid_via_webhook", {
+                request_id_in: id,
+                stripe_session_id_in: null,
+                stripe_payment_intent_in: paymentIntentId || null,
+              });
 
         if (!requestId) {
           // Try to recover by matching against any row we previously
@@ -323,11 +364,7 @@ export async function POST(req: Request) {
               .eq("stripe_payment_intent_id", paymentIntentId)
               .maybeSingle();
             if (existing?.id) {
-              const { error: rpcErr } = await admin.rpc("mark_deposit_paid_via_webhook", {
-                request_id_in: existing.id,
-                stripe_session_id_in: null,
-                stripe_payment_intent_in: paymentIntentId,
-              });
+              const { error: rpcErr } = await markPaid(existing.id);
               if (rpcErr) {
                 console.error("[stripe-connect/webhook] mark_paid (pi recover) failed:", rpcErr.message);
                 return NextResponse.json({ error: rpcErr.message }, { status: 500 });
@@ -339,11 +376,7 @@ export async function POST(req: Request) {
           return NextResponse.json({ received: true, ignored: "no_booking_request_id" }, { status: 200 });
         }
 
-        const { error: rpcErr } = await admin.rpc("mark_deposit_paid_via_webhook", {
-          request_id_in: requestId,
-          stripe_session_id_in: null,
-          stripe_payment_intent_in: paymentIntentId || null,
-        });
+        const { error: rpcErr } = await markPaid(requestId);
         if (rpcErr) {
           console.error("[stripe-connect/webhook] mark_paid (pi) failed:", rpcErr.message);
           return NextResponse.json({ error: rpcErr.message }, { status: 500 });
