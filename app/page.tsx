@@ -26606,6 +26606,36 @@ const PackagesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
 //  form. Editable standard set: toggle questions on/off, edit labels,
 //  pick a type, add/remove custom questions. See app/lib/intake.ts.
 // ============================================================
+// Choices editor for a multiple-choice question. Holds the raw text the
+// stylist types so commas + spaces survive keystroke-to-keystroke — the
+// canonical `options` array is parsed underneath. (A plain
+// value={options.join(", ")} input strips a comma the instant you type
+// it, because the empty trailing segment gets filtered out.) Re-seeds
+// from `options` only on an external change (e.g. Restore defaults),
+// detected by normalized comparison so it never clobbers in-progress
+// typing.
+const IntakeChoicesInput = ({ options, onChange }: { options: string[]; onChange: (opts: string[]) => void }) => {
+  const seed = (opts: string[]) => (opts ?? []).map((s) => String(s).trim()).filter(Boolean).join(", ");
+  const [text, setText] = useState<string>(() => seed(options));
+  const norm = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean).join("");
+  useEffect(() => {
+    // Only re-seed when the canonical options diverge from what's typed,
+    // so our own edits don't fight the controlled value.
+    if (norm(text) !== norm(seed(options))) setText(seed(options));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options]);
+  return (
+    <Input
+      value={text}
+      onChange={(e: any) => {
+        const raw = e.target.value;
+        setText(raw);
+        onChange(raw.split(",").map((s: string) => s.trim()).filter(Boolean));
+      }}
+      placeholder="Tighter, Medium, Looser"
+    />
+  );
+};
 const IntakeFormScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const api = store?.intakeFormApi;
   const [draft, setDraft] = useState<IntakeForm>(api?.form ?? { enabled: false, questions: DEFAULT_INTAKE_QUESTIONS });
@@ -26688,10 +26718,9 @@ const IntakeFormScreen = ({ store, onBack }: { store: any; onBack: () => void })
                 </Field>
                 {q.type === "choice" && (
                   <Field label="Choices" hint="Comma-separated.">
-                    <Input
-                      value={(q.options ?? []).join(", ")}
-                      onChange={(e) => updateQuestion(q.id, { options: e.target.value.split(",").map(s => s.trim()).filter(Boolean) })}
-                      placeholder="Tighter, Medium, Looser"
+                    <IntakeChoicesInput
+                      options={q.options ?? []}
+                      onChange={(opts) => updateQuestion(q.id, { options: opts })}
                     />
                   </Field>
                 )}
