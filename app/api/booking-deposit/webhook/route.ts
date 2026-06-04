@@ -126,6 +126,13 @@ export async function POST(req: Request) {
   const sessionId: string | undefined = session?.id;
   const paymentIntent: string | undefined =
     typeof session?.payment_intent === "string" ? session.payment_intent : undefined;
+  // Full-ticket BNPL payments (created by /api/booking-full/checkout) carry
+  // payment_kind = 'full'. They land in the same paid-pending-approval
+  // state but via a different RPC (records paid_in_full + amount_paid) and
+  // skip no-show card capture (BNPL methods aren't saved off-session).
+  const isFullPayment: boolean =
+    session?.metadata?.payment_kind === "full" ||
+    session?.payment_intent_data?.metadata?.payment_kind === "full";
 
   // Online package purchase — this endpoint is the configured Stripe
   // webhook for connected-account checkout.session.completed, so package
@@ -206,11 +213,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ received: true, ignored: `payment_status=${session.payment_status}` }, { status: 200 });
   }
 
-  const { error: rpcErr } = await admin.rpc("mark_deposit_paid_via_webhook", {
-    request_id_in: requestId,
-    stripe_session_id_in: sessionId || null,
-    stripe_payment_intent_in: paymentIntent || null,
-  });
+  const { error: rpcErr } = isFullPayment
+    ? await admin.rpc("mark_full_payment_paid_via_webhook", {
+        request_id_in: requestId,
+        stripe_session_id_in: sessionId || null,
+        stripe_payment_intent_in: paymentIntent || null,
+        amount_paid_in:
+          typeof session?.amount_total === "number"
+            ? session.amount_total / 100
+            : null,
+      })
+    : await admin.rpc("mark_deposit_paid_via_webhook", {
+        request_id_in: requestId,
+        stripe_session_id_in: sessionId || null,
+        stripe_payment_intent_in: paymentIntent || null,
+      });
   if (rpcErr) {
     // Surface the error so Stripe retries — it's likely a transient DB
     // issue worth re-delivering.
@@ -220,10 +237,12 @@ export async function POST(req: Request) {
   // No-show protection: record the saved card (off-session reusable) on
   // the connected account so the stylist can later charge a no-show fee
   // via /api/no-show-charge. Best-effort — never blocks the deposit ack.
+  // Skipped for full BNPL payments: there's no saved card and a fully-paid
+  // booking has no balance to protect.
   try {
     const acctId = typeof evt?.account === "string" ? evt.account : null;
     const stripeSecret = process.env.STRIPE_SECRET_KEY;
-    if (acctId && paymentIntent && stripeSecret) {
+    if (!isFullPayment && acctId && paymentIntent && stripeSecret) {
       const piRes = await fetch(
         `https://api.stripe.com/v1/payment_intents/${paymentIntent}?expand[]=payment_method`,
         {
@@ -276,16 +295,26 @@ export async function POST(req: Request) {
       const studioName =
         typeof studio === "string" && studio.trim() ? studio.trim() : null;
       const serviceName = br.service_name_snapshot || br.service_name || null;
+      // Tailor the copy: a full BNPL payment isn't a "deposit".
+      const clientPaidSubject = isFullPayment
+        ? "Payment received — pending approval"
+        : "Deposit received — pending approval";
+      const clientPaidBody = isFullPayment
+        ? "Payment received — pending approval."
+        : "Deposit received — pending approval.";
+      const ownerPaidBody = isFullPayment
+        ? `${br.client_name || "A client"} paid in full — review and approve the booking.`
+        : `${br.client_name || "A client"} paid their deposit — review and approve the booking.`;
 
-      // Client — "deposit received, pending approval". Dedupes on
+      // Client — "received, pending approval". Dedupes on
       // `deposit_received:<request_id>`.
       if (br.client_email) {
         await admin.rpc("queue_notification", {
           user_id_in: br.user_id,
           channel_in: "email",
           notification_type_in: "deposit_received",
-          body_in: "Deposit received — pending approval.",
-          subject_in: "Deposit received — pending approval",
+          body_in: clientPaidBody,
+          subject_in: clientPaidSubject,
           recipient_email_in: br.client_email,
           recipient_name_in: br.client_name || null,
           payload_in: {
@@ -312,7 +341,7 @@ export async function POST(req: Request) {
           user_id_in: br.user_id,
           channel_in: "email",
           notification_type_in: "stylist_deposit_paid",
-          body_in: `${br.client_name || "A client"} paid their deposit — review and approve the booking.`,
+          body_in: ownerPaidBody,
           subject_in: "New paid booking — ready to review",
           recipient_email_in: ownerEmail,
           recipient_name_in: null,
