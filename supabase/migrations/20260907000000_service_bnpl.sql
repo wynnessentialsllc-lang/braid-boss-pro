@@ -20,10 +20,10 @@
 --      (service_price, bnpl_enabled) so the booking page knows whether to
 --      offer the "pay in full" choice and for how much.
 --
--- Scope: pay-in-full BNPL is only offered for services that already take a
--- deposit (i.e. the booking already reaches a Stripe checkpoint at booking
--- time). No-deposit services keep the request-then-approve-then-pay flow
--- unchanged.
+-- Scope: pay-in-full BNPL is offered whenever the stylist opted in and the
+-- connected account can take charges — for both deposit services (client
+-- chooses deposit vs full) and no-deposit services (client chooses pay-in-
+-- full vs the existing "just request, pay later" flow).
 
 -- 1. Per-stylist opt-in flag. Default false: a stylist must turn it on in
 --    /settings/payments. Unlike the paid-access columns, this is a benign
