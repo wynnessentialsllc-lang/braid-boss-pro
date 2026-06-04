@@ -1251,7 +1251,8 @@ export default function PublicBookingPage() {
         return;
       }
 
-      setSubmitted(true);
+      // A booking request was created on every non-deposit path — record
+      // it before branching to the optional pay-now choice.
       if (link?.user_id) {
         void emitAnalyticsEvent({
           ownerUserId: link.user_id,
@@ -1265,6 +1266,22 @@ export default function PublicBookingPage() {
           },
         });
       }
+
+      // No-deposit service where the stylist offers pay-in-full BNPL. The
+      // "request received" notifications already went out above (this is
+      // the !needsDeposit branch), so the request stands on its own — we
+      // just offer an optional "pay in full now" path. Choosing "continue
+      // without paying" keeps the existing pay-later flow.
+      if (!needsDeposit && offerBnpl && newRequestId && bnplFullPrice > 0) {
+        setPaymentChoice({
+          requestId: newRequestId,
+          depositAmount: 0,
+          fullPrice: bnplFullPrice,
+        });
+        return;
+      }
+
+      setSubmitted(true);
     } catch (err: any) {
       setSubmitError(
         err?.message
@@ -1982,31 +1999,35 @@ export default function PublicBookingPage() {
           <div style={{ marginTop: 32, display: "grid", gap: 14 }}>
             <div style={{ textAlign: "center" }}>
               <p style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: C.espresso }}>
-                Almost there — choose how to pay
+                {paymentChoice.depositAmount > 0 ? "Almost there — choose how to pay" : "Want to pay now?"}
               </p>
               <p style={{ fontSize: 14, color: C.coffee, marginTop: 8, lineHeight: 1.5 }}>
-                Secure your appointment with a deposit, or pay in full now —
-                including Buy Now, Pay Later options at checkout.
+                {paymentChoice.depositAmount > 0
+                  ? "Secure your appointment with a deposit, or pay in full now — including Buy Now, Pay Later options at checkout."
+                  : "Your request is in. You can pay the full price now — including Buy Now, Pay Later options — or settle up with your stylist later."}
               </p>
             </div>
 
-            <button
-              type="button"
-              disabled={choiceRedirecting}
-              onClick={() => void startBookingCheckout("/api/booking-deposit/checkout", paymentChoice.requestId)}
-              style={{
-                padding: "16px 18px", borderRadius: 14, cursor: choiceRedirecting ? "default" : "pointer",
-                background: C.paper, color: C.espresso, border: `1px solid ${accent}`,
-                textAlign: "left", opacity: choiceRedirecting ? 0.6 : 1,
-              }}
-            >
-              <span style={{ display: "block", fontSize: 15, fontWeight: 700 }}>
-                Pay deposit · ${paymentChoice.depositAmount.toFixed(2)}
-              </span>
-              <span style={{ display: "block", fontSize: 12, color: C.muted, marginTop: 2 }}>
-                ${(paymentChoice.fullPrice - paymentChoice.depositAmount).toFixed(2)} balance due at your appointment
-              </span>
-            </button>
+            {/* Deposit option only exists when a deposit is actually due. */}
+            {paymentChoice.depositAmount > 0 && (
+              <button
+                type="button"
+                disabled={choiceRedirecting}
+                onClick={() => void startBookingCheckout("/api/booking-deposit/checkout", paymentChoice.requestId)}
+                style={{
+                  padding: "16px 18px", borderRadius: 14, cursor: choiceRedirecting ? "default" : "pointer",
+                  background: C.paper, color: C.espresso, border: `1px solid ${accent}`,
+                  textAlign: "left", opacity: choiceRedirecting ? 0.6 : 1,
+                }}
+              >
+                <span style={{ display: "block", fontSize: 15, fontWeight: 700 }}>
+                  Pay deposit · ${paymentChoice.depositAmount.toFixed(2)}
+                </span>
+                <span style={{ display: "block", fontSize: 12, color: C.muted, marginTop: 2 }}>
+                  ${(paymentChoice.fullPrice - paymentChoice.depositAmount).toFixed(2)} balance due at your appointment
+                </span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -2019,12 +2040,29 @@ export default function PublicBookingPage() {
               }}
             >
               <span style={{ display: "block", fontSize: 15, fontWeight: 700 }}>
-                Pay in full · ${paymentChoice.fullPrice.toFixed(2)}
+                {paymentChoice.depositAmount > 0 ? "Pay in full" : "Pay in full now"} · ${paymentChoice.fullPrice.toFixed(2)}
               </span>
               <span style={{ display: "block", fontSize: 12, color: "rgba(255,255,255,0.85)", marginTop: 2 }}>
                 Split it over time with Affirm, Klarna, or Afterpay at checkout
               </span>
             </button>
+
+            {/* No-deposit bookings can stand as a plain request — keep the
+                existing pay-later flow one tap away. */}
+            {paymentChoice.depositAmount === 0 && (
+              <button
+                type="button"
+                disabled={choiceRedirecting}
+                onClick={() => { setPaymentChoice(null); setSubmitted(true); }}
+                style={{
+                  padding: "12px 16px", borderRadius: 12, cursor: choiceRedirecting ? "default" : "pointer",
+                  background: "transparent", color: C.muted, border: 0,
+                  fontSize: 13, fontWeight: 600,
+                }}
+              >
+                Continue without paying
+              </button>
+            )}
 
             {choiceRedirecting && (
               <p style={{ fontSize: 12, color: C.muted, textAlign: "center" }}>Opening secure checkout…</p>

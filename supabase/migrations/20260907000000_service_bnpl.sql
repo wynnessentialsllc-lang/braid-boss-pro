@@ -291,13 +291,20 @@ begin
     connect_stamp := owner_connect_id;
   end if;
 
-  -- Offer pay-in-full BNPL only when the stylist opted in AND this booking
-  -- reaches a paid checkpoint (deposit required) AND the full ticket is
-  -- strictly more than the deposit (otherwise there's nothing extra to
-  -- finance and the deposit checkout already covers it).
+  -- Offer pay-in-full BNPL whenever the stylist opted in, the account can
+  -- take charges, and there's a real ticket to finance. This is offered
+  -- regardless of whether a deposit is required:
+  --   * deposit service  → client chooses deposit (card) vs full (BNPL).
+  --   * no-deposit service → client chooses pay-in-full (BNPL) vs just
+  --     sending the request (the existing pay-later flow).
+  -- resolved_price must strictly exceed whatever is already due as a
+  -- deposit (0 when none) so there's something extra to actually finance.
   offer_bnpl := coalesce(owner_bnpl_enabled, false)
-    and effective_deposit_required is true
+    and owner_charges_enabled is true
+    and owner_connect_id is not null
+    and owner_connect_id <> ''
     and resolved_price is not null
+    and resolved_price > 0
     and resolved_price > coalesce(effective_deposit_amount, 0);
 
   insert into public.booking_requests (

@@ -88,7 +88,14 @@ export async function POST(req: Request) {
   if (readErr || !row) {
     return fail(404, "Booking request not found.");
   }
-  if (row.approval_status !== "awaiting_deposit") {
+  // Payable checkpoints: a deposit-taking service lands as
+  // `awaiting_deposit`; a no-deposit service lands as `pending_review`
+  // (the client opted to pay the full ticket up front instead of just
+  // requesting). Both are valid entry points for a full payment.
+  if (
+    row.approval_status !== "awaiting_deposit" &&
+    row.approval_status !== "pending_review"
+  ) {
     return fail(409, `Request is not awaiting payment (state: ${row.approval_status}).`);
   }
 

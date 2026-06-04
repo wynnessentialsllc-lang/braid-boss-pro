@@ -336,9 +336,9 @@ function PaymentsInner() {
                 Let clients pay in full with Buy Now, Pay Later
               </p>
               <p style={{ fontSize: 12, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
-                On services that take a deposit, clients can choose to pay the
-                full price instead — with Affirm, Klarna, or Afterpay at
-                checkout. You still get paid up front, in full.
+                When booking, clients can choose to pay the full price with
+                Affirm, Klarna, or Afterpay at checkout — whether or not the
+                service takes a deposit. You still get paid up front, in full.
               </p>
             </div>
             <button
