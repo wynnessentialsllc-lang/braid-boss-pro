@@ -86,6 +86,10 @@ export type BookingRequestRecord = {
   selected_curl_pattern: string | null;
   client_style_notes: string | null;
   customization_summary: Record<string, any> | null;
+  // Who the appointment is for. Null/empty = the client themselves;
+  // a name means a dependent (e.g. a child the client booked for).
+  booked_for_name: string | null;
+  booked_for_note: string | null;
   portal_token: string | null;
   // Client self-service: cancel + one-time reschedule.
   cancel_token: string | null;

@@ -24495,6 +24495,32 @@ const ApprovalQueueScreen = ({
       }
       if (!client?.id) throw new Error("Couldn't resolve client");
 
+      // Who the appointment is for. When the client booked for someone
+      // else (e.g. their child), link/create a family member under the
+      // client so it shows in the "Booking for" picker and the client's
+      // record, and stamp the dependent onto the appointment. The client
+      // stays the contact + payer.
+      let dependentId: string | null = null;
+      let dependentName: string | null = null;
+      const bookedForName = String((req as any).booked_for_name || "").trim();
+      if (bookedForName) {
+        dependentName = bookedForName;
+        const existingDeps: any[] = Array.isArray(client.dependents) ? client.dependents : [];
+        let dep = existingDeps.find(
+          (d: any) => String(d?.name || "").trim().toLowerCase() === bookedForName.toLowerCase(),
+        );
+        if (!dep) {
+          dep = { id: `dep-${uid()}`, name: bookedForName, note: String((req as any).booked_for_note || "").trim() };
+          try {
+            const updatedClient = await store.upsertClient({ ...client, dependents: [...existingDeps, dep] });
+            if (updatedClient?.id) client = updatedClient;
+          } catch {
+            /* linking the family member is non-fatal — still stamp the name */
+          }
+        }
+        dependentId = dep.id;
+      }
+
       const apptId = req.appointment_id || `appt_${uid()}`;
       // Deposit accounting at approval time:
       //   * req.deposit_paid is the source of truth (flipped by the
@@ -24530,6 +24556,9 @@ const ApprovalQueueScreen = ({
         clientName: client.name || req.client_name,
         clientPhone: client.phone || req.client_phone || "",
         clientEmail: client.email || req.client_email || "",
+        // Who the appointment is for (null = the client themselves).
+        dependentId,
+        dependentName,
         style: req.service_name || "",
         date: req.preferred_date || "",
         time: req.preferred_time || "",
@@ -24691,6 +24720,12 @@ const ApprovalQueueScreen = ({
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-[14px] font-semibold truncate" style={{ color: C.espresso }}>{req.client_name}</p>
+                  {(req as any).booked_for_name && (
+                    <p className="text-[11px] font-semibold truncate" style={{ color: C.goldDeep }}>
+                      For {(req as any).booked_for_name}
+                      {(req as any).booked_for_note ? ` · ${(req as any).booked_for_note}` : ""}
+                    </p>
+                  )}
                   <p className="text-[11px]" style={{ color: C.muted }}>
                     {req.service_name || "Service TBD"}
                     {req.preferred_date ? ` · ${formatAppointmentDateShort(req.preferred_date, req.preferred_time)}` : ""}
