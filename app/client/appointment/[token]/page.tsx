@@ -30,6 +30,7 @@ type PortalState = {
   request_id: string;
   studio_name: string;
   client_name: string | null;
+  booked_for_name: string | null;
   service_name: string | null;
   approval_status: string;
   preferred_date: string | null;
@@ -346,6 +347,7 @@ export default function ClientAppointmentPortal() {
       <Card>
         <SectionTitle>Appointment</SectionTitle>
         <Row label="Service" value={s.service_name || "—"} strong />
+        {s.booked_for_name && <Row label="For" value={s.booked_for_name} />}
         <Row label="Date" value={fmtDate(s.preferred_date)} />
         <Row label="Time" value={s.preferred_time ? fmtTime(s.preferred_time) : "—"} />
         <Row label="Stylist" value={s.studio_name} />
