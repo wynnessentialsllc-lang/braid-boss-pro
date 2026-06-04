@@ -16845,6 +16845,12 @@ const useAuth = () => {
   const [mode, setMode] = useState<AuthMode>("loading");
   const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
+  // True once the initial getSession() has resolved. Until then we
+  // don't know whether the user is signed in, so the UI must show a
+  // splash — NOT the sign-in screen. Without this, a returning signed-in
+  // user (cold start / PWA resume-with-reload) sees a flash of the
+  // sign-in page before the restored session lands them on Home.
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -16868,6 +16874,7 @@ const useAuth = () => {
       const { data } = await supabase.auth.getSession();
       if (cancelled) return;
       const session = data.session;
+      setReady(true);
       if (session?.user) {
         setUserId(session.user.id);
         setEmail(session.user.email ?? null);
@@ -16879,6 +16886,7 @@ const useAuth = () => {
       setMode(guest ? "guest" : "loading");
     })();
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setReady(true);
       if (session?.user) {
         setUserId(session.user.id);
         setEmail(session.user.email ?? null);
@@ -16906,7 +16914,7 @@ const useAuth = () => {
     setMode("loading");
   }, []);
 
-  return { mode, userId, email, continueAsGuest, signOut };
+  return { mode, userId, email, ready, continueAsGuest, signOut };
 };
 
 type SyncState = "idle" | "syncing" | "offline" | "error";
@@ -30443,9 +30451,12 @@ export default function App() {
   // hook order is stable across renders.
   if (auth.mode === "loading") {
     // Show a cream splash until the intro state has resolved on the
-    // client (one tick post-mount). Prevents hydration flicker and
-    // avoids a flash of the AuthGate before the intro.
-    if (introSeen === null) {
+    // client (one tick post-mount) AND the initial session check has
+    // finished. The `!auth.ready` guard is what keeps a returning
+    // signed-in user from seeing a flash of the sign-in screen on cold
+    // start / PWA resume — we wait until we actually know whether
+    // there's a session before deciding between Home and the AuthGate.
+    if (introSeen === null || !auth.ready) {
       return (
         <div className="flex items-center justify-center" style={{ minHeight: "100dvh", background: C.cream }}>
           <GlobalStyle />
