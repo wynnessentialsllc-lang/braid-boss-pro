@@ -553,6 +553,90 @@ export const EDUCATION_CATEGORIES: EducationCategory[] = [
       },
     ],
   },
+  {
+    id: "feature-guides",
+    name: "App Features & How-Tos",
+    blurb: "Step-by-step guides for getting the most out of Braid Boss Pro.",
+    lessons: [
+      {
+        id: "edit-appointment-addons",
+        title: "How to add or change add-ons on a booked appointment",
+        readMinutes: 2,
+        body: [
+          "Plans change after booking — a client decides she wants the hair included, or an extra bundle. Open the appointment from your calendar and find the Add-ons card: toggle on any extra your service offers, or tap \"Add custom add-on\" for a one-off (name, price, extra time).",
+          "Adding or removing an add-on updates the appointment's total price and duration automatically. You can still type over either field. The deposit already paid stays put, so the difference just becomes the balance due.",
+          "Your client is emailed one tidy \"appointment updated\" note showing exactly what changed, and their appointment-details page updates to match — so nobody's guessing.",
+        ],
+        tryThisWeek:
+          "Open an upcoming appointment and practice adding, then removing, one add-on — watch the total and balance update live.",
+        relatedTool: "Calendar → Edit Appointment → Add-ons",
+      },
+      {
+        id: "switch-service-option",
+        title: "How to switch a client's service option without rebooking",
+        readMinutes: 2,
+        body: [
+          "If a client booked the wrong option — say Standard when she meant Boho Hair Included — you don't have to cancel and start over. Open the appointment and use the Option picker to switch.",
+          "Switching re-prices the ticket: the total and duration update to the new option (plus any add-ons), and the service name updates too. The deposit she already paid carries over, and the higher amount becomes balance due — exactly what she now owes.",
+          "She gets one consolidated update email with the new option and total, and her appointment-details page reflects the change.",
+        ],
+        tryThisWeek:
+          "Open a test appointment for a service that has options and switch between them to see the price and balance update.",
+        relatedTool: "Calendar → Edit Appointment → Option",
+      },
+      {
+        id: "edit-style-customization",
+        title: "How to fix the hair color or curl pattern on an appointment",
+        readMinutes: 2,
+        body: [
+          "The style details a client picked at booking — braiding-hair color (like 1B) and the boho/curl pattern — are editable from the appointment's Style customization card. Tap a quick-pick chip or type a custom value.",
+          "Your edits sync to the client's \"View appointment details\" page and are included in the update email, so you and the client are always working from the same picture before she sits in your chair.",
+        ],
+        tryThisWeek:
+          "Open an appointment, correct the hair color, then open the client's appointment link to confirm it shows there too.",
+        relatedTool: "Calendar → Edit Appointment → Style customization",
+      },
+      {
+        id: "offer-buy-now-pay-later",
+        title: "How to offer Buy Now, Pay Later in your shop",
+        readMinutes: 3,
+        body: [
+          "Bigger product and hair purchases convert better when clients can split the cost. Your shop checkout can show Affirm, Klarna, and Afterpay right next to card — the client chooses how to pay.",
+          "Turn the methods on once in your Stripe dashboard: Settings → Payment methods → your connected-accounts configuration → the \"Buy now, pay later\" section. Flip Affirm, Klarna, and Afterpay to on and save. (Leave \"Allow connected accounts to customize\" off so it applies everywhere.)",
+          "After that they appear automatically at checkout for carts that qualify (Affirm starts around $50), and card is always shown too. The provider pays you up front and the client repays them — there's nothing extra to manage per sale.",
+        ],
+        tryThisWeek:
+          "Enable Affirm/Klarna/Afterpay in Stripe, then add a $50+ item to your shop and start checkout to confirm they appear.",
+        relatedTool: "Shop checkout · Stripe → Payment methods",
+      },
+      {
+        id: "book-kids-and-family",
+        title: "How to book kids and family under one client",
+        readMinutes: 2,
+        body: [
+          "Parents often book more than one child. On a client's profile, add Family members — a name, plus an optional note like age or hair texture.",
+          "When you create or edit an appointment for that client, a \"Booking for\" picker lets you choose the client herself or one of her family members. The parent stays the contact, payer, and reminder recipient — only who the style is for changes.",
+          "On your public booking link, a client can pick \"Someone else\" and enter who it's for. When you approve it, that person is saved as a family member under the client automatically, so it's there next time.",
+        ],
+        tryThisWeek:
+          "Add a family member to one client, then book an appointment \"for\" them and confirm it shows on the calendar entry.",
+        relatedTool: "Clients → (open a client) → Family members",
+      },
+      {
+        id: "build-intake-form",
+        title: "How to build your consultation (intake) form",
+        readMinutes: 3,
+        body: [
+          "Intake questions appear on your booking page after the client picks a style and date. Answers save to her record and ride into the confirmation email once you approve the booking — so you're prepped before she arrives.",
+          "Each question can be Short text, Paragraph, Yes / No, Multiple choice (pick one), or \"Choose all that apply\" (the client ticks every option that fits — great for things like scalp concerns where more than one applies). For the choice types, list the options comma-separated.",
+          "Keep it short and high-signal — scalp sensitivities, last protective style, allergies, medications. A handful of the right questions tailors the appointment without slowing the booking down.",
+        ],
+        tryThisWeek:
+          "Add one \"Choose all that apply\" question (e.g. \"Any of these concerns?\") with 3–4 options, then preview it on your booking link.",
+        relatedTool: "Settings → Intake form",
+      },
+    ],
+  },
 ];
 
 export const EDUCATION_TOTAL_LESSONS = EDUCATION_CATEGORIES.reduce(
