@@ -24721,6 +24721,14 @@ const ApprovalQueueScreen = ({
 
         {filtered.map(req => {
           const status = req.approval_status as ApprovalStatus;
+          // Pay-in-full bookings share the deposit_paid_pending_approval
+          // state but should read as "paid in full" everywhere on the card.
+          const reqPaidInFull = !!req.paid_in_full;
+          const reqPaidAmount = Number(req.amount_paid || 0) || 0;
+          const paidBadgeLabel =
+            status === "deposit_paid_pending_approval" && reqPaidInFull
+              ? "Paid in full · needs approval"
+              : APPROVAL_STATUS_LABEL[status];
           const isOpen = expanded === req.id;
           const isFocused = focusRequestId === req.id;
           const fallbackDeposit = req.service_deposit_required && req.service_deposit_amount
@@ -24749,7 +24757,7 @@ const ApprovalQueueScreen = ({
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {status === "approved_pending_deposit" && <ApprovalCountdown req={req} />}
-                  <Pill tone={APPROVAL_STATUS_TONE[status]}>{APPROVAL_STATUS_LABEL[status]}</Pill>
+                  <Pill tone={APPROVAL_STATUS_TONE[status]}>{paidBadgeLabel}</Pill>
                 </div>
               </div>
 
@@ -24814,7 +24822,15 @@ const ApprovalQueueScreen = ({
 
               <ApprovalContractsBlock userId={store.userId || null} req={req} />
 
-              {req.deposit_amount !== null && req.deposit_amount !== undefined && (
+              {reqPaidInFull ? (
+                <div className="flex items-center justify-between text-[12px]">
+                  <span style={{ color: C.muted }}>Paid in full</span>
+                  <span style={{ color: C.goldDeep, fontWeight: 600 }}>
+                    {fmtMoney(reqPaidAmount || Number(req.service_price || 0), currency)}
+                    {req.deposit_paid_at ? " · paid" : ""}
+                  </span>
+                </div>
+              ) : req.deposit_amount !== null && req.deposit_amount !== undefined && (
                 <div className="flex items-center justify-between text-[12px]">
                   <span style={{ color: C.muted }}>Deposit</span>
                   <span style={{ color: C.goldDeep, fontWeight: 600 }}>
@@ -24947,7 +24963,9 @@ const ApprovalQueueScreen = ({
                   >
                     <Check size={14} style={{ color: C.success }} />
                     <span className="text-[11px] font-semibold" style={{ color: C.success }}>
-                      Deposit paid · {fmtMoney(Number(req.deposit_amount || 0), currency)}
+                      {reqPaidInFull
+                        ? `Paid in full · ${fmtMoney(reqPaidAmount || Number(req.service_price || 0), currency)}`
+                        : `Deposit paid · ${fmtMoney(Number(req.deposit_amount || 0), currency)}`}
                     </span>
                   </div>
                   <div className="flex gap-2">

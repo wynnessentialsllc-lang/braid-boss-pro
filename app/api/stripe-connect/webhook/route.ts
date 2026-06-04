@@ -306,6 +306,13 @@ export async function POST(req: Request) {
                 serviceName: br.service_name_snapshot || br.service_name || null,
                 preferredDate: br.preferred_date || null,
                 preferredTime: br.preferred_time || null,
+                // Pay-in-full flag + amount so the email template renders
+                // "Payment received / $50" instead of deposit wording.
+                paidInFull: isFullPayment,
+                amountPaid:
+                  isFullPayment && typeof amountTotalCents === "number"
+                    ? Math.round(amountTotalCents) / 100
+                    : null,
               },
               dedupe_key_in: `deposit_received:${requestId}`,
               booking_request_id_in: requestId,
