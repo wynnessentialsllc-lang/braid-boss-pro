@@ -413,6 +413,12 @@ export default function PublicBookingPage() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  // Who's this appointment for. Defaults to the booker themselves so
+  // adults breeze through; only when they pick "someone else" do we
+  // ask for the recipient's name (+ optional note like age).
+  const [bookedForSelf, setBookedForSelf] = useState(true);
+  const [recipientName, setRecipientName] = useState("");
+  const [recipientNote, setRecipientNote] = useState("");
   const [serviceName, setServiceName] = useState("");
   const [preferredDate, setPreferredDate] = useState("");
   const [preferredTime, setPreferredTime] = useState("");
@@ -1074,6 +1080,22 @@ export default function PublicBookingPage() {
           } catch {
             // Stylist can always resend signing links manually from
             // the Approvals queue Contracts mini-card.
+          }
+        }
+
+        // Who the appointment is for — best-effort, never blocks the
+        // booking. Only attaches when the client booked for someone
+        // else and gave a name; carried onto the appointment as the
+        // dependent on approval.
+        if (!bookedForSelf && recipientName.trim()) {
+          try {
+            await supabase.rpc("public_attach_booking_recipient", {
+              request_id_in: newRequestId,
+              booked_for_name_in: recipientName.trim(),
+              booked_for_note_in: recipientNote.trim() || null,
+            });
+          } catch {
+            /* booking already saved — recipient is non-fatal */
           }
         }
 
@@ -1917,6 +1939,62 @@ export default function PublicBookingPage() {
                     <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" autoComplete="email" />
                   </Field>
                 </div>
+                {/* Who's this appointment for — defaults to the booker.
+                    Picking "Someone else" reveals the recipient's name so
+                    a parent can book for their child. The booker stays the
+                    contact + payer. */}
+                <Field label="Who's this appointment for?">
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    {[
+                      { v: true, label: "Myself" },
+                      { v: false, label: "Someone else" },
+                    ].map((opt) => {
+                      const active = bookedForSelf === opt.v;
+                      return (
+                        <button
+                          key={String(opt.v)}
+                          type="button"
+                          onClick={() => {
+                            setBookedForSelf(opt.v);
+                            if (opt.v) { setRecipientName(""); setRecipientNote(""); }
+                          }}
+                          style={{
+                            padding: "12px 14px",
+                            borderRadius: 12,
+                            fontSize: 14,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            background: active ? C.espresso : C.paper,
+                            color: active ? C.paper : C.espresso,
+                            border: `1px solid ${active ? C.espresso : C.hairline}`,
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Field>
+                {!bookedForSelf && (
+                  <>
+                    <Field label="Who it's for">
+                      <Input
+                        value={recipientName}
+                        onChange={e => setRecipientName(e.target.value)}
+                        placeholder="e.g. Maya (your daughter)"
+                        autoComplete="off"
+                      />
+                    </Field>
+                    <Field label="Anything to note? (optional)">
+                      <Input
+                        value={recipientNote}
+                        onChange={e => setRecipientNote(e.target.value)}
+                        placeholder="e.g. 7 years old, fine hair"
+                        autoComplete="off"
+                      />
+                    </Field>
+                  </>
+                )}
                 {SMS_ENABLED && phone.trim() && (
                   <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
                     <input
