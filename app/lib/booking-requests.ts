@@ -46,6 +46,10 @@ export type BookingRequestRecord = {
   deposit_paid: boolean;
   deposit_paid_at: string | null;
   deposit_required: boolean;
+  // Set when the client paid the FULL ticket up front (BNPL/card via
+  // /api/booking-full/checkout) instead of just the deposit.
+  paid_in_full: boolean;
+  amount_paid: number | null;
   payment_status: PaymentStatus;
   stripe_session_id: string | null;
   stripe_checkout_session_id: string | null;

@@ -598,16 +598,17 @@ export const EDUCATION_CATEGORIES: EducationCategory[] = [
       },
       {
         id: "offer-buy-now-pay-later",
-        title: "How to offer Buy Now, Pay Later in your shop",
+        title: "How to offer Buy Now, Pay Later — shop and services",
         readMinutes: 3,
         body: [
-          "Bigger product and hair purchases convert better when clients can split the cost. Your shop checkout can show Affirm, Klarna, and Afterpay right next to card — the client chooses how to pay.",
+          "Bigger purchases convert better when clients can split the cost. Your shop checkout can show Affirm, Klarna, and Afterpay right next to card — the client chooses how to pay.",
           "Turn the methods on once in your Stripe dashboard: Settings → Payment methods → your connected-accounts configuration → the \"Buy now, pay later\" section. Flip Affirm, Klarna, and Afterpay to on and save. (Leave \"Allow connected accounts to customize\" off so it applies everywhere.)",
           "After that they appear automatically at checkout for carts that qualify (Affirm starts around $50), and card is always shown too. The provider pays you up front and the client repays them — there's nothing extra to manage per sale.",
+          "Want it on your services too? In Settings → Payments, turn on \"Let clients pay in full with Buy Now, Pay Later.\" On any service that takes a deposit, clients can then choose to pay the full price instead — financed through Affirm/Klarna/Afterpay — and you're paid in full up front, with no balance left to collect.",
         ],
         tryThisWeek:
-          "Enable Affirm/Klarna/Afterpay in Stripe, then add a $50+ item to your shop and start checkout to confirm they appear.",
-        relatedTool: "Shop checkout · Stripe → Payment methods",
+          "Enable Affirm/Klarna/Afterpay in Stripe, flip on pay-in-full in Settings → Payments, then start a booking on a deposit service to confirm the \"Pay in full\" option appears.",
+        relatedTool: "Shop checkout & Settings → Payments · Stripe → Payment methods",
       },
       {
         id: "book-kids-and-family",

@@ -114,6 +114,50 @@ function PaymentsInner() {
 
   const [launching, setLaunching] = useState(false);
 
+  // Pay-in-full BNPL opt-in. Lets clients pay a service's full price via
+  // Affirm / Klarna / Afterpay at checkout (vs. a card-only deposit).
+  // Stored on profiles.service_bnpl_enabled; written through the
+  // set_service_bnpl_enabled RPC so the locked-down column stays safe.
+  const [bnplEnabled, setBnplEnabled] = useState<boolean | null>(null);
+  const [bnplSaving, setBnplSaving] = useState(false);
+  const [bnplError, setBnplError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!userId) { if (!cancelled) setBnplEnabled(null); return; }
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from("profiles")
+        .select("service_bnpl_enabled")
+        .eq("id", userId)
+        .maybeSingle();
+      if (!cancelled) setBnplEnabled(!!data?.service_bnpl_enabled);
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const toggleBnpl = useCallback(async () => {
+    if (bnplSaving || bnplEnabled === null) return;
+    const next = !bnplEnabled;
+    setBnplSaving(true);
+    setBnplError(null);
+    // Optimistic flip; revert on failure.
+    setBnplEnabled(next);
+    try {
+      const supabase = getSupabase();
+      const { error: rpcErr } = await supabase.rpc("set_service_bnpl_enabled", {
+        enabled_in: next,
+      });
+      if (rpcErr) throw new Error(rpcErr.message);
+    } catch (e: any) {
+      setBnplEnabled(!next);
+      setBnplError(e?.message || "Couldn't save that. Try again.");
+    } finally {
+      setBnplSaving(false);
+    }
+  }, [bnplEnabled, bnplSaving]);
+
   // Detect the platform-side blocker: Stripe refuses to create
   // connected accounts until the platform owner accepts the Connect
   // responsibilities in the Stripe dashboard. We surface a friendly
@@ -272,6 +316,74 @@ function PaymentsInner() {
       ) : connect.error ? (
         <p style={{ fontSize: 12, color: C.danger }}>{connect.error}</p>
       ) : null}
+
+      {/* Pay-in-full BNPL opt-in. Only meaningful once the account can take
+          charges, so we surface it after onboarding is active. */}
+      {status === "active" && bnplEnabled !== null && (
+        <div
+          style={{
+            padding: 16,
+            borderRadius: 14,
+            background: C.cream,
+            border: `1px solid ${C.hairline}`,
+            display: "grid",
+            gap: 10,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <p style={{ fontSize: 14, fontWeight: 700, color: C.espresso }}>
+                Let clients pay in full with Buy Now, Pay Later
+              </p>
+              <p style={{ fontSize: 12, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+                On services that take a deposit, clients can choose to pay the
+                full price instead — with Affirm, Klarna, or Afterpay at
+                checkout. You still get paid up front, in full.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={bnplEnabled}
+              disabled={bnplSaving}
+              onClick={() => void toggleBnpl()}
+              style={{
+                position: "relative",
+                width: 46,
+                height: 28,
+                flexShrink: 0,
+                borderRadius: 999,
+                border: 0,
+                cursor: bnplSaving ? "default" : "pointer",
+                background: bnplEnabled ? C.goldDeep : C.hairline,
+                transition: "background 120ms ease",
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  top: 3,
+                  left: bnplEnabled ? 21 : 3,
+                  width: 22,
+                  height: 22,
+                  borderRadius: 999,
+                  background: C.paper,
+                  transition: "left 120ms ease",
+                }}
+              />
+            </button>
+          </div>
+          <p style={{ fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
+            Make sure Affirm, Klarna, and Afterpay are turned on in your Stripe
+            dashboard → Settings → Payment methods. Stripe only shows the ones
+            you&apos;ve enabled and that qualify for the amount.
+          </p>
+          {bnplError && (
+            <p style={{ fontSize: 12, color: C.danger }}>{bnplError}</p>
+          )}
+        </div>
+      )}
 
       <p style={{ fontSize: 11, color: C.muted, textAlign: "center", lineHeight: 1.5 }}>
         Stripe collects deposits as direct charges on your account.

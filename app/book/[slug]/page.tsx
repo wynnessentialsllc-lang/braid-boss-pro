@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
 import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LABEL } from "../../lib/waitlist";
@@ -446,6 +446,44 @@ export default function PublicBookingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Pay-in-full BNPL choice. When the stylist opted in and the booking
+  // takes a deposit, we pause after submit and let the client choose
+  // between paying the deposit (card) or the full ticket (BNPL/card)
+  // instead of auto-redirecting to the deposit checkout.
+  const [paymentChoice, setPaymentChoice] = useState<{
+    requestId: string;
+    depositAmount: number;
+    fullPrice: number;
+  } | null>(null);
+  const [choiceRedirecting, setChoiceRedirecting] = useState(false);
+
+  // Kick off one of the two booking checkouts and redirect to Stripe.
+  const startBookingCheckout = useCallback(
+    async (endpoint: string, requestId: string) => {
+      setSubmitError(null);
+      setChoiceRedirecting(true);
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ request_id: requestId }),
+        });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok || !out?.url) {
+          throw new Error(out?.error || "Couldn't start checkout. Please try again.");
+        }
+        if (typeof window !== "undefined") window.location.assign(String(out.url));
+      } catch (err: any) {
+        setSubmitError(
+          err?.message
+            ? `Couldn't start checkout: ${err.message}`
+            : "Couldn't start checkout. Please try again.",
+        );
+        setChoiceRedirecting(false);
+      }
+    },
+    [],
+  );
 
   // Waitlist mode — when the client doesn't see a workable slot, they
   // can join the waitlist directly via the anon insert policy on
@@ -987,6 +1025,9 @@ export default function PublicBookingPage() {
       let submittedOk = false;
       let newRequestId: string | null = null;
       let needsDeposit = false;
+      let offerBnpl = false;
+      let bnplFullPrice = 0;
+      let bnplDepositAmount = 0;
       const ctx = collectPublicContext();
       const supabase = getSupabase();
       // Phase B10 — the RPC now returns a TABLE with the new request
@@ -1025,6 +1066,11 @@ export default function PublicBookingPage() {
           submittedOk = true;
           newRequestId = String(row.request_id);
           needsDeposit = !!row.deposit_required && Number(row.deposit_amount) > 0;
+          // Pay-in-full BNPL offer — the RPC only sets this true when the
+          // stylist opted in AND the full ticket exceeds the deposit.
+          offerBnpl = !!row.bnpl_enabled;
+          bnplFullPrice = Number(row.service_price) || 0;
+          bnplDepositAmount = Number(row.deposit_amount) || 0;
         }
       }
       if (!submittedOk) {
@@ -1178,6 +1224,16 @@ export default function PublicBookingPage() {
       // The success URL routes them to /booking/success which polls
       // the RPC until the webhook flips approval_status.
       if (needsDeposit && newRequestId) {
+        // When the stylist offers pay-in-full BNPL, pause and let the
+        // client pick deposit vs full instead of auto-redirecting.
+        if (offerBnpl && bnplFullPrice > bnplDepositAmount) {
+          setPaymentChoice({
+            requestId: newRequestId,
+            depositAmount: bnplDepositAmount,
+            fullPrice: bnplFullPrice,
+          });
+          return;
+        }
         const checkoutRes = await fetch("/api/booking-deposit/checkout", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -1919,7 +1975,64 @@ export default function PublicBookingPage() {
           </div>
         )}
 
-        {!linkLoading && !linkError && !submitted && link && (
+        {/* Pay-in-full BNPL choice — only shown when the stylist opted in
+            and the booking takes a deposit. The client picks how to pay;
+            both paths redirect to Stripe Checkout. */}
+        {!linkLoading && !linkError && !submitted && paymentChoice && (
+          <div style={{ marginTop: 32, display: "grid", gap: 14 }}>
+            <div style={{ textAlign: "center" }}>
+              <p style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: C.espresso }}>
+                Almost there — choose how to pay
+              </p>
+              <p style={{ fontSize: 14, color: C.coffee, marginTop: 8, lineHeight: 1.5 }}>
+                Secure your appointment with a deposit, or pay in full now —
+                including Buy Now, Pay Later options at checkout.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              disabled={choiceRedirecting}
+              onClick={() => void startBookingCheckout("/api/booking-deposit/checkout", paymentChoice.requestId)}
+              style={{
+                padding: "16px 18px", borderRadius: 14, cursor: choiceRedirecting ? "default" : "pointer",
+                background: C.paper, color: C.espresso, border: `1px solid ${accent}`,
+                textAlign: "left", opacity: choiceRedirecting ? 0.6 : 1,
+              }}
+            >
+              <span style={{ display: "block", fontSize: 15, fontWeight: 700 }}>
+                Pay deposit · ${paymentChoice.depositAmount.toFixed(2)}
+              </span>
+              <span style={{ display: "block", fontSize: 12, color: C.muted, marginTop: 2 }}>
+                ${(paymentChoice.fullPrice - paymentChoice.depositAmount).toFixed(2)} balance due at your appointment
+              </span>
+            </button>
+
+            <button
+              type="button"
+              disabled={choiceRedirecting}
+              onClick={() => void startBookingCheckout("/api/booking-full/checkout", paymentChoice.requestId)}
+              style={{
+                padding: "16px 18px", borderRadius: 14, cursor: choiceRedirecting ? "default" : "pointer",
+                background: accent, color: C.paper, border: `1px solid ${accent}`,
+                textAlign: "left", opacity: choiceRedirecting ? 0.6 : 1,
+              }}
+            >
+              <span style={{ display: "block", fontSize: 15, fontWeight: 700 }}>
+                Pay in full · ${paymentChoice.fullPrice.toFixed(2)}
+              </span>
+              <span style={{ display: "block", fontSize: 12, color: "rgba(255,255,255,0.85)", marginTop: 2 }}>
+                Split it over time with Affirm, Klarna, or Afterpay at checkout
+              </span>
+            </button>
+
+            {choiceRedirecting && (
+              <p style={{ fontSize: 12, color: C.muted, textAlign: "center" }}>Opening secure checkout…</p>
+            )}
+          </div>
+        )}
+
+        {!linkLoading && !linkError && !submitted && !paymentChoice && link && (
           <form onSubmit={handleSubmit} style={{ marginTop: 28, display: "grid", gap: 14 }}>
             {/* Personal info gates on having picked a service when a
                 catalog exists — the landing should read as a menu
@@ -3135,7 +3248,7 @@ export default function PublicBookingPage() {
         )}
 
         {/* Waitlist alternate flow */}
-        {!linkLoading && !linkError && !submitted && (
+        {!linkLoading && !linkError && !submitted && !paymentChoice && (
           <div style={{ marginTop: 24, padding: 16, borderRadius: 16, background: C.paper, border: `1px solid ${C.hairline}` }}>
             {!waitlistOpen && !waitlistDone && (
               <button

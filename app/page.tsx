@@ -24547,8 +24547,16 @@ const ApprovalQueueScreen = ({
       // without having to re-read the live services row.
       const totalPriceResolved = Number(req.service_price || 0) || 0;
       const depositAmtRaw = Number(req.deposit_amount || 0) || 0;
-      const depositActuallyPaid = !!req.deposit_paid && depositAmtRaw > 0;
-      const depositPaidAmount = depositActuallyPaid ? depositAmtRaw : 0;
+      // Pay-in-full (BNPL or card via /api/booking-full/checkout): the
+      // client already paid the whole ticket, so credit the full amount and
+      // leave a $0 balance. amount_paid is the source of truth; fall back to
+      // the resolved total if it's somehow missing.
+      const paidInFull = !!req.paid_in_full;
+      const fullPaidAmount = Number(req.amount_paid || 0) || totalPriceResolved;
+      const depositActuallyPaid = paidInFull || (!!req.deposit_paid && depositAmtRaw > 0);
+      const depositPaidAmount = paidInFull
+        ? fullPaidAmount
+        : (depositActuallyPaid ? depositAmtRaw : 0);
       const paymentDateISO = (() => {
         if (!depositActuallyPaid) return "";
         if (req.deposit_paid_at) {
