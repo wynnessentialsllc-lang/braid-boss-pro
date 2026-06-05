@@ -407,12 +407,19 @@ export default function PublicBookingPage() {
   // the page's primary action, which otherwise sits below the bio /
   // socials / gallery / reviews.
   const bookingFormRef = useRef<HTMLFormElement | null>(null);
+  // Submit button ref — the sticky price summary (shown while the form
+  // is on screen) scrolls here so a configured client can jump straight
+  // to "Pay deposit & request".
+  const bookingSubmitRef = useRef<HTMLButtonElement | null>(null);
   // Sticky "Book" bar shows only while the form is OFF screen, so the
   // CTA is always one tap away without doubling up once the visitor is
   // already at the picker.
   const [bookingInView, setBookingInView] = useState(false);
   const scrollToBooking = useCallback(() => {
     bookingFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+  const scrollToSubmit = useCallback(() => {
+    bookingSubmitRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
   // Watch the booking form so the sticky bar can hide once the picker
   // is on screen. Re-runs when the link resolves (the form mounts only
@@ -2322,100 +2329,15 @@ export default function PublicBookingPage() {
 
         {!linkLoading && !linkError && !submitted && !paymentChoice && link && (
           <form ref={bookingFormRef} onSubmit={handleSubmit} style={{ marginTop: 28, display: "grid", gap: 14 }}>
-            {/* Personal info gates on having picked a service when a
-                catalog exists — the landing should read as a menu
-                (Acuity flow). Legacy/free-form bookings keep the
-                old "name first" layout because there's no service
-                grid above. */}
-            {(serviceId || !hasCatalog) && (
-              <>
-                <Field label="Your name">
-                  <Input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" autoComplete="name" required />
-                </Field>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <Field label="Phone">
-                    <Input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="555-0123" autoComplete="tel" />
-                  </Field>
-                  <Field label="Email">
-                    <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" autoComplete="email" />
-                  </Field>
-                </div>
-                {/* Who's this appointment for — defaults to the booker.
-                    Picking "Someone else" reveals the recipient's name so
-                    a parent can book for their child. The booker stays the
-                    contact + payer. */}
-                <Field label="Who's this appointment for?">
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    {[
-                      { v: true, label: "Myself" },
-                      { v: false, label: "Someone else" },
-                    ].map((opt) => {
-                      const active = bookedForSelf === opt.v;
-                      return (
-                        <button
-                          key={String(opt.v)}
-                          type="button"
-                          onClick={() => {
-                            setBookedForSelf(opt.v);
-                            if (opt.v) { setRecipientName(""); setRecipientNote(""); }
-                          }}
-                          style={{
-                            padding: "12px 14px",
-                            borderRadius: 12,
-                            fontSize: 14,
-                            fontWeight: 600,
-                            cursor: "pointer",
-                            background: active ? C.espresso : C.paper,
-                            color: active ? C.paper : C.espresso,
-                            border: `1px solid ${active ? C.espresso : C.hairline}`,
-                          }}
-                        >
-                          {opt.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </Field>
-                {!bookedForSelf && (
-                  <>
-                    <Field label="Who it's for">
-                      <Input
-                        value={recipientName}
-                        onChange={e => setRecipientName(e.target.value)}
-                        placeholder="e.g. Maya (daughter)"
-                        autoComplete="off"
-                      />
-                    </Field>
-                    <Field label="Anything to note? (optional)">
-                      <Input
-                        value={recipientNote}
-                        onChange={e => setRecipientNote(e.target.value)}
-                        placeholder="e.g. 7 years old, fine hair"
-                        autoComplete="off"
-                      />
-                    </Field>
-                  </>
-                )}
-                {SMS_ENABLED && phone.trim() && (
-                  <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={smsOptIn}
-                      onChange={e => setSmsOptIn(e.target.checked)}
-                      style={{ marginTop: 2, width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }}
-                    />
-                    <span style={{ fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
-                      I agree to receive transactional SMS from Braid Boss Pro on behalf of my stylist about my appointment (confirmations, reminders, balance reminders, rebooking). Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out, <strong>HELP</strong> for help. See our{" "}
-                      <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Privacy Policy</a>{" "}
-                      and{" "}
-                      <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Terms</a>.
-                    </span>
-                  </label>
-                )}
-              </>
-            )}
+            {/* Booking funnel order: service menu → date/time → your
+                details → consultation → deposit. Contact details used to
+                sit here at the top; they now render after the calendar
+                (see the "3 · Your details" block below) so the client
+                configures their style and picks a time before being
+                asked who they are. */}
             {hasCatalog ? (
               <>
+                <p style={stepHeaderStyle}>1 · Choose your service</p>
                 {/* Featured services — pinned row above the category
                     chips. Only renders when at least one service has
                     `featured = true`. Tapping a card jumps straight
@@ -3257,10 +3179,11 @@ export default function PublicBookingPage() {
                 </div>
               );
             })()}
-            {/* Calendar + notes + submit only after a service is picked
+            {/* Calendar + details + submit only after a service is picked
                 (or in legacy free-form mode), so the landing reads
                 cleanly as a menu. */}
             {(serviceId || !hasCatalog) && <>
+            {hasCatalog && <p style={stepHeaderStyle}>2 · Pick a time</p>}
             <BookingCalendar
               monthCursor={monthCursor}
               setMonthCursor={setMonthCursor}
@@ -3353,6 +3276,93 @@ export default function PublicBookingPage() {
                   </div>
                 )}
               </div>
+            )}
+            {/* 3 · Your details — relocated from the top of the form so
+                contact info is collected only after the client has
+                configured their style and picked a time. */}
+            {hasCatalog && <p style={stepHeaderStyle}>3 · Your details</p>}
+            <Field label="Your name">
+              <Input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" autoComplete="name" required />
+            </Field>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Phone">
+                <Input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="555-0123" autoComplete="tel" />
+              </Field>
+              <Field label="Email">
+                <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" autoComplete="email" />
+              </Field>
+            </div>
+            {/* Who's this appointment for — defaults to the booker.
+                Picking "Someone else" reveals the recipient's name so
+                a parent can book for their child. The booker stays the
+                contact + payer. */}
+            <Field label="Who's this appointment for?">
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[
+                  { v: true, label: "Myself" },
+                  { v: false, label: "Someone else" },
+                ].map((opt) => {
+                  const active = bookedForSelf === opt.v;
+                  return (
+                    <button
+                      key={String(opt.v)}
+                      type="button"
+                      onClick={() => {
+                        setBookedForSelf(opt.v);
+                        if (opt.v) { setRecipientName(""); setRecipientNote(""); }
+                      }}
+                      style={{
+                        padding: "12px 14px",
+                        borderRadius: 12,
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        background: active ? C.espresso : C.paper,
+                        color: active ? C.paper : C.espresso,
+                        border: `1px solid ${active ? C.espresso : C.hairline}`,
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+            {!bookedForSelf && (
+              <>
+                <Field label="Who it's for">
+                  <Input
+                    value={recipientName}
+                    onChange={e => setRecipientName(e.target.value)}
+                    placeholder="e.g. Maya (daughter)"
+                    autoComplete="off"
+                  />
+                </Field>
+                <Field label="Anything to note? (optional)">
+                  <Input
+                    value={recipientNote}
+                    onChange={e => setRecipientNote(e.target.value)}
+                    placeholder="e.g. 7 years old, fine hair"
+                    autoComplete="off"
+                  />
+                </Field>
+              </>
+            )}
+            {SMS_ENABLED && phone.trim() && (
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={smsOptIn}
+                  onChange={e => setSmsOptIn(e.target.checked)}
+                  style={{ marginTop: 2, width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }}
+                />
+                <span style={{ fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
+                  I agree to receive transactional SMS from Braid Boss Pro on behalf of my stylist about my appointment (confirmations, reminders, balance reminders, rebooking). Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out, <strong>HELP</strong> for help. See our{" "}
+                  <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Privacy Policy</a>{" "}
+                  and{" "}
+                  <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Terms</a>.
+                </span>
+              </label>
             )}
             {!hasCatalog && services.length === 0 && (
               <details
@@ -3496,7 +3506,7 @@ export default function PublicBookingPage() {
             {submitError && (
               <p style={{ fontSize: 12, color: C.danger }}>{submitError}</p>
             )}
-            <button type="submit" disabled={submitting || (noShowConsentRequired && !noShowConsent)}
+            <button ref={bookingSubmitRef} type="submit" disabled={submitting || (noShowConsentRequired && !noShowConsent)}
               // 2026 refresh: primary booking CTA now uses the brand
               // purple→coral gradient with a soft halo shadow. The
               // stylist's accent still drives borders/chips, but the
@@ -3749,6 +3759,74 @@ export default function PublicBookingPage() {
           Book an appointment
         </button>
       </div>
+
+      {/* Sticky price summary — the counterpart to the Book bar above.
+          Shows while the form IS on screen and a service is selected, so
+          the running total + deposit-due-today stay visible as the
+          client stacks add-ons. Tapping jumps to the submit button. */}
+      {(() => {
+        const price = resolved?.price ?? (selectedCatalogService ? Number(selectedCatalogService.base_price) : null);
+        const hasPrice = price != null && Number.isFinite(price);
+        const show = bookingInView && !!serviceId && hasPrice;
+        const deposit = resolved && resolved.depositRequired
+          ? resolved.depositAmount
+          : (selectedCatalogService?.deposit_required && !hasVariations
+              ? Number(selectedCatalogService.deposit_amount || 0)
+              : 0);
+        return (
+          <div
+            aria-hidden={!show}
+            style={{
+              position: "fixed",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 80,
+              display: "flex",
+              justifyContent: "center",
+              padding: "12px 16px calc(12px + env(safe-area-inset-bottom, 0px))",
+              background: "linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.92) 38%, #FFFFFF 100%)",
+              pointerEvents: show ? "auto" : "none",
+              opacity: show ? 1 : 0,
+              transform: show ? "translateY(0)" : "translateY(110%)",
+              transition: "opacity 220ms ease, transform 260ms cubic-bezier(.2,.8,.2,1)",
+            }}
+          >
+            <button
+              type="button"
+              onClick={scrollToSubmit}
+              style={{
+                width: "100%",
+                maxWidth: 480,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "12px 18px",
+                borderRadius: 999,
+                border: `1px solid ${C.hairline}`,
+                cursor: "pointer",
+                background: "#FFFFFF",
+                color: C.espresso,
+                boxShadow: "0 14px 30px -12px rgba(21, 17, 26, 0.40)",
+                appearance: "none",
+                WebkitAppearance: "none",
+              }}
+            >
+              <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.2 }}>
+                <span style={{ fontSize: 16, fontWeight: 800 }}>${hasPrice ? price!.toFixed(0) : "0"}</span>
+                <span style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>
+                  {deposit > 0 ? `$${deposit.toFixed(0)} deposit due today` : "No deposit due today"}
+                </span>
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: accent, fontSize: 14, fontWeight: 700 }}>
+                Review &amp; book
+                <span aria-hidden style={{ fontSize: 18, lineHeight: 1 }}>›</span>
+              </span>
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Tap-to-expand lightbox. Self-contained — no portal needed
           because this page is its own scope with no parent
@@ -4008,6 +4086,16 @@ const inputStyle: React.CSSProperties = {
   outline: "none",
 };
 const selectStyle: React.CSSProperties = { ...inputStyle, appearance: "none" };
+// Numbered step header for the booking funnel — gives the long form a
+// guided "1 · 2 · 3" rhythm instead of one endless scroll.
+const stepHeaderStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+  color: C.brandPrimary,
+  margin: "6px 0 -2px",
+};
 
 // Shared between the "Recommended Products" + "For Your Appointment"
 // rails. Image on top, title + price below, optional external
