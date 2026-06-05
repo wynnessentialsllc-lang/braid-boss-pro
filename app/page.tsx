@@ -3541,6 +3541,9 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   userId: string | null;
 }) => {
   const [businessName, setBusinessName] = useState<string>(link?.business_name || "");
+  // Storefront-only name — shown on the shop + product pages. Blank
+  // falls back to the studio name so existing shops are unchanged.
+  const [shopName, setShopName] = useState<string>(link?.shop_name || "");
   const [intro, setIntro] = useState<string>(link?.intro || "");
   // Header customization — hero layout + the branded copy that fills
   // the editorial / spotlight heroes on the public booking page.
@@ -3582,6 +3585,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   useEffect(() => {
     if (!open) return;
     setBusinessName(link?.business_name || "");
+    setShopName(link?.shop_name || "");
     setIntro(link?.intro || "");
     setHeaderTheme(link?.header_theme || "classic");
     setTagline(link?.tagline || "");
@@ -3642,6 +3646,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         : "classic";
       const patch: Record<string, any> = {
         business_name: businessName.trim() || null,
+        shop_name: shopName.trim() || null,
         intro: intro.trim() || null,
         header_theme: themeOut,
         tagline: tagline.trim() || null,
@@ -3685,8 +3690,11 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   return (
     <Sheet open={open} onClose={onClose} title="Customize booking page">
       <div className="space-y-4">
-        <Field label="Studio name">
-          <Input value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="SBW Braiding" />
+        <Field label="Studio name" hint="Shown on your booking page — your stylist name (e.g. “Sheree”).">
+          <Input value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="Sheree" />
+        </Field>
+        <Field label="Shop name" hint="Optional — shown on your shop page. Use your brand/store name (e.g. “SBW Braiding”). Leave blank to reuse your studio name.">
+          <Input value={shopName} onChange={(e) => setShopName(e.target.value)} placeholder="SBW Braiding" />
         </Field>
         <Field label="Intro line" hint="Optional — one sentence that greets visitors.">
           <Input value={intro} onChange={(e) => setIntro(e.target.value)} placeholder="Welcome — let's get you on the books." />
@@ -18334,6 +18342,9 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
     active: boolean;
     intro: string | null;
     business_name: string | null;
+    // Storefront-only brand/store name (20260911). Shown on the shop +
+    // product pages; the booking page keeps using business_name.
+    shop_name?: string | null;
     logo_url?: string | null;
     location_text?: string | null;
     phone?: string | null;
@@ -18401,7 +18412,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
       const { data: link } = await supabase
         .from("booking_links")
         .select(
-          "slug, active, intro, business_name, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business, header_theme, tagline, about"
+          "slug, active, intro, business_name, shop_name, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business, header_theme, tagline, about"
         )
         .eq("user_id", userId)
         .order("created_at", { ascending: false })

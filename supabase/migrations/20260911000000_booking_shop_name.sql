@@ -1,0 +1,22 @@
+-- Separate stylist name (booking page) from shop name (storefront).
+--
+-- Until now a single column — booking_links.business_name — drove the
+-- name on BOTH the public booking page (/book/<slug>) and the public
+-- storefront (/@handle/shop, product pages). Stylists who use the
+-- editorial / spotlight booking heroes put their personal name there
+-- (e.g. "Sheree"), but that same name then showed at the top of their
+-- shop, where a brand/store name (e.g. "SBW Braiding") reads better.
+--
+-- This adds an optional `shop_name` override that is used ONLY by the
+-- storefront surfaces. The booking page keeps using business_name, so:
+--
+--   * business_name → the stylist name shown on the booking page
+--                      (and the studio identity used in emails / SMS).
+--   * shop_name      → the brand/store name shown on the shop +
+--                      product pages. Falls back to business_name when
+--                      blank, so every existing storefront is unchanged.
+--
+-- Nullable with no default — a NULL shop_name means "use the studio
+-- name", which preserves today's behavior for every existing link.
+alter table public.booking_links
+  add column if not exists shop_name text;
