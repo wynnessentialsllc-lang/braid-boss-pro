@@ -70,6 +70,7 @@ type Tab = "profile" | "shop";
 export const StorefrontShell = ({
   handle,
   businessName,
+  description,
   bannerUrl,
   logoUrl,
   active,
@@ -77,6 +78,9 @@ export const StorefrontShell = ({
 }: {
   handle: string;             // Without the leading "@" — e.g. "janestylist".
   businessName: string | null;
+  // Short shop description shown under the shop name — what the
+  // stylist sells (e.g. "Hair bundles, edge control & growth oils").
+  description?: string | null;
   bannerUrl: string | null;
   logoUrl: string | null;
   active: Tab;
@@ -248,11 +252,20 @@ export const StorefrontShell = ({
             >
               {businessName || "Welcome"}
             </h1>
-            {/* The @handle is intentionally not shown here. It's the
-                stylist's booking handle; on the shop — which carries
-                its own brand/store name — it read as a mismatched
-                personal tag. The handle still drives nav via the
-                `handle` prop. */}
+            {/* Shop description sits where the @handle used to. It's a
+                short line describing what the stylist sells. The
+                @handle is intentionally not shown — on a shop that
+                carries its own brand name it read as a mismatched
+                personal tag (the handle still drives nav via the
+                `handle` prop). */}
+            {description?.trim() && (
+              <p
+                className="text-[12px]"
+                style={{ color: C.muted, marginTop: 4, lineHeight: 1.5 }}
+              >
+                {description.trim()}
+              </p>
+            )}
           </div>
         </div>
 

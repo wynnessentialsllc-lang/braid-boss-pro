@@ -19,6 +19,8 @@ export type StylistProfile = {
   // Storefront-only brand/store name. Falls back to business_name when
   // null so existing shops are unchanged. See 20260911 migration.
   shop_name: string | null;
+  // Storefront-only description shown under the shop name (20260913).
+  shop_description: string | null;
   intro: string | null;
   logo_url: string | null;
   banner_image_url: string | null;
@@ -87,7 +89,7 @@ export const useStylistProfile = (handle: string): UseStylistProfileState => {
       const { data: extra } = await supabase
         .from("booking_links")
         .select(
-          "shop_name, shop_logo_url, shop_banner_url, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business",
+          "shop_name, shop_description, shop_logo_url, shop_banner_url, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business",
         )
         .eq("slug", row.slug)
         .maybeSingle();
@@ -99,6 +101,7 @@ export const useStylistProfile = (handle: string): UseStylistProfileState => {
           branded_slug: row.branded_slug ?? null,
           business_name: row.business_name ?? null,
           shop_name: extra?.shop_name ?? null,
+          shop_description: extra?.shop_description ?? null,
           intro: row.intro ?? null,
           logo_url: row.logo_url ?? null,
           banner_image_url: extra?.banner_image_url ?? null,

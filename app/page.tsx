@@ -3544,6 +3544,8 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   // Storefront-only name — shown on the shop + product pages. Blank
   // falls back to the studio name so existing shops are unchanged.
   const [shopName, setShopName] = useState<string>(link?.shop_name || "");
+  // Short shop description shown under the shop name on the storefront.
+  const [shopDescription, setShopDescription] = useState<string>(link?.shop_description || "");
   // Storefront-only branding overrides. Blank falls back to the
   // booking logo / banner on the public shop.
   const [shopLogoUrl, setShopLogoUrl] = useState<string>(link?.shop_logo_url || "");
@@ -3596,6 +3598,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
     if (!open) return;
     setBusinessName(link?.business_name || "");
     setShopName(link?.shop_name || "");
+    setShopDescription(link?.shop_description || "");
     setShopLogoUrl(link?.shop_logo_url || "");
     setShopBannerUrl(link?.shop_banner_url || "");
     setIntro(link?.intro || "");
@@ -3659,6 +3662,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
       const patch: Record<string, any> = {
         business_name: businessName.trim() || null,
         shop_name: shopName.trim() || null,
+        shop_description: shopDescription.trim().slice(0, 200) || null,
         shop_logo_url: shopLogoUrl.trim() || null,
         shop_banner_url: shopBannerUrl.trim() || null,
         intro: intro.trim() || null,
@@ -3709,6 +3713,10 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         </Field>
         <Field label="Shop name" hint="Optional — shown on your shop page. Use your brand/store name (e.g. “SBW Braiding”). Leave blank to reuse your studio name.">
           <Input value={shopName} onChange={(e) => setShopName(e.target.value)} placeholder="SBW Braiding" />
+        </Field>
+        <Field label="Shop description" hint="Optional — a short line under your shop name describing what you sell.">
+          <Textarea value={shopDescription} onChange={(e) => setShopDescription(e.target.value)} rows={2}
+            placeholder="Hair bundles, edge control & growth oils — shipped fast." />
         </Field>
         <Field label="Intro line" hint="Optional — one sentence that greets visitors.">
           <Input value={intro} onChange={(e) => setIntro(e.target.value)} placeholder="Welcome — let's get you on the books." />
@@ -18528,6 +18536,8 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
     // Storefront-only brand/store name (20260911). Shown on the shop +
     // product pages; the booking page keeps using business_name.
     shop_name?: string | null;
+    // Storefront-only description shown under the shop name (20260913).
+    shop_description?: string | null;
     // Storefront-only branding overrides (20260912). Each falls back to
     // its booking-page counterpart on the public shop when blank.
     shop_logo_url?: string | null;
@@ -18599,7 +18609,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
       const { data: link } = await supabase
         .from("booking_links")
         .select(
-          "slug, active, intro, business_name, shop_name, shop_logo_url, shop_banner_url, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business, header_theme, tagline, about"
+          "slug, active, intro, business_name, shop_name, shop_description, shop_logo_url, shop_banner_url, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business, header_theme, tagline, about"
         )
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
