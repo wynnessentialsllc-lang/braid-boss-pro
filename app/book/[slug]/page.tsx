@@ -170,7 +170,11 @@ type LinkConfig = {
   policies?: string | null;
   accent_color?: string | null;
   // Gallery — added by 20260608 migration. Array of { url, path, sort }.
-  gallery_photos?: Array<{ url: string; path?: string; sort?: number }> | null;
+  // serviceId / label are optional per-photo "shop this look" metadata:
+  // serviceId links the photo to a service (surfaces name + "from $X"
+  // and lets "Book this look" pre-select it); label is a free-form
+  // style name.
+  gallery_photos?: Array<{ url: string; path?: string; sort?: number; serviceId?: string; label?: string }> | null;
   // Storefront profile fields — added by 20260617 migration. All
   // optional; the branded header gracefully drops sections that
   // aren't filled in.
@@ -1385,6 +1389,18 @@ export default function PublicBookingPage() {
     );
   }
 
+  // Resolve a gallery photo's "shop this look" metadata. A photo can
+  // be linked to a service (serviceId) and/or carry a free-form style
+  // label. When linked, we surface the live service name + "from $X"
+  // and let "Book this look" pre-select it. Defined here — after all
+  // state is declared — so it can close over `catalog` safely.
+  const resolvePhotoMeta = (photo: { serviceId?: string; label?: string }) => {
+    const svc = photo.serviceId ? catalog.find((s) => s.id === photo.serviceId) : undefined;
+    const title = (photo.label || "").trim() || svc?.name || "";
+    const fromPrice = svc ? Number((svc as any).base_price) : null;
+    return { svc, title, fromPrice };
+  };
+
   return (
     <div style={{ minHeight: "100dvh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso }}>
       <style>{`
@@ -2016,13 +2032,16 @@ export default function PublicBookingPage() {
                 .slice()
                 .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
                 .slice(0, 8)
-                .map((p, i) => (
+                .map((p, i) => {
+                  const meta = resolvePhotoMeta(p);
+                  return (
                   <button
                     key={p.url || i}
                     type="button"
                     onClick={() => setLightboxIndex(i)}
-                    aria-label={`Open photo ${i + 1}`}
+                    aria-label={meta.title ? `Open ${meta.title}` : `Open photo ${i + 1}`}
                     style={{
+                      position: "relative",
                       flex: "0 0 auto",
                       appearance: "none",
                       WebkitAppearance: "none",
@@ -2038,7 +2057,7 @@ export default function PublicBookingPage() {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={p.url}
-                      alt={`${link?.business_name || "Studio"} — photo ${i + 1}`}
+                      alt={meta.title || `${link?.business_name || "Studio"} — photo ${i + 1}`}
                       loading="lazy"
                       decoding="async"
                       style={{
@@ -2048,8 +2067,35 @@ export default function PublicBookingPage() {
                         objectFit: "cover",
                       }}
                     />
+                    {/* "Shop this look" caption — only when the stylist
+                        named the style or linked a service. Gradient
+                        keeps the text legible over any photo. */}
+                    {(meta.title || meta.fromPrice != null) && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: 0, right: 0, bottom: 0,
+                          padding: "20px 12px 10px",
+                          textAlign: "left",
+                          background: "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.62) 100%)",
+                          color: "#FFFFFF",
+                        }}
+                      >
+                        {meta.title && (
+                          <p style={{ margin: 0, fontSize: 13, fontWeight: 700, lineHeight: 1.25, textShadow: "0 1px 6px rgba(0,0,0,0.4)" }}>
+                            {meta.title}
+                          </p>
+                        )}
+                        {meta.fromPrice != null && (
+                          <p style={{ margin: "2px 0 0", fontSize: 11, fontWeight: 600, opacity: 0.92 }}>
+                            from ${meta.fromPrice.toFixed(0)}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </button>
-                ))}
+                  );
+                })}
             </div>
           </div>
         )}
@@ -3829,6 +3875,7 @@ export default function PublicBookingPage() {
         const close = () => setLightboxIndex(null);
         const prev = () => setLightboxIndex((cur) => cur === null ? null : (cur - 1 + photos.length) % photos.length);
         const next = () => setLightboxIndex((cur) => cur === null ? null : (cur + 1) % photos.length);
+        const meta = resolvePhotoMeta(p);
         return (
           <div
             role="dialog"
@@ -3940,33 +3987,70 @@ export default function PublicBookingPage() {
             {/* "Book this look" — turns the portfolio into the front
                 door of the funnel. Closes the lightbox and scrolls
                 straight to the service picker instead of leaving the
-                photo as a dead end. Sits above the dot indicators. */}
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); close(); scrollToBooking(); }}
+                photo as a dead end. Sits above the dot indicators.
+                When the photo is linked to a service, the style name +
+                "from $X" show above the button and the tap pre-selects
+                that service. */}
+            <div
+              onClick={(e) => e.stopPropagation()}
               style={{
                 position: "absolute",
-                left: "50%",
-                transform: "translateX(-50%)",
+                left: 0, right: 0,
                 bottom: photos.length > 1
                   ? "max(52px, calc(env(safe-area-inset-bottom) + 52px))"
                   : "max(28px, env(safe-area-inset-bottom))",
-                padding: "11px 22px",
-                borderRadius: 999,
-                border: "none",
-                cursor: "pointer",
-                background: "#FFFFFF",
-                color: C.espresso,
-                fontSize: 13,
-                fontWeight: 700,
-                letterSpacing: "0.02em",
-                boxShadow: "0 10px 24px -8px rgba(0,0,0,0.6)",
-                appearance: "none",
-                WebkitAppearance: "none",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 8,
+                padding: "0 16px",
               }}
             >
-              Book this look
-            </button>
+              {(meta.title || meta.fromPrice != null) && (
+                <div style={{ textAlign: "center", color: "#FFFFFF", textShadow: "0 1px 8px rgba(0,0,0,0.6)" }}>
+                  {meta.title && (
+                    <p style={{ margin: 0, fontSize: 15, fontWeight: 700, lineHeight: 1.2 }}>{meta.title}</p>
+                  )}
+                  {meta.fromPrice != null && (
+                    <p style={{ margin: "2px 0 0", fontSize: 12, fontWeight: 600, opacity: 0.92 }}>from ${meta.fromPrice.toFixed(0)}</p>
+                  )}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  close();
+                  // Pre-select the linked service (mirrors the
+                  // featured-card handler) before scrolling to the
+                  // picker. Falls back to a plain scroll when the
+                  // photo isn't linked or the service is inactive.
+                  if (meta.svc) {
+                    setServiceId(meta.svc.id);
+                    setSelectedVariationId("");
+                    setServiceName(meta.svc.name || "");
+                    if (meta.svc.category_id) setActiveCategoryId(meta.svc.category_id);
+                  }
+                  scrollToBooking();
+                }}
+                style={{
+                  padding: "11px 22px",
+                  borderRadius: 999,
+                  border: "none",
+                  cursor: "pointer",
+                  background: meta.svc ? accent : "#FFFFFF",
+                  color: meta.svc ? "#FFFFFF" : C.espresso,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  letterSpacing: "0.02em",
+                  boxShadow: "0 10px 24px -8px rgba(0,0,0,0.6)",
+                  appearance: "none",
+                  WebkitAppearance: "none",
+                }}
+              >
+                Book this look
+              </button>
+            </div>
           </div>
         );
       })()}

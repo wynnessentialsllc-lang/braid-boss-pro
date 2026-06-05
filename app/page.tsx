@@ -3575,7 +3575,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   );
   const [gallery, setGallery] = useState<GalleryPhoto[]>(
     Array.isArray(link?.gallery_photos)
-      ? (link!.gallery_photos as any[]).map((p, i) => ({ url: p.url, path: p.path || "", sort: typeof p.sort === "number" ? p.sort : i }))
+      ? (link!.gallery_photos as any[]).map((p, i) => ({ url: p.url, path: p.path || "", sort: typeof p.sort === "number" ? p.sort : i, serviceId: p.serviceId || undefined, label: p.label || undefined }))
       : []
   );
   const [busy, setBusy] = useState(false);
@@ -3592,6 +3592,10 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   const shopBannerInputRef = useRef<HTMLInputElement | null>(null);
   const [shopLogoUploading, setShopLogoUploading] = useState(false);
   const [shopBannerUploading, setShopBannerUploading] = useState(false);
+  // Active services, for linking a gallery photo to a "Book this look"
+  // service. Fetched when the sheet opens so the dropdown reflects the
+  // stylist's live catalog.
+  const [galleryServices, setGalleryServices] = useState<Array<{ id: string; name: string; base_price: number }>>([]);
 
   // Re-hydrate when the link prop changes (e.g. after a save).
   useEffect(() => {
@@ -3620,12 +3624,30 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
     setYearsInBusiness(link?.years_in_business != null ? String(link.years_in_business) : "");
     setGallery(
       Array.isArray(link?.gallery_photos)
-        ? (link!.gallery_photos as any[]).map((p, i) => ({ url: p.url, path: p.path || "", sort: typeof p.sort === "number" ? p.sort : i }))
+        ? (link!.gallery_photos as any[]).map((p, i) => ({ url: p.url, path: p.path || "", sort: typeof p.sort === "number" ? p.sort : i, serviceId: p.serviceId || undefined, label: p.label || undefined }))
         : []
     );
     setErr(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot when the sheet opens
   }, [open, link?.slug]);
+
+  // Load active services for the "Book this look" picker on the gallery.
+  useEffect(() => {
+    if (!open || !userId) return;
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from("services")
+        .select("id, name, base_price, is_active")
+        .eq("user_id", userId)
+        .eq("is_active", true)
+        .order("name", { ascending: true });
+      if (cancelled) return;
+      setGalleryServices(((data as any[]) || []).map((s) => ({ id: s.id, name: s.name, base_price: Number(s.base_price) })));
+    })();
+    return () => { cancelled = true; };
+  }, [open, userId]);
 
   const save = async () => {
     if (busy) return;
@@ -3689,6 +3711,10 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
           url: p.url,
           path: p.path,
           sort: i,
+          // Persist "shop this look" metadata; omit empties so the JSON
+          // stays lean and a cleared field reads back as undefined.
+          ...(p.serviceId ? { serviceId: p.serviceId } : {}),
+          ...(p.label && p.label.trim() ? { label: p.label.trim() } : {}),
         })),
       };
       const { error } = await supabase
@@ -4006,16 +4032,49 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
               Add up to {GALLERY_LIMITS.maxPhotos} photos to showcase your work.
             </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+            // Stacked list — each photo carries an optional style name +
+            // a "Book this look" service link so the portfolio funnels
+            // into booking on the public page.
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {gallery.map((p, i) => (
-                <div key={p.path || p.url || i} style={{ position: "relative", aspectRatio: "1 / 1", borderRadius: 10, overflow: "hidden", background: C.cream, border: `1px solid ${C.hairline}` }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={p.url}
-                    alt={`Gallery photo ${i + 1}`}
-                    loading="lazy"
-                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                  />
+                <div
+                  key={p.path || p.url || i}
+                  style={{
+                    display: "flex", gap: 10, alignItems: "flex-start",
+                    padding: 8, borderRadius: 12,
+                    background: C.cream, border: `1px solid ${C.hairline}`,
+                  }}
+                >
+                  <div style={{ position: "relative", width: 72, height: 72, flexShrink: 0, borderRadius: 8, overflow: "hidden", background: C.paper, border: `1px solid ${C.hairline}` }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={p.url}
+                      alt={`Gallery photo ${i + 1}`}
+                      loading="lazy"
+                      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                    />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                    <Input
+                      value={p.label || ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setGallery((prev) => prev.map((ph, idx) => idx === i ? { ...ph, label: v } : ph));
+                      }}
+                      placeholder="Style name (e.g. Knotless box braids)"
+                    />
+                    <Select
+                      value={p.serviceId || ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setGallery((prev) => prev.map((ph, idx) => idx === i ? { ...ph, serviceId: v || undefined } : ph));
+                      }}
+                      options={[
+                        { value: "", label: "Link a service (optional)" },
+                        ...galleryServices.map((s) => ({ value: s.id, label: `${s.name} — from $${s.base_price.toFixed(0)}` })),
+                      ]}
+                    />
+                  </div>
                   <button
                     type="button"
                     aria-label="Remove photo"
@@ -4029,10 +4088,10 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
                       }
                     }}
                     style={{
-                      position: "absolute", top: 4, right: 4,
-                      width: 22, height: 22, borderRadius: 99,
+                      flexShrink: 0,
+                      width: 26, height: 26, borderRadius: 99,
                       background: "rgba(21, 17, 26,0.78)", color: C.cream,
-                      border: "none", fontSize: 13, fontWeight: 700,
+                      border: "none", fontSize: 14, fontWeight: 700,
                       lineHeight: 1, padding: 0, cursor: "pointer",
                     }}
                   >×</button>
@@ -4041,7 +4100,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
             </div>
           )}
           <p className="text-[11px] mt-2" style={{ color: C.muted }}>
-            Up to {GALLERY_LIMITS.maxInputMb} MB each — we resize to {GALLERY_LIMITS.maxDimension}px so loads stay fast.
+            Up to {GALLERY_LIMITS.maxInputMb} MB each — we resize to {GALLERY_LIMITS.maxDimension}px so loads stay fast. Add a style name or link a service so visitors can “Book this look.”
           </p>
         </div>
 
