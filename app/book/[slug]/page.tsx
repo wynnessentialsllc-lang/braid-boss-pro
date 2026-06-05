@@ -398,6 +398,38 @@ export default function PublicBookingPage() {
   // rating is consistent between the marketplace and this page.
   const [clientReviews, setClientReviews] = useState<StylistReview[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
+  // Booking funnel: a ref on the booking form so the hero CTA and the
+  // sticky bottom bar can smooth-scroll the visitor straight to the
+  // service picker — the page's primary action, which otherwise sits
+  // below the bio / socials / gallery / reviews. reviewsRef lets the
+  // hero rating chip jump down to the written reviews.
+  const bookingFormRef = useRef<HTMLFormElement | null>(null);
+  const reviewsRef = useRef<HTMLDivElement | null>(null);
+  // Sticky "Book" bar shows only while the form is OFF screen, so the
+  // CTA is always one tap away without doubling up once the visitor is
+  // already at the picker.
+  const [bookingInView, setBookingInView] = useState(false);
+  const scrollToBooking = useCallback(() => {
+    bookingFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+  const scrollToReviews = useCallback(() => {
+    setReviewsOpen(true);
+    reviewsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+  // Watch the booking form so the sticky bar can hide once the picker
+  // is on screen. Re-runs when the link resolves (the form mounts only
+  // after that). Falls back to "always show" if IntersectionObserver
+  // is unavailable.
+  useEffect(() => {
+    const el = bookingFormRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(
+      ([entry]) => setBookingInView(entry.isIntersecting),
+      { rootMargin: "0px 0px -45% 0px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [link?.slug]);
   const [products, setProducts] = useState<PublicProduct[]>([]);
   const [serviceRecs, setServiceRecs] = useState<PublicProduct[]>([]);
   const [activeCategoryId, setActiveCategoryId] = useState<string>("");
@@ -1721,6 +1753,61 @@ export default function PublicBookingPage() {
           paddingBottom: "calc(120px + env(safe-area-inset-bottom, 0px))",
         }}
       >
+        {/* Above-the-fold conversion block. The page's whole job is to
+            get the visitor onto the books, so surface social proof and
+            a direct "Book" button BEFORE the bio / chips / gallery /
+            reviews push the service picker far down the page. The chip
+            jumps to the written reviews; the button scrolls to the
+            form. Both hide gracefully when there's nothing to show. */}
+        {clientReviews.length > 0 && (() => {
+          const avg = clientReviews.reduce((s, r) => s + (r.stars || 0), 0) / clientReviews.length;
+          const count = clientReviews.length;
+          return (
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 4 }}>
+              <button
+                type="button"
+                onClick={scrollToReviews}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  background: "transparent", border: "none", cursor: "pointer",
+                  fontSize: 13, fontWeight: 600, color: C.coffee, padding: "2px 4px",
+                }}
+              >
+                <span aria-hidden style={{ color: "#F5A623", letterSpacing: "0.05em" }}>
+                  {"★★★★★".slice(0, Math.max(0, Math.min(5, Math.round(avg))))}
+                  <span style={{ color: C.hairline }}>
+                    {"★★★★★".slice(Math.max(0, Math.min(5, Math.round(avg))))}
+                  </span>
+                </span>
+                <span style={{ fontWeight: 700 }}>{avg.toFixed(1)}</span>
+                <span style={{ color: C.muted }}>· {count} {count === 1 ? "review" : "reviews"}</span>
+              </button>
+            </div>
+          );
+        })()}
+        <button
+          type="button"
+          onClick={scrollToBooking}
+          style={{
+            width: "100%",
+            marginTop: 14,
+            padding: "15px 18px",
+            borderRadius: 14,
+            border: "none",
+            cursor: "pointer",
+            background: accent,
+            color: "#FFFFFF",
+            fontSize: 15,
+            fontWeight: 700,
+            letterSpacing: "0.01em",
+            boxShadow: "0 12px 28px -12px rgba(21, 17, 26, 0.45)",
+            appearance: "none",
+            WebkitAppearance: "none",
+          }}
+        >
+          Book an appointment
+        </button>
+
         {/* Location + phone chips. Prefer the structured city/state
             pair when present, fall back to the free-form
             location_text. Phone stays its own tappable chip. */}
@@ -1777,7 +1864,7 @@ export default function PublicBookingPage() {
           if (link?.tiktok_url) socials.push({ key: "tt", label: "TikTok", href: link.tiktok_url });
           if (link?.website_url) socials.push({ key: "web", label: "Website", href: link.website_url });
           const showShare = typeof window !== "undefined";
-          if (socials.length === 0 && !showShare) return null;
+          if (socials.length === 0 && !showShare && !link?.phone) return null;
           const handleShare = async () => {
             const url = typeof window !== "undefined" ? window.location.href : "";
             const title = link?.business_name ? `${link.business_name} — book an appointment` : "Book an appointment";
@@ -1845,33 +1932,30 @@ export default function PublicBookingPage() {
                   Share profile
                 </button>
               )}
+              {/* Message pill lives in the same connect row as socials +
+                  share so contact actions read as one tidy group rather
+                  than stacking into a separate centered row below. */}
+              {link?.phone && (
+                <a
+                  href={`sms:${link.phone.replace(/\s/g, "")}`}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: "0.04em",
+                    color: accent,
+                    textDecoration: "none",
+                    padding: "6px 12px",
+                    borderRadius: 99,
+                    background: "#FFFFFF",
+                    border: `1px solid ${accent}`,
+                  }}
+                >
+                  Message
+                </a>
+              )}
             </div>
           );
         })()}
-        {/* Send-a-message CTA — uses sms: when phone is set, mailto:
-            falls through to a future stylist contact email. Shown
-            only when at least one channel is available. */}
-        {link?.phone && (
-          <div style={{ textAlign: "center", marginTop: 14 }}>
-            <a
-              href={`sms:${link.phone.replace(/\s/g, "")}`}
-              style={{
-                display: "inline-block",
-                fontSize: 12,
-                fontWeight: 600,
-                color: accent,
-                textDecoration: "none",
-                padding: "8px 14px",
-                borderRadius: 99,
-                background: "#FFFFFF",
-                border: `1px solid ${accent}`,
-                letterSpacing: "0.04em",
-              }}
-            >
-              Send {link.business_name || "the studio"} a message
-            </a>
-          </div>
-        )}
         {/* Policies — collapsible cream card so the headline stays
             uncluttered for browsing clients but power-users can read
             them before committing. */}
@@ -1980,7 +2064,7 @@ export default function PublicBookingPage() {
           const count = clientReviews.length;
           const fullStars = Math.max(0, Math.min(5, Math.round(avg)));
           return (
-            <div style={{ marginTop: 28 }}>
+            <div ref={reviewsRef} style={{ marginTop: 28, scrollMarginTop: 16 }}>
               <button
                 type="button"
                 onClick={() => setReviewsOpen(o => !o)}
@@ -2252,7 +2336,7 @@ export default function PublicBookingPage() {
         )}
 
         {!linkLoading && !linkError && !submitted && !paymentChoice && link && (
-          <form onSubmit={handleSubmit} style={{ marginTop: 28, display: "grid", gap: 14 }}>
+          <form ref={bookingFormRef} onSubmit={handleSubmit} style={{ marginTop: 28, display: "grid", gap: 14 }}>
             {/* Personal info gates on having picked a service when a
                 catalog exists — the landing should read as a menu
                 (Acuity flow). Legacy/free-form bookings keep the
@@ -3635,6 +3719,52 @@ export default function PublicBookingPage() {
         )}
       </div>
 
+      {/* Sticky "Book" bar — keeps the primary action one tap away no
+          matter how far the visitor has scrolled through the bio,
+          gallery, and reviews. Slides out of view once the service
+          picker itself is on screen so the CTA never doubles up. */}
+      <div
+        aria-hidden={bookingInView}
+        style={{
+          position: "fixed",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 80,
+          display: "flex",
+          justifyContent: "center",
+          padding: "12px 16px calc(12px + env(safe-area-inset-bottom, 0px))",
+          background: "linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.92) 38%, #FFFFFF 100%)",
+          pointerEvents: bookingInView ? "none" : "auto",
+          opacity: bookingInView ? 0 : 1,
+          transform: bookingInView ? "translateY(110%)" : "translateY(0)",
+          transition: "opacity 220ms ease, transform 260ms cubic-bezier(.2,.8,.2,1)",
+        }}
+      >
+        <button
+          type="button"
+          onClick={scrollToBooking}
+          style={{
+            width: "100%",
+            maxWidth: 480,
+            padding: "15px 18px",
+            borderRadius: 999,
+            border: "none",
+            cursor: "pointer",
+            background: accent,
+            color: "#FFFFFF",
+            fontSize: 15,
+            fontWeight: 700,
+            letterSpacing: "0.01em",
+            boxShadow: "0 14px 30px -10px rgba(21, 17, 26, 0.55)",
+            appearance: "none",
+            WebkitAppearance: "none",
+          }}
+        >
+          Book an appointment
+        </button>
+      </div>
+
       {/* Tap-to-expand lightbox. Self-contained — no portal needed
           because this page is its own scope with no parent
           transform / overflow that would trap fixed positioning. */}
@@ -3806,6 +3936,37 @@ export default function PublicBookingPage() {
                 ))}
               </div>
             )}
+
+            {/* "Book this look" — turns the portfolio into the front
+                door of the funnel. Closes the lightbox and scrolls
+                straight to the service picker instead of leaving the
+                photo as a dead end. Sits above the dot indicators. */}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); close(); scrollToBooking(); }}
+              style={{
+                position: "absolute",
+                left: "50%",
+                transform: "translateX(-50%)",
+                bottom: photos.length > 1
+                  ? "max(52px, calc(env(safe-area-inset-bottom) + 52px))"
+                  : "max(28px, env(safe-area-inset-bottom))",
+                padding: "11px 22px",
+                borderRadius: 999,
+                border: "none",
+                cursor: "pointer",
+                background: "#FFFFFF",
+                color: C.espresso,
+                fontSize: 13,
+                fontWeight: 700,
+                letterSpacing: "0.02em",
+                boxShadow: "0 10px 24px -8px rgba(0,0,0,0.6)",
+                appearance: "none",
+                WebkitAppearance: "none",
+              }}
+            >
+              Book this look
+            </button>
           </div>
         );
       })()}
