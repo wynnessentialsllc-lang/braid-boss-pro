@@ -49,6 +49,13 @@ const safeArr = <T,>(v: T[] | null | undefined): T[] => Array.isArray(v) ? v : [
 const isCanceledStatus = (status: unknown): boolean =>
   status === "cancelled" || status === "canceled";
 const isCanceledAppointment = (a: any): boolean => isCanceledStatus(a?.status);
+// Personal events, blocked time, and all-day "Off" blocks live in the
+// same appointments list but aren't client bookings: they carry no
+// client and no real start time (an empty time defaults to 10:00 below),
+// so a reminder for one renders as a meaningless "your client / the
+// appointment at 10 AM." Mirrors isRealAppointment in app/page.tsx.
+const isClientAppointment = (a: any): boolean =>
+  (!a?.kind || a.kind === "appointment") && !a?.isAllDay;
 const cleanIso = (date: string, time: string): string | null => {
   if (!date) return null;
   const t = time || "10:00";
@@ -94,6 +101,7 @@ export const getAppointmentReminderNotifications = (
 
   for (const a of safeArr(appointments)) {
     if (!a?.id || !a.date) continue;
+    if (!isClientAppointment(a)) continue;
     if (isCanceledAppointment(a) || a.status === "completed" || a.status === "no_show") continue;
     const startIso = cleanIso(a.date, a.time);
     const startMs = isoToMs(startIso);
