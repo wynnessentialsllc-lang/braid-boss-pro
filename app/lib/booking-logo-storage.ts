@@ -53,6 +53,12 @@ export type UploadLogoResult = {
 export const uploadBookingLogo = async (
   userId: string,
   file: File,
+  // Filename within the user's folder. Defaults to the booking logo;
+  // the storefront passes "shop-logo.jpg" so a stylist can give their
+  // shop its own logo without overwriting the booking-page one. The
+  // bucket RLS pins writes to {auth.uid()}/<filename>, so any sibling
+  // name under the user's folder is allowed — no new bucket needed.
+  filename: string = "logo.jpg",
 ): Promise<UploadLogoResult> => {
   if (!userId) throw new Error("Sign in required.");
   if (!file) throw new Error("No file selected.");
@@ -63,7 +69,7 @@ export const uploadBookingLogo = async (
   const supabase = getSupabase();
   // Stable filename so the upload upserts in place. Cache-bust handled
   // via the public URL query param below.
-  const path = `${userId}/logo.jpg`;
+  const path = `${userId}/${filename}`;
   const { error: upErr } = await supabase
     .storage
     .from(BUCKET)
@@ -83,10 +89,13 @@ export const uploadBookingLogo = async (
   return { publicUrl: `${base}?v=${Date.now()}`, path };
 };
 
-export const removeBookingLogo = async (userId: string): Promise<void> => {
+export const removeBookingLogo = async (
+  userId: string,
+  filename: string = "logo.jpg",
+): Promise<void> => {
   if (!userId) return;
   const supabase = getSupabase();
-  await supabase.storage.from(BUCKET).remove([`${userId}/logo.jpg`]);
+  await supabase.storage.from(BUCKET).remove([`${userId}/${filename}`]);
 };
 
 // ---- Banner (wide hero image) --------------------------------------
@@ -133,6 +142,9 @@ const compressBanner = (file: File): Promise<Blob> =>
 export const uploadBookingBanner = async (
   userId: string,
   file: File,
+  // Defaults to the booking banner; the storefront passes
+  // "shop-banner.jpg" so the shop hero can differ from the booking one.
+  filename: string = "banner.jpg",
 ): Promise<UploadLogoResult> => {
   if (!userId) throw new Error("Sign in required.");
   if (!file) throw new Error("No file selected.");
@@ -141,7 +153,7 @@ export const uploadBookingBanner = async (
 
   const blob = await compressBanner(file);
   const supabase = getSupabase();
-  const path = `${userId}/banner.jpg`;
+  const path = `${userId}/${filename}`;
   const { error: upErr } = await supabase
     .storage
     .from(BUCKET)
@@ -158,8 +170,11 @@ export const uploadBookingBanner = async (
   return { publicUrl: `${base}?v=${Date.now()}`, path };
 };
 
-export const removeBookingBanner = async (userId: string): Promise<void> => {
+export const removeBookingBanner = async (
+  userId: string,
+  filename: string = "banner.jpg",
+): Promise<void> => {
   if (!userId) return;
   const supabase = getSupabase();
-  await supabase.storage.from(BUCKET).remove([`${userId}/banner.jpg`]);
+  await supabase.storage.from(BUCKET).remove([`${userId}/${filename}`]);
 };
