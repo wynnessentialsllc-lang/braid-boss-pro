@@ -181,6 +181,15 @@ type LinkConfig = {
   tiktok_url?: string | null;
   website_url?: string | null;
   years_in_business?: number | null;
+  // Header customization — added by 20260909 migration. header_theme
+  // picks the hero layout ('classic' | 'editorial' | 'spotlight');
+  // tagline is the specialty kicker shown in the hero; about is the
+  // "Meet your stylist" bio rendered in the editorial / spotlight
+  // heroes. All optional — the hero degrades to 'classic' and drops
+  // empty sections.
+  header_theme?: string | null;
+  tagline?: string | null;
+  about?: string | null;
   // Branded share handle (profiles.public_slug) — surfaces in the
   // /@handle storefront header as the @ display below the title.
   // Falls back to the canonical slug when not set.
@@ -613,6 +622,9 @@ export default function PublicBookingPage() {
             tiktok_url: row.tiktok_url ?? null,
             website_url: row.website_url ?? null,
             years_in_business: row.years_in_business ?? null,
+            header_theme: (row.header_theme as string | null) ?? null,
+            tagline: (row.tagline as string | null) ?? null,
+            about: (row.about as string | null) ?? null,
             branded_slug: (row.branded_slug as string | null) ?? null,
           };
           setLink(config);
@@ -1304,6 +1316,26 @@ export default function PublicBookingPage() {
   // to whatever URL the visitor arrived on.
   const displayHandle = (link?.branded_slug || slug || "").replace(/^@/, "");
 
+  // Which hero layout the stylist picked. Anything we don't recognize
+  // (including null on legacy links) falls back to 'classic' so the
+  // header never breaks on an unexpected value — the DB CHECK already
+  // whitelists these three, this is just defense in depth.
+  const headerTheme: "classic" | "editorial" | "spotlight" =
+    link?.header_theme === "editorial" || link?.header_theme === "spotlight"
+      ? link.header_theme
+      : "classic";
+  const tagline = (link?.tagline || "").trim();
+  const about = (link?.about || "").trim();
+  // Portrait for the 'spotlight' "Meet your stylist" hero — prefer the
+  // uploaded logo, fall back to the first gallery photo, else a tinted
+  // gradient placeholder so the card never renders a broken image.
+  const heroPortrait =
+    link?.logo_url ||
+    (Array.isArray(link?.gallery_photos) && link!.gallery_photos!.length > 0
+      ? link!.gallery_photos!.slice().sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))[0]?.url || ""
+      : "") ||
+    "";
+
   // Never render the profile chrome with placeholder data. Until the
   // real booking link resolves, show only the branded loader; if it
   // failed to resolve, show a clean not-found state. This kills the
@@ -1363,6 +1395,21 @@ export default function PublicBookingPage() {
           background: linear-gradient(90deg, #7C3AED, #FF4D6D);
           border-radius: 99px;
         }
+        /* Branded-hero entrance — the editorial / spotlight headers
+           rise + fade their identity stack on first paint so the
+           stylist's brand makes an entrance instead of snapping in.
+           Each child is staggered via inline animation-delay. */
+        @keyframes bbpHeroRise {
+          0%   { opacity: 0; transform: translateY(16px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        .bbp-hero-rise {
+          animation: bbpHeroRise 0.9s cubic-bezier(.2,.8,.2,1) both;
+          will-change: transform, opacity;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .bbp-hero-rise { animation: none; }
+        }
       `}</style>
 
       {/* Storefront-style hero — full-width gradient (or banner
@@ -1373,7 +1420,9 @@ export default function PublicBookingPage() {
           shell across booking + storefront. */}
       <div
         style={{
-          height: 156,
+          // The branded heroes (editorial / spotlight) sit on a taller
+          // banner so the overlapping identity has room to breathe.
+          height: headerTheme === "classic" ? 156 : 190,
           background: link?.banner_image_url
             ? `url(${link.banner_image_url}) center / cover no-repeat`
             : "linear-gradient(160deg, #7C3AED 0%, #B14BE0 45%, #FF4D6D 100%)",
@@ -1420,70 +1469,208 @@ export default function PublicBookingPage() {
       </div>
       <div
         className="mx-auto"
-        style={{ maxWidth: 480, padding: "0 20px", marginTop: -44, position: "relative" }}
+        style={{ maxWidth: 480, padding: "0 20px", position: "relative" }}
       >
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+        {/* Identity block — theme-aware. 'classic' is the original
+            banner-overlapping logo + name row (byte-for-byte, so every
+            existing link is untouched). 'editorial' and 'spotlight' are
+            the branded heroes: a centered serif lockup and a "Meet your
+            stylist" portrait card respectively, each rising in on first
+            paint. The -44/-52/-56 top margins pull each lockup up so it
+            overlaps the banner's bottom edge. */}
+        {headerTheme === "editorial" ? (
           <div
+            className="bbp-hero-rise"
             style={{
-              width: 88, height: 88, borderRadius: 18,
-              background: C.paper,
-              border: `4px solid ${C.cream}`,
-              boxShadow: "0 12px 32px -12px rgba(21, 17, 26, 0.18)",
-              flexShrink: 0,
-              overflow: "hidden",
+              marginTop: -52,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              textAlign: "center",
             }}
           >
-            {link?.logo_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={link.logo_url}
-                alt={link.business_name || "Studio logo"}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
-            ) : (
-              <div
-                aria-hidden
-                style={{
-                  width: "100%", height: "100%",
-                  background: "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)",
-                }}
-              />
-            )}
-          </div>
-          <div style={{ flex: 1, minWidth: 0, marginTop: 52 }}>
-            {/* marginTop pushes the name + handle below the
-                banner's bottom edge so the title sits on the
-                white surface, not floating into the pink. With
-                alignItems: flex-start on the parent flex row,
-                this margin is applied from the top of the row
-                (which sits 44px above the banner bottom because
-                of the outer marginTop:-44 overlap) — i.e. text
-                starts ~8px below the banner edge.
-                Color shifts to brandPrimary (purple) at a heavier
-                weight + larger size per the user's design pass —
-                makes the name read as the page's anchor heading
-                instead of a small caption next to the logo. */}
+            <div
+              style={{
+                width: 104, height: 104, borderRadius: 999,
+                background: C.paper, border: `4px solid ${C.cream}`,
+                boxShadow: "0 14px 36px -14px rgba(21, 17, 26, 0.24)",
+                overflow: "hidden", flexShrink: 0,
+              }}
+            >
+              {link?.logo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={link.logo_url}
+                  alt={link.business_name || "Studio logo"}
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+              ) : (
+                <div
+                  aria-hidden
+                  style={{ width: "100%", height: "100%", background: "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)" }}
+                />
+              )}
+            </div>
             <h1
               style={{
-                fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 700,
-                color: C.brandPrimary, lineHeight: 1.1, margin: 0,
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 700,
+                color: C.brandPrimary, lineHeight: 1.05, margin: "14px 0 0",
               }}
             >
               {link?.business_name || "Welcome"}
             </h1>
             {displayHandle && (
+              <p style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>@{displayHandle}</p>
+            )}
+            {tagline && (
               <p
                 style={{
-                  fontSize: 12, color: C.muted, marginTop: 4,
-                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  fontFamily: FONT_DISPLAY, fontStyle: "italic", fontWeight: 500,
+                  fontSize: 17, color: C.coffee, margin: "8px 0 0", lineHeight: 1.3,
                 }}
               >
-                @{displayHandle}
+                {tagline}
+              </p>
+            )}
+            {about && (
+              <p style={{ fontSize: 14, lineHeight: 1.6, color: C.muted, margin: "10px auto 0", maxWidth: 360 }}>
+                {about}
               </p>
             )}
           </div>
-        </div>
+        ) : headerTheme === "spotlight" ? (
+          <div className="bbp-hero-rise" style={{ marginTop: -56 }}>
+            <div
+              style={{
+                display: "flex", gap: 14, alignItems: "center",
+                background: C.paper, border: `1px solid ${C.hairline}`,
+                borderRadius: 20, padding: 14,
+                boxShadow: "0 18px 44px -22px rgba(21, 17, 26, 0.30)",
+              }}
+            >
+              <div
+                style={{
+                  width: 88, height: 88, borderRadius: 16, overflow: "hidden",
+                  flexShrink: 0, border: `1px solid ${C.hairline}`,
+                }}
+              >
+                {heroPortrait ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={heroPortrait}
+                    alt={link?.business_name || "Studio"}
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                ) : (
+                  <div
+                    aria-hidden
+                    style={{ width: "100%", height: "100%", background: "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)" }}
+                  />
+                )}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p
+                  style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: "0.2em",
+                    textTransform: "uppercase", color: accent, margin: 0,
+                  }}
+                >
+                  Meet your stylist
+                </p>
+                <h1
+                  style={{
+                    fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 700,
+                    color: C.brandPrimary, lineHeight: 1.1, margin: "4px 0 0",
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  }}
+                >
+                  {link?.business_name || "Welcome"}
+                </h1>
+                {tagline ? (
+                  <p
+                    style={{
+                      fontFamily: FONT_DISPLAY, fontStyle: "italic", fontWeight: 500,
+                      fontSize: 15, color: C.coffee, margin: "2px 0 0",
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                    }}
+                  >
+                    {tagline}
+                  </p>
+                ) : displayHandle ? (
+                  <p style={{ fontSize: 12, color: C.muted, margin: "2px 0 0" }}>@{displayHandle}</p>
+                ) : null}
+              </div>
+            </div>
+            {about && (
+              <p style={{ fontSize: 14, lineHeight: 1.6, color: C.coffee, margin: "12px 2px 0" }}>
+                {about}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginTop: -44 }}>
+            <div
+              style={{
+                width: 88, height: 88, borderRadius: 18,
+                background: C.paper,
+                border: `4px solid ${C.cream}`,
+                boxShadow: "0 12px 32px -12px rgba(21, 17, 26, 0.18)",
+                flexShrink: 0,
+                overflow: "hidden",
+              }}
+            >
+              {link?.logo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={link.logo_url}
+                  alt={link.business_name || "Studio logo"}
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+              ) : (
+                <div
+                  aria-hidden
+                  style={{
+                    width: "100%", height: "100%",
+                    background: "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)",
+                  }}
+                />
+              )}
+            </div>
+            <div style={{ flex: 1, minWidth: 0, marginTop: 52 }}>
+              {/* marginTop pushes the name + handle below the
+                  banner's bottom edge so the title sits on the
+                  white surface, not floating into the pink. With
+                  alignItems: flex-start on the parent flex row,
+                  this margin is applied from the top of the row
+                  (which sits 44px above the banner bottom because
+                  of the row's marginTop:-44 overlap) — i.e. text
+                  starts ~8px below the banner edge.
+                  Color shifts to brandPrimary (purple) at a heavier
+                  weight + larger size per the user's design pass —
+                  makes the name read as the page's anchor heading
+                  instead of a small caption next to the logo. */}
+              <h1
+                style={{
+                  fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 700,
+                  color: C.brandPrimary, lineHeight: 1.1, margin: 0,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                }}
+              >
+                {link?.business_name || "Welcome"}
+              </h1>
+              {displayHandle && (
+                <p
+                  style={{
+                    fontSize: 12, color: C.muted, marginTop: 4,
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  }}
+                >
+                  @{displayHandle}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Profile / Shop tab nav. Profile is the active page —
             tapping it is a no-op. Shop links to the storefront

@@ -3542,6 +3542,11 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
 }) => {
   const [businessName, setBusinessName] = useState<string>(link?.business_name || "");
   const [intro, setIntro] = useState<string>(link?.intro || "");
+  // Header customization — hero layout + the branded copy that fills
+  // the editorial / spotlight heroes on the public booking page.
+  const [headerTheme, setHeaderTheme] = useState<string>(link?.header_theme || "classic");
+  const [tagline, setTagline] = useState<string>(link?.tagline || "");
+  const [about, setAbout] = useState<string>(link?.about || "");
   const [logoUrl, setLogoUrl] = useState<string>(link?.logo_url || "");
   const [locationText, setLocationText] = useState<string>(link?.location_text || "");
   const [phone, setPhone] = useState<string>(link?.phone || "");
@@ -3578,6 +3583,9 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
     if (!open) return;
     setBusinessName(link?.business_name || "");
     setIntro(link?.intro || "");
+    setHeaderTheme(link?.header_theme || "classic");
+    setTagline(link?.tagline || "");
+    setAbout(link?.about || "");
     setLogoUrl(link?.logo_url || "");
     setLocationText(link?.location_text || "");
     setPhone(link?.phone || "");
@@ -3626,9 +3634,18 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         if (c && s) return `${c}, ${s}`;
         return c || s || null;
       })();
+      // Header theme is whitelisted client-side too (the DB CHECK is
+      // the real guard) — an unknown value saves as 'classic' so the
+      // public page can't be pushed into an undefined layout.
+      const themeOut = ["classic", "editorial", "spotlight"].includes(headerTheme)
+        ? headerTheme
+        : "classic";
       const patch: Record<string, any> = {
         business_name: businessName.trim() || null,
         intro: intro.trim() || null,
+        header_theme: themeOut,
+        tagline: tagline.trim() || null,
+        about: about.trim() || null,
         logo_url: logoUrl.trim() || null,
         phone: phone.trim() || null,
         policies: policies.trim() || null,
@@ -3674,6 +3691,65 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         <Field label="Intro line" hint="Optional — one sentence that greets visitors.">
           <Input value={intro} onChange={(e) => setIntro(e.target.value)} placeholder="Welcome — let's get you on the books." />
         </Field>
+
+        {/* Header style — picks the public booking page's hero layout.
+            Classic keeps the current look; editorial + spotlight are
+            the new branded heroes that surface the tagline + bio below. */}
+        <div>
+          <p className="text-[11px] font-bold uppercase mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>Header style</p>
+          <div style={{ display: "grid", gap: 8 }}>
+            {([
+              { id: "classic", name: "Classic", desc: "Banner with your logo and name tucked into the corner — clean and compact." },
+              { id: "editorial", name: "Editorial", desc: "Centered, serif-forward lockup that animates in. Your tagline + bio sit front and center." },
+              { id: "spotlight", name: "Spotlight", desc: "A “Meet your stylist” card — portrait, name, and bio — layered over your banner." },
+            ] as const).map((opt) => {
+              const selected = headerTheme === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setHeaderTheme(opt.id)}
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 14px",
+                    borderRadius: 14,
+                    border: selected ? `2px solid ${C.goldDeep}` : `1px solid ${C.hairline}`,
+                    background: selected ? "rgba(124, 58, 237, 0.06)" : C.paper,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                  }}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 18, height: 18, borderRadius: 999, flexShrink: 0,
+                      border: selected ? `5px solid ${C.goldDeep}` : `2px solid ${C.caramel}`,
+                      background: C.cream,
+                    }}
+                  />
+                  <span style={{ minWidth: 0 }}>
+                    <span className="block text-[13px] font-semibold" style={{ color: C.espresso }}>{opt.name}</span>
+                    <span className="block text-[11px]" style={{ color: C.muted, lineHeight: 1.45 }}>{opt.desc}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {headerTheme !== "classic" && (
+          <>
+            <Field label="Specialty tagline" hint="Shown in your hero — e.g. “Knotless / Boho / Box Braid Specialist”.">
+              <Input value={tagline} onChange={(e) => setTagline(e.target.value)} placeholder="Knotless / Boho / Box Braid Specialist" maxLength={80} />
+            </Field>
+            <Field label="Meet your stylist" hint="Optional — a short bio shown in the editorial & spotlight headers.">
+              <Textarea value={about} onChange={(e) => setAbout(e.target.value)} rows={4}
+                placeholder="Thank you for booking with me! I specialize in protective styles that last…" />
+            </Field>
+          </>
+        )}
         <div>
           <p className="text-[11px] font-bold uppercase mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>Studio logo</p>
           <div className="flex items-center gap-3" style={{ flexWrap: "wrap" }}>
@@ -18275,6 +18351,12 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
     tiktok_url?: string | null;
     website_url?: string | null;
     years_in_business?: number | null;
+    // Header customization (PR: customizable booking headers). Picks
+    // the public hero layout + the branded copy that fills it. Keep in
+    // sync with the SELECT below or the Customize sheet hydrates empty.
+    header_theme?: string | null;
+    tagline?: string | null;
+    about?: string | null;
   } | null>(null);
   const [bookingBusy, setBookingBusy] = useState(false);
   const [bookingCopied, setBookingCopied] = useState(false);
@@ -18319,7 +18401,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
       const { data: link } = await supabase
         .from("booking_links")
         .select(
-          "slug, active, intro, business_name, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business"
+          "slug, active, intro, business_name, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business, header_theme, tagline, about"
         )
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
