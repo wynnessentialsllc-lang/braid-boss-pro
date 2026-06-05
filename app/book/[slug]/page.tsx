@@ -411,6 +411,10 @@ export default function PublicBookingPage() {
   // is on screen) scrolls here so a configured client can jump straight
   // to "Pay deposit & request".
   const bookingSubmitRef = useRef<HTMLButtonElement | null>(null);
+  // Anchor at the top of the selected-service detail. Picking a service
+  // collapses the tall menu, so we scroll here (not to page top) to keep
+  // the client in the flow and land them on their service + options.
+  const serviceDetailRef = useRef<HTMLDivElement | null>(null);
   // Sticky "Book" bar shows only while the form is OFF screen, so the
   // CTA is always one tap away without doubling up once the visitor is
   // already at the picker.
@@ -2367,6 +2371,12 @@ export default function PublicBookingPage() {
                               setSelectedVariationId("");
                               setServiceName(s.name || "");
                               if (s.category_id) setActiveCategoryId(s.category_id);
+                              // Land on the selected service detail, not page top.
+                              if (typeof window !== "undefined") {
+                                requestAnimationFrame(() => {
+                                  serviceDetailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                });
+                              }
                             }}
                             style={{
                               flex: "0 0 240px",
@@ -2576,12 +2586,13 @@ export default function PublicBookingPage() {
                                   payload: { slug, serviceId: s.id, serviceName: s.name },
                                 });
                               }
-                              // Scroll the picked service to the top
-                              // so the client lands on its photo and
-                              // details, not back at the menu.
+                              // Land the client on the selected service's
+                              // detail + options, not the page top. Picking
+                              // collapses the tall menu, so without this the
+                              // viewport jumps up past the hero.
                               if (typeof window !== "undefined") {
                                 requestAnimationFrame(() => {
-                                  window.scrollTo({ top: 0, behavior: "smooth" });
+                                  serviceDetailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
                                 });
                               }
                             }}
@@ -2661,6 +2672,9 @@ export default function PublicBookingPage() {
                     </div>
                   </Field>
                 )}
+                {/* Scroll anchor — selection scrolls here so the client
+                    lands on the selected service detail, not page top. */}
+                {serviceId && <div ref={serviceDetailRef} aria-hidden style={{ scrollMarginTop: 12 }} />}
                 {/* Back-to-menu affordance once a service is picked.
                     Resets serviceId + variation + customization so the
                     client can re-enter the flow cleanly. */}
