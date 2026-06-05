@@ -611,6 +611,20 @@ export const EDUCATION_CATEGORIES: EducationCategory[] = [
         relatedTool: "Shop checkout & Settings → Payments · Stripe → Payment methods",
       },
       {
+        id: "instant-cash-out",
+        title: "How to cash out your Stripe balance instantly",
+        readMinutes: 3,
+        body: [
+          "Normally the deposits and payments you collect through Stripe pay out on a rolling schedule — they land in your bank a couple of business days after they settle. Instant cash-out is a Braid Boss Pro member perk that lets you skip the wait and send your available balance to your debit card in minutes, any day of the week.",
+          "You'll find it in Settings → Payments once three things are true: you're on the paid plan, your Stripe account has finished onboarding, and Stripe has enabled payouts on it. When you're eligible, a \"Cash out instantly\" card shows how much is ready to go.",
+          "Tap \"Cash out $X now\" and Braid Boss Pro sends your available balance straight to the debit card linked to your Stripe account. Only money that has settled shows as available — a deposit paid an hour ago may still be clearing, so it appears once it's ready. The card updates with the amount on its way and the expected arrival.",
+          "A few things to know: instant payouts go to a debit card (not a bank account number), so make sure a supported card is on file in Stripe — if it isn't, you'll see a note explaining why. Stripe charges a small instant-payout fee (a percentage of the amount), which is the cost of getting paid early; your regular automatic payouts stay free if you'd rather wait. Every cash-out is also a single, protected action, so a double-tap can't send your money twice.",
+        ],
+        tryThisWeek:
+          "Open Settings → Payments, check your \"Ready to cash out\" balance, and do one small instant cash-out so you know exactly how it feels before a day you need the money fast.",
+        relatedTool: "Settings → Payments → Cash out instantly",
+      },
+      {
         id: "book-kids-and-family",
         title: "How to book kids and family under one client",
         readMinutes: 2,
