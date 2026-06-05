@@ -22,7 +22,9 @@ import {
   STATUS_TONE,
   useStripeConnect,
   type ConnectStatus,
+  type InstantPayoutResult,
 } from "../../lib/stripe-connect";
+import { usePremiumStatus } from "../../lib/guest-limits";
 import { getSupabase } from "../../lib/supabase";
 
 const C = {
@@ -86,6 +88,36 @@ function PaymentsInner() {
   const connect = useStripeConnect(userId);
   const status: ConnectStatus = connect.profile.stripe_connect_status;
   const tone = STATUS_TONE[status];
+
+  // Instant Payouts are a paid-tier perk. `premium` covers lifetime /
+  // founding / live subscription — same gate the API enforces.
+  const { premium } = usePremiumStatus(userId);
+  const canCashOut =
+    premium && status === "active" && connect.profile.stripe_connect_payouts_enabled;
+  const [payout, setPayout] = useState<InstantPayoutResult | null>(null);
+
+  // Probe the instant-available balance once the account can actually
+  // pay out (and the user is on the paid plan). Re-probe on foreground
+  // so a newly-settled deposit shows up without a manual refresh.
+  const { refreshInstantBalance } = connect;
+  useEffect(() => {
+    if (!canCashOut) return;
+    void refreshInstantBalance();
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        void refreshInstantBalance();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [canCashOut, refreshInstantBalance]);
+
+  const handleCashOut = useCallback(async () => {
+    if (connect.payoutBusy) return;
+    setPayout(null);
+    const result = await connect.cashOutNow();
+    if (result) setPayout(result);
+  }, [connect]);
 
   // On return from Stripe onboarding, pull the latest account state
   // (charges_enabled / payouts_enabled / details_submitted) and
@@ -251,6 +283,87 @@ function PaymentsInner() {
           </div>
         )}
       </div>
+
+      {/* Instant cash-out — paid-tier perk. Sweeps the available Stripe
+          balance to the stylist's debit card in minutes instead of
+          waiting for the default rolling payout. Only rendered once the
+          account is active, payouts are enabled, and the user is on the
+          paid plan (the API enforces the same gate). */}
+      {canCashOut && (
+        <div
+          style={{
+            padding: 16,
+            borderRadius: 14,
+            background: C.cream,
+            border: `1px solid ${C.hairline}`,
+            display: "grid",
+            gap: 12,
+          }}
+        >
+          <div>
+            <p style={{ fontSize: 14, fontWeight: 700, color: C.espresso }}>
+              Cash out instantly
+            </p>
+            <p style={{ fontSize: 12, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+              Send your available Stripe balance to your debit card in minutes —
+              a Braid Boss Pro member perk. Stripe charges a small instant-payout fee.
+            </p>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              justifyContent: "space-between",
+              gap: 8,
+            }}
+          >
+            <span style={{ fontSize: 11, color: C.muted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Ready to cash out
+            </span>
+            <span style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: C.espresso }}>
+              {connect.instantAvailable == null
+                ? "—"
+                : `$${connect.instantAvailable.toFixed(2)}`}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void handleCashOut()}
+            disabled={connect.payoutBusy || !connect.instantAvailable || connect.instantAvailable <= 0}
+            style={{
+              ...primaryButtonStyle,
+              opacity:
+                connect.payoutBusy || !connect.instantAvailable || connect.instantAvailable <= 0
+                  ? 0.55
+                  : 1,
+              cursor:
+                connect.payoutBusy || !connect.instantAvailable || connect.instantAvailable <= 0
+                  ? "default"
+                  : "pointer",
+            }}
+          >
+            {connect.payoutBusy
+              ? "Sending…"
+              : connect.instantAvailable && connect.instantAvailable > 0
+                ? `Cash out $${connect.instantAvailable.toFixed(2)} now`
+                : "Nothing to cash out yet"}
+          </button>
+
+          {payout && (
+            <p style={{ fontSize: 12, color: C.success, lineHeight: 1.5 }}>
+              ${payout.amount.toFixed(2)} is on its way to your card
+              {payout.arrival_date
+                ? ` — expected by ${new Date(payout.arrival_date).toLocaleDateString()}.`
+                : "."}
+            </p>
+          )}
+          {connect.payoutError && (
+            <p style={{ fontSize: 12, color: C.danger, lineHeight: 1.5 }}>{connect.payoutError}</p>
+          )}
+        </div>
+      )}
 
       {/* Primary CTA — disabled while the platform side is incomplete
           so the stylist can't bash their head against an opaque

@@ -55,6 +55,16 @@ const getAccessToken = async (): Promise<string | null> => {
   return data?.session?.access_token || null;
 };
 
+// Result of an instant cash-out attempt — surfaced so the Payments page
+// can show a confirmation ("$X on its way to your card").
+export type InstantPayoutResult = {
+  id: string;
+  amount: number;
+  currency: string;
+  status: string;
+  arrival_date: string | null;
+};
+
 export const useStripeConnect = (userId: string | null): {
   profile: StripeConnectProfile;
   loading: boolean;
@@ -62,10 +72,21 @@ export const useStripeConnect = (userId: string | null): {
   refresh: () => Promise<void>;
   syncFromStripe: () => Promise<void>;
   startOnboarding: () => Promise<string | null>;
+  // Instant Payouts (subscriber-gated). `instantAvailable` is the
+  // dollar amount Stripe says can be swept to the debit card right now;
+  // null while it hasn't been probed yet.
+  instantAvailable: number | null;
+  payoutBusy: boolean;
+  payoutError: string | null;
+  refreshInstantBalance: () => Promise<void>;
+  cashOutNow: (amount?: number) => Promise<InstantPayoutResult | null>;
 } => {
   const [profile, setProfile] = useState<StripeConnectProfile>(EMPTY);
   const [loading, setLoading] = useState<boolean>(!!userId);
   const [error, setError] = useState<string | null>(null);
+  const [instantAvailable, setInstantAvailable] = useState<number | null>(null);
+  const [payoutBusy, setPayoutBusy] = useState<boolean>(false);
+  const [payoutError, setPayoutError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!userId) { setProfile(EMPTY); setLoading(false); return; }
@@ -138,5 +159,52 @@ export const useStripeConnect = (userId: string | null): {
     }
   }, []);
 
-  return { profile, loading, error, refresh, syncFromStripe, startOnboarding };
+  // Probe the connected account's instant-available balance. Quiet on
+  // the gate/connect errors (subscriber-only, not yet onboarded) —
+  // those just mean "nothing to show," not a failure to report.
+  const refreshInstantBalance = useCallback(async () => {
+    const token = await getAccessToken();
+    if (!token) { setInstantAvailable(null); return; }
+    try {
+      const res = await fetch("/api/stripe-connect/payout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ access_token: token, probe: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setInstantAvailable(null); return; }
+      setInstantAvailable(typeof data?.instant_available === "number" ? data.instant_available : 0);
+    } catch {
+      setInstantAvailable(null);
+    }
+  }, []);
+
+  const cashOutNow = useCallback(async (amount?: number): Promise<InstantPayoutResult | null> => {
+    const token = await getAccessToken();
+    if (!token) { setPayoutError("Sign in required."); return null; }
+    setPayoutBusy(true);
+    setPayoutError(null);
+    try {
+      const res = await fetch("/api/stripe-connect/payout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ access_token: token, amount }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `payout_${res.status}`);
+      // Server returns the remaining balance after the sweep.
+      if (typeof data?.instant_available === "number") setInstantAvailable(data.instant_available);
+      return (data.payout as InstantPayoutResult) ?? null;
+    } catch (e: any) {
+      setPayoutError(e?.message || "Couldn't complete the cash-out.");
+      return null;
+    } finally {
+      setPayoutBusy(false);
+    }
+  }, []);
+
+  return {
+    profile, loading, error, refresh, syncFromStripe, startOnboarding,
+    instantAvailable, payoutBusy, payoutError, refreshInstantBalance, cashOutNow,
+  };
 };
