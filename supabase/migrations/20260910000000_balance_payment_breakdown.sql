@@ -11,9 +11,12 @@
 --     denormalized discount snapshot columns (discounts_v1).
 --   * addons / variation_name          — recovered from the booking_request
 --     that was converted into this appointment (booking_requests.appointment_id
---     is set by confirm_booking_request_approval). These are display-only
---     snapshots taken at submit time, so editing the catalog later never
---     rewrites a client's in-flight breakdown.
+--     is set by confirm_booking_request_approval), OR — for appointments the
+--     stylist built manually in-app — from the appointment's own `data` jsonb
+--     catch-all, where AppointmentSheet already persists the chosen `addons`
+--     array + `variationName`. Either way these are display-only snapshots
+--     taken at booking time, so editing the catalog later never rewrites a
+--     client's in-flight breakdown.
 --
 -- Money stays anchored to the appointment row: total_price is the GROSS
 -- subtotal (pre-discount, add-ons included — matches receipts.ts), and
@@ -60,16 +63,27 @@ begin
     order by b.created_at desc nulls last limit 1;
   end if;
 
-  -- Recover the add-on / variation breakdown from the originating
-  -- booking request, if this appointment came through a booking link.
-  -- Manual (in-app) appointments have no booking_request, so these stay
-  -- null and the page falls back to the flat service line.
+  -- Recover the add-on / variation breakdown. Booking-link appointments
+  -- carry it on the originating booking request (linked via appointment_id
+  -- in confirm_booking_request_approval); manual in-app appointments carry
+  -- the very same shape in their own `data` jsonb catch-all, where
+  -- AppointmentSheet stores the chosen `addons` array + `variationName`.
+  -- Prefer the booking request, then fall back to the appointment data.
   select br.selected_addons, br.selected_variation_name
     into br_addons, br_variation
   from public.booking_requests br
   where br.appointment_id = row_out.id
   order by br.created_at desc nulls last
   limit 1;
+
+  if (br_addons is null or jsonb_array_length(br_addons) = 0)
+     and row_out.data ? 'addons'
+     and jsonb_typeof(row_out.data -> 'addons') = 'array' then
+    br_addons := row_out.data -> 'addons';
+  end if;
+  if br_variation is null or trim(br_variation) = '' then
+    br_variation := nullif(trim(coalesce(row_out.data ->> 'variationName', '')), '');
+  end if;
 
   return jsonb_build_object(
     'ok', true,
