@@ -3544,6 +3544,10 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   // Storefront-only name — shown on the shop + product pages. Blank
   // falls back to the studio name so existing shops are unchanged.
   const [shopName, setShopName] = useState<string>(link?.shop_name || "");
+  // Storefront-only branding overrides. Blank falls back to the
+  // booking logo / banner on the public shop.
+  const [shopLogoUrl, setShopLogoUrl] = useState<string>(link?.shop_logo_url || "");
+  const [shopBannerUrl, setShopBannerUrl] = useState<string>(link?.shop_banner_url || "");
   const [intro, setIntro] = useState<string>(link?.intro || "");
   // Header customization — hero layout + the branded copy that fills
   // the editorial / spotlight heroes on the public booking page.
@@ -3580,12 +3584,20 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const bannerInputRef = useRef<HTMLInputElement | null>(null);
   const [bannerUploading, setBannerUploading] = useState(false);
+  // Shop-specific branding upload state (own refs + flags so they
+  // don't collide with the booking logo / banner controls above).
+  const shopLogoInputRef = useRef<HTMLInputElement | null>(null);
+  const shopBannerInputRef = useRef<HTMLInputElement | null>(null);
+  const [shopLogoUploading, setShopLogoUploading] = useState(false);
+  const [shopBannerUploading, setShopBannerUploading] = useState(false);
 
   // Re-hydrate when the link prop changes (e.g. after a save).
   useEffect(() => {
     if (!open) return;
     setBusinessName(link?.business_name || "");
     setShopName(link?.shop_name || "");
+    setShopLogoUrl(link?.shop_logo_url || "");
+    setShopBannerUrl(link?.shop_banner_url || "");
     setIntro(link?.intro || "");
     setHeaderTheme(link?.header_theme || "classic");
     setTagline(link?.tagline || "");
@@ -3647,6 +3659,8 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
       const patch: Record<string, any> = {
         business_name: businessName.trim() || null,
         shop_name: shopName.trim() || null,
+        shop_logo_url: shopLogoUrl.trim() || null,
+        shop_banner_url: shopBannerUrl.trim() || null,
         intro: intro.trim() || null,
         header_theme: themeOut,
         tagline: tagline.trim() || null,
@@ -3838,6 +3852,92 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
           <p className="text-[11px] mt-2" style={{ color: C.muted }}>
             JPG / PNG / SVG up to 8 MB. We resize to 512px so the file stays small.
           </p>
+        </div>
+
+        {/* Shop logo — optional override shown only on the public shop +
+            product pages. Stored as shop-logo.jpg under the user's
+            folder so it doesn't overwrite the booking logo. Blank
+            falls back to the studio logo above. */}
+        <div>
+          <p className="text-[11px] font-bold uppercase mb-1" style={{ color: C.muted, letterSpacing: "0.14em" }}>Shop logo</p>
+          <p className="text-[11px] mb-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+            Optional — a separate logo for your shop page. Leave blank to reuse your studio logo.
+          </p>
+          <div className="flex items-center gap-3" style={{ flexWrap: "wrap" }}>
+            {shopLogoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={shopLogoUrl}
+                alt="Shop logo preview"
+                style={{
+                  height: 72, width: 72, objectFit: "contain",
+                  borderRadius: 16, background: C.cream,
+                  border: `1px solid ${C.hairline}`, padding: 6,
+                }}
+              />
+            ) : (
+              <div
+                aria-hidden
+                style={{
+                  height: 72, width: 72, borderRadius: 16,
+                  border: `1px dashed ${C.caramel}`,
+                  background: C.cream,
+                  display: "grid", placeItems: "center",
+                  color: C.muted, fontSize: 11, letterSpacing: "0.08em",
+                  textTransform: "uppercase", fontWeight: 700, textAlign: "center", padding: 4,
+                }}
+              >
+                Uses studio logo
+              </div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <input
+                ref={shopLogoInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!f) return;
+                  if (!userId) { setErr("Sign in required."); return; }
+                  setErr(null);
+                  setShopLogoUploading(true);
+                  try {
+                    const { publicUrl } = await uploadBookingLogo(userId, f, "shop-logo.jpg");
+                    setShopLogoUrl(publicUrl);
+                  } catch (ex: any) {
+                    setErr(ex?.message || "Upload failed.");
+                  } finally {
+                    setShopLogoUploading(false);
+                  }
+                }}
+              />
+              <Button
+                variant="outline"
+                icon={<Upload size={14} />}
+                onClick={() => shopLogoInputRef.current?.click()}
+                disabled={shopLogoUploading}
+              >
+                {shopLogoUploading ? "Uploading…" : shopLogoUrl ? "Replace shop logo" : "Upload shop logo"}
+              </Button>
+              {shopLogoUrl && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (userId) {
+                      try { await removeBookingLogo(userId, "shop-logo.jpg"); } catch { /* ignore */ }
+                    }
+                    setShopLogoUrl("");
+                  }}
+                  className="text-[11px] font-semibold"
+                  style={{ color: C.danger, background: "transparent", border: 0, padding: "4px 0", textAlign: "left" }}
+                >
+                  Remove shop logo
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Gallery — up to 8 photos. Each is compressed to 1024px on
@@ -4037,6 +4137,89 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
                 style={{ color: C.danger, background: "transparent", border: 0, padding: "4px 0", textAlign: "left" }}
               >
                 Remove banner
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Shop banner — optional override shown only on the public
+            shop + product pages. Stored as shop-banner.jpg under the
+            user's folder so it doesn't overwrite the booking banner.
+            Blank falls back to the booking banner above. */}
+        <div>
+          <p className="text-[11px] font-bold uppercase mb-1" style={{ color: C.muted, letterSpacing: "0.14em" }}>Shop banner</p>
+          <p className="text-[11px] mb-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+            Optional — a separate hero image for your shop page. Leave blank to reuse your booking banner.
+          </p>
+          {shopBannerUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={shopBannerUrl}
+              alt="Shop banner preview"
+              style={{
+                width: "100%", height: 120, objectFit: "cover",
+                borderRadius: 14, background: C.cream,
+                border: `1px solid ${C.hairline}`, display: "block",
+              }}
+            />
+          ) : (
+            <div
+              aria-hidden
+              style={{
+                width: "100%", height: 120, borderRadius: 14,
+                border: `1px dashed ${C.caramel}`, background: C.cream,
+                display: "grid", placeItems: "center",
+                color: C.muted, fontSize: 11, letterSpacing: "0.08em",
+                textTransform: "uppercase", fontWeight: 700,
+              }}
+            >
+              Uses booking banner
+            </div>
+          )}
+          <input
+            ref={shopBannerInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (!f) return;
+              if (!userId) { setErr("Sign in required."); return; }
+              setErr(null);
+              setShopBannerUploading(true);
+              try {
+                const { publicUrl } = await uploadBookingBanner(userId, f, "shop-banner.jpg");
+                setShopBannerUrl(publicUrl);
+              } catch (ex: any) {
+                setErr(ex?.message || "Upload failed.");
+              } finally {
+                setShopBannerUploading(false);
+              }
+            }}
+          />
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+            <Button
+              variant="outline"
+              icon={<Upload size={14} />}
+              onClick={() => shopBannerInputRef.current?.click()}
+              disabled={shopBannerUploading}
+            >
+              {shopBannerUploading ? "Uploading…" : shopBannerUrl ? "Replace shop banner" : "Upload shop banner"}
+            </Button>
+            {shopBannerUrl && (
+              <button
+                type="button"
+                onClick={async () => {
+                  if (userId) {
+                    try { await removeBookingBanner(userId, "shop-banner.jpg"); } catch { /* ignore */ }
+                  }
+                  setShopBannerUrl("");
+                }}
+                className="text-[11px] font-semibold"
+                style={{ color: C.danger, background: "transparent", border: 0, padding: "4px 0", textAlign: "left" }}
+              >
+                Remove shop banner
               </button>
             )}
           </div>
@@ -18345,6 +18528,10 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
     // Storefront-only brand/store name (20260911). Shown on the shop +
     // product pages; the booking page keeps using business_name.
     shop_name?: string | null;
+    // Storefront-only branding overrides (20260912). Each falls back to
+    // its booking-page counterpart on the public shop when blank.
+    shop_logo_url?: string | null;
+    shop_banner_url?: string | null;
     logo_url?: string | null;
     location_text?: string | null;
     phone?: string | null;
@@ -18412,7 +18599,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
       const { data: link } = await supabase
         .from("booking_links")
         .select(
-          "slug, active, intro, business_name, shop_name, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business, header_theme, tagline, about"
+          "slug, active, intro, business_name, shop_name, shop_logo_url, shop_banner_url, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business, header_theme, tagline, about"
         )
         .eq("user_id", userId)
         .order("created_at", { ascending: false })

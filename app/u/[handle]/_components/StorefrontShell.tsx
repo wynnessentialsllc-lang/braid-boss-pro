@@ -248,12 +248,11 @@ export const StorefrontShell = ({
             >
               {businessName || "Welcome"}
             </h1>
-            <p
-              className="text-[12px] truncate"
-              style={{ color: C.muted, marginTop: 4 }}
-            >
-              @{handle}
-            </p>
+            {/* The @handle is intentionally not shown here. It's the
+                stylist's booking handle; on the shop — which carries
+                its own brand/store name — it read as a mismatched
+                personal tag. The handle still drives nav via the
+                `handle` prop. */}
           </div>
         </div>
 

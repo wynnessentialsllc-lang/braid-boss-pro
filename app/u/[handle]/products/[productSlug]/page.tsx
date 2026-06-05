@@ -249,8 +249,8 @@ export default function ProductDetailPage() {
       <StorefrontShell
         handle={handle}
         businessName={profileState.profile.shop_name || profileState.profile.business_name}
-        bannerUrl={profileState.profile.banner_image_url}
-        logoUrl={profileState.profile.logo_url}
+        bannerUrl={profileState.profile.shop_banner_url || profileState.profile.banner_image_url}
+        logoUrl={profileState.profile.shop_logo_url || profileState.profile.logo_url}
         active="shop"
       >
         <div
