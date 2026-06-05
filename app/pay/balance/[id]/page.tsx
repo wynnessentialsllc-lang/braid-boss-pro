@@ -464,12 +464,13 @@ const primaryBtn: React.CSSProperties = {
 };
 
 const Row = ({ label, value, accent, emphasis }: { label: string; value: React.ReactNode; accent?: boolean; emphasis?: boolean }) => (
-  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "5px 0", fontSize: emphasis ? 14 : 12.5, color: C.coffee }}>
-    <span style={{ fontWeight: emphasis ? 700 : 500 }}>{label}</span>
+  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 16, padding: "5px 0", fontSize: emphasis ? 14 : 12.5, color: C.coffee }}>
+    <span style={{ fontWeight: emphasis ? 700 : 500, flexShrink: 0 }}>{label}</span>
     <span style={{
       fontFamily: emphasis ? FONT_DISPLAY : "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
       fontSize: emphasis ? 20 : 13,
       fontWeight: 600,
+      textAlign: "right",
       color: accent ? C.goldDeep : C.espresso,
     }}>{value}</span>
   </div>
