@@ -2447,83 +2447,40 @@ export default function PublicBookingPage() {
                   );
                 })()}
 
-                {/* Category browse — a horizontal-scrolling chip row
-                    above the service select. "All" is always present.
-                    "Other" only when there are uncategorized services,
-                    so the row stays clean for stylists who haven't
-                    categorized everything yet. */}
+                {/* Category browse — a dropdown so a long category list
+                    stays compact instead of a tall wall of pills. "All"
+                    is the default; "Other" only appears when there are
+                    uncategorized services. */}
                 {hasCategories && (
                   <Field label="Browse by category">
-                    <div
-                      role="tablist"
-                      aria-label="Service categories"
-                      style={{
-                        // Wrap onto multiple lines instead of forcing
-                        // a sideways scroll. Keeps every category
-                        // visible on mobile and lets the row breathe
-                        // naturally on wider screens.
-                        display: "flex",
-                        flexWrap: "wrap",
-                        gap: 8,
-                        justifyContent: "flex-start",
+                    <select
+                      aria-label="Browse by category"
+                      value={activeCategoryId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setActiveCategoryId(id);
+                        // Clear the service pick if it falls outside the
+                        // new filter — keeps the selection coherent.
+                        const stillVisible = catalog.some(s => {
+                          if (s.id !== serviceId) return false;
+                          if (id === "") return true;
+                          if (id === "__other__") return !s.category_id;
+                          return s.category_id === id;
+                        });
+                        if (!stillVisible) {
+                          setServiceId("");
+                          setSelectedVariationId("");
+                          setServiceName("");
+                        }
                       }}
+                      style={{ ...selectStyle, padding: 12 }}
                     >
-                      {[
-                        { id: "", label: "All" },
-                        ...serviceCategories.map(c => ({ id: c.id, label: c.name })),
-                        ...(hasUncategorized ? [{ id: "__other__", label: "Other" }] : []),
-                      ].map(tab => {
-                        const active = activeCategoryId === tab.id;
-                        return (
-                          <button
-                            key={tab.id || "__all__"}
-                            type="button"
-                            role="tab"
-                            aria-selected={active}
-                            onClick={() => {
-                              setActiveCategoryId(tab.id);
-                              // Clear the service pick if it falls
-                              // outside the new filter — keeps the
-                              // select dropdown's value coherent.
-                              const stillVisible = catalog.some(s => {
-                                if (s.id !== serviceId) return false;
-                                if (tab.id === "") return true;
-                                if (tab.id === "__other__") return !s.category_id;
-                                return s.category_id === tab.id;
-                              });
-                              if (!stillVisible) {
-                                setServiceId("");
-                                setSelectedVariationId("");
-                                setServiceName("");
-                              }
-                            }}
-                            style={{
-                              // Intrinsic width so each chip hugs its
-                              // own label; the wrapped row handles
-                              // multi-line layout. Don't grow / shrink
-                              // — chips of different lengths should
-                              // size to their content.
-                              flex: "0 0 auto",
-                              padding: "8px 14px",
-                              borderRadius: 999,
-                              background: active ? C.espresso : C.paper,
-                              color: active ? C.cream : C.coffee,
-                              border: `1px solid ${active ? C.espresso : C.hairline}`,
-                              fontSize: 12,
-                              fontWeight: 600,
-                              letterSpacing: "0.01em",
-                              cursor: "pointer",
-                              whiteSpace: "nowrap",
-                              transition: "background 120ms ease, color 120ms ease, border-color 120ms ease",
-                              appearance: "none",
-                              WebkitAppearance: "none",
-                            }}
-                          >
-                            {tab.label}
-                          </button>
-                        );
-                      })}
-                    </div>
+                      <option value="">All services</option>
+                      {serviceCategories.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                      {hasUncategorized && <option value="__other__">Other</option>}
+                    </select>
                   </Field>
                 )}
                 {/* Description card for the active category, when the
