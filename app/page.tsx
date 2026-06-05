@@ -6187,6 +6187,13 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
     setSelectedDate(prev => addDaysISO(prev, direction * 7));
   };
 
+  // Single-day step, used by the Day view's left/right swipe. Same
+  // selectedDate-driven model as shiftWeek, so the week strip highlight
+  // and month label follow along automatically.
+  const shiftDay = (direction: 1 | -1) => {
+    setSelectedDate(prev => addDaysISO(prev, direction));
+  };
+
   // Touch-driven horizontal swipe. We capture startX on touchstart
   // and decide on touchend; threshold of 40px filters out vertical
   // scroll noise. Direction maps to "swipe content left = next week"
@@ -6383,6 +6390,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
             business={business}
             onTap={(a) => setEditing(a)}
             onAdd={() => setEditing({ date: selectedDate })}
+            onSwipeDay={shiftDay}
           />
         )}
 
@@ -6457,7 +6465,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
 // ---- Day Calendar -----------------------------------------------------
 
 const DayCalendarView = ({
-  appts, dayStatus, colorMode, today, business, onTap, onAdd,
+  appts, dayStatus, colorMode, today, business, onTap, onAdd, onSwipeDay,
 }: {
   appts: any[];
   dayStatus: { status: string; label: string };
@@ -6466,12 +6474,35 @@ const DayCalendarView = ({
   business: any;
   onTap: (a: any) => void;
   onAdd: () => void;
+  onSwipeDay?: (direction: 1 | -1) => void;
 }) => {
   const HOURS = Array.from(
     { length: TIMELINE_END_HOUR - TIMELINE_START_HOUR + 1 },
     (_, i) => i + TIMELINE_START_HOUR,
   );
   const formatHourLabel = (h: number) => `${((h + 11) % 12) + 1} ${h >= 12 ? "PM" : "AM"}`;
+
+  // Horizontal swipe to step a day at a time. Mirrors the week-strip
+  // swipe in the parent: capture on touchstart, decide on touchend, 40px
+  // threshold to ignore taps, and bail when the gesture is mostly
+  // vertical so the page can scroll the timeline normally. Swipe content
+  // left → next day (iOS convention).
+  const daySwipeStart = useRef<{ x: number; y: number } | null>(null);
+  const onDayTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    daySwipeStart.current = { x: t.clientX, y: t.clientY };
+  };
+  const onDayTouchEnd = (e: React.TouchEvent) => {
+    const start = daySwipeStart.current;
+    daySwipeStart.current = null;
+    if (!start || !onSwipeDay) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) < 40) return;
+    if (Math.abs(dy) > Math.abs(dx)) return; // vertical scroll won
+    onSwipeDay(dx < 0 ? 1 : -1);
+  };
 
   // Column-packing for overlapping appointments. Two appointments
   // that overlap in time render side-by-side instead of stacking on
@@ -6559,7 +6590,7 @@ const DayCalendarView = ({
   })();
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" onTouchStart={onDayTouchStart} onTouchEnd={onDayTouchEnd}>
       <Card
         className={`px-4 py-3 flex items-center justify-between ${allDayBlock ? "active:scale-[0.99]" : ""}`}
         style={{ background: dayStatusToneBg, border: `1px solid ${C.hairline}` }}
