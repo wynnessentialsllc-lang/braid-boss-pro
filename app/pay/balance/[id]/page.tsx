@@ -34,6 +34,12 @@ const C = {
 } as const;
 const FONT_DISPLAY = "'Cormorant Garamond', 'Playfair Display', Georgia, serif";
 
+type AddOn = {
+  id?: string;
+  name: string;
+  price: number;
+};
+
 type PaymentInfo = {
   ok: true;
   id: string;
@@ -46,6 +52,14 @@ type PaymentInfo = {
   total_price: number | null;
   deposit_paid: number | null;
   balance_due: number | null;
+  // Discount snapshot denormalized onto the appointment (null when none).
+  discount_name: string | null;
+  discount_amount: number | null;
+  // Service breakdown recovered from the originating booking request.
+  // `addons` is the snapshot of paid extras the client picked; null/empty
+  // for manual appointments or services without add-ons.
+  variation_name: string | null;
+  addons: AddOn[] | null;
   status: string | null;
   balance_paid: boolean;
   balance_paid_at: string | null;
@@ -284,6 +298,26 @@ const BalancePayInner = ({ id }: { id: string }) => {
   const grandTotalCents = Math.round(balance * 100) + tipCents;
   const grandTotal = grandTotalCents / 100;
 
+  // ---- Itemized breakdown ----
+  // total_price is the GROSS subtotal (add-ons included, pre-discount —
+  // see receipts.ts). The base service line is whatever's left after the
+  // add-ons are pulled out, so the itemization always foots to the
+  // appointment's own total regardless of later edits.
+  const addons: AddOn[] = Array.isArray(info.addons)
+    ? info.addons.filter(a => a && (Number(a.price) || 0) !== 0)
+    : [];
+  const addonsSum = addons.reduce((s, a) => s + (Number(a.price) || 0), 0);
+  const subtotal = Number(info.total_price) || 0;
+  const discount = Math.max(0, Number(info.discount_amount) || 0);
+  const serviceLinePrice = Math.max(0, subtotal - addonsSum);
+  const netTotal = Math.max(0, subtotal - discount);
+  const deposit = Number(info.deposit_paid) || 0;
+  // Show the expanded breakdown only when there's something to explain:
+  // add-ons to itemize or a discount to account for. Plain single-service
+  // appointments keep the original compact "Total" row.
+  const hasBreakdown = addons.length > 0 || discount > 0;
+  const discountLabel = info.discount_name ? `Discount · ${info.discount_name}` : "Discount";
+
   // ---- Main pay state ----
   return (
     <Shell>
@@ -340,8 +374,26 @@ const BalancePayInner = ({ id }: { id: string }) => {
         <div style={{ marginTop: 16, borderTop: `1px solid ${C.hairline}`, paddingTop: 12 }}>
           <Row label="Service" value={info.service_name || "Appointment"} />
           {when && <Row label="Appointment" value={when} />}
-          {info.total_price ? <Row label="Total" value={fmtMoney(info.total_price)} /> : null}
-          {info.deposit_paid ? <Row label="Deposit paid" value={`− ${fmtMoney(info.deposit_paid)}`} /> : null}
+          {hasBreakdown ? (
+            <>
+              {/* Itemize add-ons under a base service-price line so the
+                  client can see exactly what stacks into the subtotal. */}
+              {addons.length > 0 && (
+                <>
+                  <Row label="Service price" value={fmtMoney(serviceLinePrice)} />
+                  {addons.map((a, i) => (
+                    <Row key={a.id || `${a.name}-${i}`} label={a.name || "Add-on"} value={`+ ${fmtMoney(a.price)}`} />
+                  ))}
+                </>
+              )}
+              {subtotal > 0 && <Row label="Subtotal" value={fmtMoney(subtotal)} />}
+              {discount > 0 && <Row label={discountLabel} value={`− ${fmtMoney(discount)}`} />}
+              <Row label="Total" value={fmtMoney(netTotal)} />
+            </>
+          ) : (
+            info.total_price ? <Row label="Total" value={fmtMoney(info.total_price)} /> : null
+          )}
+          {deposit > 0 ? <Row label="Deposit paid" value={`− ${fmtMoney(deposit)}`} /> : null}
           <Row label="Balance due" value={fmtMoney(balance)} />
           {tipCents > 0 && <Row label="Tip" value={`+ ${fmtMoney(tipDollars)}`} />}
           <Row label={tipCents > 0 ? "Total charge" : "Balance due"} value={fmtMoney(grandTotal)} accent emphasis />
