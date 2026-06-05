@@ -5,7 +5,7 @@
 // /api/stripe-connect/* routes so the publishable key isn't required
 // and the access token never leaves the device.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getSupabase } from "./supabase";
 
 export type ConnectStatus =
@@ -49,6 +49,20 @@ export const STATUS_TONE: Record<ConnectStatus, "neutral" | "gold" | "success" |
   disabled:      "danger",
 };
 
+// A fresh idempotency token for one cash-out "intent." Stripe collapses
+// any payout requests carrying the same Idempotency-Key into a single
+// payout, so a double-tap (or a network retry of the same intent) can
+// never move money twice. We rotate the token after each successful
+// payout so the *next* cash-out is treated as a distinct operation.
+const makeIdempotencyKey = (): string => {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return `bbp_instant_${crypto.randomUUID()}`;
+    }
+  } catch { /* fall through */ }
+  return `bbp_instant_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+};
+
 const getAccessToken = async (): Promise<string | null> => {
   const supabase = getSupabase();
   const { data } = await supabase.auth.getSession();
@@ -87,6 +101,9 @@ export const useStripeConnect = (userId: string | null): {
   const [instantAvailable, setInstantAvailable] = useState<number | null>(null);
   const [payoutBusy, setPayoutBusy] = useState<boolean>(false);
   const [payoutError, setPayoutError] = useState<string | null>(null);
+  // Stable across re-renders so every tap of the same intent reuses one
+  // idempotency key; rotated only after a payout actually succeeds.
+  const idempotencyKeyRef = useRef<string>(makeIdempotencyKey());
 
   const refresh = useCallback(async () => {
     if (!userId) { setProfile(EMPTY); setLoading(false); return; }
@@ -188,10 +205,17 @@ export const useStripeConnect = (userId: string | null): {
       const res = await fetch("/api/stripe-connect/payout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ access_token: token, amount }),
+        body: JSON.stringify({
+          access_token: token,
+          amount,
+          idempotency_key: idempotencyKeyRef.current,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) throw new Error(data?.error || `payout_${res.status}`);
+      // The cash-out went through — rotate the key so the next one is a
+      // distinct Stripe operation, not a dedup of this one.
+      idempotencyKeyRef.current = makeIdempotencyKey();
       // Server returns the remaining balance after the sweep.
       if (typeof data?.instant_available === "number") setInstantAvailable(data.instant_available);
       return (data.payout as InstantPayoutResult) ?? null;
