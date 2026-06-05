@@ -59,11 +59,19 @@ const pickBucket = (buckets: BalanceBucket[] | undefined, currency: string): Bal
 };
 
 export async function POST(req: Request) {
-  let body: { access_token?: string; amount?: number; probe?: boolean };
+  let body: { access_token?: string; amount?: number; probe?: boolean; idempotency_key?: string };
   try { body = await req.json(); } catch { return fail(400, "Invalid JSON."); }
   const accessToken = body?.access_token?.trim();
   if (!accessToken) return fail(401, "Missing access_token.");
   const probe = body?.probe === true;
+  // Optional client-supplied idempotency token. Stripe collapses repeat
+  // payout requests carrying the same key into a single payout, so a
+  // double-tap or retry can't move money twice. Cap the length defensively
+  // (Stripe allows up to 255 chars) and ignore anything malformed.
+  const idempotencyKey =
+    typeof body?.idempotency_key === "string" && body.idempotency_key.trim().length > 0
+      ? body.idempotency_key.trim().slice(0, 255)
+      : null;
 
   let stripeSecret: string;
   let supabaseUrl: string;
@@ -168,15 +176,18 @@ export async function POST(req: Request) {
   form.set("metadata[stylist_user_id]", userId);
   form.set("metadata[source]", "braid_boss_instant_cashout");
 
+  const payoutHeaders: Record<string, string> = {
+    Authorization: `Bearer ${stripeSecret}`,
+    "Stripe-Version": STRIPE_VERSION,
+    "Stripe-Account": accountId,
+    "content-type": "application/x-www-form-urlencoded",
+  };
+  if (idempotencyKey) payoutHeaders["Idempotency-Key"] = idempotencyKey;
+
   try {
     const res = await fetch(`${STRIPE_API}/payouts`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${stripeSecret}`,
-        "Stripe-Version": STRIPE_VERSION,
-        "Stripe-Account": accountId,
-        "content-type": "application/x-www-form-urlencoded",
-      },
+      headers: payoutHeaders,
       body: form.toString(),
       cache: "no-store",
     });
