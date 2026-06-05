@@ -402,23 +402,17 @@ export default function PublicBookingPage() {
   // rating is consistent between the marketplace and this page.
   const [clientReviews, setClientReviews] = useState<StylistReview[]>([]);
   const [reviewsOpen, setReviewsOpen] = useState(false);
-  // Booking funnel: a ref on the booking form so the hero CTA and the
-  // sticky bottom bar can smooth-scroll the visitor straight to the
-  // service picker — the page's primary action, which otherwise sits
-  // below the bio / socials / gallery / reviews. reviewsRef lets the
-  // hero rating chip jump down to the written reviews.
+  // Booking funnel: a ref on the booking form so the floating "Book"
+  // bar can smooth-scroll the visitor straight to the service picker —
+  // the page's primary action, which otherwise sits below the bio /
+  // socials / gallery / reviews.
   const bookingFormRef = useRef<HTMLFormElement | null>(null);
-  const reviewsRef = useRef<HTMLDivElement | null>(null);
   // Sticky "Book" bar shows only while the form is OFF screen, so the
   // CTA is always one tap away without doubling up once the visitor is
   // already at the picker.
   const [bookingInView, setBookingInView] = useState(false);
   const scrollToBooking = useCallback(() => {
     bookingFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
-  const scrollToReviews = useCallback(() => {
-    setReviewsOpen(true);
-    reviewsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
   // Watch the booking form so the sticky bar can hide once the picker
   // is on screen. Re-runs when the link resolves (the form mounts only
@@ -1769,61 +1763,6 @@ export default function PublicBookingPage() {
           paddingBottom: "calc(120px + env(safe-area-inset-bottom, 0px))",
         }}
       >
-        {/* Above-the-fold conversion block. The page's whole job is to
-            get the visitor onto the books, so surface social proof and
-            a direct "Book" button BEFORE the bio / chips / gallery /
-            reviews push the service picker far down the page. The chip
-            jumps to the written reviews; the button scrolls to the
-            form. Both hide gracefully when there's nothing to show. */}
-        {clientReviews.length > 0 && (() => {
-          const avg = clientReviews.reduce((s, r) => s + (r.stars || 0), 0) / clientReviews.length;
-          const count = clientReviews.length;
-          return (
-            <div style={{ display: "flex", justifyContent: "center", marginTop: 4 }}>
-              <button
-                type="button"
-                onClick={scrollToReviews}
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: 6,
-                  background: "transparent", border: "none", cursor: "pointer",
-                  fontSize: 13, fontWeight: 600, color: C.coffee, padding: "2px 4px",
-                }}
-              >
-                <span aria-hidden style={{ color: "#F5A623", letterSpacing: "0.05em" }}>
-                  {"★★★★★".slice(0, Math.max(0, Math.min(5, Math.round(avg))))}
-                  <span style={{ color: C.hairline }}>
-                    {"★★★★★".slice(Math.max(0, Math.min(5, Math.round(avg))))}
-                  </span>
-                </span>
-                <span style={{ fontWeight: 700 }}>{avg.toFixed(1)}</span>
-                <span style={{ color: C.muted }}>· {count} {count === 1 ? "review" : "reviews"}</span>
-              </button>
-            </div>
-          );
-        })()}
-        <button
-          type="button"
-          onClick={scrollToBooking}
-          style={{
-            width: "100%",
-            marginTop: 14,
-            padding: "15px 18px",
-            borderRadius: 14,
-            border: "none",
-            cursor: "pointer",
-            background: accent,
-            color: "#FFFFFF",
-            fontSize: 15,
-            fontWeight: 700,
-            letterSpacing: "0.01em",
-            boxShadow: "0 12px 28px -12px rgba(21, 17, 26, 0.45)",
-            appearance: "none",
-            WebkitAppearance: "none",
-          }}
-        >
-          Book an appointment
-        </button>
-
         {/* Location + phone chips. Prefer the structured city/state
             pair when present, fall back to the free-form
             location_text. Phone stays its own tappable chip. */}
@@ -2110,7 +2049,7 @@ export default function PublicBookingPage() {
           const count = clientReviews.length;
           const fullStars = Math.max(0, Math.min(5, Math.round(avg)));
           return (
-            <div ref={reviewsRef} style={{ marginTop: 28, scrollMarginTop: 16 }}>
+            <div style={{ marginTop: 28 }}>
               <button
                 type="button"
                 onClick={() => setReviewsOpen(o => !o)}
