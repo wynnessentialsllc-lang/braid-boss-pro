@@ -29,6 +29,13 @@ export type GalleryPhoto = {
   url: string;
   path: string;
   sort: number;
+  // Optional "shop this look" metadata. serviceId links the photo to
+  // one of the stylist's services — the public booking page then shows
+  // the service name + "from $X" on the photo and "Book this look"
+  // pre-selects it. label is a free-form style name shown when no
+  // service is linked (or as a custom title).
+  serviceId?: string;
+  label?: string;
 };
 
 const compress = (file: File): Promise<Blob> =>
