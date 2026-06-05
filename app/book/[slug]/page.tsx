@@ -1721,12 +1721,6 @@ export default function PublicBookingPage() {
           paddingBottom: "calc(120px + env(safe-area-inset-bottom, 0px))",
         }}
       >
-        <p style={{ textAlign: "center", letterSpacing: "0.22em", textTransform: "uppercase", fontSize: 10, fontWeight: 700, color: accent }}>
-          Book your appointment
-        </p>
-        {/* Contact pills row — location + phone surface as small
-            chips beneath the headline. Phone is tappable (tel: on
-            mobile). */}
         {/* Location + phone chips. Prefer the structured city/state
             pair when present, fall back to the free-form
             location_text. Phone stays its own tappable chip. */}
