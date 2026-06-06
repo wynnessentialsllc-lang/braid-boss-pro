@@ -117,3 +117,57 @@ export const dispatchAndRemember = async (
   if (!result.ok) return history;
   return { ...history, [rule.id]: new Date().toISOString() };
 };
+
+// Statuses that mean an appointment is no longer "upcoming" and must
+// never trigger a reminder push. Covers both spellings of cancelled and
+// every no-show variant the codebase / DB has used over time.
+const INACTIVE_APPOINTMENT_STATUSES = new Set([
+  "cancelled", "canceled", "completed", "no_show", "no-show", "noshow", "declined",
+]);
+
+// Authoritative guard against stale local state.
+//
+// The client scheduler builds appointment reminders from the in-memory
+// appointments cache, which can lag behind a cancellation made on
+// another device or through a client self-service link. Without this
+// check a "starts soon" push fires for an appointment that's already
+// cancelled in the database.
+//
+// Re-check every appointment-category reminder against the DB right
+// before dispatch and drop any whose row is missing (deleted) or no
+// longer active. Non-appointment rules pass through untouched. Fails
+// OPEN (returns the input unchanged) on a query error so a transient
+// network blip can never silence legitimate reminders.
+export const dropInactiveAppointmentRules = async (
+  rules: NotificationRule[],
+): Promise<NotificationRule[]> => {
+  const apptIds = Array.from(
+    new Set(
+      rules
+        .filter((r) => r.category === "appointment" && r.appointmentId)
+        .map((r) => r.appointmentId as string),
+    ),
+  );
+  if (apptIds.length === 0) return rules;
+  try {
+    const { data, error } = await getSupabase()
+      .from("appointments")
+      .select("id, status")
+      .in("id", apptIds);
+    if (error || !data) return rules; // fail open
+    const statusById = new Map<string, string>(
+      data.map((r: { id: unknown; status: unknown }) => [
+        String(r.id),
+        String(r.status || "").toLowerCase(),
+      ]),
+    );
+    return rules.filter((r) => {
+      if (r.category !== "appointment" || !r.appointmentId) return true;
+      const status = statusById.get(r.appointmentId);
+      if (status === undefined) return false; // row deleted — suppress
+      return !INACTIVE_APPOINTMENT_STATUSES.has(status);
+    });
+  } catch {
+    return rules; // fail open
+  }
+};
