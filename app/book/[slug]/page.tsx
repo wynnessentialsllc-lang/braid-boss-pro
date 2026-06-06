@@ -2483,7 +2483,10 @@ export default function PublicBookingPage() {
                           setServiceName("");
                         }
                       }}
-                      style={{ ...selectStyle, padding: 12 }}
+                      // inputStyle (not selectStyle) keeps the native
+                      // dropdown chevron so it reads as a picker, matching
+                      // the hair-color / consultation selects below.
+                      style={{ ...inputStyle, padding: 12 }}
                     >
                       <option value="">All services</option>
                       {serviceCategories.map(c => (
