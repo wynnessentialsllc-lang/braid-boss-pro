@@ -198,6 +198,7 @@ import {
   validateSlug,
   normalizeSlug,
   slugReasonMessage,
+  buildBookingUrl,
 } from "./lib/publicSlug";
 import {
   usePublicReviews,
@@ -29669,7 +29670,7 @@ const SocialTemplatesScreen = ({ store, onBack }: { store: any; onBack: () => vo
   const userId: string | null = store.userId;
   const [businessName, setBusinessName] = useState<string>(store.business?.businessName || "Your Studio");
   const [accentColor, setAccentColor] = useState<string | null>(null);
-  const [handle, setHandle] = useState<string | null>(null);
+  const [bookingUrl, setBookingUrl] = useState<string | null>(null);
   const [logoImage, setLogoImage] = useState<HTMLImageElement | null>(null);
   const [selected, setSelected] = useState<SocialTemplate | null>(null);
   const [busy, setBusy] = useState(false);
@@ -29677,8 +29678,8 @@ const SocialTemplatesScreen = ({ store, onBack }: { store: any; onBack: () => vo
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 1800); };
 
   // Pull branding off the public booking link so the post matches the
-  // stylist's storefront — name, logo, accent color, and a footer
-  // handle (Instagram if they've linked it, else their booking URL).
+  // stylist's storefront — name, logo, accent color, and the URL the
+  // embedded QR points to (their booking page, else their Instagram).
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
@@ -29693,12 +29694,19 @@ const SocialTemplatesScreen = ({ store, onBack }: { store: any; onBack: () => vo
       if (cancelled || !data) return;
       if (data.business_name) setBusinessName(data.business_name);
       setAccentColor(data.accent_color || null);
-      const ig = (data.instagram_url || "").trim();
-      if (ig) {
-        const h = ig.replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/^@/, "").replace(/\/+$/, "");
-        setHandle(h ? `@${h}` : null);
-      } else if (data.slug) {
-        setHandle(`braidbosspro.app/book/${data.slug}`);
+      // QR target: prefer the booking page; fall back to a cleaned
+      // Instagram URL (strip tracking query params).
+      if (data.slug) {
+        setBookingUrl(buildBookingUrl(data.slug));
+      } else {
+        const ig = (data.instagram_url || "").trim();
+        if (ig) {
+          const h = ig
+            .replace(/^https?:\/\/(www\.)?instagram\.com\//i, "")
+            .replace(/^@/, "")
+            .split(/[/?#]/)[0];
+          if (h) setBookingUrl(`https://instagram.com/${h}`);
+        }
       }
       const logoSrc = data.logo_url || data.shop_logo_url || null;
       if (logoSrc) {
@@ -29712,8 +29720,8 @@ const SocialTemplatesScreen = ({ store, onBack }: { store: any; onBack: () => vo
   // Stable branding object so the canvas effect only re-runs when
   // something it draws actually changes.
   const branding: SocialBranding = useMemo(
-    () => ({ businessName, logoImage, accentColor, handle }),
-    [businessName, logoImage, accentColor, handle],
+    () => ({ businessName, logoImage, accentColor, bookingUrl }),
+    [businessName, logoImage, accentColor, bookingUrl],
   );
 
   const groups = useMemo(() => templatesByCategory(), []);
@@ -29783,7 +29791,7 @@ const SocialTemplatesScreen = ({ store, onBack }: { store: any; onBack: () => vo
         <Card className="p-3.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
           <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: C.muted, letterSpacing: "0.14em" }}>How it works</p>
           <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
-            Each template is auto-branded with your business name{logoImage ? ", logo," : ""} and{accentColor ? " brand color" : " style"}. Tap one to download or share it straight to Instagram, TikTok, or your story.
+            Each template is auto-branded with your business name{logoImage ? ", logo," : ""} and{accentColor ? " brand color" : " style"}{bookingUrl ? ", plus a scannable QR that opens your booking page" : ""}. Tap one to download or share it straight to Instagram, TikTok, or your story.
           </p>
         </Card>
 

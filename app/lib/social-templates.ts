@@ -3,13 +3,10 @@
 // Owner-facing marketing graphics — the stylist picks a template, it's
 // auto-branded with their business name / logo / accent color, then
 // downloaded or shared straight to Instagram / TikTok. Square (1080px)
-// canvas output, the standard Instagram feed size.
-//
-// This module is split so the config + filename helpers stay pure
-// (node-testable, no DOM) while the canvas drawing only touches
-// `document` when actually called. Fonts (Cormorant Garamond + DM Sans)
-// are already loaded in app/page.tsx via a Google Fonts @import, so the
-// canvas can use them once `document.fonts.ready` resolves.
+// canvas is already loaded in app/page.tsx via a Google Fonts @import, so
+// the canvas can use them once `document.fonts.ready` resolves.
+
+import QRCode from "qrcode";
 
 export type SocialTemplateCategory =
   | "gift_card"
@@ -232,8 +229,12 @@ export interface SocialBranding {
   logoImage?: HTMLImageElement | null;
   /** Brand accent (hex). Overrides the theme accent when accentDriven. */
   accentColor?: string | null;
-  /** Footer handle, e.g. "@curlsbysheree" or a short booking URL. */
-  handle?: string | null;
+  /**
+   * URL the embedded QR code points to (the stylist's booking page).
+   * When set, a scannable QR is drawn in the footer instead of any
+   * link text. When null, the footer is just the business name.
+   */
+  bookingUrl?: string | null;
 }
 
 /** Resolve fonts before drawing so canvas text isn't a fallback flash. */
@@ -283,6 +284,48 @@ const wrapLines = (
   }
   if (cur) lines.push(cur);
   return lines;
+};
+
+// Draw a scannable QR onto the canvas. Uses qrcode's pure module
+// matrix (no DOM) so we can paint it in our own colors with a white
+// quiet zone for reliable scanning. Returns false if encoding fails.
+const drawQrCode = (
+  ctx: CanvasRenderingContext2D,
+  url: string,
+  x: number,
+  y: number,
+  size: number,
+  dark: string,
+): boolean => {
+  try {
+    const qr = QRCode.create(url, { errorCorrectionLevel: "M" });
+    const count = qr.modules.size;
+    const data = qr.modules.data;
+    // White card with a quiet-zone margin so scanners lock on.
+    const pad = Math.round(size * 0.08);
+    roundRect(ctx, x, y, size, size, Math.round(size * 0.08));
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fill();
+    const inner = size - pad * 2;
+    const cell = inner / count;
+    ctx.fillStyle = dark;
+    for (let r = 0; r < count; r++) {
+      for (let c = 0; c < count; c++) {
+        if (data[r * count + c]) {
+          // +0.5 overdraw removes hairline gaps between cells.
+          ctx.fillRect(
+            x + pad + c * cell,
+            y + pad + r * cell,
+            cell + 0.5,
+            cell + 0.5,
+          );
+        }
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const drawSpacedText = (
@@ -367,36 +410,45 @@ export const drawSocialTemplate = (
   const cx = D / 2;
   const innerTop = m + 70;
   const innerBottom = D - m - 70;
+  const usable = innerBottom - innerTop;
   const maxTextW = pw - 150;
+  const businessName = (branding.businessName || "Your Studio").trim();
+  const hasQr = !!branding.bookingUrl;
 
-  // --- Measure the centered stack so it's vertically balanced ------
   ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
 
-  // Headline
-  ctx.font = `600 96px ${FONT_DISPLAY}`;
+  // --- Measure every block at its natural size, THEN scale the whole
+  //     stack to fit between innerTop and innerBottom. Laying the
+  //     footer out as the last element in the same flow (not pinned to
+  //     the bottom) means nothing can ever overlap, no matter how many
+  //     lines the headline or subhead wrap to. ---------------------
+  ctx.font = `600 92px ${FONT_DISPLAY}`;
   const headLines = wrapLines(ctx, template.headline, maxTextW);
-  const headLH = 102;
-
-  // Subhead
-  ctx.font = `400 38px ${FONT_SANS}`;
+  ctx.font = `400 36px ${FONT_SANS}`;
   const subLines = wrapLines(ctx, template.subhead, maxTextW - 40);
-  const subLH = 50;
 
-  const logoBlock = 168; // diameter + gap
-  const eyebrowBlock = 30 + 30;
-  const emojiBlock = 138;
-  const headBlock = headLines.length * headLH + 26;
-  const subBlock = subLines.length * subLH + 44;
-  const ctaBlock = 92;
-  const footerReserve = 110;
+  // Base (unscaled) metrics.
+  const LOGO_D = 140, EYEBROW_H = 28, EMOJI_H = 104;
+  const HEAD_LH = 98, SUB_LH = 48, CTA_H = 74;
+  const QR_SIZE = 150, NAME_ONLY_H = 50;
+  const G_LOGO = 26, G_EYEBROW = 18, G_EMOJI = 12, G_HEAD = 16, G_SUB = 30, G_CTA = 38;
 
-  const stackH =
-    logoBlock + eyebrowBlock + emojiBlock + headBlock + subBlock + ctaBlock;
-  const available = innerBottom - footerReserve - innerTop;
-  let y = innerTop + Math.max(0, (available - stackH) / 2);
+  const footerH = hasQr ? QR_SIZE : NAME_ONLY_H;
+  const natural =
+    LOGO_D + G_LOGO +
+    EYEBROW_H + G_EYEBROW +
+    EMOJI_H + G_EMOJI +
+    headLines.length * HEAD_LH + G_HEAD +
+    subLines.length * SUB_LH + G_SUB +
+    CTA_H + G_CTA +
+    footerH;
+
+  const k = Math.min(1, usable / natural);
+  let y = innerTop + Math.max(0, (usable - natural * k) / 2);
 
   // --- Logo / initial ----------------------------------------------
-  const logoR = 72;
+  const logoR = (LOGO_D / 2) * k;
   const logoCY = y + logoR;
   ctx.save();
   ctx.beginPath();
@@ -414,68 +466,91 @@ export const drawSocialTemplate = (
     ctx.drawImage(img, cx - dw / 2, logoCY - dh / 2, dw, dh);
     ctx.restore();
   } else {
-    const initial = (branding.businessName || "B").trim().charAt(0).toUpperCase();
+    const initial = businessName.charAt(0).toUpperCase() || "B";
     ctx.fillStyle = "#FFFFFF";
-    ctx.font = `600 70px ${FONT_DISPLAY}`;
+    ctx.font = `600 ${70 * k}px ${FONT_DISPLAY}`;
     ctx.textBaseline = "middle";
-    ctx.fillText(initial, cx, logoCY + 4);
+    ctx.fillText(initial, cx, logoCY);
     ctx.textBaseline = "alphabetic";
   }
   ctx.restore();
-  y += logoBlock;
+  y += LOGO_D * k + G_LOGO * k;
 
   // --- Eyebrow ------------------------------------------------------
   ctx.fillStyle = accent;
-  ctx.font = `700 26px ${FONT_SANS}`;
-  drawSpacedText(ctx, template.eyebrow.toUpperCase(), cx, y + 24, 6);
-  y += eyebrowBlock;
+  ctx.font = `700 ${26 * k}px ${FONT_SANS}`;
+  drawSpacedText(ctx, template.eyebrow.toUpperCase(), cx, y + EYEBROW_H * k, 6 * k);
+  y += EYEBROW_H * k + G_EYEBROW * k;
 
   // --- Emoji motif --------------------------------------------------
-  ctx.font = `110px ${FONT_SANS}`;
-  ctx.fillText(template.emoji, cx, y + 104);
-  y += emojiBlock;
+  ctx.font = `${100 * k}px ${FONT_SANS}`;
+  ctx.fillText(template.emoji, cx, y + EMOJI_H * k);
+  y += EMOJI_H * k + G_EMOJI * k;
 
   // --- Headline -----------------------------------------------------
   ctx.fillStyle = theme.headline;
-  ctx.font = `600 96px ${FONT_DISPLAY}`;
+  ctx.font = `600 ${92 * k}px ${FONT_DISPLAY}`;
   for (const line of headLines) {
-    y += headLH;
+    y += HEAD_LH * k;
     ctx.fillText(line, cx, y);
   }
-  y += 26;
+  y += G_HEAD * k;
 
   // --- Subhead ------------------------------------------------------
   ctx.fillStyle = theme.body;
-  ctx.font = `400 38px ${FONT_SANS}`;
+  ctx.font = `400 ${36 * k}px ${FONT_SANS}`;
   for (const line of subLines) {
-    y += subLH;
+    y += SUB_LH * k;
     ctx.fillText(line, cx, y);
   }
-  y += 44;
+  y += G_SUB * k;
 
   // --- CTA pill -----------------------------------------------------
-  ctx.font = `700 32px ${FONT_SANS}`;
+  ctx.font = `700 ${31 * k}px ${FONT_SANS}`;
   const ctaText = template.cta;
-  const ctaW = Math.min(maxTextW, ctx.measureText(ctaText).width + 80);
-  const ctaH = 76;
+  const ctaW = Math.min(maxTextW, ctx.measureText(ctaText).width + 80 * k);
+  const ctaH = CTA_H * k;
   roundRect(ctx, cx - ctaW / 2, y, ctaW, ctaH, ctaH / 2);
   ctx.fillStyle = accent;
   ctx.fill();
   ctx.fillStyle = theme.ctaText;
   ctx.textBaseline = "middle";
-  ctx.fillText(ctaText, cx, y + ctaH / 2 + 2);
+  ctx.fillText(ctaText, cx, y + ctaH / 2 + 1);
   ctx.textBaseline = "alphabetic";
+  y += ctaH + G_CTA * k;
 
-  // --- Footer: business name + handle ------------------------------
-  const footY = innerBottom - 10;
-  if (branding.handle) {
-    ctx.fillStyle = theme.body;
-    ctx.font = `500 28px ${FONT_SANS}`;
-    ctx.fillText(branding.handle, cx, footY);
+  // --- Footer -------------------------------------------------------
+  // With a booking URL: a scannable QR on the left + the business name
+  // and a "Scan to book" caption to its right. Without: just the name.
+  let footerDrawn = false;
+  if (hasQr) {
+    const qpx = QR_SIZE * k;
+    ctx.font = `600 ${40 * k}px ${FONT_DISPLAY}`;
+    const nameW = ctx.measureText(businessName).width;
+    ctx.font = `700 ${22 * k}px ${FONT_SANS}`;
+    const capW = ctx.measureText("SCAN TO BOOK").width + 6 * k * 11;
+    const txtW = Math.max(nameW, capW);
+    const gap = 26 * k;
+    const groupW = qpx + gap + txtW;
+    const gx = cx - groupW / 2;
+    // drawQrCode only paints once encoding succeeds, so a failure
+    // leaves the area untouched and we fall through to the name.
+    if (drawQrCode(ctx, branding.bookingUrl!, gx, y, qpx, theme.headline)) {
+      const txc = gx + qpx + gap + txtW / 2;
+      ctx.fillStyle = theme.headline;
+      ctx.font = `600 ${40 * k}px ${FONT_DISPLAY}`;
+      ctx.fillText(businessName, txc, y + qpx / 2 - 6 * k);
+      ctx.fillStyle = accent;
+      ctx.font = `700 ${22 * k}px ${FONT_SANS}`;
+      drawSpacedText(ctx, "SCAN TO BOOK", txc, y + qpx / 2 + 34 * k, 6 * k);
+      footerDrawn = true;
+    }
   }
-  ctx.fillStyle = theme.headline;
-  ctx.font = `600 44px ${FONT_DISPLAY}`;
-  ctx.fillText(branding.businessName || "Your Studio", cx, footY - (branding.handle ? 40 : 0));
+  if (!footerDrawn) {
+    ctx.fillStyle = theme.headline;
+    ctx.font = `600 ${44 * k}px ${FONT_DISPLAY}`;
+    ctx.fillText(businessName, cx, y + (hasQr ? (QR_SIZE * k) / 2 : NAME_ONLY_H * k * 0.7));
+  }
 
   ctx.restore();
 };
