@@ -1842,13 +1842,51 @@ export default function PublicBookingPage() {
             } catch { /* user cancelled — fall through silently */ }
             try { await navigator.clipboard?.writeText(url); } catch { /* ignore */ }
           };
+          // Compact circular icon button — lightens the connect row vs.
+          // a stack of text pills. Each carries an aria-label/title so
+          // the icon stays accessible.
+          const iconBtnStyle: React.CSSProperties = {
+            width: 42, height: 42, borderRadius: 999, padding: 0,
+            border: `1px solid ${accent}`, background: "#FFFFFF", color: accent,
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            textDecoration: "none", cursor: "pointer", flex: "0 0 auto",
+            appearance: "none", WebkitAppearance: "none",
+          };
+          const svgProps = {
+            width: 19, height: 19, viewBox: "0 0 24 24", fill: "none",
+            stroke: "currentColor", strokeWidth: 1.8,
+            strokeLinecap: "round" as const, strokeLinejoin: "round" as const,
+          };
+          const socialIcon = (key: string) => {
+            if (key === "ig") return (
+              <svg {...svgProps}>
+                <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+                <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+                <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+              </svg>
+            );
+            if (key === "tt") return (
+              <svg {...svgProps}>
+                <path d="M9 18V5l11-2v12" />
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="20" cy="15" r="3" />
+              </svg>
+            );
+            return (
+              <svg {...svgProps}>
+                <circle cx="12" cy="12" r="10" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+              </svg>
+            );
+          };
           return (
             <div
               style={{
                 marginTop: 14,
                 display: "flex",
                 justifyContent: "center",
-                gap: 8,
+                gap: 10,
                 flexWrap: "wrap",
               }}
             >
@@ -1858,65 +1896,40 @@ export default function PublicBookingPage() {
                   href={s.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  // Outline + label colored by the stylist's accent
-                  // so the social row reads as a cohesive set with
-                  // Share / Send-a-message rather than two visual
-                  // styles fighting on the same row.
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    letterSpacing: "0.04em",
-                    color: accent,
-                    textDecoration: "none",
-                    padding: "6px 12px",
-                    borderRadius: 99,
-                    background: "#FFFFFF",
-                    border: `1px solid ${accent}`,
-                  }}
+                  aria-label={s.label}
+                  title={s.label}
+                  style={iconBtnStyle}
                 >
-                  {s.label}
+                  {socialIcon(s.key)}
                 </a>
               ))}
               {showShare && (
                 <button
                   type="button"
                   onClick={handleShare}
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    letterSpacing: "0.04em",
-                    color: accent,
-                    background: "#FFFFFF",
-                    border: `1px solid ${accent}`,
-                    padding: "6px 12px",
-                    borderRadius: 99,
-                    cursor: "pointer",
-                    appearance: "none",
-                    WebkitAppearance: "none",
-                  }}
+                  aria-label="Share profile"
+                  title="Share profile"
+                  style={iconBtnStyle}
                 >
-                  Share profile
+                  <svg {...svgProps}>
+                    <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                    <polyline points="16 6 12 2 8 6" />
+                    <line x1="12" y1="2" x2="12" y2="15" />
+                  </svg>
                 </button>
               )}
-              {/* Message pill lives in the same connect row as socials +
-                  share so contact actions read as one tidy group rather
-                  than stacking into a separate centered row below. */}
+              {/* Message icon lives in the same connect row as socials +
+                  share so contact actions read as one tidy group. */}
               {link?.phone && (
                 <a
                   href={`sms:${link.phone.replace(/\s/g, "")}`}
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    letterSpacing: "0.04em",
-                    color: accent,
-                    textDecoration: "none",
-                    padding: "6px 12px",
-                    borderRadius: 99,
-                    background: "#FFFFFF",
-                    border: `1px solid ${accent}`,
-                  }}
+                  aria-label="Message"
+                  title="Message"
+                  style={iconBtnStyle}
                 >
-                  Message
+                  <svg {...svgProps}>
+                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                  </svg>
                 </a>
               )}
             </div>
@@ -2839,7 +2852,7 @@ export default function PublicBookingPage() {
                     })),
                   ];
                   return (
-                    <Field label="Choose an option">
+                    <Field label="Choose an option" labelColor={accent}>
                       <p style={{ margin: "0 0 8px", fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
                         Tap any option to switch — your price, deposit, and balance update right away.
                       </p>
@@ -2944,7 +2957,7 @@ export default function PublicBookingPage() {
                     Deposit only bumps if the add-on has
                     include_in_deposit = true. */}
                 {selectedCatalogService && availableExtras.length > 0 && (
-                  <Field label="Optional add-ons">
+                  <Field label="Optional add-ons" labelColor={accent}>
                     <p style={{ margin: "0 0 8px", fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
                       Pick any extras you want — your total updates as you tap.
                     </p>
@@ -3702,8 +3715,11 @@ export default function PublicBookingPage() {
           zIndex: 80,
           display: "flex",
           justifyContent: "center",
-          padding: "12px 16px calc(12px + env(safe-area-inset-bottom, 0px))",
-          background: "linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.92) 38%, #FFFFFF 100%)",
+          // Taller top padding + a longer, softer white fade so content
+          // (e.g. the Recent Work photos) dissolves gently under the bar
+          // instead of being hard-cut by an abrupt edge.
+          padding: "30px 16px calc(12px + env(safe-area-inset-bottom, 0px))",
+          background: "linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.78) 50%, #FFFFFF 82%)",
           pointerEvents: bookingInView ? "none" : "auto",
           opacity: bookingInView ? 0 : 1,
           transform: bookingInView ? "translateY(110%)" : "translateY(0)",
@@ -3758,8 +3774,8 @@ export default function PublicBookingPage() {
               zIndex: 80,
               display: "flex",
               justifyContent: "center",
-              padding: "12px 16px calc(12px + env(safe-area-inset-bottom, 0px))",
-              background: "linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.92) 38%, #FFFFFF 100%)",
+              padding: "30px 16px calc(12px + env(safe-area-inset-bottom, 0px))",
+              background: "linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.78) 50%, #FFFFFF 82%)",
               pointerEvents: show ? "auto" : "none",
               opacity: show ? 1 : 0,
               transform: show ? "translateY(0)" : "translateY(110%)",
@@ -4185,9 +4201,9 @@ const ProductCard = ({ product, accent, handle }: { product: PublicProduct; acce
   return <div style={sharedStyle}>{body}</div>;
 };
 
-const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
+const Field = ({ label, children, labelColor }: { label: string; children: React.ReactNode; labelColor?: string }) => (
   <label style={{ display: "block" }}>
-    <span style={{ display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: C.coffee, marginBottom: 6 }}>{label}</span>
+    <span style={{ display: "block", fontSize: labelColor ? 13 : 11, fontWeight: labelColor ? 800 : 700, textTransform: "uppercase", letterSpacing: "0.08em", color: labelColor || C.coffee, marginBottom: 6 }}>{label}</span>
     {children}
   </label>
 );
