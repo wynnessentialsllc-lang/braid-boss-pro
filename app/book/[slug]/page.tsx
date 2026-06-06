@@ -2366,7 +2366,9 @@ export default function PublicBookingPage() {
                 asked who they are. */}
             {hasCatalog ? (
               <>
-                <p style={stepHeaderStyle}>1 · Choose your service</p>
+                {/* The "Choose a service" heading lives below (after the
+                    Featured row + category dropdown) so this section
+                    isn't titled twice. */}
                 {/* Featured services — pinned row above the category
                     chips. Only renders when at least one service has
                     `featured = true`. Tapping a card jumps straight
@@ -2543,7 +2545,7 @@ export default function PublicBookingPage() {
                     second. The "back" affordance to return to the
                     menu sits above the selected-service card. */}
                 {!serviceId && (
-                  <Field label={filteredCatalog.length === 1 ? "Service" : "Choose a service"}>
+                  <Field label={filteredCatalog.length === 1 ? "Service" : "Choose a service"} labelColor={accent}>
                     <div
                       style={{
                         display: "grid",
@@ -3182,7 +3184,7 @@ export default function PublicBookingPage() {
                 (or in legacy free-form mode), so the landing reads
                 cleanly as a menu. */}
             {(serviceId || !hasCatalog) && <>
-            {hasCatalog && <p style={stepHeaderStyle}>2 · Pick a time</p>}
+            {hasCatalog && <p style={{ ...stepHeaderStyle, color: accent }}>Pick a time</p>}
             <BookingCalendar
               monthCursor={monthCursor}
               setMonthCursor={setMonthCursor}
@@ -3279,7 +3281,7 @@ export default function PublicBookingPage() {
             {/* 3 · Your details — relocated from the top of the form so
                 contact info is collected only after the client has
                 configured their style and picked a time. */}
-            {hasCatalog && <p style={stepHeaderStyle}>3 · Your details</p>}
+            {hasCatalog && <p style={{ ...stepHeaderStyle, color: accent }}>Your details</p>}
             <Field label="Your name">
               <Input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" autoComplete="name" required />
             </Field>
@@ -4093,10 +4095,13 @@ const inputStyle: React.CSSProperties = {
 const selectStyle: React.CSSProperties = { ...inputStyle };
 // Numbered step header for the booking funnel — gives the long form a
 // guided "1 · 2 · 3" rhythm instead of one endless scroll.
+// Accent section heading for the booking funnel — matches the emphasized
+// Field labels (Choose a service / option / add-ons). Callers override
+// `color` with the stylist's accent.
 const stepHeaderStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: 13,
   fontWeight: 800,
-  letterSpacing: "0.14em",
+  letterSpacing: "0.08em",
   textTransform: "uppercase",
   color: C.brandPrimary,
   margin: "6px 0 -2px",
