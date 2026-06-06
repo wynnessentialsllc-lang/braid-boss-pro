@@ -386,7 +386,19 @@ import {
   downloadJson,
   downloadCsv,
   downloadPdfBlob,
+  downloadFile,
 } from "./lib/native-download";
+import {
+  SOCIAL_CATEGORY_LABELS,
+  templatesByCategory,
+  socialTemplateFilename,
+  drawSocialTemplate,
+  renderSocialTemplateBlob,
+  loadBrandLogo,
+  ensureFontsReady,
+  type SocialTemplate,
+  type SocialBranding,
+} from "./lib/social-templates";
 import { buildCsv } from "./lib/csv";
 import ImportStudio, { IMPORT_TAGLINE } from "./components/ImportStudio";
 import { deriveClientInsights, formatLastBookedHint } from "./lib/client-insights";
@@ -29618,9 +29630,229 @@ const ReferralsScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
 };
 
 // ============================================================
+//  SOCIAL MEDIA TEMPLATES — branded, downloadable promo graphics
+// ============================================================
+// A small client component that paints one template onto a canvas.
+// Re-draws whenever the template or branding (logo load, accent) change.
+const SocialTemplateCanvas = ({
+  template,
+  branding,
+  size = 600,
+  style,
+}: {
+  template: SocialTemplate;
+  branding: SocialBranding;
+  size?: number;
+  style?: React.CSSProperties;
+}) => {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await ensureFontsReady();
+      if (cancelled || !ref.current) return;
+      drawSocialTemplate(ref.current, template, branding);
+    })();
+    return () => { cancelled = true; };
+  }, [template, branding, size]);
+  return (
+    <canvas
+      ref={ref}
+      width={size}
+      height={size}
+      style={{ width: "100%", height: "auto", display: "block", borderRadius: 16, ...style }}
+    />
+  );
+};
+
+const SocialTemplatesScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const [businessName, setBusinessName] = useState<string>(store.business?.businessName || "Your Studio");
+  const [accentColor, setAccentColor] = useState<string | null>(null);
+  const [handle, setHandle] = useState<string | null>(null);
+  const [logoImage, setLogoImage] = useState<HTMLImageElement | null>(null);
+  const [selected, setSelected] = useState<SocialTemplate | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 1800); };
+
+  // Pull branding off the public booking link so the post matches the
+  // stylist's storefront — name, logo, accent color, and a footer
+  // handle (Instagram if they've linked it, else their booking URL).
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await getSupabase()
+        .from("booking_links")
+        .select("business_name, logo_url, shop_logo_url, accent_color, instagram_url, slug")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled || !data) return;
+      if (data.business_name) setBusinessName(data.business_name);
+      setAccentColor(data.accent_color || null);
+      const ig = (data.instagram_url || "").trim();
+      if (ig) {
+        const h = ig.replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/^@/, "").replace(/\/+$/, "");
+        setHandle(h ? `@${h}` : null);
+      } else if (data.slug) {
+        setHandle(`braidbosspro.app/book/${data.slug}`);
+      }
+      const logoSrc = data.logo_url || data.shop_logo_url || null;
+      if (logoSrc) {
+        const img = await loadBrandLogo(logoSrc);
+        if (!cancelled) setLogoImage(img);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  // Stable branding object so the canvas effect only re-runs when
+  // something it draws actually changes.
+  const branding: SocialBranding = useMemo(
+    () => ({ businessName, logoImage, accentColor, handle }),
+    [businessName, logoImage, accentColor, handle],
+  );
+
+  const groups = useMemo(() => templatesByCategory(), []);
+
+  const handleDownload = async (template: SocialTemplate) => {
+    setBusy(true);
+    try {
+      const blob = await renderSocialTemplateBlob(template, branding);
+      const filename = socialTemplateFilename(template, businessName);
+      const result = await downloadFile({
+        filename,
+        mimeType: "image/png",
+        data: blob,
+        shareTitle: template.headline,
+      });
+      const isNative = typeof window !== "undefined" && !!(window as any).Capacitor?.isNativePlatform?.();
+      showToast(result.ok ? (isNative ? "Saved — share it!" : "Downloaded") : "Couldn't save image");
+    } catch (e: any) {
+      console.warn("[social-templates] download failed:", e?.message || e);
+      showToast("Couldn't generate image");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleShare = async (template: SocialTemplate) => {
+    setBusy(true);
+    try {
+      const blob = await renderSocialTemplateBlob(template, branding);
+      const filename = socialTemplateFilename(template, businessName);
+      const isNative = typeof window !== "undefined" && !!(window as any).Capacitor?.isNativePlatform?.();
+      // Web with the Web Share API gets a true share sheet; native
+      // routes through downloadFile (Filesystem + Share). Otherwise
+      // fall back to a plain download.
+      if (!isNative) {
+        const file = new File([blob], filename, { type: "image/png" });
+        const nav: any = navigator;
+        if (nav.canShare && nav.canShare({ files: [file] })) {
+          await nav.share({ files: [file], title: template.headline, text: template.subhead });
+          showToast("Shared");
+          return;
+        }
+      }
+      const result = await downloadFile({
+        filename,
+        mimeType: "image/png",
+        data: blob,
+        shareTitle: template.headline,
+      });
+      showToast(result.ok ? (isNative ? "Opened share sheet" : "Sharing unavailable — downloaded") : "Couldn't share");
+    } catch (e: any) {
+      console.warn("[social-templates] share failed:", e?.message || e);
+      showToast("Couldn't share image");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Social templates"
+        subtitle="Ready-to-post promo graphics"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-5">
+        <Card className="p-3.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: C.muted, letterSpacing: "0.14em" }}>How it works</p>
+          <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+            Each template is auto-branded with your business name{logoImage ? ", logo," : ""} and{accentColor ? " brand color" : " style"}. Tap one to download or share it straight to Instagram, TikTok, or your story.
+          </p>
+        </Card>
+
+        {groups.map((g) => (
+          <div key={g.category}>
+            <SectionTitle>{SOCIAL_CATEGORY_LABELS[g.category]}</SectionTitle>
+            <div className="grid grid-cols-2 gap-3 mt-1.5">
+              {g.templates.map((t) => (
+                <button
+                  type="button"
+                  key={t.id}
+                  onClick={() => setSelected(t)}
+                  className="text-left active:scale-[0.98] transition"
+                >
+                  <SocialTemplateCanvas template={t} branding={branding} size={420} />
+                  <p className="text-[12px] font-semibold mt-1.5 px-0.5" style={{ color: C.espresso }}>{t.name}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Detail sheet — bigger preview + download / share */}
+      <Sheet open={!!selected} onClose={() => setSelected(null)} title={selected?.name || "Template"}>
+        {selected && (
+          <div className="space-y-4 pb-2">
+            <SocialTemplateCanvas template={selected} branding={branding} size={900} />
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => handleShare(selected)}
+                className="rounded-full py-3 text-[13px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2"
+                style={{ background: C.paper, color: C.espresso, border: `1px solid ${C.hairline}`, opacity: busy ? 0.6 : 1 }}
+              >
+                <Send size={16} /> Share
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => handleDownload(selected)}
+                className="rounded-full py-3 text-[13px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2"
+                style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}`, opacity: busy ? 0.6 : 1 }}
+              >
+                <Download size={16} /> {busy ? "Working…" : "Download"}
+              </button>
+            </div>
+            <p className="text-[11px] text-center" style={{ color: C.muted }}>
+              Saves a square (1080×1080) image — perfect for an Instagram or TikTok post.
+            </p>
+          </div>
+        )}
+      </Sheet>
+
+      {toast && (
+        <div className="fixed left-1/2 z-50 px-4 py-2 rounded-full text-sm font-semibold bbp-fade"
+          style={{ bottom: 100, transform: "translateX(-50%)", background: C.espresso, color: C.cream }}>
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============================================================
 //  MARKETING — auto-rebook nudges, opt-out, per-service windows
 // ============================================================
-const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+const MarketingScreen = ({ store, onBack, openSocialTemplates }: { store: any; onBack: () => void; openSocialTemplates?: () => void }) => {
   const userId: string | null = store.userId;
   const services: any[] = store.servicesApi?.services || [];
   const updateService = store.servicesApi?.upsert;
@@ -29748,6 +29980,31 @@ const MarketingScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
         leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
       />
       <div className="px-5 pt-2 space-y-4">
+        {/* Social media templates — branded, downloadable promo
+            graphics the stylist can post to Instagram / TikTok. */}
+        {openSocialTemplates && (
+          <Card className="p-4 active:scale-[0.99]" onClick={openSocialTemplates} style={{ background: GRADIENTS.hero, border: "none" }}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div
+                  aria-hidden
+                  style={{
+                    width: 36, height: 36, borderRadius: 999, display: "grid", placeItems: "center",
+                    background: "rgba(255,255,255,0.22)", color: "#FFFFFF", flexShrink: 0,
+                  }}
+                >
+                  <ImageIcon size={17} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold" style={{ color: "#FFFFFF" }}>Social media templates</p>
+                  <p className="text-[11px]" style={{ color: "rgba(255,255,255,0.85)" }}>Branded promo graphics, ready to post</p>
+                </div>
+              </div>
+              <ChevronRight size={18} style={{ color: "rgba(255,255,255,0.9)" }} />
+            </div>
+          </Card>
+        )}
+
         {/* Per-type master switches. Each automation is independent —
             a stylist can run rebook nudges without birthdays, etc.
             All default to on so day-one setup is one less screen. */}
@@ -31021,7 +31278,8 @@ export default function App() {
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
       {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} />}
-      {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} openSocialTemplates={() => setSecondary("socialTemplates")} />}
+      {secondary === "socialTemplates" && <SocialTemplatesScreen store={store} onBack={() => setSecondary("marketing")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "marketplace" && <MarketplaceScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "giftCards" && <GiftCardsScreen store={store} onBack={() => setSecondary("settings")} />}
