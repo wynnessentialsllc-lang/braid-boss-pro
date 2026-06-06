@@ -1463,6 +1463,40 @@ export default function PublicBookingPage() {
         @media (prefers-reduced-motion: reduce) {
           .bbp-hero-rise { animation: none; }
         }
+        /* Featured "spotlight" — a soft, slowly-pulsing aura behind a
+           featured service card so it reads as the hero pick instead
+           of just another row. The glow color is driven by
+           --bbp-accent (the stylist's storefront accent) so it always
+           matches the theme rather than a hard-coded purple. The
+           center brightens toward white on each pulse to read as lit /
+           illuminated. Lives on a wrapper (not the card) because the
+           card clips overflow for its cover image. */
+        @keyframes bbpFeaturedGlow {
+          0%, 100% { opacity: .5;  transform: scale(.985); }
+          50%      { opacity: .95; transform: scale(1.025); }
+        }
+        .bbp-featured { position: relative; isolation: isolate; }
+        .bbp-featured::before {
+          content: "";
+          position: absolute;
+          inset: -7px;
+          z-index: -1;
+          border-radius: 24px;
+          background:
+            radial-gradient(58% 58% at 50% 42%,
+              color-mix(in srgb, #FFFFFF 28%, var(--bbp-accent)) 0%,
+              color-mix(in srgb, var(--bbp-accent) 60%, transparent) 38%,
+              transparent 72%),
+            radial-gradient(80% 80% at 50% 60%,
+              color-mix(in srgb, var(--bbp-accent) 28%, transparent) 0%,
+              transparent 75%);
+          filter: blur(11px);
+          animation: bbpFeaturedGlow 3s ease-in-out infinite;
+          pointer-events: none;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .bbp-featured::before { animation: none; opacity: .7; transform: none; }
+        }
       `}</style>
 
       {/* Storefront-style hero — full-width gradient (or banner
@@ -2382,16 +2416,27 @@ export default function PublicBookingPage() {
                       <div
                         style={{
                           display: "flex",
-                          gap: 10,
+                          gap: 14,
                           overflowX: "auto",
                           WebkitOverflowScrolling: "touch",
-                          paddingBottom: 4,
+                          // Breathing room so the featured spotlight aura
+                          // (inset -7px + blur) isn't clipped by the
+                          // rail's scroll overflow.
+                          padding: "10px 12px 14px",
+                          margin: "0 -12px",
                           scrollbarWidth: "none",
                         }}
                       >
                         {featured.map(s => (
-                          <button
+                          <div
                             key={`feat_${s.id}`}
+                            className="bbp-featured"
+                            // Drives the spotlight aura color (see the
+                            // .bbp-featured rule) off the storefront
+                            // accent so it tracks the theme.
+                            style={{ flex: "0 0 240px", ["--bbp-accent" as string]: accent } as React.CSSProperties}
+                          >
+                          <button
                             type="button"
                             onClick={() => {
                               setServiceId(s.id);
@@ -2406,14 +2451,17 @@ export default function PublicBookingPage() {
                               }
                             }}
                             style={{
-                              flex: "0 0 240px",
+                              width: "100%",
                               padding: 0,
                               borderRadius: 18,
                               background: C.paper,
-                              border: `1.5px solid ${serviceId === s.id ? accent : C.hairline}`,
+                              // Featured cards always carry an accent-
+                              // tinted border (heavier once selected) so
+                              // they read as the hero pick on the rail.
+                              border: `1.5px solid ${serviceId === s.id ? accent : `color-mix(in srgb, ${accent} 40%, ${C.hairline})`}`,
                               boxShadow: serviceId === s.id
                                 ? `0 0 0 3px ${C.cream}`
-                                : "0 4px 14px rgba(21, 17, 26, 0.06)",
+                                : `0 6px 18px -6px color-mix(in srgb, ${accent} 35%, transparent)`,
                               textAlign: "left",
                               font: "inherit",
                               color: "inherit",
@@ -2478,6 +2526,7 @@ export default function PublicBookingPage() {
                               </p>
                             </div>
                           </button>
+                          </div>
                         ))}
                       </div>
                     </Field>
