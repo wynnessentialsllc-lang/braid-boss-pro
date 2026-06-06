@@ -4059,7 +4059,10 @@ const inputStyle: React.CSSProperties = {
   fontSize: 15,
   outline: "none",
 };
-const selectStyle: React.CSSProperties = { ...inputStyle, appearance: "none" };
+// Select style mirrors the inputs. We deliberately DON'T strip the
+// native dropdown arrow (no `appearance: none`) so every <select> keeps
+// a visible chevron and reads as a tappable picker.
+const selectStyle: React.CSSProperties = { ...inputStyle };
 // Numbered step header for the booking funnel — gives the long form a
 // guided "1 · 2 · 3" rhythm instead of one endless scroll.
 const stepHeaderStyle: React.CSSProperties = {
