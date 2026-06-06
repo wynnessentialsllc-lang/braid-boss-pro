@@ -417,6 +417,7 @@ import {
 } from "./lib/rebooking/rebooking-intelligence";
 import {
   dispatchPush,
+  dropInactiveAppointmentRules,
   loadDeliveredHistory,
   saveDeliveredHistory,
   sendTestPush,
@@ -30889,12 +30890,17 @@ export default function App() {
         });
         const history = loadDeliveredHistory();
         const { toSend } = splitDeliverable(rules, history, new Date());
+        // Authoritative re-check against the DB so a cancellation made
+        // off-device (another device, client self-service link) can't
+        // fire a reminder for an appointment the local cache still
+        // thinks is active.
+        const deliverable = await dropInactiveAppointmentRules(toSend);
         let nextHistory = history;
-        for (const r of toSend.slice(0, 10)) {
+        for (const r of deliverable.slice(0, 10)) {
           const result = await dispatchPush(auth.userId!, r);
           if (result.ok) nextHistory = { ...nextHistory, [r.id]: new Date().toISOString() };
         }
-        if (toSend.length > 0) saveDeliveredHistory(nextHistory);
+        if (deliverable.length > 0) saveDeliveredHistory(nextHistory);
       } catch (err) {
         console.warn("[bbp] scheduler failed", err);
       }
