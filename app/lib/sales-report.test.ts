@@ -153,6 +153,20 @@ describe("buildSalesReport — drill-down details", () => {
 
     expect(r.details.discounts).toHaveLength(1);
     expect(r.details.discounts[0]).toMatchObject({ title: "Bailey", subtitle: "Loyalty", amount: 25 });
+
+    // Sales rows carry item + category so the list can filter to a Top row.
+    expect(bailey.item).toBe("Knotless");
+  });
+
+  it("lists collected payments by method bucket", () => {
+    const txns = [
+      txn({ id: "p1", paidAt: "2026-06-06T10:00:00Z", method: "cash", amount: 100, clientName: "Dana", serviceName: "Twists" }),
+      txn({ id: "p2", paidAt: "2026-06-06T11:00:00Z", method: "stripe", amount: 200, clientName: "Mia" }),
+    ];
+    const r = buildSalesReport([], txns, {}, "1W", REF);
+    expect(r.details.payments).toHaveLength(2);
+    expect(r.details.payments.find(p => p.id === "p1")).toMatchObject({ bucket: "cash", amount: 100 });
+    expect(r.details.payments.find(p => p.id === "p2")).toMatchObject({ bucket: "card", amount: 200 });
   });
 });
 
