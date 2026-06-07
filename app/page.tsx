@@ -86,6 +86,14 @@ import {
   runReferralProcessor,
   computeReferralSummary,
 } from "./lib/referrals";
+import {
+  type CreditEntry,
+  listCreditsForClient,
+  creditBalance,
+  grantCredit,
+  voidCreditEntry,
+  applyCreditToAppointment,
+} from "./lib/credits";
 import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
 import WelcomeIntro from "./components/WelcomeIntro";
 import { ProductImageUploader } from "./components/ProductImageUploader";
@@ -771,11 +779,15 @@ const normalizeAppointment = (raw: any): any => {
   // off the NET (post-discount) total so a "Mark paid" against a
   // discounted appointment lands as paid (not "owes the discount").
   const discountAmount = roundCents(parseMoney(raw.discountAmount));
+  // Account credit applied to the balance (store credit), separate from
+  // a promo discount. Both reduce what's owed; credit is tracked apart so
+  // reports/receipts can tell a discount from a credit redemption.
+  const creditApplied = roundCents(parseMoney(raw.creditApplied));
   const netTotal = Math.max(0, roundCents(totalPrice - discountAmount));
   let depositPaid = roundCents(parseMoney(raw.depositPaid));
   if (depositPaid > netTotal && netTotal > 0) depositPaid = netTotal;
   if (depositPaid < 0) depositPaid = 0;
-  const balanceDue = roundCents(Math.max(0, netTotal - depositPaid));
+  const balanceDue = roundCents(Math.max(0, netTotal - depositPaid - Math.max(0, creditApplied)));
   let paymentStatus: "paid" | "" | string = raw.paymentStatus || "";
   if (netTotal > 0 && balanceDue === 0) paymentStatus = "paid";
   else if (paymentStatus === "paid") paymentStatus = "";
@@ -8096,6 +8108,9 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         discountId: a?.discountId ?? a?.discount_id ?? null,
         discountName: a?.discountName ?? a?.discount_name ?? null,
         discountAmount: sanitizeMoneyInput(a?.discountAmount ?? a?.discount_amount ?? 0),
+        // Account credit applied to this appointment's balance. Rides in
+        // the data jsonb; the canonical ledger is reconciled on save.
+        creditApplied: sanitizeMoneyInput(a?.creditApplied ?? 0),
         // Phase 2: track which service catalog row this appointment
         // came from. Snapshot only — used for picker highlight + the
         // "Replace with service defaults" affordance.
@@ -8234,10 +8249,53 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     }
   }, [form.totalPrice, form.discountId, availableDiscounts]);
 
+  // Account credit on the selected client. Applied to the BALANCE (never
+  // the deposit) of this appointment. The ledger is canonical; we mirror
+  // the applied amount onto the appointment for the math + receipts.
+  const [creditEntries, setCreditEntries] = useState<CreditEntry[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const uid_ = store.userId;
+      if (!uid_ || !form.clientId) { if (!cancelled) setCreditEntries([]); return; }
+      try {
+        const list = await listCreditsForClient(uid_, form.clientId);
+        if (!cancelled) setCreditEntries(list);
+      } catch { if (!cancelled) setCreditEntries([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [store.userId, form.clientId, form.id]);
+
   const discountAmt = Number(form.discountAmount) || 0;
   const grossTotal = Number(form.totalPrice) || 0;
   const netTotal = Math.max(0, grossTotal - discountAmt);
-  const balanceDue = netTotal - (Number(form.depositPaid) || 0);
+  const balanceBeforeCredit = Math.max(0, netTotal - (Number(form.depositPaid) || 0));
+
+  // Net credit currently on the account already nets out this
+  // appointment's existing redemption, so add that back to get the pool
+  // this appointment can actually draw from (mirrors the apply RPC).
+  const clientCreditNet = creditBalance(creditEntries);
+  const thisApptRedeemed = useMemo(() => {
+    if (!form.id) return 0;
+    let s = 0;
+    for (const e of creditEntries) {
+      if (e.kind === "redeem" && e.appointment_id === form.id) s += -Number(e.amount);
+    }
+    return Math.round(s * 100) / 100;
+  }, [creditEntries, form.id]);
+  const creditPool = Math.max(0, Math.round((clientCreditNet + thisApptRedeemed) * 100) / 100);
+  const maxCreditApplicable = Math.min(creditPool, balanceBeforeCredit);
+  const creditApplied = Math.min(Number(form.creditApplied) || 0, maxCreditApplicable);
+  const balanceDue = Math.max(0, roundCents(balanceBeforeCredit - creditApplied));
+
+  // Keep the applied credit valid as the total / deposit / discount move:
+  // never apply more than is available or more than the balance.
+  useEffect(() => {
+    const current = Number(form.creditApplied) || 0;
+    if (current > maxCreditApplicable + 0.001) {
+      setForm((prev: any) => ({ ...prev, creditApplied: roundCents(maxCreditApplicable) }));
+    }
+  }, [maxCreditApplicable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When picking an existing client, auto-fill phone/email + their
   // most recent style/duration on NEW appointments only. We don't
@@ -8364,6 +8422,27 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
     const saved = await upsertAppointment(baseAppt);
     if (!saved) return; // Gated by upgrade sheet.
+
+    // Reconcile account credit applied to this appointment's balance.
+    // Idempotent: writes/clears the single redeem row for this appt and,
+    // if the RPC capped the amount (insufficient balance), corrects the
+    // stored creditApplied so the balance matches the ledger. Best-effort.
+    try {
+      const isRealAppt = (form.kind || "appointment") === "appointment";
+      const notCancelled =
+        (saved.status || "") !== "cancelled" && (saved.status || "") !== "canceled";
+      if (isRealAppt && notCancelled && saved?.id && clientId &&
+          (creditApplied > 0 || thisApptRedeemed > 0)) {
+        const res = await applyCreditToAppointment(clientId, saved.id, creditApplied);
+        if (Math.abs(res.applied - creditApplied) > 0.001) {
+          await upsertAppointment({ ...saved, creditApplied: res.applied });
+        }
+      }
+    } catch (e) {
+      // Credit reconciliation is best-effort — never block the save.
+      if (typeof console !== "undefined") console.warn("[appt] credit reconcile failed:", e);
+    }
+
     // Track repeat bookings for the smart-studio funnel — fires when
     // the booked client already has a prior completed visit.
     if (saved?.clientId) {
@@ -8703,6 +8782,47 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       } else {
         alert("Appointment cancelled.");
       }
+
+      // A cancelled appointment shouldn't consume the client's account
+      // credit — release anything that was applied back to their balance.
+      try {
+        if (form.clientId && form.id) {
+          await applyCreditToAppointment(form.clientId, form.id, 0);
+        }
+      } catch { /* best-effort */ }
+
+      // Offer to turn the cancellation into account credit for the client
+      // — the "I'll credit you for the short notice" gesture. Applies to
+      // their next appointment's balance and emails them automatically.
+      try {
+        if (store.userId && form.clientId) {
+          const collected = depositPaid > 0 ? ` (you collected ${fmtMoney(depositPaid, business.currency)})` : "";
+          const raw = window.prompt(
+            `Give ${form.clientName || "this client"} account credit for the cancellation?${collected}\n\nEnter an amount to credit their account (or leave blank to skip). It applies to their next appointment's balance and they'll be emailed.`,
+            "",
+          );
+          if (raw !== null) {
+            const amt = Math.round((parseFloat(raw) || 0) * 100) / 100;
+            if (amt > 0) {
+              await grantCredit(
+                store.userId,
+                { id: form.clientId, name: form.clientName, email: form.clientEmail },
+                amt,
+                reason ? `Cancellation — ${reason}` : "Cancellation credit",
+                { studioName: business?.name || business?.studioName || null },
+              );
+              alert(
+                form.clientEmail
+                  ? `Added ${fmtMoney(amt, business.currency)} credit to ${form.clientName || "the client"}'s account — they were emailed.`
+                  : `Added ${fmtMoney(amt, business.currency)} credit to ${form.clientName || "the client"}'s account.`,
+              );
+            }
+          }
+        }
+      } catch (e: any) {
+        if (typeof console !== "undefined") console.warn("[appt] cancellation credit failed:", e?.message || e);
+      }
+
       trackEvent("appointment_cancelled", { category: "feature", metadata: { refunded: body.refunded || 0 } });
     } catch (err: any) {
       console.error("[appt] cancel failed:", err);
@@ -9576,6 +9696,40 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
               </span>
             </div>
           </Card>
+        )}
+
+        {/* Account credit — applied to the balance (not the deposit).
+            Auto-suggests the available credit; the stylist can toggle it
+            off. The ledger is reconciled on save. */}
+        {isAppointment && creditPool > 0 && (
+        <Card className="p-3.5" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Account credit</p>
+              <p className="text-[11px]" style={{ color: C.muted }}>
+                {fmtMoney(creditPool, business.currency)} available · applied to the balance
+              </p>
+            </div>
+            <Toggle
+              checked={creditApplied > 0}
+              onChange={(v: boolean) =>
+                setForm((prev: any) => ({
+                  ...prev,
+                  creditApplied: v ? roundCents(maxCreditApplicable) : 0,
+                }))
+              }
+            />
+          </div>
+          {creditApplied > 0 && (
+            <div className="flex items-center justify-between text-[13px] mt-2 pt-2"
+              style={{ color: C.goldDeep, borderTop: `1px solid ${C.hairline}` }}>
+              <span>Credit applied</span>
+              <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
+                − {fmtMoney(creditApplied, business.currency)}
+              </span>
+            </div>
+          )}
+        </Card>
         )}
 
         {isAppointment && (
@@ -11394,6 +11548,155 @@ const ClientProfileSheet = ({
   );
 };
 
+// Account credit — store credit on a client's profile. The stylist adds
+// credit (e.g. to make good on a last-minute cancellation); it's applied
+// to the BALANCE of a future appointment, not the deposit. Granting
+// credit emails the client. Mirrors the referral "account credit" idea
+// but is a general, manual, auto-applying balance credit.
+const ClientCreditCard = ({ userId, client, currency, studioName }: {
+  userId: string | null;
+  client: { id: string; name?: string; email?: string };
+  currency: string;
+  studioName?: string | null;
+}) => {
+  const [entries, setEntries] = useState<CreditEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+  const [adding, setAdding] = useState(false);
+  const [amountStr, setAmountStr] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!userId || !client.id) { setEntries([]); setLoading(false); return; }
+      setLoading(true);
+      try {
+        const list = await listCreditsForClient(userId, client.id);
+        if (!cancelled) setEntries(list);
+      } catch { /* read is best-effort */ }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [userId, client.id, tick]);
+
+  const balance = creditBalance(entries);
+
+  const submit = async () => {
+    const amt = Math.round((parseFloat(amountStr) || 0) * 100) / 100;
+    if (!(amt > 0)) { setMsg("Enter an amount greater than $0."); return; }
+    if (!userId) { setMsg("Sign in required."); return; }
+    setBusy(true); setMsg(null);
+    try {
+      await grantCredit(
+        userId,
+        { id: client.id, name: client.name, email: client.email },
+        amt,
+        reason.trim(),
+        { studioName },
+      );
+      setAmountStr(""); setReason(""); setAdding(false);
+      setMsg(
+        client.email
+          ? `Added ${fmtMoney(amt, currency)} — ${client.name || "the client"} was emailed.`
+          : `Added ${fmtMoney(amt, currency)} of credit.`,
+      );
+      setTick(t => t + 1);
+    } catch (e: any) {
+      setMsg(e?.message || "Couldn't add credit.");
+    } finally { setBusy(false); }
+  };
+
+  const removeEntry = async (entry: CreditEntry) => {
+    if (!userId || busy) return;
+    if (!window.confirm("Reverse this credit entry? This adds an offsetting row to keep the history honest.")) return;
+    setBusy(true); setMsg(null);
+    try { await voidCreditEntry(userId, entry); setTick(t => t + 1); }
+    catch { setMsg("Couldn't reverse that entry."); }
+    finally { setBusy(false); }
+  };
+
+  const kindLabel = (e: CreditEntry): string => {
+    if (e.kind === "redeem") return "Applied to appointment";
+    if (e.kind === "void") return "Reversal";
+    if (e.kind === "adjust") return "Adjustment";
+    return "Credit added";
+  };
+
+  return (
+    <Card className="p-4" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Account credit</p>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: balance > 0 ? C.goldDeep : C.espresso, lineHeight: 1.1, marginTop: 2 }}>
+            {fmtMoney(balance, currency)}
+          </p>
+        </div>
+        {!adding && (
+          <Button variant="outline" size="sm" icon={<Plus size={14} />} onClick={() => { setAdding(true); setMsg(null); }}>
+            Add credit
+          </Button>
+        )}
+      </div>
+
+      <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+        Applied to the balance of {client.name || "this client"}&apos;s next appointment. Deposits are unaffected.
+      </p>
+
+      {adding && (
+        <div className="mt-3 space-y-2.5">
+          <div className="grid grid-cols-2 gap-2.5">
+            <Field label="Amount">
+              <Input
+                value={amountStr}
+                onChange={(e: any) => setAmountStr(e.target.value.replace(/[^\d.]/g, ""))}
+                placeholder="0.00"
+                prefix="$"
+              />
+            </Field>
+            <Field label="Reason">
+              <Input value={reason} onChange={(e: any) => setReason(e.target.value)} placeholder="e.g. Cancellation" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-2.5">
+            <Button variant="outline" onClick={() => { setAdding(false); setMsg(null); }} disabled={busy}>Cancel</Button>
+            <Button variant="primary" onClick={submit} disabled={busy}>{busy ? "Adding…" : "Add credit"}</Button>
+          </div>
+        </div>
+      )}
+
+      {msg && <p className="text-[11px] mt-2" style={{ color: C.coffee }}>{msg}</p>}
+
+      {!loading && entries.length > 0 && (
+        <div className="mt-3 pt-3 space-y-1.5" style={{ borderTop: `1px solid ${C.hairline}` }}>
+          {entries.slice(0, 8).map((e) => (
+            <div key={e.id} className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[12px] font-semibold truncate" style={{ color: C.espresso }}>
+                  {kindLabel(e)}{e.reason ? ` · ${e.reason}` : ""}
+                </p>
+                <p className="text-[10px]" style={{ color: C.muted }}>{(e.created_at || "").slice(0, 10)}</p>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <span className="text-[12px] font-mono font-semibold" style={{ color: Number(e.amount) < 0 ? C.danger : C.success }}>
+                  {Number(e.amount) < 0 ? "−" : "+"}{fmtMoney(Math.abs(Number(e.amount)), currency)}
+                </span>
+                {(e.kind === "grant" || e.kind === "adjust") && (
+                  <button type="button" onClick={() => removeEntry(e)} aria-label="Reverse" style={{ color: C.muted, padding: 2 }}>
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+};
+
 const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuickAppt, savePhoto, deletePhotoExternal }: {
   open: boolean;
   client: any;
@@ -11539,6 +11842,14 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
                 business={business}
                 openCommunication={openCommunication}
                 onDuplicate={(prefill) => { onClose(); openQuickAppt?.(prefill); }}
+              />
+            )}
+            {form.id && (
+              <ClientCreditCard
+                userId={store.userId || null}
+                client={{ id: form.id, name: form.name, email: form.email }}
+                currency={business.currency}
+                studioName={business?.name || business?.studioName || null}
               />
             )}
             <Field label="Name"><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Full name" /></Field>
