@@ -8285,17 +8285,11 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   }, [creditEntries, form.id]);
   const creditPool = Math.max(0, Math.round((clientCreditNet + thisApptRedeemed) * 100) / 100);
   const maxCreditApplicable = Math.min(creditPool, balanceBeforeCredit);
-  const creditApplied = Math.min(Number(form.creditApplied) || 0, maxCreditApplicable);
+  // Effective applied credit is always clamped to what's actually
+  // available + owed, so a later total/deposit change can never over-
+  // apply. handleSave persists THIS value (not the raw form field).
+  const creditApplied = Math.max(0, Math.min(Number(form.creditApplied) || 0, maxCreditApplicable));
   const balanceDue = Math.max(0, roundCents(balanceBeforeCredit - creditApplied));
-
-  // Keep the applied credit valid as the total / deposit / discount move:
-  // never apply more than is available or more than the balance.
-  useEffect(() => {
-    const current = Number(form.creditApplied) || 0;
-    if (current > maxCreditApplicable + 0.001) {
-      setForm((prev: any) => ({ ...prev, creditApplied: roundCents(maxCreditApplicable) }));
-    }
-  }, [maxCreditApplicable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When picking an existing client, auto-fill phone/email + their
   // most recent style/duration on NEW appointments only. We don't
@@ -8410,6 +8404,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     const baseAppt = {
       ...original,
       ...form,
+      // Persist the CLAMPED applied credit, never the raw form field —
+      // a later total/deposit edit could leave form.creditApplied above
+      // what's available/owed, and the balance math keys off this value.
+      creditApplied,
       paymentDate: paymentDateAutoFill,
       clientId, clientName,
       seriesId,
@@ -11166,6 +11164,18 @@ const ClientProfileSheet = ({
           />
         )}
 
+        {/* Account credit — same card as the editor so the balance,
+            history and "Add credit" are all available straight from the
+            profile, not only the edit screen. */}
+        {client?.id && (
+          <ClientCreditCard
+            userId={store.userId || null}
+            client={{ id: String(client.id), name: client.name, email: client.email }}
+            currency={currency}
+            studioName={business?.name || business?.studioName || null}
+          />
+        )}
+
         {/* Prepaid packages — sell / redeem / view. */}
         {client?.id && <ClientPackagesCard store={store} client={client} />}
 
@@ -11364,6 +11374,36 @@ const ClientProfileSheet = ({
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Scalp sensitivity</p>
                 <p className="text-[13px] mt-1" style={{ color: C.coffee }}>{client.scalpSensitivity}</p>
+              </div>
+            )}
+            {Array.isArray(client?.preferredStyles) && client.preferredStyles.length > 0 && (
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Preferred styles</p>
+                <p className="text-[13px] mt-1" style={{ color: C.coffee, lineHeight: 1.5 }}>{client.preferredStyles.join(", ")}</p>
+              </div>
+            )}
+            {Array.isArray(client?.dependents) && client.dependents.filter((d: any) => d?.name).length > 0 && (
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Family members</p>
+                <p className="text-[13px] mt-1" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                  {client.dependents
+                    .filter((d: any) => d?.name)
+                    .map((d: any) => (d.note ? `${d.name} (${d.note})` : d.name))
+                    .join(", ")}
+                </p>
+              </div>
+            )}
+            {client?.birthday && (
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Birthday</p>
+                <p className="text-[13px] mt-1" style={{ color: C.coffee }}>
+                  {(() => {
+                    const d = new Date(`${client.birthday}T12:00:00`);
+                    return Number.isNaN(d.getTime())
+                      ? client.birthday
+                      : d.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+                  })()}
+                </p>
               </div>
             )}
             <div>
