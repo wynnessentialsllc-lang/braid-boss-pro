@@ -643,6 +643,14 @@ const renderAppointmentConfirmed = (p: Record<string, any>) => {
       : null;
 
   const subject = `Your appointment is confirmed with ${studioName}`;
+  // Optional stylist note (Square-style) — appears at the top of the
+  // confirmation, above the standard details.
+  const customMessage = String(p.customMessage || "").trim();
+  const messageBlock = customMessage
+    ? `<div style="background:#F6F2EC;border:1px solid rgba(21,17,26,0.08);border-radius:12px;padding:12px 14px;margin:0 0 16px;">
+         <p style="font-size:14px;line-height:21px;margin:0;color:${C.coffee};white-space:pre-wrap;">${escape(customMessage)}</p>
+       </div>`
+    : "";
   const balanceLine = remainingBalance != null
     ? remainingBalance > 0
       ? `<p style="font-size:14px;line-height:22px;margin:0 0 12px;color:${C.coffee};">Remaining balance: <strong>$${remainingBalance.toFixed(2)}</strong>${depositPaid ? ` (deposit of $${depositPaid.toFixed(2)} received)` : ""}. Due at your appointment.</p>`
@@ -656,6 +664,7 @@ const renderAppointmentConfirmed = (p: Record<string, any>) => {
     <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">
       You're officially booked, ${escape(clientName)}.
     </h1>
+    ${messageBlock}
     <p style="font-size:15px;line-height:24px;margin:0 0 14px;">
       ${escape(studioName)} approved and scheduled your appointment${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}${when ? ` on <strong>${escape(when)}</strong>` : ""}.
     </p>
