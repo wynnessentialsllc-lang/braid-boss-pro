@@ -73,7 +73,7 @@ const refundIntent = async (
 };
 
 export async function POST(req: Request) {
-  let body: { appointment_id?: string; reason?: string; skip_refund?: boolean };
+  let body: { appointment_id?: string; reason?: string; skip_refund?: boolean; notify_client?: boolean };
   try { body = await req.json(); }
   catch { return fail(400, "Invalid JSON body."); }
 
@@ -81,6 +81,8 @@ export async function POST(req: Request) {
   if (!apptId) return fail(400, "Missing appointment_id.");
   const reason = (body?.reason || "").trim() || null;
   const skipRefund = !!body?.skip_refund;
+  // Default to notifying (back-compat: callers that omit it still email).
+  const notifyClient = body?.notify_client !== false;
 
   let stripeSecret: string;
   let supabaseUrl: string;
@@ -202,7 +204,7 @@ export async function POST(req: Request) {
   // + idempotent via the dedupe key; never fails the cancel. Deposit
   // was refunded above where possible, so we don't claim forfeiture.
   const clientEmail = String(appt.client_email || "").trim();
-  if (clientEmail) {
+  if (clientEmail && notifyClient) {
     try {
       let studioName = "your stylist";
       try {

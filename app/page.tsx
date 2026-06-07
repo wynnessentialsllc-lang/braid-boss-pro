@@ -8078,6 +8078,13 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   // (consent source = "stylist"). Drives the SMS reminder + the SMS
   // confirmation; gated server-side on phone + credits + opt-out.
   const [smsOptIn, setSmsOptIn] = useState(false);
+  // Whether to email the client about THIS booking / change. Defaults on,
+  // but lets the stylist save quietly — e.g. fixing a mistake or creating
+  // a placeholder — without spamming the client (a real pain when a
+  // double-booking gets created then cancelled). Gates the booking
+  // confirmation, the "appointment updated" notice, and (via the cancel
+  // flow) the cancellation email.
+  const [notifyClient, setNotifyClient] = useState(true);
 
   // Custom (one-off) add-on draft. Committed to form.addons via the
   // "Add" button so the total/duration only move on an explicit action,
@@ -8187,6 +8194,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       setRemindersEnabled(a?.remindersEnabled !== false);
       setReminderChannel(a?.reminderChannel || null);
       setSmsOptIn(!!a?.smsOptIn);
+      setNotifyClient(true);
     }
     // store.appointments intentionally NOT a dep — seed once per open;
     // re-seeding mid-edit would discard the stylist's in-progress edits.
@@ -8480,7 +8488,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       const isRealAppt = (form.kind || "appointment") === "appointment";
       const notCancelled =
         (saved.status || "") !== "cancelled" && (saved.status || "") !== "canceled";
-      if (isNew && isRealAppt && notCancelled && store.userId) {
+      if (isNew && isRealAppt && notCancelled && notifyClient && store.userId) {
         const balance = Number(saved.totalPrice ?? form.totalPrice ?? 0);
         await getSupabase().rpc("enqueue_appointment_confirmation", {
           appt_id_in: saved.id,
@@ -8610,7 +8618,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
       if (
         wasExisting && isRealAppt && anyChanged && notCancelled &&
-        clientEmail && store.userId
+        notifyClient && clientEmail && store.userId
       ) {
         const supabase = getSupabase();
         let studioName = "your stylist";
@@ -8765,7 +8773,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       const res = await fetch("/api/cancel-appointment", {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ appointment_id: form.id, reason: reason || undefined }),
+        body: JSON.stringify({ appointment_id: form.id, reason: reason || undefined, notify_client: notifyClient }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error || `cancel_${res.status}`);
@@ -8976,6 +8984,20 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     () => ((apptService?.extras || []) as ServiceExtra[]).filter((e) => e?.active !== false),
     [apptService],
   );
+  // Contract attached to this appointment's service — surfaced so the
+  // stylist can see which agreement goes out with the booking (the app's
+  // equivalent of Square's "Forms to send"). Contracts are assigned per
+  // service in Settings → Services.
+  const apptContracts = useContractTemplates(store.userId || null);
+  const apptContractNames = useMemo(() => {
+    const cid = (apptService as any)?.contract_template_id;
+    const names: string[] = [];
+    for (const t of apptContracts.contractTemplates || []) {
+      if (!t.is_active) continue;
+      if (t.attach_to_all_bookings || (cid && t.id === cid)) names.push(t.title);
+    }
+    return Array.from(new Set(names));
+  }, [apptService, apptContracts.contractTemplates]);
   const currentAddons: any[] = Array.isArray(form.addons) ? form.addons : [];
   const isExtraSelected = (id: string) => currentAddons.some((a) => String(a?.id) === String(id));
   // Add-ons not backed by a current menu extra (custom one-offs, or
@@ -9917,6 +9939,40 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
               <p className="text-xs" style={{ color: C.muted }}>
                 Future appointments will be auto-created on the selected cadence. Edit each one individually as needed.
               </p>
+            </div>
+          )}
+        </Card>
+        )}
+
+        {/* CLIENT NOTIFICATIONS — say yes/no to emailing the client about
+            this booking or change, and see the contract that goes with it. */}
+        {isAppointment && (
+        <Card className="p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Mail size={16} style={{ color: C.gold }} />
+              <span className="font-semibold text-sm" style={{ color: C.espresso }}>Notify client</span>
+            </div>
+            <Toggle checked={notifyClient} onChange={setNotifyClient} />
+          </div>
+          <p className="text-[11px] mt-1.5" style={{ color: C.muted, lineHeight: 1.45 }}>
+            {notifyClient
+              ? (form.id
+                  ? "The client will be emailed about changes you save here (and about a cancellation)."
+                  : "The client will be emailed a booking confirmation when you save.")
+              : (form.id
+                  ? "Saving won't email the client — good for fixing a mistake quietly."
+                  : "Saving won't email the client — good for placeholders or double-bookings you'll fix.")}
+          </p>
+          {apptContractNames.length > 0 && (
+            <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
+              <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+                Contract{apptContractNames.length === 1 ? "" : "s"} sent with this booking
+              </p>
+              {apptContractNames.map((n) => (
+                <p key={n} className="text-[13px] mt-1 font-semibold" style={{ color: C.espresso }}>{n}</p>
+              ))}
+              <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>Assigned in Settings → Services / Contracts.</p>
             </div>
           )}
         </Card>
