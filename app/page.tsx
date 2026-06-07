@@ -262,6 +262,7 @@ import {
   RANGES,
   type ReportRange,
   type SalesReport,
+  type SaleDetail,
 } from "./lib/sales-report";
 import {
   EXPENSE_CATEGORIES,
@@ -21171,8 +21172,10 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
   const [range, setRange] = useState<ReportRange>("1M");
   const [itemMode, setItemMode] = useState<"gross" | "count">("gross");
   const [catMode, setCatMode] = useState<"gross" | "count">("gross");
-  const [detailKind, setDetailKind] = useState<
-    "salesGross" | "salesNet" | "salesCount" | "returns" | "discounts" | null
+  // Tap-to-drill-down: any summary card, Top item/category, or payment
+  // row opens this sheet with the underlying rows.
+  const [detail, setDetail] = useState<
+    { title: string; rows: SaleDetail[]; mode: "gross" | "net" | "amount"; danger?: boolean } | null
   >(null);
   const [manualTxns, setManualTxns] = useState<any[]>([]);
   const [stripeTxns, setStripeTxns] = useState<Transaction[]>([]);
@@ -21285,6 +21288,13 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
   const topItems = [...report.topItems].sort((a, b) => (itemMode === "gross" ? b.gross - a.gross : b.count - a.count));
   const topCategories = [...report.topCategories].sort((a, b) => (catMode === "gross" ? b.gross - a.gross : b.count - a.count));
 
+  const openMetric = (kind: MetricKind) => {
+    if (kind === "returns") { setDetail({ title: "Returns", rows: report.details.returns, mode: "amount", danger: true }); return; }
+    if (kind === "discounts") { setDetail({ title: "Discounts & comps", rows: report.details.discounts, mode: "amount", danger: true }); return; }
+    const title = kind === "salesGross" ? "Gross sales" : kind === "salesNet" ? "Net sales" : "Sales";
+    setDetail({ title, rows: report.details.sales, mode: kind === "salesGross" ? "gross" : "net" });
+  };
+
   return (
     <div className="bbp-fade pb-32">
       <Header
@@ -21324,7 +21334,7 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
               <button
                 key={m.label}
                 type="button"
-                onClick={() => setDetailKind(m.kind)}
+                onClick={() => openMetric(m.kind)}
                 className="rounded-2xl p-3.5 text-left active:scale-[0.98] transition"
                 style={{ background: m.lead ? GRADIENTS.primary : C.paper, border: m.lead ? "0" : `1px solid ${C.hairline}` }}
               >
@@ -21378,22 +21388,30 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
               <span className="text-[14px] font-bold" style={{ color: C.espresso }}>Total collected</span>
               <span className="text-[15px] font-bold tabular-nums" style={{ color: C.espresso }}>{fmtMoney(report.payments.totalCollected, currency)}</span>
             </div>
-            {[
-              { label: "Cash", amount: report.payments.cash, tone: "#16A34A" },
-              { label: "Card", amount: report.payments.card, tone: "#635BFF" },
-              ...(report.payments.other > 0 ? [{ label: "Other (Zelle, Cash App, Venmo)", amount: report.payments.other, tone: "#008CFF" }] : []),
-            ].map(row => {
+            {([
+              { label: "Cash", amount: report.payments.cash, tone: "#16A34A", bucket: "cash" as const },
+              { label: "Card", amount: report.payments.card, tone: "#635BFF", bucket: "card" as const },
+              ...(report.payments.other > 0 ? [{ label: "Other (Zelle, Cash App, Venmo)", amount: report.payments.other, tone: "#008CFF", bucket: "other" as const }] : []),
+            ]).map(row => {
               const pct = report.payments.totalCollected > 0 ? Math.min(100, (row.amount / report.payments.totalCollected) * 100) : 0;
               return (
-                <div key={row.label} className="py-2" style={{ borderTop: `1px solid ${C.hairline}` }}>
-                  <div className="flex justify-between mb-1.5">
-                    <span className="text-[13px] font-semibold" style={{ color: C.coffee }}>{row.label}</span>
+                <button
+                  key={row.label}
+                  type="button"
+                  onClick={() => setDetail({ title: row.label, rows: report.details.payments.filter(p => p.bucket === row.bucket), mode: "amount" })}
+                  className="w-full py-2 text-left active:opacity-70 transition"
+                  style={{ borderTop: `1px solid ${C.hairline}` }}
+                >
+                  <div className="flex justify-between mb-1.5 items-center">
+                    <span className="text-[13px] font-semibold inline-flex items-center gap-1" style={{ color: C.coffee }}>
+                      {row.label}<ChevronRight size={12} style={{ color: C.mutedSoft }} />
+                    </span>
                     <span className="text-[13px] font-semibold tabular-nums" style={{ color: C.espresso }}>{fmtMoney(row.amount, currency)}</span>
                   </div>
                   <div style={{ height: 7, borderRadius: 999, background: C.ivory, overflow: "hidden" }}>
                     <div style={{ width: `${pct}%`, height: "100%", background: row.tone, borderRadius: 999 }} />
                   </div>
-                </div>
+                </button>
               );
             })}
             <div className="flex items-center justify-between py-2.5" style={{ borderTop: `1px solid ${C.hairline}` }}>
@@ -21424,10 +21442,15 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
             {topItems.length === 0 ? (
               <p className="text-[12px] text-center py-3" style={{ color: C.muted }}>No items sold in this period yet.</p>
             ) : topItems.map((r, i) => (
-              <div key={r.label} className="flex items-center justify-between px-2 py-2.5" style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+              <button key={r.label} type="button"
+                onClick={() => setDetail({ title: r.label, rows: report.details.sales.filter(x => x.item === r.label), mode: "gross" })}
+                className="w-full flex items-center justify-between px-2 py-2.5 text-left active:opacity-70 transition" style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
                 <p className="text-[13px] font-semibold truncate flex-1 min-w-0" style={{ color: C.espresso }}>{r.label}</p>
-                <span className="text-[12px] font-bold tabular-nums ml-3" style={{ color: C.coffee }}>{itemMode === "gross" ? fmtMoney(r.gross, currency) : `${r.count} sale${r.count === 1 ? "" : "s"}`}</span>
-              </div>
+                <span className="text-[12px] font-bold tabular-nums ml-3 inline-flex items-center gap-1" style={{ color: C.coffee }}>
+                  {itemMode === "gross" ? fmtMoney(r.gross, currency) : `${r.count} sale${r.count === 1 ? "" : "s"}`}
+                  <ChevronRight size={12} style={{ color: C.mutedSoft }} />
+                </span>
+              </button>
             ))}
           </Card>
         </div>
@@ -21447,10 +21470,15 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
             {topCategories.length === 0 ? (
               <p className="text-[12px] text-center py-3" style={{ color: C.muted }}>No categorized sales yet — set a category on your services.</p>
             ) : topCategories.map((r, i) => (
-              <div key={r.label} className="flex items-center justify-between px-2 py-2.5" style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+              <button key={r.label} type="button"
+                onClick={() => setDetail({ title: r.label, rows: report.details.sales.filter(x => x.category === r.label), mode: "gross" })}
+                className="w-full flex items-center justify-between px-2 py-2.5 text-left active:opacity-70 transition" style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
                 <p className="text-[13px] font-semibold truncate flex-1 min-w-0" style={{ color: C.espresso }}>{r.label}</p>
-                <span className="text-[12px] font-bold tabular-nums ml-3" style={{ color: C.coffee }}>{catMode === "gross" ? fmtMoney(r.gross, currency) : `${r.count} sale${r.count === 1 ? "" : "s"}`}</span>
-              </div>
+                <span className="text-[12px] font-bold tabular-nums ml-3 inline-flex items-center gap-1" style={{ color: C.coffee }}>
+                  {catMode === "gross" ? fmtMoney(r.gross, currency) : `${r.count} sale${r.count === 1 ? "" : "s"}`}
+                  <ChevronRight size={12} style={{ color: C.mutedSoft }} />
+                </span>
+              </button>
             ))}
           </Card>
         </div>
@@ -21528,55 +21556,40 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
         )}
       </div>
 
-      {/* Drill-down: tap a summary card to see the rows behind it. */}
-      {detailKind && (() => {
-        const isReturns = detailKind === "returns";
-        const isDiscounts = detailKind === "discounts";
-        const rows = isReturns ? report.details.returns : isDiscounts ? report.details.discounts : report.details.sales;
-        const title = isReturns ? "Returns"
-          : isDiscounts ? "Discounts & comps"
-          : detailKind === "salesGross" ? "Gross sales"
-          : detailKind === "salesNet" ? "Net sales"
-          : "Sales";
-        const empty = isReturns ? "No returns in this period."
-          : isDiscounts ? "No discounts in this period."
-          : "No sales in this period.";
-        const valueFor = (r: typeof rows[number]): { text: string; danger: boolean } =>
-          isReturns || isDiscounts
-            ? { text: `− ${fmtMoney(r.amount, currency)}`, danger: true }
-            : { text: fmtMoney(detailKind === "salesGross" ? r.gross : r.net, currency), danger: false };
-        return (
-          <Sheet open onClose={() => setDetailKind(null)} title={title}>
-            <div className="pb-6">
-              {rows.length === 0 ? (
-                <p className="text-[13px] text-center py-10" style={{ color: C.muted }}>{empty}</p>
-              ) : (
-                <>
-                  <Card className="p-2">
-                    {rows.map((r, i) => {
-                      const v = valueFor(r);
-                      return (
-                        <div key={r.id} className="flex items-center justify-between px-2 py-2.5 gap-3" style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{r.title}</p>
-                            <p className="text-[11px] truncate" style={{ color: C.muted }}>
-                              {[r.subtitle, r.date ? fmtDate(r.date) : ""].filter(Boolean).join(" · ")}
-                            </p>
-                          </div>
-                          <span className="text-[13px] font-bold tabular-nums" style={{ color: v.danger ? C.danger : C.coffee }}>{v.text}</span>
+      {/* Drill-down: tap a summary card, Top item/category, or payment
+          row to see the underlying rows. */}
+      {detail && (
+        <Sheet open onClose={() => setDetail(null)} title={detail.title}>
+          <div className="pb-6">
+            {detail.rows.length === 0 ? (
+              <p className="text-[13px] text-center py-10" style={{ color: C.muted }}>Nothing to show in this period.</p>
+            ) : (
+              <>
+                <Card className="p-2">
+                  {detail.rows.map((r, i) => {
+                    const amt = detail.mode === "gross" ? r.gross : detail.mode === "net" ? r.net : r.amount;
+                    const text = detail.danger ? `− ${fmtMoney(amt, currency)}` : fmtMoney(amt, currency);
+                    return (
+                      <div key={r.id} className="flex items-center justify-between px-2 py-2.5 gap-3" style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{r.title}</p>
+                          <p className="text-[11px] truncate" style={{ color: C.muted }}>
+                            {[r.subtitle, r.date ? fmtDate(r.date) : ""].filter(Boolean).join(" · ")}
+                          </p>
                         </div>
-                      );
-                    })}
-                  </Card>
-                  <p className="text-[11px] text-center mt-3" style={{ color: C.mutedSoft }}>
-                    {rows.length} {rows.length === 1 ? "entry" : "entries"} · {report.rangeLabel.toLowerCase()}
-                  </p>
-                </>
-              )}
-            </div>
-          </Sheet>
-        );
-      })()}
+                        <span className="text-[13px] font-bold tabular-nums" style={{ color: detail.danger ? C.danger : C.coffee }}>{text}</span>
+                      </div>
+                    );
+                  })}
+                </Card>
+                <p className="text-[11px] text-center mt-3" style={{ color: C.mutedSoft }}>
+                  {detail.rows.length} {detail.rows.length === 1 ? "entry" : "entries"} · {report.rangeLabel.toLowerCase()}
+                </p>
+              </>
+            )}
+          </div>
+        </Sheet>
+      )}
     </div>
   );
 };

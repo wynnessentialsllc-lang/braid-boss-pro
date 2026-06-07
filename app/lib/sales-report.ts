@@ -75,13 +75,17 @@ export type SaleDetail = {
   date: string;      // YYYY-MM-DD
   gross: number;     // pre-discount ticket (sales only; 0 elsewhere)
   net: number;       // post-discount ticket (sales only; 0 elsewhere)
-  amount: number;    // the figure this row contributes (refund/discount $)
+  amount: number;    // the figure this row contributes (refund/discount/payment $)
+  item?: string;     // style — lets the list filter to a Top item
+  category?: string; // category name — lets the list filter to a Top category
+  bucket?: "cash" | "card" | "other"; // payment-method bucket (payments only)
 };
 
 export type ReportDetails = {
   sales: SaleDetail[];      // billable tickets (Gross / Net / Sales / Average)
   returns: SaleDetail[];    // refunds
   discounts: SaleDetail[];  // discounted tickets
+  payments: SaleDetail[];   // money collected, by payment method
 };
 
 export type SalesReport = {
@@ -264,7 +268,7 @@ export const buildSalesReport = (
 
     const id = String(a.id || `${d}-${salesCount}`);
     const title = (a.clientName || a.style || "Sale").toString().trim() || "Sale";
-    salesDetail.push({ id, title, subtitle: (a.style || "").toString(), date: d, gross: round2(gross), net: round2(ticket), amount: round2(ticket) });
+    salesDetail.push({ id, title, subtitle: (a.style || "").toString(), date: d, gross: round2(gross), net: round2(ticket), amount: round2(ticket), item, category: catName });
     if (disc > 0) {
       discountsDetail.push({ id: `disc-${id}`, title, subtitle: (a.discountName || a.style || "Discount").toString(), date: d, gross: 0, net: 0, amount: round2(disc) });
     }
@@ -276,6 +280,7 @@ export const buildSalesReport = (
   };
   let returns = 0;
   const returnsDetail: SaleDetail[] = [];
+  const paymentsDetail: SaleDetail[] = [];
   for (const t of transactions || []) {
     const d = (t.paidAt || "").slice(0, 10);
     if (!d || d < start || d > end) continue;
@@ -286,9 +291,11 @@ export const buildSalesReport = (
       continue;
     }
     const collected = t.amount + (t.amount > 0 ? t.tip : 0);
-    pay[collectedBucketFor(t.method)] += collected;
+    const bucket = collectedBucketFor(t.method);
+    pay[bucket] += collected;
     pay.totalCollected += collected;
     pay.fees += t.fee > 0 ? t.fee : 0;
+    paymentsDetail.push({ id: String(t.id), title: t.clientName || "Payment", subtitle: t.serviceName || "", date: d, gross: 0, net: 0, amount: round2(collected), bucket });
   }
   pay.netTotal = pay.totalCollected - pay.fees;
 
@@ -343,6 +350,7 @@ export const buildSalesReport = (
       sales: salesDetail.sort((a, b) => (a.date < b.date ? 1 : -1)),
       returns: returnsDetail.sort((a, b) => (a.date < b.date ? 1 : -1)),
       discounts: discountsDetail.sort((a, b) => (a.date < b.date ? 1 : -1)),
+      payments: paymentsDetail.sort((a, b) => (a.date < b.date ? 1 : -1)),
     },
     previousGross,
     rangeLabel: RANGE_LABEL[range],
