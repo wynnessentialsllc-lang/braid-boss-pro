@@ -19,6 +19,7 @@ import {
   syncNotifications,
   syncPhotos,
   syncSettings,
+  syncPaymentTransactions,
 } from "./lib/supabase";
 import {
   uploadPhoto,
@@ -228,12 +229,8 @@ import {
 } from "./lib/storefront";
 import {
   type DashboardRevenue,
-  type RevenueGranularity,
-  type RevenuePoint,
-  type StyleCount,
   type RepeatClientStats,
   computeDashboardRevenue,
-  revenueByPeriod,
   topBookedStyles,
   repeatClientStats,
   lastBookingForClient,
@@ -251,6 +248,21 @@ import {
   monthExpectedAppts,
   monthEarnedAppts,
 } from "./lib/reports";
+import {
+  deriveAppointmentTransactions,
+  fromManualRecord,
+  fromStripeRecord,
+  mergeTransactions,
+  type Transaction,
+} from "./lib/transactions";
+import {
+  buildSalesReport,
+  pctChange,
+  previousPeriodReference,
+  RANGES,
+  type ReportRange,
+  type SalesReport,
+} from "./lib/sales-report";
 import {
   EXPENSE_CATEGORIES,
   RECURRING_INTERVALS,
@@ -21155,13 +21167,79 @@ const TaxPackScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
 const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const appointments = (store.appointments as any[]) || [];
   const currency = store.business?.currency || "USD";
-  const [granularity, setGranularity] = useState<RevenueGranularity>("week");
+  const userId: string | null = store.userId || null;
+  const [range, setRange] = useState<ReportRange>("1M");
+  const [itemMode, setItemMode] = useState<"gross" | "count">("gross");
+  const [catMode, setCatMode] = useState<"gross" | "count">("gross");
+  const [manualTxns, setManualTxns] = useState<any[]>([]);
+  const [stripeTxns, setStripeTxns] = useState<Transaction[]>([]);
+  const [serviceCategoryById, setServiceCategoryById] = useState<Record<string, string>>({});
 
-  const revenuePoints = useMemo(
-    () => revenueByPeriod(appointments, granularity, undefined, granularity === "week" ? 8 : 6),
-    [appointments, granularity],
+  // Pull what the appointment list doesn't already carry: the manual
+  // (cash/Zelle/…) ledger, live Stripe charges (fees + refunds), and the
+  // service→category map for Top Categories. All best-effort — the
+  // appointment-driven numbers render regardless.
+  useEffect(() => {
+    if (!userId) return;
+    let off = false;
+    (async () => {
+      try {
+        const manual = await syncPaymentTransactions.pull(userId).catch(() => [] as any[]);
+        if (!off) setManualTxns(manual);
+      } catch { /* ignore */ }
+      try {
+        const supabase = getSupabase();
+        const [{ data: svcs }, { data: cats }] = await Promise.all([
+          supabase.from("services").select("id, category_id").eq("user_id", userId),
+          supabase.from("service_categories").select("id, name").eq("user_id", userId),
+        ]);
+        if (!off) {
+          const catName = new Map<string, string>();
+          for (const c of cats || []) catName.set(String((c as any).id), String((c as any).name || "Category"));
+          const map: Record<string, string> = {};
+          for (const sv of svcs || []) {
+            const cid = (sv as any).category_id;
+            if (cid && catName.has(String(cid))) map[String((sv as any).id)] = catName.get(String(cid))!;
+          }
+          setServiceCategoryById(map);
+        }
+      } catch { /* categories best-effort */ }
+      try {
+        const supabase = getSupabase();
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess?.session?.access_token;
+        if (token) {
+          const res = await fetch("/api/stripe-connect/transactions", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ access_token: token }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!off && res.ok && Array.isArray(body?.transactions)) {
+            setStripeTxns(body.transactions.map(fromStripeRecord));
+          }
+        }
+      } catch { /* Stripe best-effort */ }
+    })();
+    return () => { off = true; };
+  }, [userId]);
+
+  const allTxns = useMemo<Transaction[]>(
+    () => mergeTransactions(
+      deriveAppointmentTransactions(appointments),
+      stripeTxns,
+      manualTxns.map(fromManualRecord),
+    ),
+    [appointments, stripeTxns, manualTxns],
   );
-  const styles = useMemo(() => topBookedStyles(appointments, 8), [appointments]);
+  const report = useMemo<SalesReport>(
+    () => buildSalesReport(appointments, allTxns, serviceCategoryById, range),
+    [appointments, allTxns, serviceCategoryById, range],
+  );
+  const prevReport = useMemo<SalesReport>(
+    () => buildSalesReport(appointments, allTxns, serviceCategoryById, range, previousPeriodReference(range, todayISO())),
+    [appointments, allTxns, serviceCategoryById, range],
+  );
   const repeats = useMemo(() => repeatClientStats(appointments, 5), [appointments]);
 
   // Cancelled appointments are already excluded from the aggregators
@@ -21189,105 +21267,183 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
     }
   };
 
-  const maxRevenue = Math.max(1, ...revenuePoints.map(p => p.revenue));
-  const totalRevenue = revenuePoints.reduce((s, p) => s + p.revenue, 0);
-  const totalAppts = revenuePoints.reduce((s, p) => s + p.appointmentCount, 0);
+  const s = report.summary;
+  const ps = prevReport.summary;
+  const summaryMetrics: { label: string; value: string; delta?: number | null; lead?: boolean; negative?: boolean }[] = [
+    { label: "Gross sales", value: fmtMoney(s.grossSales, currency), delta: pctChange(s.grossSales, ps.grossSales), lead: true },
+    { label: "Net sales", value: fmtMoney(s.netSales, currency), delta: pctChange(s.netSales, ps.netSales) },
+    { label: "Sales", value: String(s.salesCount), delta: pctChange(s.salesCount, ps.salesCount) },
+    { label: "Average sale", value: fmtMoney(s.averageSale, currency), delta: pctChange(s.averageSale, ps.averageSale) },
+    { label: "Returns", value: s.returns > 0 ? `(${fmtMoney(s.returns, currency)})` : fmtMoney(0, currency), negative: s.returns > 0 },
+    { label: "Discounts & comps", value: s.discounts > 0 ? `(${fmtMoney(s.discounts, currency)})` : fmtMoney(0, currency), negative: s.discounts > 0 },
+  ];
+  const chartMax = Math.max(1, ...report.series.map(p => Math.max(p.current, p.previous)));
+  const topItems = [...report.topItems].sort((a, b) => (itemMode === "gross" ? b.gross - a.gross : b.count - a.count));
+  const topCategories = [...report.topCategories].sort((a, b) => (catMode === "gross" ? b.gross - a.gross : b.count - a.count));
 
   return (
     <div className="bbp-fade pb-32">
       <Header
         title="Reports"
-        subtitle="Revenue, top styles, returning clients"
+        subtitle="Sales, payment types, top items & clients"
         leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
       />
 
       <div className="px-5 pt-2 space-y-5">
-        {/* REVENUE */}
+        {/* RANGE */}
+        <div className="flex gap-1.5">
+          {RANGES.map(r => {
+            const active = range === r.key;
+            return (
+              <button
+                key={r.key}
+                type="button"
+                onClick={() => setRange(r.key)}
+                className="flex-1 py-2 rounded-lg text-[12px] font-bold transition"
+                style={{
+                  background: active ? C.espresso : C.paper,
+                  color: active ? C.cream : C.coffee,
+                  border: `1px solid ${active ? C.espresso : C.hairline}`,
+                }}
+              >
+                {r.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* SALES SUMMARY */}
         <div>
-          <div className="flex items-center justify-between mb-3">
-            <SectionTitle>Revenue</SectionTitle>
-            <div className="flex p-0.5 rounded-lg" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
-              {(["week", "month"] as RevenueGranularity[]).map(g => (
-                <button
-                  type="button"
-                  key={g}
-                  onClick={() => setGranularity(g)}
-                  className="px-3 py-1 rounded-md text-[11px] font-semibold transition"
-                  style={{
-                    background: granularity === g ? C.espresso : "transparent",
-                    color: granularity === g ? C.cream : C.coffee,
-                  }}
-                >
-                  {g === "week" ? "Weekly" : "Monthly"}
-                </button>
-              ))}
-            </div>
+          <SectionTitle>Sales summary · {report.rangeLabel.toLowerCase()}</SectionTitle>
+          <div className="grid grid-cols-2 gap-2.5">
+            {summaryMetrics.map(m => (
+              <div
+                key={m.label}
+                className="rounded-2xl p-3.5"
+                style={{ background: m.lead ? GRADIENTS.primary : C.paper, border: m.lead ? "0" : `1px solid ${C.hairline}` }}
+              >
+                <p className="text-[9px] uppercase tracking-widest font-bold" style={{ color: m.lead ? "rgba(255,255,255,0.85)" : C.muted, letterSpacing: "0.08em" }}>{m.label}</p>
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, marginTop: 3, color: m.lead ? "#fff" : m.negative ? C.danger : C.espresso }}>{m.value}</p>
+                {m.delta != null && (
+                  <p className="text-[11px] font-bold mt-0.5" style={{ color: m.lead ? "rgba(255,255,255,0.9)" : m.delta >= 0 ? C.success : C.danger }}>
+                    {m.delta >= 0 ? "▲" : "▼"} {m.delta >= 0 ? "+" : ""}{m.delta.toFixed(1)}%
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* GROSS SALES CHART */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <SectionTitle>Gross sales</SectionTitle>
+            <p className="text-[11px]" style={{ color: C.muted }}>vs previous {fmtMoney(report.previousGross, currency)}</p>
           </div>
           <Card className="p-4">
-            <div className="flex items-baseline justify-between mb-3">
-              <div>
-                <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>
-                  Last {revenuePoints.length} {granularity === "week" ? "weeks" : "months"}
-                </p>
-                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600, color: C.espresso }}>
-                  {fmtMoney(totalRevenue, currency)}
-                </p>
-              </div>
-              <p className="text-[11px]" style={{ color: C.muted }}>
-                {totalAppts} appt{totalAppts === 1 ? "" : "s"}
-              </p>
-            </div>
-            <div className="flex items-end gap-1.5" style={{ height: 80 }}>
-              {revenuePoints.map(p => {
-                const h = Math.max(2, Math.round((p.revenue / maxRevenue) * 80));
-                return (
-                  <div key={p.iso} className="flex-1 flex flex-col items-center gap-1">
-                    <div
-                      className="w-full rounded-t-md"
-                      style={{
-                        height: h,
-                        background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
-                        opacity: p.revenue > 0 ? 1 : 0.25,
-                      }}
-                    />
-                    <span className="text-[9px] font-semibold" style={{ color: C.muted }}>{p.label}</span>
+            <div className="flex items-end gap-1" style={{ height: 120 }}>
+              {report.series.map((p, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+                  <div className="flex items-end justify-center w-full" style={{ height: 100, gap: 2 }}>
+                    <div style={{ width: "42%", maxWidth: 12, height: Math.max(2, Math.round((p.current / chartMax) * 100)), background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`, borderRadius: "3px 3px 0 0" }} />
+                    <div style={{ width: "42%", maxWidth: 12, height: Math.max(2, Math.round((p.previous / chartMax) * 100)), background: C.mutedSoft, opacity: 0.55, borderRadius: "3px 3px 0 0" }} />
                   </div>
-                );
-              })}
+                  {report.series.length <= 12 && (
+                    <span className="text-[8px] font-semibold" style={{ color: C.muted, whiteSpace: "nowrap" }}>{p.label}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-4 justify-center mt-2">
+              <span className="text-[10px] font-semibold inline-flex items-center gap-1" style={{ color: C.muted }}><span style={{ width: 8, height: 8, borderRadius: 2, background: C.gold }} /> This period</span>
+              <span className="text-[10px] font-semibold inline-flex items-center gap-1" style={{ color: C.muted }}><span style={{ width: 8, height: 8, borderRadius: 2, background: C.mutedSoft }} /> Previous</span>
             </div>
           </Card>
         </div>
 
-        {/* TOP STYLES */}
+        {/* PAYMENT TYPES */}
         <div>
-          <SectionTitle>Top booked styles</SectionTitle>
-          {styles.length === 0 ? (
-            <Card className="p-4 text-center">
-              <p className="text-[12px]" style={{ color: C.muted }}>
-                Add a style to your appointments and it'll surface here.
-              </p>
-            </Card>
-          ) : (
-            <Card className="p-2">
-              {styles.map((s, i) => (
-                <div
-                  key={s.style}
-                  className="flex items-center justify-between px-2 py-2.5"
-                  style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{s.style}</p>
-                    <p className="text-[11px]" style={{ color: C.muted }}>
-                      {s.count} booking{s.count === 1 ? "" : "s"}
-                    </p>
+          <SectionTitle>Sales by payment type</SectionTitle>
+          <Card className="p-4">
+            <div className="flex items-center justify-between py-1">
+              <span className="text-[14px] font-bold" style={{ color: C.espresso }}>Total collected</span>
+              <span className="text-[15px] font-bold tabular-nums" style={{ color: C.espresso }}>{fmtMoney(report.payments.totalCollected, currency)}</span>
+            </div>
+            {[
+              { label: "Cash", amount: report.payments.cash, tone: "#16A34A" },
+              { label: "Card", amount: report.payments.card, tone: "#635BFF" },
+              ...(report.payments.other > 0 ? [{ label: "Other (Zelle, Cash App, Venmo)", amount: report.payments.other, tone: "#008CFF" }] : []),
+            ].map(row => {
+              const pct = report.payments.totalCollected > 0 ? Math.min(100, (row.amount / report.payments.totalCollected) * 100) : 0;
+              return (
+                <div key={row.label} className="py-2" style={{ borderTop: `1px solid ${C.hairline}` }}>
+                  <div className="flex justify-between mb-1.5">
+                    <span className="text-[13px] font-semibold" style={{ color: C.coffee }}>{row.label}</span>
+                    <span className="text-[13px] font-semibold tabular-nums" style={{ color: C.espresso }}>{fmtMoney(row.amount, currency)}</span>
                   </div>
-                  <span className="text-[12px] font-semibold tabular-nums ml-3" style={{ color: C.coffee }}>
-                    {fmtMoney(s.revenue, currency)}
-                  </span>
+                  <div style={{ height: 7, borderRadius: 999, background: C.ivory, overflow: "hidden" }}>
+                    <div style={{ width: `${pct}%`, height: "100%", background: row.tone, borderRadius: 999 }} />
+                  </div>
                 </div>
+              );
+            })}
+            <div className="flex items-center justify-between py-2.5" style={{ borderTop: `1px solid ${C.hairline}` }}>
+              <span className="text-[13px]" style={{ color: C.coffee }}>Fees</span>
+              <span className="text-[13px] font-semibold tabular-nums" style={{ color: report.payments.fees > 0 ? C.danger : C.coffee }}>
+                {report.payments.fees > 0 ? `(${fmtMoney(report.payments.fees, currency)})` : fmtMoney(0, currency)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between py-2.5" style={{ borderTop: `1px solid ${C.hairline}` }}>
+              <span className="text-[14px] font-bold" style={{ color: C.espresso }}>Net total</span>
+              <span className="text-[15px] font-bold tabular-nums" style={{ color: C.espresso }}>{fmtMoney(report.payments.netTotal, currency)}</span>
+            </div>
+          </Card>
+        </div>
+
+        {/* TOP ITEMS */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <SectionTitle>Top items</SectionTitle>
+            <div className="flex p-0.5 rounded-lg" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              {(["gross", "count"] as const).map(m => (
+                <button key={m} type="button" onClick={() => setItemMode(m)} className="px-3 py-1 rounded-md text-[11px] font-semibold capitalize transition"
+                  style={{ background: itemMode === m ? C.espresso : "transparent", color: itemMode === m ? C.cream : C.coffee }}>{m}</button>
               ))}
-            </Card>
-          )}
+            </div>
+          </div>
+          <Card className="p-2">
+            {topItems.length === 0 ? (
+              <p className="text-[12px] text-center py-3" style={{ color: C.muted }}>No items sold in this period yet.</p>
+            ) : topItems.map((r, i) => (
+              <div key={r.label} className="flex items-center justify-between px-2 py-2.5" style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+                <p className="text-[13px] font-semibold truncate flex-1 min-w-0" style={{ color: C.espresso }}>{r.label}</p>
+                <span className="text-[12px] font-bold tabular-nums ml-3" style={{ color: C.coffee }}>{itemMode === "gross" ? fmtMoney(r.gross, currency) : `${r.count} sale${r.count === 1 ? "" : "s"}`}</span>
+              </div>
+            ))}
+          </Card>
+        </div>
+
+        {/* TOP CATEGORIES */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <SectionTitle>Top categories</SectionTitle>
+            <div className="flex p-0.5 rounded-lg" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              {(["gross", "count"] as const).map(m => (
+                <button key={m} type="button" onClick={() => setCatMode(m)} className="px-3 py-1 rounded-md text-[11px] font-semibold capitalize transition"
+                  style={{ background: catMode === m ? C.espresso : "transparent", color: catMode === m ? C.cream : C.coffee }}>{m}</button>
+              ))}
+            </div>
+          </div>
+          <Card className="p-2">
+            {topCategories.length === 0 ? (
+              <p className="text-[12px] text-center py-3" style={{ color: C.muted }}>No categorized sales yet — set a category on your services.</p>
+            ) : topCategories.map((r, i) => (
+              <div key={r.label} className="flex items-center justify-between px-2 py-2.5" style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+                <p className="text-[13px] font-semibold truncate flex-1 min-w-0" style={{ color: C.espresso }}>{r.label}</p>
+                <span className="text-[12px] font-bold tabular-nums ml-3" style={{ color: C.coffee }}>{catMode === "gross" ? fmtMoney(r.gross, currency) : `${r.count} sale${r.count === 1 ? "" : "s"}`}</span>
+              </div>
+            ))}
+          </Card>
         </div>
 
         {/* REPEAT CLIENTS */}
