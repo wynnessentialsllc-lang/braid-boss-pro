@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import PullToRefresh from "./components/PullToRefresh";
+import PrivacyNotice from "./components/PrivacyNotice";
 import { CartProvider } from "./lib/cart";
 import { CartDrawer, CartFloatingBadge } from "./components/CartDrawer";
 
@@ -166,6 +167,7 @@ export default function RootLayout({
           <CartFloatingBadge />
           <CartDrawer />
         </CartProvider>
+        <PrivacyNotice />
       </body>
     </html>
   );
