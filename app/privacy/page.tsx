@@ -7,7 +7,7 @@ export default function PrivacyPage() {
     <LegalShell
       title="Privacy Policy"
       intro="Braid Boss Pro is a tool for independent braiders to organize their business. We treat your data like it’s ours — minimal, scoped to you, and never sold."
-      updated="May 8, 2026">
+      updated="June 7, 2026">
 
       <LegalSection title="What we collect">
         <p>The data Braid Boss Pro stores is the data you put in. Specifically:</p>
@@ -17,7 +17,7 @@ export default function PrivacyPage() {
           <><strong>Appointments</strong> — date, time, service, pricing, payment status, and notes.</>,
           <><strong>Photos</strong> — inspiration, before-and-after, and reference images you attach to client profiles. Stored privately in our secure storage bucket; only you can read them.</>,
           <><strong>Notifications</strong> — a record of subscriptions for browser or device push, plus the dismissed/read state of in-app alerts.</>,
-          <><strong>Analytics & insights</strong> — computed in your device or in our backend solely from the data above. We don’t ship your data to a third-party analytics product.</>,
+          <><strong>Usage analytics</strong> — first-party only. We record basic in-app product events (e.g. which screens are used), a randomly-generated analytics ID kept in your device’s local storage, the page path, and your browser’s user-agent, in our own backend. We do <strong>not</strong> use Google Analytics, advertising pixels, or any third-party analytics product, and we do not store your IP address for analytics.</>,
           <><strong>Public booking links</strong> — the slug you generate, plus any incoming requests submitted to it. Anyone with the slug can submit a request; only you can read the inbox.</>,
         ]} />
       </LegalSection>
@@ -25,9 +25,35 @@ export default function PrivacyPage() {
       <LegalSection title="What we don’t do">
         <LegalList items={[
           <>We do <strong>not</strong> sell, rent, or share your data with advertisers or data brokers.</>,
-          <>We do <strong>not</strong> process payments inside the app. There is no Stripe, no payment card collection, and no billing inside Braid Boss Pro. Money you collect from clients happens off-app via the methods you already use (cash, CashApp, Zelle, etc.).</>,
+          <>We do <strong>not</strong> use advertising or cross-site tracking cookies.</>,
           <>We do <strong>not</strong> read your photos, notes, or client lists for any purpose other than displaying them back to you.</>,
         ]} />
+      </LegalSection>
+
+      <LegalSection title="Payments">
+        <p>
+          Braid Boss Pro uses <strong>Stripe</strong> to process payments — client deposits and balance
+          payments you collect through the app, and your own Braid Boss Pro subscription. Card details
+          are entered directly with Stripe and are <strong>never seen or stored</strong> by Braid Boss
+          Pro; we store only the payment metadata we need to show your transactions, issue refunds, and
+          reconcile payouts (amounts, status, and Stripe reference IDs). Stripe is an independent,
+          PCI-DSS-certified payment processor, and its handling of your and your clients’ payment data
+          is governed by <a href="https://stripe.com/privacy">Stripe’s Privacy Policy</a>. Payments you
+          also take off-app (cash, CashApp, Zelle, etc.) are recorded by you for your own bookkeeping.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="Cookies & local storage">
+        <p>
+          Braid Boss Pro does <strong>not</strong> set advertising or cross-site tracking cookies. To
+          function, the app stores data in your browser’s <strong>local storage</strong> on your device:
+          your sign-in session, your offline copy of your own data, and a randomly-generated first-party
+          analytics ID. These stay on your device and are never shared with advertisers. Stripe may set
+          its own cookies on its checkout pages when a payment is made; those are governed by Stripe.
+          Because we use only first-party, essential storage and analytics, the app doesn’t show a
+          separate cookie-consent pop-up — this policy is the disclosure. If we ever add third-party
+          tracking, we’ll ask for your consent first.
+        </p>
       </LegalSection>
 
       <LegalSection title="Security">
