@@ -23,6 +23,8 @@ export type ReportAppointment = {
   kind?: string;            // "appointment" | "personal" | "blocked"
   totalPrice?: number | string;
   discountAmount?: number | string;
+  discountName?: string | null;
+  clientName?: string | null;
   style?: string | null;
   serviceId?: string | null;
   cancelledAt?: string | null;
@@ -65,12 +67,30 @@ export type RankedRow = { label: string; gross: number; count: number };
 
 export type SeriesPoint = { label: string; current: number; previous: number };
 
+// One underlying row behind a summary card, for the tap-to-drill-down list.
+export type SaleDetail = {
+  id: string;
+  title: string;     // client (or style) the sale/refund/discount is for
+  subtitle: string;  // style / payment method / discount name
+  date: string;      // YYYY-MM-DD
+  gross: number;     // pre-discount ticket (sales only; 0 elsewhere)
+  net: number;       // post-discount ticket (sales only; 0 elsewhere)
+  amount: number;    // the figure this row contributes (refund/discount $)
+};
+
+export type ReportDetails = {
+  sales: SaleDetail[];      // billable tickets (Gross / Net / Sales / Average)
+  returns: SaleDetail[];    // refunds
+  discounts: SaleDetail[];  // discounted tickets
+};
+
 export type SalesReport = {
   summary: SalesSummary;
   payments: PaymentBreakdown;
   topItems: RankedRow[];
   topCategories: RankedRow[];
   series: SeriesPoint[];
+  details: ReportDetails;
   previousGross: number;   // total gross of the comparison period
   rangeLabel: string;      // human label for the active range
 };
@@ -220,6 +240,8 @@ export const buildSalesReport = (
   let salesCount = 0;
   const itemMap = new Map<string, { gross: number; count: number }>();
   const catRollup = new Map<string, { gross: number; count: number }>();
+  const salesDetail: SaleDetail[] = [];
+  const discountsDetail: SaleDetail[] = [];
 
   for (const a of appts) {
     const d = a.date || "";
@@ -228,7 +250,8 @@ export const buildSalesReport = (
     const ticket = ticketTotal(a);
     if (ticket <= 0 && gross <= 0) continue;
     grossSales += gross;
-    discounts += num(a.discountAmount);
+    const disc = num(a.discountAmount);
+    discounts += disc;
     salesCount += 1;
 
     const item = (a.style || "Other service").trim() || "Other service";
@@ -238,6 +261,13 @@ export const buildSalesReport = (
     const catName = (a.serviceId && catMap[a.serviceId]) || "Uncategorized";
     const rc = catRollup.get(catName) || { gross: 0, count: 0 };
     rc.gross += ticket; rc.count += 1; catRollup.set(catName, rc);
+
+    const id = String(a.id || `${d}-${salesCount}`);
+    const title = (a.clientName || a.style || "Sale").toString().trim() || "Sale";
+    salesDetail.push({ id, title, subtitle: (a.style || "").toString(), date: d, gross: round2(gross), net: round2(ticket), amount: round2(ticket) });
+    if (disc > 0) {
+      discountsDetail.push({ id: `disc-${id}`, title, subtitle: (a.discountName || a.style || "Discount").toString(), date: d, gross: 0, net: 0, amount: round2(disc) });
+    }
   }
 
   // --- Payment types + returns (transaction-driven) ---
@@ -245,11 +275,14 @@ export const buildSalesReport = (
     totalCollected: 0, cash: 0, card: 0, other: 0, fees: 0, netTotal: 0,
   };
   let returns = 0;
+  const returnsDetail: SaleDetail[] = [];
   for (const t of transactions || []) {
     const d = (t.paidAt || "").slice(0, 10);
     if (!d || d < start || d > end) continue;
     if (t.type === "refund" || t.amount < 0) {
-      returns += Math.abs(t.amount);
+      const amt = Math.abs(t.amount);
+      returns += amt;
+      returnsDetail.push({ id: String(t.id), title: t.clientName || "Refund", subtitle: t.serviceName || "", date: d, gross: 0, net: 0, amount: round2(amt) });
       continue;
     }
     const collected = t.amount + (t.amount > 0 ? t.tip : 0);
@@ -306,6 +339,11 @@ export const buildSalesReport = (
     topItems: rank(itemMap),
     topCategories: rank(catRollup),
     series,
+    details: {
+      sales: salesDetail.sort((a, b) => (a.date < b.date ? 1 : -1)),
+      returns: returnsDetail.sort((a, b) => (a.date < b.date ? 1 : -1)),
+      discounts: discountsDetail.sort((a, b) => (a.date < b.date ? 1 : -1)),
+    },
     previousGross,
     rangeLabel: RANGE_LABEL[range],
   };

@@ -21171,6 +21171,9 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
   const [range, setRange] = useState<ReportRange>("1M");
   const [itemMode, setItemMode] = useState<"gross" | "count">("gross");
   const [catMode, setCatMode] = useState<"gross" | "count">("gross");
+  const [detailKind, setDetailKind] = useState<
+    "salesGross" | "salesNet" | "salesCount" | "returns" | "discounts" | null
+  >(null);
   const [manualTxns, setManualTxns] = useState<any[]>([]);
   const [stripeTxns, setStripeTxns] = useState<Transaction[]>([]);
   const [serviceCategoryById, setServiceCategoryById] = useState<Record<string, string>>({});
@@ -21269,13 +21272,14 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
 
   const s = report.summary;
   const ps = prevReport.summary;
-  const summaryMetrics: { label: string; value: string; delta?: number | null; lead?: boolean; negative?: boolean }[] = [
-    { label: "Gross sales", value: fmtMoney(s.grossSales, currency), delta: pctChange(s.grossSales, ps.grossSales), lead: true },
-    { label: "Net sales", value: fmtMoney(s.netSales, currency), delta: pctChange(s.netSales, ps.netSales) },
-    { label: "Sales", value: String(s.salesCount), delta: pctChange(s.salesCount, ps.salesCount) },
-    { label: "Average sale", value: fmtMoney(s.averageSale, currency), delta: pctChange(s.averageSale, ps.averageSale) },
-    { label: "Returns", value: s.returns > 0 ? `(${fmtMoney(s.returns, currency)})` : fmtMoney(0, currency), negative: s.returns > 0 },
-    { label: "Discounts & comps", value: s.discounts > 0 ? `(${fmtMoney(s.discounts, currency)})` : fmtMoney(0, currency), negative: s.discounts > 0 },
+  type MetricKind = "salesGross" | "salesNet" | "salesCount" | "returns" | "discounts";
+  const summaryMetrics: { label: string; value: string; delta?: number | null; lead?: boolean; negative?: boolean; kind: MetricKind; count: number }[] = [
+    { label: "Gross sales", value: fmtMoney(s.grossSales, currency), delta: pctChange(s.grossSales, ps.grossSales), lead: true, kind: "salesGross", count: report.details.sales.length },
+    { label: "Net sales", value: fmtMoney(s.netSales, currency), delta: pctChange(s.netSales, ps.netSales), kind: "salesNet", count: report.details.sales.length },
+    { label: "Sales", value: String(s.salesCount), delta: pctChange(s.salesCount, ps.salesCount), kind: "salesCount", count: report.details.sales.length },
+    { label: "Average sale", value: fmtMoney(s.averageSale, currency), delta: pctChange(s.averageSale, ps.averageSale), kind: "salesNet", count: report.details.sales.length },
+    { label: "Returns", value: s.returns > 0 ? `(${fmtMoney(s.returns, currency)})` : fmtMoney(0, currency), negative: s.returns > 0, kind: "returns", count: report.details.returns.length },
+    { label: "Discounts & comps", value: s.discounts > 0 ? `(${fmtMoney(s.discounts, currency)})` : fmtMoney(0, currency), negative: s.discounts > 0, kind: "discounts", count: report.details.discounts.length },
   ];
   const chartMax = Math.max(1, ...report.series.map(p => Math.max(p.current, p.previous)));
   const topItems = [...report.topItems].sort((a, b) => (itemMode === "gross" ? b.gross - a.gross : b.count - a.count));
@@ -21317,19 +21321,24 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
           <SectionTitle>Sales summary · {report.rangeLabel.toLowerCase()}</SectionTitle>
           <div className="grid grid-cols-2 gap-2.5">
             {summaryMetrics.map(m => (
-              <div
+              <button
                 key={m.label}
-                className="rounded-2xl p-3.5"
+                type="button"
+                onClick={() => setDetailKind(m.kind)}
+                className="rounded-2xl p-3.5 text-left active:scale-[0.98] transition"
                 style={{ background: m.lead ? GRADIENTS.primary : C.paper, border: m.lead ? "0" : `1px solid ${C.hairline}` }}
               >
                 <p className="text-[9px] uppercase tracking-widest font-bold" style={{ color: m.lead ? "rgba(255,255,255,0.85)" : C.muted, letterSpacing: "0.08em" }}>{m.label}</p>
                 <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, marginTop: 3, color: m.lead ? "#fff" : m.negative ? C.danger : C.espresso }}>{m.value}</p>
-                {m.delta != null && (
-                  <p className="text-[11px] font-bold mt-0.5" style={{ color: m.lead ? "rgba(255,255,255,0.9)" : m.delta >= 0 ? C.success : C.danger }}>
-                    {m.delta >= 0 ? "▲" : "▼"} {m.delta >= 0 ? "+" : ""}{m.delta.toFixed(1)}%
-                  </p>
-                )}
-              </div>
+                <div className="flex items-center justify-between mt-0.5">
+                  {m.delta != null ? (
+                    <span className="text-[11px] font-bold" style={{ color: m.lead ? "rgba(255,255,255,0.9)" : m.delta >= 0 ? C.success : C.danger }}>
+                      {m.delta >= 0 ? "▲" : "▼"} {m.delta >= 0 ? "+" : ""}{m.delta.toFixed(1)}%
+                    </span>
+                  ) : <span />}
+                  <ChevronRight size={13} style={{ color: m.lead ? "rgba(255,255,255,0.8)" : C.mutedSoft, flexShrink: 0 }} />
+                </div>
+              </button>
             ))}
           </div>
         </div>
@@ -21518,6 +21527,56 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
           </div>
         )}
       </div>
+
+      {/* Drill-down: tap a summary card to see the rows behind it. */}
+      {detailKind && (() => {
+        const isReturns = detailKind === "returns";
+        const isDiscounts = detailKind === "discounts";
+        const rows = isReturns ? report.details.returns : isDiscounts ? report.details.discounts : report.details.sales;
+        const title = isReturns ? "Returns"
+          : isDiscounts ? "Discounts & comps"
+          : detailKind === "salesGross" ? "Gross sales"
+          : detailKind === "salesNet" ? "Net sales"
+          : "Sales";
+        const empty = isReturns ? "No returns in this period."
+          : isDiscounts ? "No discounts in this period."
+          : "No sales in this period.";
+        const valueFor = (r: typeof rows[number]): { text: string; danger: boolean } =>
+          isReturns || isDiscounts
+            ? { text: `− ${fmtMoney(r.amount, currency)}`, danger: true }
+            : { text: fmtMoney(detailKind === "salesGross" ? r.gross : r.net, currency), danger: false };
+        return (
+          <Sheet open onClose={() => setDetailKind(null)} title={title}>
+            <div className="pb-6">
+              {rows.length === 0 ? (
+                <p className="text-[13px] text-center py-10" style={{ color: C.muted }}>{empty}</p>
+              ) : (
+                <>
+                  <Card className="p-2">
+                    {rows.map((r, i) => {
+                      const v = valueFor(r);
+                      return (
+                        <div key={r.id} className="flex items-center justify-between px-2 py-2.5 gap-3" style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{r.title}</p>
+                            <p className="text-[11px] truncate" style={{ color: C.muted }}>
+                              {[r.subtitle, r.date ? fmtDate(r.date) : ""].filter(Boolean).join(" · ")}
+                            </p>
+                          </div>
+                          <span className="text-[13px] font-bold tabular-nums" style={{ color: v.danger ? C.danger : C.coffee }}>{v.text}</span>
+                        </div>
+                      );
+                    })}
+                  </Card>
+                  <p className="text-[11px] text-center mt-3" style={{ color: C.mutedSoft }}>
+                    {rows.length} {rows.length === 1 ? "entry" : "entries"} · {report.rangeLabel.toLowerCase()}
+                  </p>
+                </>
+              )}
+            </div>
+          </Sheet>
+        );
+      })()}
     </div>
   );
 };
