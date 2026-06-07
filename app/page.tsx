@@ -11406,6 +11406,25 @@ const ClientProfileSheet = ({
                 </p>
               </div>
             )}
+            {client?.referredByClientId && (
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Referred by</p>
+                <p className="text-[13px] mt-1" style={{ color: C.coffee }}>
+                  {(() => {
+                    const ref = ((store.clients as any[]) || []).find((c: any) => c?.id === client.referredByClientId);
+                    return ref?.name || "Another client";
+                  })()}
+                </p>
+              </div>
+            )}
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Marketing emails</p>
+              <p className="text-[13px] mt-1" style={{ color: client?.marketingEmailsEnabled !== false ? C.coffee : C.muted }}>
+                {client?.marketingEmailsEnabled !== false
+                  ? "Subscribed — gets rebook nudges, birthday & win-back emails"
+                  : "Unsubscribed — transactional emails only"}
+              </p>
+            </div>
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Photos</p>
               {cPhotos.length === 0 ? (
