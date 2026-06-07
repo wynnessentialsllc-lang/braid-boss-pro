@@ -56,6 +56,28 @@ describe("mergeTransactions de-dupe", () => {
     expect(deposits[0].source).toBe("appointment");
     expect(deposits[0].clientName).toBe("Bailey Cooper");
     expect(deposits[0].serviceName).toBe("Knotless Braids (Medium)");
+    // ...but it inherits the live Stripe payment_intent + fee/net so the
+    // Payments screen can issue a card refund against it.
+    expect(deposits[0].stripeId).toBe("pi_bailey_deposit");
+    expect(deposits[0].fee).toBe(1.03);
+    expect(deposits[0].net).toBe(23.97);
+  });
+
+  it("carries Stripe refund history onto the appointment row it collapses into", () => {
+    const apptTxns = deriveAppointmentTransactions([baileyAppointment]);
+    const stripeTxns = [
+      fromStripeRecord({
+        ...baileyStripeDeposit,
+        refunds: [
+          { id: "re_1", amount: 10, reason: "requested_by_customer", date: "2026-06-01T00:00:00.000Z" },
+        ],
+      }),
+    ];
+
+    const merged = mergeTransactions(apptTxns, stripeTxns, []);
+    const deposit = merged.find((t) => t.type === "deposit");
+    expect(deposit?.refunds).toHaveLength(1);
+    expect(deposit?.refunds[0].amount).toBe(10);
   });
 
   it("still de-dupes by payment_intent (balance payments)", () => {
