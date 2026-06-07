@@ -149,6 +149,22 @@ export async function POST(req: Request) {
       .maybeSingle();
     if (br?.stripe_payment_intent_id) intents.push(String(br.stripe_payment_intent_id));
   }
+  // Fallback: public-booking appointments don't always stash the
+  // originating booking_request id in `data`, so the lookup above can
+  // miss the deposit entirely (silently cancelling without refunding).
+  // The booking_request row back-references the appointment, so resolve
+  // the deposit intent that way too. De-dupe below collapses any overlap.
+  {
+    const { data: brByAppt } = await admin
+      .from("booking_requests")
+      .select("stripe_payment_intent_id")
+      .eq("appointment_id", apptId)
+      .eq("user_id", user.id)
+      .not("stripe_payment_intent_id", "is", null);
+    for (const r of brByAppt || []) {
+      if (r?.stripe_payment_intent_id) intents.push(String(r.stripe_payment_intent_id));
+    }
+  }
   // Balance — direct on the appointment.
   if (appt.balance_payment_intent_id) intents.push(String(appt.balance_payment_intent_id));
 

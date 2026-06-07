@@ -25,6 +25,7 @@ import {
   FileSpreadsheet,
   Plus,
   RefreshCw,
+  RotateCcw,
   X,
   ChevronRight,
   Search,
@@ -269,6 +270,86 @@ function Inner() {
     [userId, flashToast],
   );
 
+  // Issue (or record) a refund for a transaction. Card payments taken
+  // through Stripe are refunded to the client's card via the connected
+  // account; cash/Zelle/Cash App/Venmo can only be *recorded* (the money
+  // was handed back offline) — same split the Square app makes.
+  //
+  // Either way we write a `refund` row to the ledger so it shows in the
+  // list, the Refunds filter, the summary and exports. Stripe refunds are
+  // otherwise nested inside their charge and would never appear as a row.
+  const handleRefund = useCallback(
+    async (
+      txn: Transaction,
+      refundAmount: number,
+      reason: string,
+    ): Promise<{ ok: boolean; message: string }> => {
+      if (!userId) return { ok: false, message: "Sign in required" };
+      const amt = Math.round(refundAmount * 100) / 100;
+      if (!(amt > 0)) return { ok: false, message: "Enter a refund amount" };
+      const viaStripe = (txn.method === "stripe" || txn.method === "card") && !!txn.stripeId;
+
+      if (viaStripe) {
+        const supabase = getSupabase();
+        const { data } = await supabase.auth.getSession();
+        const tok = data?.session?.access_token;
+        if (!tok) return { ok: false, message: "Sign in required" };
+        const sid = String(txn.stripeId);
+        const isIntent = sid.startsWith("pi_");
+        try {
+          const res = await fetch("/api/stripe-connect/refund", {
+            method: "POST",
+            headers: { "content-type": "application/json", authorization: `Bearer ${tok}` },
+            body: JSON.stringify({
+              [isIntent ? "payment_intent" : "charge"]: sid,
+              amount: amt,
+              reason: reason || undefined,
+              client_name: txn.clientName,
+              service_name: txn.serviceName,
+            }),
+          });
+          const b = await res.json().catch(() => ({}));
+          if (!res.ok) return { ok: false, message: b?.error || "Stripe refund failed" };
+        } catch (e: any) {
+          return { ok: false, message: e?.message || "Stripe refund failed" };
+        }
+      }
+
+      const record = {
+        id: uid(),
+        appointmentId: txn.appointmentId || null,
+        clientName: txn.clientName,
+        serviceName: txn.serviceName,
+        amount: amt,
+        tipAmount: 0,
+        paymentType: "refund" as PaymentType,
+        paymentMethod: txn.method,
+        paidAt: new Date().toISOString(),
+        note: reason
+          ? `Refund · ${reason}`
+          : viaStripe
+            ? "Refunded via Stripe"
+            : "Refund recorded",
+        createdAt: new Date().toISOString(),
+      };
+      setManualRecords((prev) => [record, ...prev]);
+      try {
+        await syncPaymentTransactions.upsert(userId, record);
+      } catch {
+        /* saved locally — will sync on next connection */
+      }
+      if (viaStripe) void pullStripe();
+
+      return {
+        ok: true,
+        message: viaStripe
+          ? `Refunded ${formatMoney(amt, currency)} to card`
+          : `Refund of ${formatMoney(amt, currency)} recorded`,
+      };
+    },
+    [userId, pullStripe, currency],
+  );
+
   if (!authChecked || loading) return <LoadingShell />;
 
   if (!userId) {
@@ -418,7 +499,13 @@ function Inner() {
       </p>
 
       {selected && (
-        <DetailSheet txn={selected} currency={currency} onClose={() => setSelected(null)} />
+        <DetailSheet
+          txn={selected}
+          currency={currency}
+          onClose={() => setSelected(null)}
+          onRefund={handleRefund}
+          onToast={flashToast}
+        />
       )}
       {showAdd && (
         <ManualSheet
@@ -575,13 +662,140 @@ function SummaryCard({
 // ---- Detail sheet -------------------------------------------------------
 
 function DetailSheet({
-  txn, currency, onClose,
-}: { txn: Transaction; currency: string; onClose: () => void }) {
+  txn, currency, onClose, onRefund, onToast,
+}: {
+  txn: Transaction;
+  currency: string;
+  onClose: () => void;
+  onRefund: (txn: Transaction, amount: number, reason: string) => Promise<{ ok: boolean; message: string }>;
+  onToast: (msg: string) => void;
+}) {
   const isRefund = txn.type === "refund" || txn.amount < 0;
+
+  // How much is still refundable: the (positive) charge minus anything
+  // already refunded. Stripe charges carry their refund history; other
+  // rows start from zero.
+  const alreadyRefunded = txn.refunds.reduce((s, r) => s + Math.abs(r.amount), 0);
+  const grossAmount = Math.abs(txn.amount);
+  const maxRefund = Math.max(0, Math.round((grossAmount - alreadyRefunded) * 100) / 100);
+  const refundable = !isRefund && txn.amount > 0 && maxRefund > 0.005;
+  const viaStripe = (txn.method === "stripe" || txn.method === "card") && !!txn.stripeId;
+
+  const [mode, setMode] = useState<"view" | "refund">("view");
+  const [refundStr, setRefundStr] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const openRefund = () => {
+    setRefundStr(maxRefund.toFixed(2));
+    setReason("");
+    setErr(null);
+    setMode("refund");
+  };
+
+  const submitRefund = async () => {
+    const amt = parseFloat(refundStr) || 0;
+    if (!(amt > 0)) { setErr("Enter a refund amount."); return; }
+    if (amt > maxRefund + 0.001) {
+      setErr(`Can't refund more than ${formatMoney(maxRefund, currency)}.`);
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    const r = await onRefund(txn, amt, reason.trim());
+    setBusy(false);
+    if (r.ok) { onToast(r.message); onClose(); }
+    else setErr(r.message);
+  };
+
   return (
-    <Overlay onClose={onClose}>
+    <Overlay onClose={busy ? () => {} : onClose}>
       <div style={sheetStyle}>
-        <SheetHeader title="Transaction" onClose={onClose} />
+        <SheetHeader title={mode === "refund" ? "Issue refund" : "Transaction"} onClose={onClose} />
+        {mode === "refund" ? (
+          <div style={{ padding: "8px 20px 28px", overflowY: "auto", display: "grid", gap: 16 }}>
+            <div style={{ textAlign: "center", padding: "4px 0 6px" }}>
+              <p style={{ fontSize: 12, color: C.muted }}>Refunding</p>
+              <p style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>
+                {txn.clientName}
+                <span style={{ color: C.muted, fontWeight: 500 }}> · {txn.serviceName}</span>
+              </p>
+            </div>
+
+            <p style={{ fontSize: 13, color: C.coffee, lineHeight: 1.5, margin: 0 }}>
+              {viaStripe
+                ? "This refunds the client's card through Stripe. It can take 5–10 business days to land on their statement, and they'll get an email confirmation."
+                : `${METHOD_LABEL[txn.method]} payments can't be refunded automatically — hand the money back ${txn.method === "cash" ? "in person" : `in ${METHOD_LABEL[txn.method]}`}, then record it here to keep your books straight.`}
+            </p>
+
+            <Field label="Refund amount">
+              <input
+                value={refundStr}
+                onChange={(e) => setRefundStr(e.target.value.replace(/[^\d.]/g, ""))}
+                inputMode="decimal"
+                placeholder="0.00"
+                style={inputStyle}
+              />
+            </Field>
+            <div style={{ display: "flex", gap: 8, marginTop: -8 }}>
+              <button
+                type="button"
+                onClick={() => setRefundStr(maxRefund.toFixed(2))}
+                style={{
+                  ...exportBtn, fontSize: 12,
+                }}
+              >
+                Refund full {formatMoney(maxRefund, currency)}
+              </button>
+            </div>
+
+            <Field label="Reason (optional)">
+              <input
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="e.g. Client cancelled"
+                style={inputStyle}
+              />
+            </Field>
+
+            {err && (
+              <p style={{ fontSize: 13, color: C.danger, margin: 0 }}>{err}</p>
+            )}
+
+            <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+              <button
+                type="button"
+                onClick={() => setMode("view")}
+                disabled={busy}
+                style={{
+                  ...exportBtn, flex: 1, justifyContent: "center", minHeight: 50,
+                  fontSize: 15, opacity: busy ? 0.5 : 1,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitRefund}
+                disabled={busy}
+                style={{
+                  ...primaryBtn, flex: 1.4, width: "auto",
+                  background: viaStripe ? C.danger : GRADIENT,
+                  opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer",
+                  display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
+                }}
+              >
+                {busy ? (
+                  <RefreshCw size={18} style={{ animation: "bbp-spin 0.8s linear infinite" }} />
+                ) : (
+                  <RotateCcw size={18} />
+                )}
+                {viaStripe ? "Refund to card" : "Record refund"}
+              </button>
+            </div>
+          </div>
+        ) : (
         <div style={{ padding: "8px 20px 28px", overflowY: "auto" }}>
           {/* Hero amount */}
           <div style={{ textAlign: "center", padding: "8px 0 18px" }}>
@@ -660,7 +874,25 @@ function DetailSheet({
               <p style={{ fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>{txn.note}</p>
             </Section>
           )}
+
+          {refundable && (
+            <button
+              type="button"
+              onClick={openRefund}
+              style={{
+                ...primaryBtn, marginTop: 22,
+                background: "transparent", color: C.danger,
+                border: `1.5px solid ${C.danger}`,
+                display: "inline-flex", alignItems: "center",
+                justifyContent: "center", gap: 8,
+              }}
+            >
+              <RotateCcw size={18} />
+              Issue refund
+            </button>
+          )}
         </div>
+        )}
       </div>
     </Overlay>
   );

@@ -375,16 +375,34 @@ export const mergeTransactions = (
   stripeTxns: Transaction[],
   manualTxns: Transaction[],
 ): Transaction[] => {
-  const seenIntents = new Set<string>();
-  const seenApptKeys = new Set<string>();
+  const byIntent = new Map<string, Transaction>();
+  const byApptKey = new Map<string, Transaction>();
   for (const t of appointmentTxns) {
-    if (t.stripeId) seenIntents.add(t.stripeId);
-    if (t.appointmentId) seenApptKeys.add(`${t.appointmentId}:${t.type}`);
+    if (t.stripeId) byIntent.set(t.stripeId, t);
+    if (t.appointmentId) byApptKey.set(`${t.appointmentId}:${t.type}`, t);
   }
-  const dedupedStripe = stripeTxns.filter((t) => {
-    if (t.stripeId && seenIntents.has(t.stripeId)) return false;
-    if (t.appointmentId && seenApptKeys.has(`${t.appointmentId}:${t.type}`)) return false;
-    return true;
+  const dedupedStripe = stripeTxns.filter((s) => {
+    const match =
+      (s.stripeId && byIntent.get(s.stripeId)) ||
+      (s.appointmentId && byApptKey.get(`${s.appointmentId}:${s.type}`)) ||
+      null;
+    if (!match) return true;
+    // Same money — keep the appointment row (it has the real client +
+    // service context), but enrich it with the live Stripe identifiers
+    // and refund history the appointment row lacks. This is what lets
+    // the Payments screen issue a card refund against an appointment-
+    // derived deposit/balance row and show what's already been refunded.
+    if (!match.stripeId && s.stripeId) match.stripeId = s.stripeId;
+    if ((!match.refunds || match.refunds.length === 0) && s.refunds.length > 0) {
+      match.refunds = s.refunds;
+    }
+    // The appointment row assumes no processing fee (net = gross). Once
+    // Stripe reveals the real fee, its net is authoritative.
+    if (!match.fee && s.fee) {
+      match.fee = s.fee;
+      if (s.net) match.net = s.net;
+    }
+    return false;
   });
   const all = [...appointmentTxns, ...dedupedStripe, ...manualTxns];
   all.sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
