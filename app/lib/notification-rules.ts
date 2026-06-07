@@ -49,6 +49,14 @@ const safeArr = <T,>(v: T[] | null | undefined): T[] => Array.isArray(v) ? v : [
 const isCanceledStatus = (status: unknown): boolean =>
   status === "cancelled" || status === "canceled";
 const isCanceledAppointment = (a: any): boolean => isCanceledStatus(a?.status);
+// A booking still waiting on its deposit isn't confirmed yet, so it must
+// not trigger timing reminders ("starts soon", "tomorrow", etc.). Mirrors
+// the calendar's "deposit due" detection: a deposit is only outstanding
+// when the appointment actually requires one and none has been paid.
+// Manually-created appointments default to depositRequired=false, so a
+// zero depositPaid alone never flags them as awaiting deposit.
+const isAwaitingDeposit = (a: any): boolean =>
+  a?.depositRequired === true && num(a?.depositPaid) <= 0;
 const cleanIso = (date: string, time: string): string | null => {
   if (!date) return null;
   const t = time || "10:00";
@@ -95,6 +103,8 @@ export const getAppointmentReminderNotifications = (
   for (const a of safeArr(appointments)) {
     if (!a?.id || !a.date) continue;
     if (isCanceledAppointment(a) || a.status === "completed" || a.status === "no_show") continue;
+    // Don't remind about an unconfirmed booking whose deposit is unpaid.
+    if (isAwaitingDeposit(a)) continue;
     const startIso = cleanIso(a.date, a.time);
     const startMs = isoToMs(startIso);
     if (!isFinite_(startMs)) continue;
