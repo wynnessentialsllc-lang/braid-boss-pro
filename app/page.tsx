@@ -8085,6 +8085,30 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   // confirmation, the "appointment updated" notice, and (via the cancel
   // flow) the cancellation email.
   const [notifyClient, setNotifyClient] = useState(true);
+  // Styled "Send notification" modal (replaces the native confirms). A
+  // promise resolver lets the async save/cancel flows await the stylist's
+  // choice. `allowMessage` shows the optional note (confirmation only).
+  const [notifyPrompt, setNotifyPrompt] = useState<
+    | { kind: "book" | "update" | "cancel"; who: string; smsToo: boolean; contractNote: string; allowMessage: boolean }
+    | null
+  >(null);
+  const [notifyMessage, setNotifyMessage] = useState("");
+  const notifyResolverRef = useRef<((r: { notify: boolean; message: string }) => void) | null>(null);
+  const askNotify = (
+    opts: { kind: "book" | "update" | "cancel"; who: string; smsToo: boolean; contractNote: string; allowMessage: boolean },
+  ) => new Promise<{ notify: boolean; message: string }>((resolve) => {
+    notifyResolverRef.current = resolve;
+    setNotifyMessage("");
+    setNotifyPrompt(opts);
+  });
+  const resolveNotify = (notify: boolean) => {
+    const r = notifyResolverRef.current;
+    notifyResolverRef.current = null;
+    const msg = notifyMessage.trim();
+    setNotifyPrompt(null);
+    setNotifyMessage("");
+    r?.({ notify, message: notify ? msg : "" });
+  };
 
   // Custom (one-off) add-on draft. Committed to form.addons via the
   // "Add" button so the total/duration only move on an explicit action,
@@ -8495,13 +8519,13 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         const who = form.clientName || saved.clientName || "the client";
         const hasEmail = (form.clientEmail || saved.clientEmail || "").trim();
         const hasSms = !!smsOptIn && (form.clientPhone || saved.clientPhone || "").trim();
-        const channels = [hasEmail ? "email" : "", hasSms ? "text" : ""].filter(Boolean).join(" and ");
-        const contractLine = apptContractNames.length > 0 && hasEmail
-          ? `, plus the ${apptContractNames.length === 1 ? "contract" : "contracts"} to sign`
+        const contractNote = apptContractNames.length > 0 && hasEmail
+          ? `They'll also get the ${apptContractNames.length === 1 ? "contract" : "contracts"} to sign.`
           : "";
-        const okToNotify = (hasEmail || hasSms)
-          ? window.confirm(`Notify ${who} about this booking?\n\nThey'll get a confirmation by ${channels}${contractLine}.\n\nOK = send  ·  Cancel = don't notify`)
-          : false;
+        const choice = (hasEmail || hasSms)
+          ? await askNotify({ kind: "book", who, smsToo: !!hasSms, contractNote, allowMessage: !!hasEmail })
+          : { notify: false, message: "" };
+        const okToNotify = choice.notify;
         if (okToNotify) {
           const balance = Number(saved.totalPrice ?? form.totalPrice ?? 0);
           await getSupabase().rpc("enqueue_appointment_confirmation", {
@@ -8515,6 +8539,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             appt_time_in: form.time || saved.time || null,
             total_price_in: Number.isFinite(balance) && balance > 0 ? balance : null,
             sms_opt_in_in: !!smsOptIn,
+            custom_message_in: choice.message || null,
           });
 
           // Auto-send the service's contract(s) for this manual booking —
@@ -8682,11 +8707,12 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         } catch { /* portal sync is best-effort */ }
       }
 
-      if (
-        wasExisting && isRealAppt && anyChanged && notCancelled &&
-        notifyClient && clientEmail && store.userId &&
-        window.confirm(`This appointment changed. Notify ${form.clientName || saved.clientName || "the client"} of the update by email?\n\nOK = send  ·  Cancel = don't notify`)
-      ) {
+      const updateGate = wasExisting && isRealAppt && anyChanged && notCancelled &&
+        notifyClient && clientEmail && store.userId;
+      const updateNotify = updateGate
+        ? (await askNotify({ kind: "update", who: form.clientName || saved.clientName || "the client", smsToo: false, contractNote: "", allowMessage: false })).notify
+        : false;
+      if (updateNotify) {
         const supabase = getSupabase();
         let studioName = "your stylist";
         try {
@@ -8837,7 +8863,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     // when it's off we never ask and never notify.
     const clientReachable = (form.clientEmail || "").trim();
     const notifyOnCancel = notifyClient && !!clientReachable
-      ? window.confirm(`Notify ${form.clientName || "the client"} that this appointment was cancelled?\n\nOK = send  ·  Cancel = don't notify`)
+      ? (await askNotify({ kind: "cancel", who: form.clientName || "the client", smsToo: false, contractNote: "", allowMessage: false })).notify
       : false;
 
     try {
@@ -9988,6 +10014,47 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             );
           })()}
         </Card>
+        )}
+
+        {/* SEND NOTIFICATION modal — styled choice for book / update /
+            cancel, with an optional message (confirmation emails only). */}
+        {notifyPrompt && (
+          <div
+            onClick={() => resolveNotify(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 90, background: "rgba(21,17,26,0.5)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: "100%", maxWidth: 480, background: C.cream, borderTopLeftRadius: 22, borderTopRightRadius: 22, boxShadow: "0 -8px 40px -12px rgba(0,0,0,0.3)", padding: "8px 20px calc(20px + env(safe-area-inset-bottom, 0px))" }}
+            >
+              <div className="flex items-center justify-between" style={{ padding: "12px 0 4px" }}>
+                <h2 style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 700, color: C.espresso, margin: 0 }}>Send notification</h2>
+                <button type="button" onClick={() => resolveNotify(false)} aria-label="Close" style={{ background: "transparent", border: 0, color: C.coffee, padding: 6, cursor: "pointer" }}>
+                  <X size={20} />
+                </button>
+              </div>
+              <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                {notifyPrompt.kind === "book" && `Email ${notifyPrompt.who} a booking confirmation${notifyPrompt.smsToo ? " and text" : ""}? ${notifyPrompt.contractNote}`}
+                {notifyPrompt.kind === "update" && `Email ${notifyPrompt.who} that their appointment was updated?`}
+                {notifyPrompt.kind === "cancel" && `Email ${notifyPrompt.who} that their appointment was cancelled?`}
+              </p>
+              {notifyPrompt.allowMessage && (
+                <div className="mt-3.5">
+                  <p className="text-[10px] uppercase tracking-widest font-bold mb-1.5" style={{ color: C.muted, letterSpacing: "0.12em" }}>Add a message (optional)</p>
+                  <Textarea
+                    value={notifyMessage}
+                    onChange={(e: any) => setNotifyMessage(e.target.value)}
+                    placeholder="Appears at the top of the confirmation email — e.g. arrival or prep notes."
+                    rows={3}
+                  />
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3 mt-4">
+                <Button variant="outline" onClick={() => resolveNotify(false)}>Don&apos;t notify</Button>
+                <Button variant="primary" icon={<Send size={16} />} onClick={() => resolveNotify(true)}>Send</Button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* RECURRING — appointments only */}
