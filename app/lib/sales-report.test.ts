@@ -131,6 +131,31 @@ describe("buildSalesReport — series", () => {
   });
 });
 
+describe("buildSalesReport — drill-down details", () => {
+  it("lists the underlying sales, returns and discounts", () => {
+    const appts = [
+      appt({ id: "a1", date: "2026-06-05", totalPrice: 200, discountAmount: 25, style: "Knotless", clientName: "Bailey", discountName: "Loyalty" }),
+      appt({ id: "a2", date: "2026-06-06", totalPrice: 100, clientName: "Dana", style: "Twists" }),
+    ];
+    const txns = [
+      txn({ id: "r1", paidAt: "2026-06-06T11:00:00Z", method: "stripe", amount: 25, type: "refund", clientName: "Bailey", serviceName: "Knotless" }),
+    ];
+    const r = buildSalesReport(appts, txns, {}, "1W", REF);
+
+    expect(r.details.sales).toHaveLength(2);
+    expect(r.details.sales.map(s => s.title)).toContain("Bailey");
+    const bailey = r.details.sales.find(s => s.id === "a1")!;
+    expect(bailey.gross).toBe(200);
+    expect(bailey.net).toBe(175);
+
+    expect(r.details.returns).toHaveLength(1);
+    expect(r.details.returns[0]).toMatchObject({ title: "Bailey", amount: 25 });
+
+    expect(r.details.discounts).toHaveLength(1);
+    expect(r.details.discounts[0]).toMatchObject({ title: "Bailey", subtitle: "Loyalty", amount: 25 });
+  });
+});
+
 describe("pctChange", () => {
   it("returns null with no prior basis, percent otherwise", () => {
     expect(pctChange(100, 0)).toBeNull();
