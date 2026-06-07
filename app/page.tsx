@@ -8496,8 +8496,11 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         const hasEmail = (form.clientEmail || saved.clientEmail || "").trim();
         const hasSms = !!smsOptIn && (form.clientPhone || saved.clientPhone || "").trim();
         const channels = [hasEmail ? "email" : "", hasSms ? "text" : ""].filter(Boolean).join(" and ");
+        const contractLine = apptContractNames.length > 0 && hasEmail
+          ? `, plus the ${apptContractNames.length === 1 ? "contract" : "contracts"} to sign`
+          : "";
         const okToNotify = (hasEmail || hasSms)
-          ? window.confirm(`Notify ${who} about this booking?\n\nThey'll get a confirmation by ${channels}.\n\nOK = send  ·  Cancel = don't notify`)
+          ? window.confirm(`Notify ${who} about this booking?\n\nThey'll get a confirmation by ${channels}${contractLine}.\n\nOK = send  ·  Cancel = don't notify`)
           : false;
         if (okToNotify) {
           const balance = Number(saved.totalPrice ?? form.totalPrice ?? 0);
@@ -8513,6 +8516,57 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             total_price_in: Number.isFinite(balance) && balance > 0 ? balance : null,
             sms_opt_in_in: !!smsOptIn,
           });
+
+          // Auto-send the service's contract(s) for this manual booking —
+          // the online-booking approval flow already does this; manual
+          // creates didn't, so the contract never reached the client.
+          // Best-effort + idempotent (one row per appointment+template).
+          if (hasEmail) {
+            try {
+              const supabase = getSupabase();
+              await supabase.rpc("generate_appointment_contracts", { appointment_id_in: saved.id });
+              const { data: bcs } = await supabase
+                .from("booking_contracts")
+                .select("id, title, public_token, status, client_email")
+                .eq("appointment_id", saved.id)
+                .is("signed_at", null)
+                .in("status", ["sent", "pending", "pending_signature", "viewed"]);
+              const list = (bcs as any[]) || [];
+              if (list.length > 0) {
+                let studioName = "your stylist";
+                try {
+                  const { data: studio } = await supabase.rpc("public_get_studio_name", { user_id_in: store.userId });
+                  if (typeof studio === "string" && studio.trim()) studioName = studio.trim();
+                } catch { /* studio name best-effort */ }
+                const origin = typeof window !== "undefined" ? window.location.origin : "https://braidbosspro.app";
+                for (const bc of list) {
+                  if (!bc?.public_token) continue;
+                  const email = String(bc.client_email || form.clientEmail || saved.clientEmail || "").trim();
+                  if (!email) continue;
+                  await supabase.rpc("queue_notification", {
+                    user_id_in: store.userId,
+                    channel_in: "email",
+                    notification_type_in: "contract_signing",
+                    body_in: "Please review and sign your appointment agreement.",
+                    recipient_email_in: email,
+                    recipient_name_in: form.clientName || saved.clientName || null,
+                    payload_in: {
+                      clientName: form.clientName || saved.clientName || "there",
+                      studioName,
+                      contractTitle: bc.title || "Appointment agreement",
+                      serviceName: form.style || saved.style || null,
+                      contractUrl: `${origin}/sign/contract/${bc.public_token}`,
+                    },
+                    dedupe_key_in: `contract_signing:${bc.id}`,
+                    appointment_id_in: saved.id,
+                    client_id_in: saved.clientId || form.clientId || null,
+                  });
+                }
+              }
+            } catch (e) {
+              if (typeof console !== "undefined") console.warn("[appt] contract auto-send failed:", e);
+            }
+          }
         }
       }
     } catch {
