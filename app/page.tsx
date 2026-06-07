@@ -8489,19 +8489,31 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       const notCancelled =
         (saved.status || "") !== "cancelled" && (saved.status || "") !== "canceled";
       if (isNew && isRealAppt && notCancelled && notifyClient && store.userId) {
-        const balance = Number(saved.totalPrice ?? form.totalPrice ?? 0);
-        await getSupabase().rpc("enqueue_appointment_confirmation", {
-          appt_id_in: saved.id,
-          user_id_in: store.userId,
-          client_name_in: form.clientName || saved.clientName || null,
-          client_email_in: (form.clientEmail || saved.clientEmail || "").trim() || null,
-          client_phone_in: (form.clientPhone || saved.clientPhone || "").trim() || null,
-          service_name_in: form.style || saved.style || null,
-          appt_date_in: form.date || saved.date || null,
-          appt_time_in: form.time || saved.time || null,
-          total_price_in: Number.isFinite(balance) && balance > 0 ? balance : null,
-          sms_opt_in_in: !!smsOptIn,
-        });
+        // Ask before notifying so an accidental / placeholder booking
+        // never emails the client by surprise. (The "Notify client"
+        // toggle being off skips this entirely.)
+        const who = form.clientName || saved.clientName || "the client";
+        const hasEmail = (form.clientEmail || saved.clientEmail || "").trim();
+        const hasSms = !!smsOptIn && (form.clientPhone || saved.clientPhone || "").trim();
+        const channels = [hasEmail ? "email" : "", hasSms ? "text" : ""].filter(Boolean).join(" and ");
+        const okToNotify = (hasEmail || hasSms)
+          ? window.confirm(`Notify ${who} about this booking?\n\nThey'll get a confirmation by ${channels}.\n\nOK = send  ·  Cancel = don't notify`)
+          : false;
+        if (okToNotify) {
+          const balance = Number(saved.totalPrice ?? form.totalPrice ?? 0);
+          await getSupabase().rpc("enqueue_appointment_confirmation", {
+            appt_id_in: saved.id,
+            user_id_in: store.userId,
+            client_name_in: form.clientName || saved.clientName || null,
+            client_email_in: (form.clientEmail || saved.clientEmail || "").trim() || null,
+            client_phone_in: (form.clientPhone || saved.clientPhone || "").trim() || null,
+            service_name_in: form.style || saved.style || null,
+            appt_date_in: form.date || saved.date || null,
+            appt_time_in: form.time || saved.time || null,
+            total_price_in: Number.isFinite(balance) && balance > 0 ? balance : null,
+            sms_opt_in_in: !!smsOptIn,
+          });
+        }
       }
     } catch {
       // Confirmation is best-effort — never block the save.
@@ -8618,7 +8630,8 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
       if (
         wasExisting && isRealAppt && anyChanged && notCancelled &&
-        notifyClient && clientEmail && store.userId
+        notifyClient && clientEmail && store.userId &&
+        window.confirm(`This appointment changed. Notify ${form.clientName || saved.clientName || "the client"} of the update by email?\n\nOK = send  ·  Cancel = don't notify`)
       ) {
         const supabase = getSupabase();
         let studioName = "your stylist";
@@ -8765,6 +8778,14 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     );
     if (reason === null) return; // user hit Cancel on the prompt
 
+    // Ask whether to tell the client — so cancelling an accidental
+    // booking doesn't email them. Honors the "Notify client" toggle:
+    // when it's off we never ask and never notify.
+    const clientReachable = (form.clientEmail || "").trim();
+    const notifyOnCancel = notifyClient && !!clientReachable
+      ? window.confirm(`Notify ${form.clientName || "the client"} that this appointment was cancelled?\n\nOK = send  ·  Cancel = don't notify`)
+      : false;
+
     try {
       const supabase = getSupabase();
       const { data: sess } = await supabase.auth.getSession();
@@ -8773,7 +8794,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       const res = await fetch("/api/cancel-appointment", {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ appointment_id: form.id, reason: reason || undefined, notify_client: notifyClient }),
+        body: JSON.stringify({ appointment_id: form.id, reason: reason || undefined, notify_client: notifyOnCancel }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error || `cancel_${res.status}`);
@@ -9957,12 +9978,8 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           </div>
           <p className="text-[11px] mt-1.5" style={{ color: C.muted, lineHeight: 1.45 }}>
             {notifyClient
-              ? (form.id
-                  ? "The client will be emailed about changes you save here (and about a cancellation)."
-                  : "The client will be emailed a booking confirmation when you save.")
-              : (form.id
-                  ? "Saving won't email the client — good for fixing a mistake quietly."
-                  : "Saving won't email the client — good for placeholders or double-bookings you'll fix.")}
+              ? "When you save or cancel, we'll ask first — so you choose whether to email the client each time."
+              : "Off — saving or cancelling won't email the client and won't ask. Good for placeholders or fixing a mistake quietly."}
           </p>
           {apptContractNames.length > 0 && (
             <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
