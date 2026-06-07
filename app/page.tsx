@@ -1310,6 +1310,30 @@ const DEFAULT_PRESETS = [
 // ============================================================
 const renderTemplate = (body: string, ctx: any): string => body.replace(/\{\{(\w+)\}\}/g, (_, k) => ctx[k] != null ? String(ctx[k]) : "");
 
+// Some services don't need the client to arrive with washed / detangled /
+// blown-out hair — a braid REMOVAL or takedown is the opposite, and a
+// consultation has no install. Telling those clients to "arrive freshly
+// washed and blown out" is wrong, so we drop the generic prep line for
+// them. Driven off the style/service name so it works for default,
+// custom, and already-seeded message templates alike.
+const HAIR_PREP_NOT_NEEDED = /\b(removal|takedowns?|take[\s-]?downs?|consultation)\b/i;
+const needsHairPrep = (style: string | null | undefined): boolean =>
+  !HAIR_PREP_NOT_NEEDED.test(String(style || ""));
+
+// Strip the "Please arrive with hair washed/detangled/blown out…" prep
+// sentence (its several phrasings) and tidy the surrounding whitespace so
+// the message reads cleanly without it.
+const stripHairPrep = (text: string): string =>
+  String(text || "")
+    .replace(/\s*Please arrive with hair[^.!\n]*[.!]/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+const applyHairPrep = (text: string, style: string | null | undefined): string =>
+  needsHairPrep(style) ? text : stripHairPrep(text);
+
 const buildReminderContext = (appt: any, business: any): any => ({
   client: (appt.clientName || "there").split(" ")[0],
   style: appt.style || "your appointment",
@@ -1485,6 +1509,9 @@ const renderCommunicationTemplate = (key: CommTemplateKey, appt: any, client: an
   // happy in the picker preview. Decode them when emitting plain text
   // for clipboard / share / SMS so apostrophes look natural.
   let body = renderTemplate(tpl.body, ctx).replace(/&apos;/g, "'").replace(/&quot;/g, '"');
+  // Drop the "arrive washed/detangled/blown out" prep line for services
+  // that don't need it (braid removal, takedowns, consultations).
+  body = applyHairPrep(body, appt?.style);
   // If we couldn't resolve any appointment context at all, append a soft
   // line so the message still reads cleanly instead of showing TBDs.
   const noAppt = !appt || (!appt.id && !appt.date && !appt.totalPrice);
@@ -1522,7 +1549,7 @@ const planRemindersForAppointment = (appt: any, settings: any, templates: any[],
       const tpl = templates.find(t => t.purpose === item.purpose && t.channel === ch)
                 || templates.find(t => t.purpose === item.purpose); // fallback
       if (!tpl) continue;
-      const rendered = renderTemplate(tpl.body, ctx);
+      const rendered = applyHairPrep(renderTemplate(tpl.body, ctx), appt.style);
       const sig = settings.signature && ch === "email" ? `\n\n${settings.signature}` : "";
       out.push({
         id: uid(),
@@ -13087,7 +13114,12 @@ const ReminderDetailSheet = ({ reminder, client, appointment, template, business
   onCancel: (r: any) => Promise<void>;
 }) => {
   if (!reminder) return null;
-  const body = reminder.renderedBody || (template ? template.body : "");
+  // Strip the hair-prep line for removal/takedown services even on
+  // reminders created before this fix landed.
+  const body = applyHairPrep(
+    reminder.renderedBody || (template ? template.body : ""),
+    appointment?.style || reminder?.style,
+  );
   return (
     <Sheet open={!!reminder} onClose={onClose} title={PURPOSE_LABEL_LOCAL[reminder.purpose] || reminder.purpose}>
       <div className="space-y-4">
