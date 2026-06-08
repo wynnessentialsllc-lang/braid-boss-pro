@@ -10329,7 +10329,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             const handleGenerate = async (type: "receipt" | "invoice") => {
               const clientName = clients.find((c: any) => c.id === form.clientId)?.name || form.clientName || "Client";
               const newId = `rcp_${uid()}`;
-              const rcp = buildReceiptFromAppointment(form, type, (receipts || []).length, newId, clientName);
+              const rcp = buildReceiptFromAppointment(form, type, receipts || [], newId, clientName);
               const saved = await upsertReceipt(rcp);
               openReceipt(saved as ReceiptRecord);
             };
@@ -14400,7 +14400,7 @@ const SavedQuotes = ({ store, onBack, onLoadQuote, onConvertToAppt, openReceipt 
                     onClick={async () => {
                       try {
                         const newId = `rcp_${uid()}`;
-                        const rcp = buildInvoiceFromQuote({ ...q, totalPrice: q.finalPrice }, (store.receipts || []).length, newId, q.name);
+                        const rcp = buildInvoiceFromQuote({ ...q, totalPrice: q.finalPrice }, store.receipts || [], newId, q.name);
                         const saved = await store.upsertReceipt(rcp);
                         if (!saved) throw new Error("upsertReceipt returned null");
                         openReceipt(saved as ReceiptRecord);
@@ -19267,7 +19267,9 @@ const DeleteAccountSheet = ({ open, onClose, onSignOut }: {
       const supabase = getSupabase();
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("No active session.");
-      const { error: invokeErr } = await supabase.functions.invoke("delete-account");
+      const { error: invokeErr } = await supabase.functions.invoke("delete-account", {
+        body: { confirm: confirmText.trim().toLowerCase() },
+      });
       if (invokeErr) throw invokeErr;
       await onSignOut();
     } catch (e: any) {

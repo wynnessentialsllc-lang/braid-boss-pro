@@ -42,6 +42,16 @@ const handle = async (req: Request): Promise<Response> => {
   const token = auth.replace(/^Bearer\s+/i, "").trim();
   if (!token) return json(401, { error: "missing bearer token" });
 
+  // Explicit confirmation gate. Account deletion is irreversible and
+  // wipes 16 tables + the auth user, so require the caller to send
+  // { confirm: "delete" } — matching the documented contract in
+  // config.toml. Defense-in-depth against an accidental or
+  // token-replay POST with an empty body.
+  const body = await req.json().catch(() => ({} as Record<string, unknown>));
+  if ((body as Record<string, unknown>)?.confirm !== "delete") {
+    return json(400, { error: "confirmation required", detail: 'send { "confirm": "delete" }' });
+  }
+
   // Identify the requesting user from their JWT.
   const userClient = createClient(SUPABASE_URL, ANON_KEY || SERVICE_ROLE_KEY, {
     global: { headers: { Authorization: `Bearer ${token}` } },
