@@ -269,6 +269,13 @@ export default function PublicBookingPage() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const aboutRef = useRef<HTMLDivElement | null>(null);
   useModalA11y(aboutOpen, () => setAboutOpen(false), aboutRef);
+  // Force the panel back to the top on open so iOS Safari doesn't
+  // restore a stale scroll position partway down the bio.
+  useEffect(() => {
+    if (aboutOpen && aboutRef.current) {
+      aboutRef.current.scrollTop = 0;
+    }
+  }, [aboutOpen]);
   // Canonical slug — `link.slug` once resolved, urlSlug as a fallback
   // during the first paint. Every downstream effect / RPC reads this
   // so a branded URL feeds the existing per-link queries without
@@ -4453,9 +4460,15 @@ export default function PublicBookingPage() {
             <div
               ref={aboutRef}
               onClick={(e) => e.stopPropagation()}
+              tabIndex={-1}
               style={{
                 width: "100%", maxWidth: 480,
-                maxHeight: "92vh", overflowY: "auto",
+                // dvh follows the visible viewport on iOS Safari (vh
+                // doesn't — it stays at the full screen height even
+                // while the URL bar covers part of it), so the panel
+                // never extends behind the URL bar and hides the
+                // close button + portrait at the top.
+                maxHeight: "min(92dvh, 92vh)", overflowY: "auto",
                 background: C.paper,
                 borderTopLeftRadius: 24, borderTopRightRadius: 24,
                 boxShadow: "0 -16px 48px -16px rgba(21, 17, 26, 0.5)",
@@ -4463,21 +4476,31 @@ export default function PublicBookingPage() {
                 position: "relative",
               }}
             >
-              <button
-                type="button"
-                onClick={() => setAboutOpen(false)}
-                aria-label="Close"
-                style={{
-                  position: "absolute", top: 14, right: 14,
-                  width: 36, height: 36, borderRadius: 999,
-                  background: C.ivory, color: C.coffee,
-                  border: `1px solid ${C.hairline}`,
-                  fontSize: 20, lineHeight: 1, cursor: "pointer", padding: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}
-              >
-                ×
-              </button>
+              {/* Sticky × close so it never scrolls off-screen no
+                  matter where the panel's content starts. zIndex
+                  beats anything inside the scroll area. */}
+              <div style={{
+                position: "sticky", top: 0, zIndex: 2,
+                display: "flex", justifyContent: "flex-end",
+                marginBottom: -36, pointerEvents: "none",
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setAboutOpen(false)}
+                  aria-label="Close"
+                  style={{
+                    width: 36, height: 36, borderRadius: 999,
+                    background: C.ivory, color: C.coffee,
+                    border: `1px solid ${C.hairline}`,
+                    fontSize: 20, lineHeight: 1, cursor: "pointer", padding: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    pointerEvents: "auto",
+                    boxShadow: "0 2px 8px rgba(21, 17, 26, 0.12)",
+                  }}
+                >
+                  ×
+                </button>
+              </div>
 
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
                 <div
