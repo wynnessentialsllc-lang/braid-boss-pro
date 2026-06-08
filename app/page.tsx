@@ -834,7 +834,10 @@ const calculateCollectedAmount = (appt: any): number => {
   const deposit = parseMoney(appt.depositPaid);
   if (deposit > 0) return roundCents(deposit);
   if (parseMoney(appt.balanceDue) === 0 && parseMoney(appt.totalPrice) > 0) {
-    return roundCents(parseMoney(appt.totalPrice));
+    // Paid-in-full fallback for legacy/imported rows without an explicit
+    // depositPaid. Collected = NET (post-discount), not gross — otherwise
+    // a discounted appointment overstates revenue by the discount amount.
+    return roundCents(Math.max(0, parseMoney(appt.totalPrice) - parseMoney(appt.discountAmount)));
   }
   return 0;
 };
@@ -4538,9 +4541,14 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
     // discount, depositPaid would equal the gross subtotal and the
     // appointment would render as "overpaid by $discount".
     const netTotal = Math.max(0, parseMoney(appt.totalPrice) - parseMoney(appt.discountAmount));
+    // Any store credit already covers part of the ticket — depositPaid
+    // records CASH collected, so subtract the applied credit. Otherwise
+    // collected revenue double-counts the credit (once at credit purchase,
+    // once here).
+    const creditApplied = Math.max(0, parseMoney(appt.creditApplied));
     const updated = {
       ...appt,
-      depositPaid: netTotal,
+      depositPaid: Math.max(0, netTotal - creditApplied),
       balanceDue: 0,
       paymentStatus: "paid",
       paymentDate: appt.paymentDate || todayISO(),
@@ -4718,9 +4726,11 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
           onOpenAppointment={(a) => { closeKpi(); openAppointmentRecord?.(a); }}
           markAppointmentPaid={async (a) => {
             const netTotal = Math.max(0, (Number(a.totalPrice) || 0) - (Number(a.discountAmount) || 0));
+            // Cash collected is net of any applied store credit.
+            const creditApplied = Math.max(0, Number(a.creditApplied) || 0);
             const next = {
               ...a,
-              depositPaid: netTotal,
+              depositPaid: Math.max(0, netTotal - creditApplied),
               paymentStatus: "paid",
               paymentDate: a.paymentDate || todayISO(),
               status: a.status === "scheduled" || a.status === "confirmed" ? "completed" : a.status,
@@ -10283,9 +10293,13 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                   const apptDate = form.date || todayISO();
                   const isPastOrToday = apptDate <= todayISO();
                   const netTotal = Math.max(0, parseMoney(form.totalPrice) - parseMoney(form.discountAmount));
+                  // Record CASH collected — net of any store credit already
+                  // applied — so collected revenue doesn't double-count the
+                  // credit. normalizeAppointment recomputes balanceDue to 0.
+                  const creditApplied = Math.max(0, parseMoney(form.creditApplied));
                   setForm({
                     ...form,
-                    depositPaid: netTotal,
+                    depositPaid: Math.max(0, netTotal - creditApplied),
                     paymentStatus: "paid",
                     paymentDate: form.paymentDate || todayISO(),
                     status: isPastOrToday && !isCanceledAppointment(form) && form.status !== "no_show"
