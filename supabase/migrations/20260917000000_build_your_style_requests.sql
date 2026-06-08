@@ -91,7 +91,9 @@ grant select, insert, update, delete on public.style_requests to authenticated;
 
 -- Auto-bump updated_at.
 create or replace function public.style_requests_touch_updated_at()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql
+set search_path = ''
+as $$
 begin new.updated_at = now(); return new; end;
 $$;
 drop trigger if exists style_requests_touch on public.style_requests;
