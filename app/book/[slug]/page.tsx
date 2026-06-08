@@ -533,6 +533,7 @@ export default function PublicBookingPage() {
     lng?: number;
     meets_minimum?: boolean;
     minimum_price?: number | null;
+    minimum_price_note?: string | null;
   };
   const [mobileQuote, setMobileQuote] = useState<MobileQuote | null>(null);
   // Digital intake / consultation form. Loaded once the slug resolves
@@ -3742,8 +3743,13 @@ export default function PublicBookingPage() {
                             : "No travel fee"}
                         </p>
                         {mobileQuote.meets_minimum === false && (
-                          <p style={{ margin: "6px 0 0", fontSize: 12, color: C.danger, lineHeight: 1.5 }}>
-                            This service requires a ${Number(mobileQuote.minimum_price || 0).toFixed(0)} minimum for mobile bookings.
+                          <p style={{
+                            margin: "6px 0 0", fontSize: 12, color: C.danger,
+                            lineHeight: 1.5, whiteSpace: "pre-wrap",
+                          }}>
+                            {mobileQuote.minimum_price_note
+                              ? mobileQuote.minimum_price_note
+                              : `This service requires a $${Number(mobileQuote.minimum_price || 0).toFixed(0)} minimum for mobile bookings.`}
                           </p>
                         )}
                       </div>

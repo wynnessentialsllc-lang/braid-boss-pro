@@ -136,7 +136,7 @@ export async function POST(req: Request) {
       .select(
         "id, name, base_price, is_active, mobile_service, mobile_fee_model, "
         + "mobile_flat_fee, mobile_per_mile_fee, mobile_hybrid_free_miles, "
-        + "mobile_tiered_bands, mobile_minimum_price",
+        + "mobile_tiered_bands, mobile_minimum_price, mobile_minimum_price_note",
       )
       .eq("id", serviceId)
       .eq("user_id", cfgRow.user_id)
@@ -221,5 +221,6 @@ export async function POST(req: Request) {
     lng: hit.lng,
     meets_minimum: meetsMinimum,
     minimum_price: svc.mobile_minimum_price == null ? null : Number(svc.mobile_minimum_price),
+    minimum_price_note: svc.mobile_minimum_price_note ?? null,
   });
 }

@@ -264,6 +264,12 @@ export type Service = {
   mobile_hybrid_free_miles: number;
   mobile_tiered_bands: Array<{ max_miles: number; fee: number }>;
   mobile_minimum_price: number | null;
+  // Free-text note shown to clients when the picked service has a
+  // mobile minimum AND their selection doesn't meet it. Stylist can
+  // explain WHY ("travel makes anything under $200 a loss for me",
+  // "I cap mobile to full installs only"). Null = use the generic
+  // message we ship out of the box.
+  mobile_minimum_price_note: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -312,6 +318,7 @@ export type ServiceInput = Pick<
   | "mobile_hybrid_free_miles"
   | "mobile_tiered_bands"
   | "mobile_minimum_price"
+  | "mobile_minimum_price_note"
 >;
 
 // ---- Validation -------------------------------------------------------
@@ -666,6 +673,11 @@ export const useServices = (
         const n = Number(v);
         return Number.isFinite(n) && n >= 0 ? n : null;
       })(),
+      mobile_minimum_price_note: (() => {
+        const v = (draft as any).mobile_minimum_price_note;
+        const s = typeof v === "string" ? v.trim() : "";
+        return s ? s.slice(0, 500) : null;
+      })(),
       // Marketing rebook window in weeks. Empty / 0 / non-number =>
       // null (no auto-nudge). Clamped to the DB check (1..52).
       rebook_after_weeks: (() => {
@@ -780,6 +792,7 @@ export type PublicService = Pick<
   | "mobile_hybrid_free_miles"
   | "mobile_tiered_bands"
   | "mobile_minimum_price"
+  | "mobile_minimum_price_note"
 >;
 
 export const fetchPublicServices = async (
@@ -832,6 +845,7 @@ export const fetchPublicServices = async (
         }))
       : [],
     mobile_minimum_price: s.mobile_minimum_price == null ? null : Number(s.mobile_minimum_price),
+    mobile_minimum_price_note: s.mobile_minimum_price_note ?? null,
   }));
   return { ok: true, services };
 };
