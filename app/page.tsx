@@ -6302,6 +6302,84 @@ const StyleCustomizationSection = ({
 // vertical column. Toggle gates the whole section; flipping it off
 // leaves the saved fee config intact so flipping back on doesn't lose
 // the stylist's work.
+// Controlled numeric input that holds its own draft string so typing a
+// decimal like "12.5" or pressing a leading "0" doesn't bounce through
+// Number() coercion on every keystroke. Without this local buffer,
+// every character was kicking iOS Safari's scroll-into-view because
+// React was rewriting the value attribute after Number() rounded a
+// trailing "." away. We push the parsed value out on change AND on
+// blur (so the parent stays canonical), but the DOM input mirrors the
+// user's actual keystrokes verbatim until they navigate away.
+type NumberFieldProps = {
+  value: number | null;
+  onChange: (next: number | null) => void;
+  placeholder?: string;
+  allowNull?: boolean;
+  min?: number;
+  className?: string;
+  style?: React.CSSProperties;
+  ariaLabel?: string;
+};
+const NumberField = ({
+  value, onChange, placeholder, allowNull = false, min = 0,
+  className, style, ariaLabel,
+}: NumberFieldProps) => {
+  const formatted = value == null
+    ? ""
+    : (Number.isFinite(value) ? String(value) : "");
+  const [draft, setDraft] = useState(formatted);
+  const lastExternal = useRef(formatted);
+  // When the parent updates the value programmatically (e.g. on form
+  // hydrate after a save), pull the new value in. Skip when the new
+  // value matches what the user just typed so we don't fight them.
+  useEffect(() => {
+    if (formatted !== lastExternal.current) {
+      lastExternal.current = formatted;
+      setDraft(formatted);
+    }
+  }, [formatted]);
+
+  const commit = (next: string) => {
+    setDraft(next);
+    const trimmed = next.trim();
+    if (trimmed === "") {
+      lastExternal.current = "";
+      onChange(allowNull ? null : 0);
+      return;
+    }
+    // Trailing-dot and leading-dot get kept locally but parse to a
+    // number on each keystroke so totals upstream stay live.
+    const n = Number(trimmed);
+    if (!Number.isFinite(n)) return;
+    const clamped = Math.max(min, n);
+    lastExternal.current = String(clamped);
+    onChange(clamped);
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      onChange={e => commit(e.target.value)}
+      onBlur={() => {
+        // Normalize the displayed text on blur so a half-typed "12."
+        // becomes "12" once the user is done.
+        if (draft.trim() === "") {
+          setDraft(allowNull ? "" : "0");
+          return;
+        }
+        const n = Number(draft);
+        if (Number.isFinite(n)) setDraft(String(Math.max(min, n)));
+      }}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      className={className}
+      style={style}
+    />
+  );
+};
+
 const MobileServiceSection = ({
   form, onChange,
 }: { form: any; onChange: (next: any) => void }) => {
@@ -6410,12 +6488,12 @@ const MobileServiceSection = ({
                   <label className={fieldLabel} style={{ color: C.coffee }}>Flat travel fee</label>
                   <div className="flex items-center gap-2">
                     <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
-                    <input
-                      type="number" inputMode="decimal" min={0}
+                    <NumberField
                       value={Number(form.mobile_flat_fee) || 0}
-                      onChange={e => set({ mobile_flat_fee: Math.max(0, Number(e.target.value) || 0) })}
+                      onChange={v => set({ mobile_flat_fee: v ?? 0 })}
                       className="w-32 p-2 rounded-lg border text-[13px]"
                       style={inputStyle}
+                      ariaLabel="Flat travel fee"
                     />
                   </div>
                 </div>
@@ -6426,12 +6504,12 @@ const MobileServiceSection = ({
                   <label className={fieldLabel} style={{ color: C.coffee }}>Per-mile rate</label>
                   <div className="flex items-center gap-2">
                     <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
-                    <input
-                      type="number" inputMode="decimal" min={0}
+                    <NumberField
                       value={Number(form.mobile_per_mile_fee) || 0}
-                      onChange={e => set({ mobile_per_mile_fee: Math.max(0, Number(e.target.value) || 0) })}
+                      onChange={v => set({ mobile_per_mile_fee: v ?? 0 })}
                       className="w-32 p-2 rounded-lg border text-[13px]"
                       style={inputStyle}
+                      ariaLabel="Per-mile rate"
                     />
                     <span className="text-[12px]" style={{ color: C.muted }}>per mile</span>
                   </div>
@@ -6443,12 +6521,12 @@ const MobileServiceSection = ({
                   <div>
                     <label className={fieldLabel} style={{ color: C.coffee }}>Free within</label>
                     <div className="flex items-center gap-2">
-                      <input
-                        type="number" inputMode="decimal" min={0}
+                      <NumberField
                         value={Number(form.mobile_hybrid_free_miles) || 0}
-                        onChange={e => set({ mobile_hybrid_free_miles: Math.max(0, Number(e.target.value) || 0) })}
+                        onChange={v => set({ mobile_hybrid_free_miles: v ?? 0 })}
                         className="w-24 p-2 rounded-lg border text-[13px]"
                         style={inputStyle}
+                        ariaLabel="Free miles threshold"
                       />
                       <span className="text-[12px]" style={{ color: C.muted }}>miles</span>
                     </div>
@@ -6457,12 +6535,12 @@ const MobileServiceSection = ({
                     <label className={fieldLabel} style={{ color: C.coffee }}>Then per mile</label>
                     <div className="flex items-center gap-2">
                       <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
-                      <input
-                        type="number" inputMode="decimal" min={0}
+                      <NumberField
                         value={Number(form.mobile_per_mile_fee) || 0}
-                        onChange={e => set({ mobile_per_mile_fee: Math.max(0, Number(e.target.value) || 0) })}
+                        onChange={v => set({ mobile_per_mile_fee: v ?? 0 })}
                         className="w-24 p-2 rounded-lg border text-[13px]"
                         style={inputStyle}
+                        ariaLabel="Per-mile rate after free zone"
                       />
                     </div>
                   </div>
@@ -6479,21 +6557,21 @@ const MobileServiceSection = ({
                     {bands.map((b, i) => (
                       <div key={i} className="flex items-center gap-2">
                         <span className="text-[12px]" style={{ color: C.muted }}>Up to</span>
-                        <input
-                          type="number" inputMode="decimal" min={0}
-                          value={b.max_miles}
-                          onChange={e => setBand(i, { max_miles: Math.max(0, Number(e.target.value) || 0) })}
+                        <NumberField
+                          value={Number(b.max_miles) || 0}
+                          onChange={v => setBand(i, { max_miles: v ?? 0 })}
                           className="w-20 p-2 rounded-lg border text-[13px]"
                           style={inputStyle}
+                          ariaLabel={`Band ${i + 1} miles`}
                         />
                         <span className="text-[12px]" style={{ color: C.muted }}>mi →</span>
                         <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
-                        <input
-                          type="number" inputMode="decimal" min={0}
-                          value={b.fee}
-                          onChange={e => setBand(i, { fee: Math.max(0, Number(e.target.value) || 0) })}
+                        <NumberField
+                          value={Number(b.fee) || 0}
+                          onChange={v => setBand(i, { fee: v ?? 0 })}
                           className="w-24 p-2 rounded-lg border text-[13px]"
                           style={inputStyle}
+                          ariaLabel={`Band ${i + 1} fee`}
                         />
                         <button
                           type="button"
@@ -6526,16 +6604,14 @@ const MobileServiceSection = ({
                 </label>
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
-                  <input
-                    type="number" inputMode="decimal" min={0}
-                    value={form.mobile_minimum_price ?? ""}
-                    onChange={e => {
-                      const v = e.target.value.trim();
-                      set({ mobile_minimum_price: v === "" ? null : Math.max(0, Number(v) || 0) });
-                    }}
+                  <NumberField
+                    value={form.mobile_minimum_price ?? null}
+                    onChange={v => set({ mobile_minimum_price: v })}
+                    allowNull
                     placeholder="No minimum"
                     className="w-32 p-2 rounded-lg border text-[13px]"
                     style={inputStyle}
+                    ariaLabel="Minimum service price"
                   />
                 </div>
                 <p className="text-[11px] mt-1" style={{ color: C.muted }}>
