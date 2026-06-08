@@ -161,6 +161,7 @@ import {
   computeDiscountAmount,
   formatDiscountValue,
   selectableDiscounts,
+  discountUsageFromAppointments,
   useDiscounts,
   validateDiscount,
 } from "./lib/discounts";
@@ -6314,9 +6315,13 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
   // profit" warning. Defaults to none — the user has to opt in.
   const [selectedDiscountId, setSelectedDiscountId] = useState<string | null>(null);
   const allDiscounts: Discount[] = store.discountsApi?.discounts || [];
+  const discountUsage = useMemo(
+    () => discountUsageFromAppointments(store.appointments),
+    [store.appointments],
+  );
   const availableDiscounts = useMemo(
-    () => selectableDiscounts(allDiscounts),
-    [allDiscounts],
+    () => selectableDiscounts(allDiscounts, Date.now(), discountUsage),
+    [allDiscounts, discountUsage],
   );
   const selectedDiscount = useMemo(
     () => availableDiscounts.find(d => d.id === selectedDiscountId) || null,
@@ -8564,9 +8569,13 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
   // Discount picker (V1: only "applies to all" discounts surface).
   const allDiscounts: Discount[] = store.discountsApi?.discounts || [];
+  const discountUsage = useMemo(
+    () => discountUsageFromAppointments(store.appointments),
+    [store.appointments],
+  );
   const availableDiscounts = useMemo(
-    () => selectableDiscounts(allDiscounts),
-    [allDiscounts],
+    () => selectableDiscounts(allDiscounts, Date.now(), discountUsage),
+    [allDiscounts, discountUsage],
   );
   // If the saved discount is no longer selectable (paused / expired)
   // but is the one already on this appointment, keep it visible so
@@ -23702,22 +23711,49 @@ const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }
 
   const handleSave = async () => {
     if (!name.trim()) { alert("Name is required."); return; }
-    // Materialize the variation rows: trim names, drop blanks. Existing
-    // rows on an edit keep their movement-managed count; new rows and
-    // create-time rows take the entered starting qty.
-    const builtVariations = variations
-      .map(r => ({ ...r, name: r.name.trim() }))
-      .filter(r => r.name)
-      .map(r => ({
-        id: r.id,
-        name: r.name,
-        quantityOnHand: (isEdit && !r.isNew)
-          ? (originalVarQty.get(r.id) ?? 0)
-          : (parseMoney(r.qty) || 0),
-        lowStockThreshold: r.threshold.trim() === "" ? null : parseMoney(r.threshold),
-      }));
     setBusy(true);
     try {
+      // Cross-device safety: this editor never changes stock counts —
+      // those are owned by the movement RPC. But on an edit it would
+      // otherwise write back whatever quantity THIS device loaded, which
+      // can be stale (inventory isn't re-pulled on focus), clobbering a
+      // count another device moved since. Re-read the authoritative
+      // server quantity (item-level + per-variation) right before saving.
+      // Fail-safe: if the read fails (offline/guest), fall back to the
+      // loaded values via originalVarQty / item.quantityOnHand.
+      let serverItemQty: number | null = null;
+      const serverVarQty = new Map<string, number>();
+      if (isEdit && item?.id) {
+        try {
+          const { data: fresh } = await getSupabase()
+            .from("inventory_items")
+            .select("quantity_on_hand, data")
+            .eq("id", item.id)
+            .maybeSingle();
+          if (fresh) {
+            const q = Number((fresh as any).quantity_on_hand);
+            if (Number.isFinite(q)) serverItemQty = q;
+            const fv = (fresh as any)?.data?.variations;
+            if (Array.isArray(fv)) {
+              for (const v of fv) serverVarQty.set(String(v?.id), Number(v?.quantityOnHand) || 0);
+            }
+          }
+        } catch { /* offline / read failed — fall back to loaded values */ }
+      }
+      // Materialize the variation rows: trim names, drop blanks. Existing
+      // rows on an edit keep their movement-managed count (server-current
+      // when available, else the loaded value); new rows take entered qty.
+      const builtVariations = variations
+        .map(r => ({ ...r, name: r.name.trim() }))
+        .filter(r => r.name)
+        .map(r => ({
+          id: r.id,
+          name: r.name,
+          quantityOnHand: (isEdit && !r.isNew)
+            ? (serverVarQty.has(r.id) ? serverVarQty.get(r.id)! : (originalVarQty.get(r.id) ?? 0))
+            : (parseMoney(r.qty) || 0),
+          lowStockThreshold: r.threshold.trim() === "" ? null : parseMoney(r.threshold),
+        }));
       const rec: InventoryItem = {
         id: item?.id || `inv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
         name: name.trim(),
@@ -23729,7 +23765,7 @@ const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }
         retailPrice: retailPrice ? parseMoney(retailPrice) : null,
         quantityOnHand: builtVariations.length
           ? builtVariations.reduce((s, v) => s + (Number(v.quantityOnHand) || 0), 0)
-          : (isEdit ? Number(item?.quantityOnHand) || 0 : parseMoney(quantity)),
+          : (isEdit ? (serverItemQty ?? (Number(item?.quantityOnHand) || 0)) : parseMoney(quantity)),
         lowStockThreshold: parseMoney(threshold),
         supplier: supplier.trim() || null,
         photoPath: item?.photoPath ?? null,
