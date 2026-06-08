@@ -497,6 +497,26 @@ export default function PublicBookingPage() {
   const [customColorPhotoUrl, setCustomColorPhotoUrl] = useState<string | null>(null);
   const [customColorPhotoUploading, setCustomColorPhotoUploading] = useState(false);
   const [customColorPhotoError, setCustomColorPhotoError] = useState<string | null>(null);
+  // Mobile services — the client's address + travel quote for services
+  // the stylist offers on-site. Only relevant when the selected service
+  // has mobile_service = true; otherwise these stay empty.
+  const [clientAddress, setClientAddress] = useState("");
+  const [mobileAccessNotes, setMobileAccessNotes] = useState("");
+  const [mobileQuoteLoading, setMobileQuoteLoading] = useState(false);
+  const [mobileQuoteError, setMobileQuoteError] = useState<string | null>(null);
+  type MobileQuote = {
+    in_area: boolean;
+    distance_miles: number;
+    travel_fee?: number;
+    blocked_reason?: "out_of_range" | "blocked_zip" | "no_coverage";
+    address: string;
+    zip: string | null;
+    lat?: number;
+    lng?: number;
+    meets_minimum?: boolean;
+    minimum_price?: number | null;
+  };
+  const [mobileQuote, setMobileQuote] = useState<MobileQuote | null>(null);
   // Digital intake / consultation form. Loaded once the slug resolves
   // to a user_id; answers are keyed by question id and attached to the
   // booking request before the deposit step (optional / skippable).
@@ -927,6 +947,15 @@ export default function PublicBookingPage() {
     return pickedExtras.some(isHumanHairIncludedSelection);
   }, [variations, selectedVariationId, pickedExtras]);
 
+  // True when the selected service is offered mobile. Drives the
+  // address input + travel quote on the booking page.
+  const isMobileService = !!(selectedCatalogService as any)?.mobile_service;
+  // Travel fee from the most recent in-area quote. Gated on the mobile
+  // toggle so flipping services doesn't carry over a stale quote.
+  const travelFee = isMobileService && mobileQuote?.in_area && Number.isFinite(mobileQuote.travel_fee)
+    ? Math.max(0, Number(mobileQuote.travel_fee) || 0)
+    : 0;
+
   // Final resolved pricing including the picked add-ons. This is what
   // the summary box, deposit/balance lines, and the pay-button label
   // all read from.
@@ -937,7 +966,12 @@ export default function PublicBookingPage() {
     const addonsDepositExtra = pickedExtras
       .filter(e => e.include_in_deposit === true)
       .reduce((s, e) => s + (Number(e.price) || 0), 0);
-    const price = baseResolved.price + addonsPrice;
+    // Travel fee folds straight into the base price so the totals line,
+    // pay button, and balance-due math all reflect it. It does NOT
+    // bump the deposit — deposit logic stays attached to the service +
+    // add-ons so a longer drive doesn't quietly increase the upfront
+    // ask. The travel fee gets collected in the remaining balance.
+    const price = baseResolved.price + addonsPrice + travelFee;
     const durationHours = baseResolved.durationHours + addonsDuration;
     // Deposit rules:
     //   * If the base/variation already requires a deposit, add only
@@ -960,7 +994,7 @@ export default function PublicBookingPage() {
       depositAmount,
       balanceDue: Math.max(0, price - depositAmount),
     };
-  }, [baseResolved, pickedExtras]);
+  }, [baseResolved, pickedExtras, travelFee]);
 
   // No-show consent is required to book whenever the stylist has no-show
   // protection on AND this booking will save a card (a deposit applies).
@@ -978,7 +1012,61 @@ export default function PublicBookingPage() {
   // pick from another service can't carry over.
   useEffect(() => {
     setSelectedExtraIds([]);
+    // Mobile state belongs to a specific service — clear it on switch.
+    setClientAddress("");
+    setMobileAccessNotes("");
+    setMobileQuote(null);
+    setMobileQuoteError(null);
   }, [serviceId]);
+
+  // Fetch a fresh travel quote when the address (or service) changes.
+  // Debounced so every keystroke isn't a Mapbox call. Skipped when the
+  // service isn't mobile or the address is too short to mean anything.
+  useEffect(() => {
+    if (!isMobileService) {
+      setMobileQuote(null);
+      setMobileQuoteError(null);
+      return;
+    }
+    const addr = clientAddress.trim();
+    if (addr.length < 5 || !selectedCatalogService?.id) {
+      setMobileQuote(null);
+      setMobileQuoteError(null);
+      return;
+    }
+    let cancelled = false;
+    setMobileQuoteLoading(true);
+    setMobileQuoteError(null);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/mobile-quote", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            slug,
+            service_id: selectedCatalogService.id,
+            address: addr,
+          }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok || !body?.ok) {
+          setMobileQuote(null);
+          setMobileQuoteError(body?.error || "Couldn't get a travel quote.");
+          return;
+        }
+        setMobileQuote(body as MobileQuote);
+      } catch {
+        if (!cancelled) {
+          setMobileQuote(null);
+          setMobileQuoteError("Couldn't get a travel quote. Please try again.");
+        }
+      } finally {
+        if (!cancelled) setMobileQuoteLoading(false);
+      }
+    }, 600);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [isMobileService, clientAddress, selectedCatalogService?.id, slug]);
 
   // Phase B7 — derived duration. When a catalog service is picked we
   // use its real duration; otherwise default to 60 minutes so the
@@ -1144,6 +1232,28 @@ export default function PublicBookingPage() {
       if (customColorPhotoUploading) {
         setSubmitError("Your inspiration photo is still uploading — please wait a moment.");
         return;
+      }
+      if (isMobileService) {
+        if (!clientAddress.trim()) {
+          setSubmitError("Please enter your address so your stylist can travel to you.");
+          return;
+        }
+        if (mobileQuoteLoading) {
+          setSubmitError("Checking your service area — one moment.");
+          return;
+        }
+        if (!mobileQuote) {
+          setSubmitError(mobileQuoteError || "We couldn't verify your address. Please double-check it.");
+          return;
+        }
+        if (!mobileQuote.in_area) {
+          setSubmitError("This address is outside your stylist's service area.");
+          return;
+        }
+        if (mobileQuote.meets_minimum === false) {
+          setSubmitError("This service is below your stylist's mobile booking minimum.");
+          return;
+        }
       }
       // Only require curl when the dropdown is actually visible
       // (selection enabled AND the picked option includes human hair).
@@ -1338,6 +1448,27 @@ export default function PublicBookingPage() {
             });
           } catch {
             /* booking already saved — customization is non-fatal */
+          }
+        }
+
+        // Mobile services — stamp the trip details onto the request so
+        // the appointment carries the address, distance, and travel
+        // fee paid. Best-effort: a failure here doesn't roll back the
+        // booking (price already locked in via selected_addons math).
+        if (isMobileService && mobileQuote?.in_area) {
+          try {
+            await supabase.rpc("public_attach_booking_travel_details", {
+              request_id_in: newRequestId,
+              address_in: mobileQuote.address || clientAddress.trim(),
+              zip_in: mobileQuote.zip || null,
+              lat_in: mobileQuote.lat ?? null,
+              lng_in: mobileQuote.lng ?? null,
+              distance_miles_in: mobileQuote.distance_miles ?? null,
+              travel_fee_in: Number(mobileQuote.travel_fee) || 0,
+              access_notes_in: mobileAccessNotes.trim() || null,
+            });
+          } catch {
+            /* booking already saved — travel details are non-fatal */
           }
         }
 
@@ -3516,6 +3647,99 @@ export default function PublicBookingPage() {
                 </div>
               );
             })()}
+            {/* Mobile services — address gate. Only renders when the
+                picked service is offered mobile. Out-of-area / blocked
+                zips short-circuit the booking before the calendar so
+                the client never picks a slot only to be rejected. */}
+            {isMobileService && selectedCatalogService && (
+              <div
+                style={{
+                  padding: 14, borderRadius: 14,
+                  background: C.paper, border: `1px solid ${C.hairline}`,
+                  display: "grid", gap: 10,
+                }}
+              >
+                <div>
+                  <p style={{
+                    margin: 0, fontSize: 11, fontWeight: 800, letterSpacing: "0.14em",
+                    textTransform: "uppercase", color: C.goldDeep,
+                  }}>
+                    Mobile service
+                  </p>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+                    Your stylist comes to you. Enter your address — we'll check the area and quote the travel fee before you book.
+                  </p>
+                </div>
+                <Field label="Your address">
+                  <input
+                    value={clientAddress}
+                    onChange={e => setClientAddress(e.target.value)}
+                    placeholder="1234 Main St, Dallas, TX 75201"
+                    style={{ ...inputStyle, padding: 12 }}
+                    autoComplete="street-address"
+                  />
+                </Field>
+                {mobileQuoteLoading && (
+                  <p style={{ margin: 0, fontSize: 12, color: C.muted }}>Checking your area…</p>
+                )}
+                {mobileQuoteError && !mobileQuoteLoading && (
+                  <p style={{ margin: 0, fontSize: 12, color: C.danger }}>{mobileQuoteError}</p>
+                )}
+                {mobileQuote && !mobileQuoteLoading && (
+                  <>
+                    {mobileQuote.in_area ? (
+                      <div style={{
+                        padding: 12, borderRadius: 12,
+                        background: C.cream, border: `1px solid ${C.goldDeep}`,
+                      }}>
+                        <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: C.espresso }}>
+                          ✓ In your stylist's service area
+                        </p>
+                        <p style={{ margin: "4px 0 0", fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
+                          {mobileQuote.distance_miles.toFixed(1)} miles from base
+                          {" · "}
+                          {Number(mobileQuote.travel_fee) > 0
+                            ? `Travel fee: +$${Number(mobileQuote.travel_fee || 0).toFixed(2)}`
+                            : "No travel fee"}
+                        </p>
+                        {mobileQuote.meets_minimum === false && (
+                          <p style={{ margin: "6px 0 0", fontSize: 12, color: C.danger, lineHeight: 1.5 }}>
+                            This service requires a ${Number(mobileQuote.minimum_price || 0).toFixed(0)} minimum for mobile bookings.
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{
+                        padding: 12, borderRadius: 12,
+                        background: C.paper, border: `1px solid ${C.danger}`,
+                      }}>
+                        <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: C.danger }}>
+                          {mobileQuote.blocked_reason === "blocked_zip"
+                            ? "Your stylist isn't taking bookings in this zip code."
+                            : mobileQuote.blocked_reason === "no_coverage"
+                              ? "Your stylist hasn't set up mobile coverage yet."
+                              : `Sorry — this address is outside the service area (${mobileQuote.distance_miles.toFixed(1)} mi from base).`}
+                        </p>
+                        <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+                          Try a different address, or contact your stylist directly.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+                {mobileQuote?.in_area && (
+                  <Field label="Parking / access notes (optional)">
+                    <textarea
+                      value={mobileAccessNotes}
+                      onChange={e => setMobileAccessNotes(e.target.value)}
+                      rows={2}
+                      placeholder="Apartment buzzer, gate code, parking spot, pets in home, etc."
+                      style={{ ...inputStyle, padding: 12, resize: "none", lineHeight: 1.5 }}
+                    />
+                  </Field>
+                )}
+              </div>
+            )}
             {/* Calendar + details + submit only after a service is picked
                 (or in legacy free-form mode), so the landing reads
                 cleanly as a menu. */}

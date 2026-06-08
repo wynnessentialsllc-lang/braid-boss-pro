@@ -253,6 +253,17 @@ export type Service = {
   // the client is "due for a refresh" and gets a rebook nudge email.
   // null = no auto-nudge (digital consults, one-off classes, etc.).
   rebook_after_weeks: number | null;
+  // Mobile Services V1 — when true, this service is offered at the
+  // client's address. Pricing rides one of four travel-fee models;
+  // the public booking page geocodes the client address and either
+  // quotes the trip or blocks "out of service area".
+  mobile_service: boolean;
+  mobile_fee_model: "flat" | "per_mile" | "hybrid" | "tiered";
+  mobile_flat_fee: number;
+  mobile_per_mile_fee: number;
+  mobile_hybrid_free_miles: number;
+  mobile_tiered_bands: Array<{ max_miles: number; fee: number }>;
+  mobile_minimum_price: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -294,6 +305,13 @@ export type ServiceInput = Pick<
   | "customization_enabled"
   | "default_materials"
   | "rebook_after_weeks"
+  | "mobile_service"
+  | "mobile_fee_model"
+  | "mobile_flat_fee"
+  | "mobile_per_mile_fee"
+  | "mobile_hybrid_free_miles"
+  | "mobile_tiered_bands"
+  | "mobile_minimum_price"
 >;
 
 // ---- Validation -------------------------------------------------------
@@ -621,6 +639,33 @@ export const useServices = (
             }))
             .filter(m => m.inventory_item_id && m.quantity > 0)
         : [],
+      // Mobile Services V1. mobile_service gates everything else; the
+      // fee model + numeric fields persist regardless so a stylist can
+      // toggle off + back on without losing their pricing config.
+      mobile_service: !!(draft as any).mobile_service,
+      mobile_fee_model: (() => {
+        const m = String((draft as any).mobile_fee_model || "flat");
+        return ["flat", "per_mile", "hybrid", "tiered"].includes(m) ? m : "flat";
+      })(),
+      mobile_flat_fee: Math.max(0, Number((draft as any).mobile_flat_fee) || 0),
+      mobile_per_mile_fee: Math.max(0, Number((draft as any).mobile_per_mile_fee) || 0),
+      mobile_hybrid_free_miles: Math.max(0, Number((draft as any).mobile_hybrid_free_miles) || 0),
+      mobile_tiered_bands: Array.isArray((draft as any).mobile_tiered_bands)
+        ? ((draft as any).mobile_tiered_bands as any[])
+            .map(b => ({
+              max_miles: Number(b?.max_miles) || 0,
+              fee: Math.max(0, Number(b?.fee) || 0),
+            }))
+            .filter(b => b.max_miles > 0)
+            .sort((a, b) => a.max_miles - b.max_miles)
+            .slice(0, 12)
+        : [],
+      mobile_minimum_price: (() => {
+        const v = (draft as any).mobile_minimum_price;
+        if (v == null || v === "") return null;
+        const n = Number(v);
+        return Number.isFinite(n) && n >= 0 ? n : null;
+      })(),
       // Marketing rebook window in weeks. Empty / 0 / non-number =>
       // null (no auto-nudge). Clamped to the DB check (1..52).
       rebook_after_weeks: (() => {
@@ -728,6 +773,13 @@ export type PublicService = Pick<
   | "allow_inspiration_photos"
   | "included_details"
   | "customization_enabled"
+  | "mobile_service"
+  | "mobile_fee_model"
+  | "mobile_flat_fee"
+  | "mobile_per_mile_fee"
+  | "mobile_hybrid_free_miles"
+  | "mobile_tiered_bands"
+  | "mobile_minimum_price"
 >;
 
 export const fetchPublicServices = async (
@@ -766,6 +818,20 @@ export const fetchPublicServices = async (
     allow_inspiration_photos: s.allow_inspiration_photos ?? true,
     included_details: s.included_details ?? null,
     customization_enabled: s.customization_enabled ?? true,
+    mobile_service: !!s.mobile_service,
+    mobile_fee_model: (["flat", "per_mile", "hybrid", "tiered"].includes(s.mobile_fee_model)
+      ? s.mobile_fee_model
+      : "flat") as Service["mobile_fee_model"],
+    mobile_flat_fee: Number(s.mobile_flat_fee) || 0,
+    mobile_per_mile_fee: Number(s.mobile_per_mile_fee) || 0,
+    mobile_hybrid_free_miles: Number(s.mobile_hybrid_free_miles) || 0,
+    mobile_tiered_bands: Array.isArray(s.mobile_tiered_bands)
+      ? (s.mobile_tiered_bands as any[]).map(b => ({
+          max_miles: Number(b?.max_miles) || 0,
+          fee: Number(b?.fee) || 0,
+        }))
+      : [],
+    mobile_minimum_price: s.mobile_minimum_price == null ? null : Number(s.mobile_minimum_price),
   }));
   return { ok: true, services };
 };
