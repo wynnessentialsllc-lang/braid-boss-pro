@@ -225,7 +225,7 @@ export const StorefrontShell = ({
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={logoUrl}
-                alt=""
+                alt={businessName ? `${businessName} logo` : "Stylist logo"}
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
             ) : (
@@ -241,6 +241,7 @@ export const StorefrontShell = ({
           <div className="flex-1 min-w-0" style={{ marginTop: 52 }}>
             <h1
               className="truncate"
+              title={businessName || undefined}
               style={{
                 fontFamily: FONT_DISPLAY,
                 fontSize: 28,
