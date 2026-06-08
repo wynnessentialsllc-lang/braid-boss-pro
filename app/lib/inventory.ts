@@ -21,6 +21,16 @@ export type InventoryItem = {
   supplier?: string | null;
   photoPath?: string | null;
   storefrontProductId?: string | null;
+  // What the item is FOR — keeps store stock (things sold to clients)
+  // separate from service supplies (things used ON clients, not sold):
+  //   - "retail"  → sold to clients, not used in services
+  //   - "service" → used to service clients, not for sale
+  //   - "both"    → sold AND used (e.g. an oil sold at the chair and
+  //                 also applied during a style)
+  // Drives where the item surfaces: only "retail"/"both" can be pushed
+  // to the storefront; only "service"/"both" appear as service
+  // materials. Defaults to "retail" when unset (see itemType()).
+  itemType?: InventoryItemType | string | null;
   archivedAt?: string | null;
   // Optional color / size variations of the same product (e.g. a
   // braiding hair stocked in colors 1B, 27, 6/30). Each variation
@@ -134,6 +144,38 @@ export const INVENTORY_CATEGORIES = [
 ] as const;
 export type InventoryCategory = (typeof INVENTORY_CATEGORIES)[number];
 
+// Store stock vs. service supplies. The value is what's persisted;
+// the label is what the stylist reads in the UI.
+export const INVENTORY_ITEM_TYPES = [
+  { value: "retail", label: "For sale" },
+  { value: "service", label: "Used on clients" },
+  { value: "both", label: "Sold & used" },
+] as const;
+export type InventoryItemType = (typeof INVENTORY_ITEM_TYPES)[number]["value"];
+
+// Normalize the stored item type, defaulting to "retail" for legacy
+// rows / unset values so existing behavior (everything sellable) is the
+// safe fallback.
+export const itemType = (i: InventoryItem | null | undefined): InventoryItemType => {
+  const t = String(i?.itemType ?? "").trim().toLowerCase();
+  return t === "service" || t === "both" ? (t as InventoryItemType) : "retail";
+};
+
+export const itemTypeLabel = (t: InventoryItemType): string =>
+  INVENTORY_ITEM_TYPES.find(x => x.value === t)?.label || t;
+
+// Sellable to clients — eligible for the storefront and chair-side sales.
+export const isForSale = (i: InventoryItem | null | undefined): boolean => {
+  const t = itemType(i);
+  return t === "retail" || t === "both";
+};
+
+// Consumed while servicing a client — eligible as a service material.
+export const isServiceUse = (i: InventoryItem | null | undefined): boolean => {
+  const t = itemType(i);
+  return t === "service" || t === "both";
+};
+
 export const INVENTORY_UNITS = [
   "bundle",
   "pack",
@@ -196,6 +238,13 @@ export type InventoryTotals = {
   itemCount: number;
   totalValue: number;
   lowStockCount: number;
+  // Store stock vs. service supplies. "both"-typed items count toward
+  // BOTH tallies, so these can sum to more than itemCount — that's
+  // intentional (a dual-use item is genuinely in both buckets).
+  forSaleCount: number;
+  forSaleValue: number;
+  serviceCount: number;
+  serviceValue: number;
   byCategory: { category: string; itemCount: number; totalValue: number }[];
 };
 
@@ -206,10 +255,16 @@ export const computeInventoryTotals = (
   const cat = new Map<string, { itemCount: number; totalValue: number }>();
   let totalValue = 0;
   let lowStockCount = 0;
+  let forSaleCount = 0;
+  let forSaleValue = 0;
+  let serviceCount = 0;
+  let serviceValue = 0;
   for (const i of active) {
     const v = itemValue(i);
     totalValue += v;
     if (isLowStock(i)) lowStockCount += 1;
+    if (isForSale(i)) { forSaleCount += 1; forSaleValue += v; }
+    if (isServiceUse(i)) { serviceCount += 1; serviceValue += v; }
     const k = (i.category || "Other").trim() || "Other";
     const cur = cat.get(k) || { itemCount: 0, totalValue: 0 };
     cur.itemCount += 1;
@@ -223,6 +278,10 @@ export const computeInventoryTotals = (
     itemCount: active.length,
     totalValue: round2(totalValue),
     lowStockCount,
+    forSaleCount,
+    forSaleValue: round2(forSaleValue),
+    serviceCount,
+    serviceValue: round2(serviceValue),
     byCategory,
   };
 };

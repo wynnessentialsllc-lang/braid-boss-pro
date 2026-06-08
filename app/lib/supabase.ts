@@ -195,6 +195,9 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     supplier: r => cleanString(r.supplier),
     photo_path: r => cleanString(r.photoPath),
     storefront_product_id: r => cleanString(r.storefrontProductId),
+    // "retail" | "service" | "both" — store stock vs. service supplies.
+    // Falls back to "retail" so legacy/unset records stay sellable.
+    item_type: r => cleanString(r.itemType) || "retail",
     archived_at: r => cleanString(r.archivedAt),
   },
   // Manual payment ledger (Cash / Zelle / Cash App / Venmo and one-off
@@ -378,6 +381,7 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.supplier = base.supplier ?? row.supplier;
       base.photoPath = base.photoPath ?? row.photo_path;
       base.storefrontProductId = base.storefrontProductId ?? row.storefront_product_id;
+      base.itemType = base.itemType ?? row.item_type;
       base.archivedAt = base.archivedAt ?? row.archived_at;
       break;
     case "payment_transactions":
