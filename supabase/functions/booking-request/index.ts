@@ -72,6 +72,31 @@ serve(async (req) => {
   if (linkErr) return json(500, { error: "server error" });
   if (!link || !link.active) return json(404, { error: "booking link not found" });
 
+  // Abuse guard: this endpoint is anonymous and every accepted row fans
+  // out confirmation emails (+ optional SMS), so without a cap a script
+  // could flood a stylist's dashboard and inbox. Cap how many public
+  // requests one booking link accepts per short window. Generous enough
+  // that a real burst of bookings is never affected.
+  //
+  // FAIL-OPEN by design: any error in the check (or an unexpected count
+  // shape) lets the booking through. We would rather risk an extra spam
+  // row than ever block a genuine client because the guard hiccuped.
+  const RATE_WINDOW_SECONDS = 60;
+  const RATE_MAX_PER_SLUG = 10;
+  try {
+    const sinceIso = new Date(Date.now() - RATE_WINDOW_SECONDS * 1000).toISOString();
+    const { count, error: rlErr } = await supabase
+      .from("booking_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("link_slug", slug)
+      .gte("created_at", sinceIso);
+    if (!rlErr && typeof count === "number" && count >= RATE_MAX_PER_SLUG) {
+      return json(429, { error: "Too many requests — please wait a minute and try again." });
+    }
+  } catch {
+    // fail open — never block a legitimate booking on a guard error
+  }
+
   // Snapshot the service catalog row at submit time so later owner
   // edits don't rewrite history. service_name stays mutable for
   // legacy code; service_name_snapshot is the immutable
