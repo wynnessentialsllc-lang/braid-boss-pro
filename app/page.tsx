@@ -161,6 +161,7 @@ import {
   computeDiscountAmount,
   formatDiscountValue,
   selectableDiscounts,
+  discountUsageFromAppointments,
   useDiscounts,
   validateDiscount,
 } from "./lib/discounts";
@@ -6314,9 +6315,13 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
   // profit" warning. Defaults to none — the user has to opt in.
   const [selectedDiscountId, setSelectedDiscountId] = useState<string | null>(null);
   const allDiscounts: Discount[] = store.discountsApi?.discounts || [];
+  const discountUsage = useMemo(
+    () => discountUsageFromAppointments(store.appointments),
+    [store.appointments],
+  );
   const availableDiscounts = useMemo(
-    () => selectableDiscounts(allDiscounts),
-    [allDiscounts],
+    () => selectableDiscounts(allDiscounts, Date.now(), discountUsage),
+    [allDiscounts, discountUsage],
   );
   const selectedDiscount = useMemo(
     () => availableDiscounts.find(d => d.id === selectedDiscountId) || null,
@@ -8564,9 +8569,13 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
   // Discount picker (V1: only "applies to all" discounts surface).
   const allDiscounts: Discount[] = store.discountsApi?.discounts || [];
+  const discountUsage = useMemo(
+    () => discountUsageFromAppointments(store.appointments),
+    [store.appointments],
+  );
   const availableDiscounts = useMemo(
-    () => selectableDiscounts(allDiscounts),
-    [allDiscounts],
+    () => selectableDiscounts(allDiscounts, Date.now(), discountUsage),
+    [allDiscounts, discountUsage],
   );
   // If the saved discount is no longer selectable (paused / expired)
   // but is the one already on this appointment, keep it visible so

@@ -139,9 +139,18 @@ export const computeDiscountAmount = (
 // Filter to discounts that are usable right now: active, within any
 // configured date window, and (if a usage_limit is set) not yet
 // exhausted. Sorted by name.
+//
+// usage_limit enforcement: the app has no single "finalize" event to
+// safely increment a stored counter, so usage is DERIVED from how many
+// live appointments reference the discount (passed in as a map keyed by
+// discount id — see discountUsageFromAppointments). A derived count is
+// always accurate: it can't drift or double-count across offline devices,
+// and it auto-corrects when an appointment is cancelled. Falls back to
+// the stored times_used when no map is supplied.
 export const selectableDiscounts = (
   list: Discount[] | null | undefined,
   nowMs: number = Date.now(),
+  usageByDiscountId?: Map<string, number> | null,
 ): Discount[] => {
   const out: Discount[] = [];
   for (const d of list || []) {
@@ -151,11 +160,31 @@ export const selectableDiscounts = (
     if (d.applies_to !== "all") continue;
     if (d.starts_at && new Date(d.starts_at).getTime() > nowMs) continue;
     if (d.ends_at && new Date(d.ends_at).getTime() <= nowMs) continue;
-    if (d.usage_limit != null && d.times_used >= d.usage_limit) continue;
+    if (d.usage_limit != null) {
+      const used = Math.max(d.times_used || 0, usageByDiscountId?.get(d.id) ?? 0);
+      if (used >= d.usage_limit) continue;
+    }
     out.push(d);
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
+};
+
+// Derive how many times each discount has been used from the live
+// appointment list: one count per non-cancelled appointment that carries
+// the discount. Used to enforce usage_limit without a stored counter.
+export const discountUsageFromAppointments = (
+  appointments: ReadonlyArray<{ discountId?: string | null; status?: string | null }> | null | undefined,
+): Map<string, number> => {
+  const m = new Map<string, number>();
+  for (const a of appointments || []) {
+    const id = a?.discountId;
+    if (!id) continue;
+    const s = String(a?.status || "").toLowerCase();
+    if (s === "cancelled" || s === "canceled") continue;
+    m.set(id, (m.get(id) ?? 0) + 1);
+  }
+  return m;
 };
 
 // Pretty-print "$25 off" or "10% off".
