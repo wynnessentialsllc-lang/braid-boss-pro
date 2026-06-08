@@ -4003,11 +4003,53 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
                       e.target.value = "";
                       if (!f) return;
                       if (!userId) { setErr("Sign in required."); return; }
+                      if (!/^image\//.test(f.type)) {
+                        setErr("Please choose an image file."); return;
+                      }
+                      if (f.size > 12 * 1024 * 1024) {
+                        setErr("Image is larger than 12 MB."); return;
+                      }
                       setErr(null);
                       setStylistPhotoUploading(true);
                       try {
-                        const { publicUrl } = await uploadStylistPhoto(userId, f);
-                        setStylistPhotoUrl(publicUrl);
+                        // Route through /api/stylist-photo-upload so the
+                        // service role can bypass storage RLS quirks
+                        // (stale session, refresh races, etc.) — the
+                        // server still pins the upload path to the
+                        // authenticated user's folder.
+                        const buf = await f.arrayBuffer();
+                        let binary = "";
+                        const bytes = new Uint8Array(buf);
+                        const chunk = 0x8000;
+                        for (let i = 0; i < bytes.length; i += chunk) {
+                          binary += String.fromCharCode.apply(
+                            null,
+                            Array.from(bytes.subarray(i, i + chunk)),
+                          );
+                        }
+                        const base64 = typeof window !== "undefined" ? window.btoa(binary) : "";
+                        const supabase = getSupabase();
+                        const { data: sess } = await supabase.auth.getSession();
+                        const token = sess?.session?.access_token || "";
+                        if (!token) {
+                          throw new Error("Your session expired — please sign in again, then retry.");
+                        }
+                        const res = await fetch("/api/stylist-photo-upload", {
+                          method: "POST",
+                          headers: {
+                            "content-type": "application/json",
+                            authorization: `Bearer ${token}`,
+                          },
+                          body: JSON.stringify({
+                            image_base64: base64,
+                            media_type: f.type || "image/jpeg",
+                          }),
+                        });
+                        const body = await res.json().catch(() => ({}));
+                        if (!res.ok || !body?.publicUrl) {
+                          throw new Error(body?.error || "Upload failed.");
+                        }
+                        setStylistPhotoUrl(String(body.publicUrl));
                       } catch (ex: any) {
                         setErr(ex?.message || "Upload failed.");
                       } finally {
