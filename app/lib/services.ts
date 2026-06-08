@@ -73,6 +73,30 @@ export const isAcvTreatmentEnabled = (
   return !!e && e.active !== false;
 };
 
+// Customized braiding hair color — a managed extra that lets clients
+// describe a color combo (e.g. "1B/30/27") and upload an inspiration
+// photo. Default price is $25; the braider can edit it. Same managed-
+// extra pattern as ACV so pricing/duration/deposit ride the existing
+// add-on rails for free.
+export const CUSTOM_COLOR_EXTRA_KIND = "custom_color";
+export const CUSTOM_COLOR_EXTRA_ID = "custom_braiding_hair_color";
+export const CUSTOM_COLOR_EXTRA_NAME = "Customized braiding hair color";
+export const CUSTOM_COLOR_DEFAULT_PRICE = 25;
+
+export const findCustomColorExtra = (
+  extras: ServiceExtra[] | null | undefined,
+): ServiceExtra | null =>
+  (extras || []).find(
+    e => e?.kind === CUSTOM_COLOR_EXTRA_KIND || e?.id === CUSTOM_COLOR_EXTRA_ID,
+  ) || null;
+
+export const isCustomColorEnabled = (
+  s: Pick<Service, "extras"> | null | undefined,
+): boolean => {
+  const e = findCustomColorExtra(s?.extras);
+  return !!e && e.active !== false;
+};
+
 
 export type ServiceAddOn = {
   id: string;

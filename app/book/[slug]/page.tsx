@@ -27,6 +27,9 @@ import {
   resolveVariationPricing,
   ACV_EXTRA_ID,
   ACV_EXTRA_KIND,
+  CUSTOM_COLOR_EXTRA_ID,
+  CUSTOM_COLOR_EXTRA_KIND,
+  CUSTOM_COLOR_EXTRA_NAME,
   type PublicService,
   type PublicServiceCategory,
   type PublicSlot,
@@ -487,6 +490,13 @@ export default function PublicBookingPage() {
   const [customHairColor, setCustomHairColor] = useState("");
   const [curlPattern, setCurlPattern] = useState("");
   const [customCurlPattern, setCustomCurlPattern] = useState("");
+  // Customized braiding hair color (managed extra, +$ price). The
+  // client describes their combo and can attach an inspiration photo
+  // which we upload via /api/booking-color-photo and stash by URL.
+  const [customColorDescription, setCustomColorDescription] = useState("");
+  const [customColorPhotoUrl, setCustomColorPhotoUrl] = useState<string | null>(null);
+  const [customColorPhotoUploading, setCustomColorPhotoUploading] = useState(false);
+  const [customColorPhotoError, setCustomColorPhotoError] = useState<string | null>(null);
   // Digital intake / consultation form. Loaded once the slug resolves
   // to a user_id; answers are keyed by question id and attached to the
   // booking request before the deposit step (optional / skippable).
@@ -848,8 +858,17 @@ export default function PublicBookingPage() {
     () => availableExtras.find(e => (e as any).kind === ACV_EXTRA_KIND || e.id === ACV_EXTRA_ID) || null,
     [availableExtras],
   );
+  const customColorExtra = useMemo(
+    () => availableExtras.find(
+      e => (e as any).kind === CUSTOM_COLOR_EXTRA_KIND || e.id === CUSTOM_COLOR_EXTRA_ID,
+    ) || null,
+    [availableExtras],
+  );
   const genericExtras = useMemo(
-    () => availableExtras.filter(e => (e as any).kind !== ACV_EXTRA_KIND && e.id !== ACV_EXTRA_ID),
+    () => availableExtras.filter(
+      e => (e as any).kind !== ACV_EXTRA_KIND && e.id !== ACV_EXTRA_ID
+        && (e as any).kind !== CUSTOM_COLOR_EXTRA_KIND && e.id !== CUSTOM_COLOR_EXTRA_ID,
+    ),
     [availableExtras],
   );
   const acvSelected = !!acvExtra && selectedExtraIds.includes(acvExtra.id);
@@ -858,6 +877,45 @@ export default function PublicBookingPage() {
     setSelectedExtraIds(prev =>
       prev.includes(acvExtra.id) ? prev.filter(x => x !== acvExtra.id) : [...prev, acvExtra.id],
     );
+  };
+  const customColorSelected = !!customColorExtra && selectedExtraIds.includes(customColorExtra.id);
+  const toggleCustomColor = () => {
+    if (!customColorExtra) return;
+    setSelectedExtraIds(prev =>
+      prev.includes(customColorExtra.id)
+        ? prev.filter(x => x !== customColorExtra.id)
+        : [...prev, customColorExtra.id],
+    );
+  };
+  const uploadCustomColorPhoto = async (file: File) => {
+    setCustomColorPhotoError(null);
+    if (!file) return;
+    if (file.size > 7 * 1024 * 1024) {
+      setCustomColorPhotoError("Please use an image under 7 MB.");
+      return;
+    }
+    setCustomColorPhotoUploading(true);
+    try {
+      const buf = await file.arrayBuffer();
+      let binary = "";
+      const bytes = new Uint8Array(buf);
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      const base64 = typeof window !== "undefined" ? window.btoa(binary) : "";
+      const res = await fetch("/api/booking-color-photo", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, image_base64: base64, media_type: file.type || "image/jpeg" }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body?.url) {
+        throw new Error(body?.error || "Upload failed");
+      }
+      setCustomColorPhotoUrl(String(body.url));
+    } catch (e: any) {
+      setCustomColorPhotoError(e?.message || "Couldn't upload that photo.");
+    } finally {
+      setCustomColorPhotoUploading(false);
+    }
   };
 
   // True when the client's CURRENT selection includes human curly
@@ -1079,6 +1137,14 @@ export default function PublicBookingPage() {
           setSubmitError("Please tell your stylist the color you're looking for."); return;
         }
       }
+      if (customColorSelected && !customColorDescription.trim() && !customColorPhotoUrl) {
+        setSubmitError("Please describe your custom color or upload an inspiration photo.");
+        return;
+      }
+      if (customColorPhotoUploading) {
+        setSubmitError("Your inspiration photo is still uploading — please wait a moment.");
+        return;
+      }
       // Only require curl when the dropdown is actually visible
       // (selection enabled AND the picked option includes human hair).
       if (custOn && svc?.allow_client_curl_pattern_selection && humanHairIncluded) {
@@ -1245,15 +1311,28 @@ export default function PublicBookingPage() {
           v.trim().toLowerCase() === "custom / other" || v.trim().toLowerCase() === "custom/other";
         const hairPick = hairColor.trim();
         const curlPick = curlPattern.trim();
-        if (hairPick || curlPick) {
+        // Pack a readable line for the stylist when the client opted
+        // into the paid "Customized braiding hair color" extra. The
+        // RPC trims to 300 chars; we keep both the description and
+        // the inspiration photo URL so a manual review sees both.
+        let customHairText: string | null =
+          isCustom(hairPick) && customHairColor.trim() ? customHairColor.trim() : null;
+        if (customColorSelected) {
+          const parts: string[] = [];
+          if (customColorDescription.trim()) parts.push(`Customized color: ${customColorDescription.trim()}`);
+          else parts.push("Customized color requested");
+          if (customColorPhotoUrl) parts.push(`Inspiration: ${customColorPhotoUrl}`);
+          const combined = parts.join(" | ");
+          customHairText = customHairText ? `${customHairText} | ${combined}` : combined;
+        }
+        if (hairPick || curlPick || customHairText) {
           try {
             await supabase.rpc("public_attach_booking_customization", {
               request_id_in: newRequestId,
               hair_color_in: hairPick || null,
               curl_pattern_in: curlPick || null,
               style_notes_in: null,
-              custom_hair_color_in:
-                isCustom(hairPick) && customHairColor.trim() ? customHairColor.trim() : null,
+              custom_hair_color_in: customHairText,
               custom_curl_in:
                 isCustom(curlPick) && customCurlPattern.trim() ? customCurlPattern.trim() : null,
             });
@@ -3235,7 +3314,7 @@ export default function PublicBookingPage() {
 
                   {showColor && (
                     <div>
-                      <Field label="Braiding hair color">
+                      <Field label="Basic braiding hair color">
                         <select value={hairColor} onChange={e => setHairColor(e.target.value)}
                           style={{ ...inputStyle, padding: 12 }}>
                           <option value="">Select your braiding hair color</option>
@@ -3252,6 +3331,118 @@ export default function PublicBookingPage() {
                               rows={2} placeholder="Tell your stylist the color you're looking for."
                               style={{ ...inputStyle, padding: 12, resize: "none", lineHeight: 1.5 }} />
                           </Field>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Customized braiding hair color — managed extra. Sits
+                      between the basic-color picker and the ACV checkbox.
+                      Stylist toggles + prices it in the editor; on the
+                      booking page it's a paid checkbox that reveals a
+                      description box and an inspiration photo upload. */}
+                  {customColorExtra && (
+                    <div>
+                      <label
+                        style={{
+                          display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer",
+                          border: `1.5px solid ${customColorSelected ? C.goldDeep : C.hairline}`,
+                          borderRadius: 12, padding: 12,
+                          background: customColorSelected ? C.cream : C.paper,
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={customColorSelected}
+                          onChange={toggleCustomColor}
+                          style={{ marginTop: 2, width: 18, height: 18, accentColor: C.goldDeep, flex: "0 0 auto" }}
+                        />
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                            <span style={{ fontWeight: 600, color: C.espresso, fontSize: 13 }}>
+                              {customColorExtra.name || CUSTOM_COLOR_EXTRA_NAME}
+                            </span>
+                            <span style={{ fontWeight: 700, color: C.goldDeep, fontSize: 14, whiteSpace: "nowrap" }}>
+                              {(Number(customColorExtra.price) || 0) > 0
+                                ? `+$${(Number(customColorExtra.price) || 0).toFixed(2)}`
+                                : "Free"}
+                            </span>
+                          </span>
+                          <span style={{ display: "block", marginTop: 4, fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
+                            Describe your color combo (e.g. 1B/30/27) and leave an inspiration photo.
+                          </span>
+                        </span>
+                      </label>
+                      {customColorSelected && (
+                        <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                          <Field label="Describe your color">
+                            <textarea
+                              value={customColorDescription}
+                              onChange={e => setCustomColorDescription(e.target.value)}
+                              rows={2}
+                              placeholder="Example: 1B/30/27 mixed evenly throughout"
+                              style={{ ...inputStyle, padding: 12, resize: "none", lineHeight: 1.5 }}
+                            />
+                          </Field>
+                          <div>
+                            <span style={{
+                              display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase",
+                              letterSpacing: "0.08em", color: C.coffee, marginBottom: 6,
+                            }}>
+                              Inspiration photo
+                            </span>
+                            {customColorPhotoUrl ? (
+                              <div style={{
+                                display: "flex", gap: 10, alignItems: "center",
+                                border: `1px solid ${C.hairline}`, borderRadius: 12, padding: 10,
+                                background: C.paper,
+                              }}>
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={customColorPhotoUrl}
+                                  alt="Inspiration"
+                                  style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8 }}
+                                />
+                                <span style={{ flex: 1, fontSize: 12, color: C.muted }}>
+                                  Photo attached.
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setCustomColorPhotoUrl(null)}
+                                  style={{
+                                    fontSize: 12, fontWeight: 600, color: C.goldDeep,
+                                    background: "transparent", border: "none", cursor: "pointer", padding: 6,
+                                  }}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ) : (
+                              <label style={{
+                                display: "block", border: `1.5px dashed ${C.hairline}`, borderRadius: 12,
+                                padding: 14, textAlign: "center", background: C.paper, cursor: "pointer",
+                                fontSize: 12, color: C.muted,
+                              }}>
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp,image/gif"
+                                  onChange={e => {
+                                    const f = e.target.files?.[0];
+                                    if (f) uploadCustomColorPhoto(f);
+                                    e.currentTarget.value = "";
+                                  }}
+                                  style={{ display: "none" }}
+                                  disabled={customColorPhotoUploading}
+                                />
+                                {customColorPhotoUploading ? "Uploading…" : "Tap to upload an inspiration photo"}
+                              </label>
+                            )}
+                            {customColorPhotoError && (
+                              <p style={{ margin: "6px 0 0", fontSize: 11, color: C.danger }}>
+                                {customColorPhotoError}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
