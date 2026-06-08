@@ -276,6 +276,8 @@ import {
   type ExpenseLike,
   type RecurringInterval,
 } from "./lib/expenses";
+import { computeProfit, rankStyleProfitability } from "./lib/pricing-profit";
+import { recipeCost, lineFromInventoryItem, type RecipeLine } from "./lib/recipe-cost";
 import { uploadReceipt, deleteReceipt as deleteReceiptObject, getReceiptUrl } from "./lib/receipt-storage";
 import {
   INVENTORY_CATEGORIES,
@@ -465,7 +467,7 @@ import {
   Star, Heart, Repeat, Play, Pause, Square, Timer as TimerIcon, Zap, Award,
   BarChart3, Layers, MessageSquare, Send, AlertTriangle, CheckCircle2,
   XCircle, Filter, MoreHorizontal, SlidersHorizontal, LogOut,
-  LifeBuoy, Bug, Lightbulb, PlayCircle, ShieldCheck, HelpCircle
+  LifeBuoy, Bug, Lightbulb, PlayCircle, ShieldCheck, HelpCircle, Package
 } from "lucide-react";
 
 /* ============================================================
@@ -6175,6 +6177,12 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
   const [profitMargin, setProfitMargin] = useState<string | number>(business.profitMargin || 0);
   const [tipPct, setTipPct] = useState<string | number>(0);
   const [addOns, setAddOns] = useState<EntityRecord[]>([]);
+  // Hair recipe (bill of materials) backing the hair/product cost. When
+  // set, the calculator auto-sums it into hairCost so the stylist never
+  // hand-types it. Snapshotted onto saved quotes/presets via inputs.recipe.
+  const [recipe, setRecipe] = useState<RecipeLine[]>([]);
+  const [showRecipeSheet, setShowRecipeSheet] = useState(false);
+  const inventoryItems = (store.inventoryItems || []) as InventoryItem[];
   const [savedFlash, setSavedFlash] = useState(false);
   const [labelInput, setLabelInput] = useState("");
   const [showSaveSheet, setShowSaveSheet] = useState(false);
@@ -6188,6 +6196,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
       setHours(q.inputs?.hours ?? ""); setTravelFee(q.inputs?.travelFee ?? 0);
       setOverhead(q.inputs?.overhead ?? ""); setProfitMargin(q.inputs?.profitMargin ?? 0);
       setTipPct(q.inputs?.tipPct ?? 0); setAddOns(q.inputs?.addOns || []);
+      setRecipe(Array.isArray(q.inputs?.recipe) ? q.inputs.recipe : []);
       setLabelInput(q.label || "");
       onClearPrefill?.();
     }
@@ -6204,6 +6213,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
       setOverhead(p.overhead ?? "");
       setProfitMargin(p.profitMargin ?? 0);
       setAddOns((p.defaultAddOns || []).map(a => ({ ...a, id: uid() })));
+      setRecipe(Array.isArray(p.recipe) ? p.recipe.map((l: RecipeLine) => ({ ...l, id: uid() })) : []);
       onClearPresetPrefill?.();
       trackEvent("preset_used", { category: "feature" });
     }
@@ -6233,6 +6243,22 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
     [hairCost, hourlyRate, hours, travelFee, overhead, profitMargin, tipPct, addOns, selectedDiscount],
   );
 
+  // Stylist-side profit view. The breakdown above shows what the CLIENT
+  // pays; this turns the same numbers into what the STYLIST keeps —
+  // take-home, $/hour, and profit above their own wage. (See
+  // lib/pricing-profit.ts for the math + rationale.)
+  const profit = useMemo(
+    () => computeProfit({
+      hairCost: result.hairCost,
+      overhead: result.overhead,
+      labor: result.labor,
+      hours: result.hours,
+      subtotal: result.subtotal,
+      tipAmount: result.tipAmount,
+    }),
+    [result.hairCost, result.overhead, result.labor, result.hours, result.subtotal, result.tipAmount],
+  );
+
   // Profit estimate for the warning banner: what the stylist set as
   // their target margin, minus the dollar value of the discount. If
   // the discount swallows the whole margin, surface a soft warning.
@@ -6245,12 +6271,45 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
     setStyleName(""); setHairCost(""); setHourlyRate(business.hourlyRate);
     setHours(""); setTravelFee(business.defaultTravelFee || 0);
     setOverhead(""); setProfitMargin(business.profitMargin || 0);
-    setTipPct(0); setAddOns([]); setLabelInput(""); setSelectedDiscountId(null);
+    setTipPct(0); setAddOns([]); setRecipe([]); setLabelInput(""); setSelectedDiscountId(null);
   };
 
   const addAddOn = () => setAddOns([...addOns, { id: uid(), name: "", amount: "" }]);
   const updateAddOn = (id, field, val) => setAddOns(addOns.map(a => a.id === id ? { ...a, [field]: val } : a));
   const removeAddOn = (id) => setAddOns(addOns.filter(a => a.id !== id));
+
+  // ---- Hair recipe (build hair cost from inventory) -------------------
+  const recipeTotal = useMemo(() => recipeCost(recipe), [recipe]);
+  const addRecipeRow = () => {
+    const first = inventoryItems[0];
+    setRecipe(prev => [
+      ...prev,
+      first
+        ? lineFromInventoryItem(uid(), first, 1)
+        : { id: uid(), itemId: "", itemName: "", quantity: 1, unitCost: 0 },
+    ]);
+  };
+  const updateRecipeItem = (rowId: string, itemId: string) => {
+    const item = inventoryItems.find(i => i.id === itemId);
+    setRecipe(prev => prev.map(l => l.id === rowId
+      ? (item ? { ...lineFromInventoryItem(rowId, item, l.quantity) } : { ...l, itemId: "" })
+      : l));
+  };
+  const updateRecipeQty = (rowId: string, qty: string) => {
+    setRecipe(prev => prev.map(l => l.id === rowId ? { ...l, quantity: Number(qty) || 0 } : l));
+  };
+  const removeRecipeRow = (rowId: string) => setRecipe(prev => prev.filter(l => l.id !== rowId));
+  const applyRecipeToHairCost = () => {
+    setHairCost(String(recipeTotal));
+    setShowRecipeSheet(false);
+  };
+
+  // Style profitability ranking — which saved styles actually make money,
+  // by take-home per hour. Drives the report card below.
+  const rankedStyles = useMemo(
+    () => rankStyleProfitability((store.presets || []) as any[]),
+    [store.presets],
+  );
 
   const handleSave = async () => {
     if (!styleName && !labelInput) { setShowSaveSheet(true); return; }
@@ -6260,7 +6319,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
     const quote: any = {
       label: label || styleName || "Untitled quote",
       style: styleName,
-      inputs: { hairCost, hourlyRate, hours, travelFee, overhead, profitMargin, tipPct, addOns },
+      inputs: { hairCost, hourlyRate, hours, travelFee, overhead, profitMargin, tipPct, addOns, recipe },
       breakdown: result,
       // Snapshot the discount so historical quotes don't reprice if
       // the discount is later renamed or deleted.
@@ -6287,6 +6346,9 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
       discountId: selectedDiscount?.id ?? null,
       discountName: selectedDiscount?.name ?? null,
       discountAmount: result.discountAmount || 0,
+      // Carry the hair recipe so completing the appointment pre-fills the
+      // Materials-used sheet from exactly what this style consumes.
+      recipe: recipe.length > 0 ? recipe : undefined,
     });
   };
 
@@ -6322,6 +6384,23 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
           <Field label="Overhead" hint="supplies, utils"><MoneyInput value={overhead} onChange={setOverhead} /></Field>
           <Field label="Profit margin" hint="flat $"><MoneyInput value={profitMargin} onChange={setProfitMargin} /></Field>
         </div>
+
+        {/* Build hair cost from inventory — auto-sums packs/bundles so the
+            stylist never hand-types it, and the profit numbers stay real. */}
+        <button type="button" onClick={() => setShowRecipeSheet(true)}
+          className="w-full p-3 rounded-xl flex items-center gap-3 text-left active:scale-[0.99] transition"
+          style={{ background: C.ivory, border: `1px dashed ${C.caramel}`, color: C.coffee }}>
+          <div className="rounded-full p-2" style={{ background: C.gold, color: "#FFFFFF" }}><Package size={16} /></div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold" style={{ color: C.espresso }}>Build hair cost from inventory</p>
+            <p className="text-xs" style={{ color: C.muted }}>
+              {recipe.length > 0
+                ? `${recipe.length} item${recipe.length > 1 ? "s" : ""} · ${fmtMoney(recipeTotal, business.currency)}`
+                : "Pick the packs & bundles this style uses"}
+            </p>
+          </div>
+          <ChevronRight size={16} style={{ color: C.muted }} />
+        </button>
 
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -6411,6 +6490,59 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
           </div>
         </PreviewStyleCard>
 
+        {/* Stylist-only profit lens. Same inputs, flipped to "what do I
+            keep?" — the numbers braiders actually run the chair on. */}
+        <PreviewStyleCard style={{ marginTop: 12 }} padding={20}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <SectionEyebrow>Your profit</SectionEyebrow>
+            <span style={{ fontSize: 10.5, fontWeight: 600, color: C.muted, letterSpacing: "0.04em" }}>
+              ONLY YOU SEE THIS
+            </span>
+          </div>
+
+          {/* Hero: take-home per hour — the one number that ranks styles. */}
+          <div style={{ marginTop: 10, marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div>
+              <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 34, fontWeight: 600, color: profit.takeHome >= 0 ? C.goldDeep : C.danger, lineHeight: 1 }}>
+                {profit.takeHomePerHour == null ? "—" : `${fmtMoney(profit.takeHomePerHour, business.currency)}/hr`}
+              </p>
+              <p style={{ margin: "4px 0 0", fontSize: 11.5, color: C.muted }}>
+                Take-home per hour{result.hours > 0 ? ` · ${result.hours}h` : " · add hours"}
+              </p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso, lineHeight: 1 }}>
+                {fmtMoney(profit.takeHome, business.currency)}
+              </p>
+              <p style={{ margin: "4px 0 0", fontSize: 11.5, color: C.muted }}>
+                Take-home{profit.marginPct == null ? "" : ` · ${Math.round(profit.marginPct)}% margin`}
+              </p>
+            </div>
+          </div>
+
+          <div style={{ borderTop: `1px solid rgba(21, 17, 26,0.08)`, paddingTop: 8 }}>
+            <MetricRow label="Service revenue" value={fmtMoney(profit.revenue, business.currency)} />
+            <MetricRow label="− Materials (hair + overhead)" value={`− ${fmtMoney(profit.materialCost, business.currency)}`} />
+            <MetricRow label="= Take-home" value={fmtMoney(profit.takeHome, business.currency)} emphasis="strong" accent />
+            {profit.takeHomeWithTip !== profit.takeHome && (
+              <MetricRow label="+ Tip → with tip" value={fmtMoney(profit.takeHomeWithTip, business.currency)} />
+            )}
+            <MetricRow
+              label={`Profit above your ${fmtMoney(result.hourlyRate, business.currency)}/hr wage`}
+              value={`${profit.profitAboveWage < 0 ? "− " : ""}${fmtMoney(Math.abs(profit.profitAboveWage), business.currency)}`}
+            />
+          </div>
+
+          {profit.profitAboveWage < 0 && result.subtotal > 0 && (
+            <div style={{ marginTop: 10, display: "flex", alignItems: "flex-start", gap: 8, background: C.ivory, border: `1px solid ${C.warning}`, borderRadius: 12, padding: "8px 10px" }}>
+              <AlertTriangle size={15} style={{ color: C.warning, marginTop: 1, flexShrink: 0 }} />
+              <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.45, color: C.coffee }}>
+                This price doesn&apos;t fully cover your time at {fmtMoney(result.hourlyRate, business.currency)}/hr after materials. Raise the price, trim hours, or lower hair cost.
+              </p>
+            </div>
+          )}
+        </PreviewStyleCard>
+
         <div className="grid grid-cols-2 gap-3 pt-2">
           <Button variant="primary" icon={savedFlash ? <Check size={18} /> : <Save size={18} />} onClick={handleSave}>
             {savedFlash ? "Saved" : "Save Quote"}
@@ -6418,6 +6550,37 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
           <Button variant="dark" icon={<CalendarPlus size={18} />} onClick={handleConvertToAppointment} disabled={result.finalPrice <= 0}>Book it</Button>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={reset} fullWidth>Reset calculator</Button>
+
+        {/* Style profitability — ranks saved presets by take-home per
+            hour so the stylist can see which styles actually pay. */}
+        {rankedStyles.length >= 2 && (
+          <PreviewStyleCard style={{ marginTop: 2 }} padding={20}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <SectionEyebrow>Most profitable styles</SectionEyebrow>
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: C.muted, letterSpacing: "0.04em" }}>BY $/HR</span>
+            </div>
+            <p style={{ margin: "6px 0 10px", fontSize: 11.5, color: C.muted }}>
+              From your saved style presets. Highest take-home per hour first.
+            </p>
+            <div>
+              {rankedStyles.slice(0, 6).map((s, i) => (
+                <div key={s.id} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", padding: "6px 0", borderTop: i === 0 ? "none" : `1px solid rgba(21, 17, 26,0.06)` }}>
+                  <div style={{ minWidth: 0, paddingRight: 10 }}>
+                    <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: C.espresso, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {i === 0 ? "★ " : ""}{s.name}
+                    </p>
+                    <p style={{ margin: "1px 0 0", fontSize: 11, color: C.muted }}>
+                      {fmtMoney(s.takeHome, business.currency)} take-home{s.marginPct == null ? "" : ` · ${Math.round(s.marginPct)}% margin`}
+                    </p>
+                  </div>
+                  <p style={{ margin: 0, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 14, fontWeight: 700, color: s.takeHome >= 0 ? C.goldDeep : C.danger, whiteSpace: "nowrap" }}>
+                    {s.takeHomePerHour == null ? "—" : `${fmtMoney(s.takeHomePerHour, business.currency)}/hr`}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </PreviewStyleCard>
+        )}
 
         {/* Saved Quotes — relocated here from the Home page so the
             calculator is the single home for estimates. Opens the same
@@ -6447,6 +6610,53 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
           </div>
         </Card>
       </div>
+
+      <Sheet open={showRecipeSheet} onClose={() => setShowRecipeSheet(false)} title="Hair recipe">
+        {inventoryItems.length === 0 ? (
+          <Card className="p-4 text-center">
+            <p className="text-sm" style={{ color: C.coffee }}>No inventory items yet.</p>
+            <p className="text-xs mt-1" style={{ color: C.muted }}>
+              Add your hair, bundles, and supplies in Inventory (with unit costs) to build a recipe here.
+            </p>
+          </Card>
+        ) : (
+          <>
+            <p className="text-xs mb-3" style={{ color: C.muted }}>
+              Pick what this style uses. We&apos;ll total it from your inventory unit costs.
+            </p>
+            <div className="space-y-2">
+              {recipe.map(l => (
+                <div key={l.id} className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <Select
+                      value={l.itemId}
+                      onChange={e => updateRecipeItem(l.id, e.target.value)}
+                      options={inventoryItems.map(i => ({
+                        value: i.id,
+                        label: `${i.name || "Item"} — ${fmtMoney(Number(i.unitCost) || 0, business.currency)}`,
+                      }))}
+                    />
+                  </div>
+                  <div className="w-20"><MoneyInput prefix="" suffix="×" value={l.quantity} onChange={v => updateRecipeQty(l.id, v)} /></div>
+                  <button type="button" onClick={() => removeRecipeRow(l.id)} className="p-2 rounded-lg" style={{ color: C.danger }}><Trash2 size={18} /></button>
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={addRecipeRow} className="flex items-center gap-1 text-xs font-semibold mt-3" style={{ color: C.goldDeep }}>
+              <Plus size={14} /> Add item
+            </button>
+            <div className="flex items-center justify-between mt-4 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
+              <span className="text-sm font-semibold" style={{ color: C.espresso }}>Hair cost</span>
+              <span className="text-lg font-bold" style={{ color: C.goldDeep }}>{fmtMoney(recipeTotal, business.currency)}</span>
+            </div>
+            <div className="mt-4">
+              <Button variant="primary" fullWidth onClick={applyRecipeToHairCost} disabled={recipe.length === 0}>
+                Use {fmtMoney(recipeTotal, business.currency)} as hair cost
+              </Button>
+            </div>
+          </>
+        )}
+      </Sheet>
 
       <Sheet open={showSaveSheet} onClose={() => setShowSaveSheet(false)} title="Name this quote">
         <Field label="Quote label">
@@ -8096,7 +8306,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   // After save, if the appointment was just transitioned to
   // "completed", show the MaterialsUsedSheet before closing so the
   // stylist can confirm what was consumed against the appointment.
-  const [showMaterialsFor, setShowMaterialsFor] = useState<{ id: string; style?: string | null } | null>(null);
+  const [showMaterialsFor, setShowMaterialsFor] = useState<{ id: string; style?: string | null; recipe?: RecipeLine[] | null } | null>(null);
 
   // Recurring
   const [makeRecurring, setMakeRecurring] = useState(false);
@@ -8238,6 +8448,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         dependentName: a?.dependentName ?? null,
         id: a?.id,
         seriesId: a?.seriesId,
+        // Hair recipe carried from the pricing calculator. Rides through
+        // the PATCH-style save and pre-fills the Materials-used sheet when
+        // the appointment is marked completed.
+        recipe: Array.isArray(a?.recipe) ? a.recipe.map((l: any) => ({ ...l })) : [],
       });
       setCustomAddonName("");
       setCustomAddonPrice("");
@@ -8854,7 +9068,11 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     const nowCompleted = (saved as any)?.status === "completed";
     const inventoryReady = Array.isArray(store?.inventoryItems) && store.inventoryItems.length > 0;
     if (!wasCompleted && nowCompleted && inventoryReady) {
-      setShowMaterialsFor({ id: saved.id, style: saved.style ?? form.style ?? null });
+      setShowMaterialsFor({
+        id: saved.id,
+        style: saved.style ?? form.style ?? null,
+        recipe: Array.isArray(saved.recipe) ? saved.recipe : (Array.isArray(form.recipe) ? form.recipe : null),
+      });
       return;
     }
 
@@ -13802,6 +14020,8 @@ const PresetsScreen = ({ store, onBack, onUsePreset }) => {
         <PresetEditorSheet
           preset={creating ? blank() : editing}
           isNew={creating}
+          inventory={(store.inventoryItems || []) as InventoryItem[]}
+          currency={store.business?.currency}
           onClose={() => { setEditing(null); setCreating(false); }}
           onSave={async (p) => { await store.upsertPreset({ ...p, updatedAt: new Date().toISOString() }); trackEvent("preset_saved", { category: "feature" }); setEditing(null); setCreating(false); }}
           onDelete={async (id) => { await store.deletePreset(id); setEditing(null); }}
@@ -13841,8 +14061,35 @@ const PresetCard = ({ preset, business, onClick, onUse }) => {
   );
 };
 
-const PresetEditorSheet = ({ preset, isNew, onClose, onSave, onDelete, onUse }) => {
+const PresetEditorSheet = ({ preset, isNew, inventory = [], currency = "USD", onClose, onSave, onDelete, onUse }: {
+  preset: any; isNew: boolean; inventory?: InventoryItem[]; currency?: string;
+  onClose: () => void; onSave: (p: any) => void; onDelete: (id: string) => void; onUse: (p: any) => void;
+}) => {
   const [p, setP] = useState(preset);
+
+  // Hair recipe (bill of materials) on the preset. Auto-fills hair cost
+  // from inventory and rides along when the preset is used in the
+  // calculator / booked (see lib/recipe-cost.ts).
+  const recipe: RecipeLine[] = Array.isArray(p.recipe) ? p.recipe : [];
+  const recipeTotal = recipeCost(recipe); // trivial sum — no memo needed
+  const addRecipeRow = () => {
+    const first = inventory[0];
+    const line = first
+      ? lineFromInventoryItem(uid(), first as any, 1)
+      : { id: uid(), itemId: "", itemName: "", quantity: 1, unitCost: 0 };
+    setP({ ...p, recipe: [...recipe, line] });
+  };
+  const updateRecipeItem = (rowId: string, itemId: string) => {
+    const item = inventory.find(i => i.id === itemId);
+    setP({ ...p, recipe: recipe.map(l => l.id === rowId
+      ? (item ? lineFromInventoryItem(rowId, item as any, l.quantity) : { ...l, itemId: "" })
+      : l) });
+  };
+  const updateRecipeQty = (rowId: string, qty: string) =>
+    setP({ ...p, recipe: recipe.map(l => l.id === rowId ? { ...l, quantity: parseMoney(qty) } : l) });
+  const removeRecipeRow = (rowId: string) =>
+    setP({ ...p, recipe: recipe.filter(l => l.id !== rowId) });
+  const applyRecipeToHairCost = () => setP({ ...p, hairCost: recipeTotal });
 
   const updateAddOn = (i, key, val) => {
     const list = [...(p.defaultAddOns || [])];
@@ -13880,6 +14127,37 @@ const PresetEditorSheet = ({ preset, isNew, onClose, onSave, onDelete, onUse }) 
           <Field label="Overhead/hr"><MoneyInput value={p.overhead ?? ""} onChange={(v) => setP({ ...p, overhead: parseMoney(v) })} /></Field>
           <Field label="Profit margin"><MoneyInput value={p.profitMargin ?? ""} onChange={(v) => setP({ ...p, profitMargin: parseMoney(v) })} /></Field>
         </div>
+
+        <SectionTitle>Hair recipe</SectionTitle>
+        {inventory.length === 0 ? (
+          <p className="text-xs" style={{ color: C.muted }}>
+            Add inventory items (with unit costs) to build a recipe and auto-fill hair cost.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {recipe.map(l => (
+              <div key={l.id} className="grid grid-cols-[1fr_72px_36px] gap-2 items-center">
+                <Select
+                  value={l.itemId}
+                  onChange={e => updateRecipeItem(l.id, e.target.value)}
+                  options={inventory.map(i => ({ value: i.id, label: `${i.name || "Item"} — ${fmtMoney(Number(i.unitCost) || 0, currency)}` }))}
+                />
+                <MoneyInput prefix="" suffix="×" value={l.quantity} onChange={v => updateRecipeQty(l.id, v)} />
+                <button type="button" onClick={() => removeRecipeRow(l.id)} className="rounded-xl p-2" style={{ background: "rgba(156,61,46,0.1)", color: C.danger }}><X size={16} /></button>
+              </div>
+            ))}
+            <div className="flex items-center justify-between pt-1">
+              <button type="button" onClick={addRecipeRow} className="flex items-center gap-1 text-xs font-semibold" style={{ color: C.goldDeep }}>
+                <Plus size={14} /> Add item
+              </button>
+              {recipe.length > 0 && (
+                <button type="button" onClick={applyRecipeToHairCost} className="text-xs font-semibold" style={{ color: C.goldDeep }}>
+                  Set hair cost → {fmtMoney(recipeTotal, currency)}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         <SectionTitle>Default add-ons</SectionTitle>
 
@@ -15148,7 +15426,7 @@ const SupportCenterScreen = ({
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openSupport }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openSupport?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openStyleRequests, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openSupport }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openStyleRequests?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openSupport?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -15774,6 +16052,22 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                           return parts.join(" · ");
                         })()}
                       </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openStyleRequests && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openStyleRequests}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div aria-hidden style={{ width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center", background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)" }}>
+                      <Sparkles size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Style requests</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>Custom &quot;Build your style&quot; requests from your booking page</p>
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
@@ -24531,7 +24825,7 @@ const DefaultMaterialsPicker = ({ inventory, value, onChange }: {
 // inventory_apply_movement for each row. Skip is allowed — accuracy
 // matters more than coercion.
 const MaterialsUsedSheet = ({ appointment, services, inventory, onClose }: {
-  appointment: { id: string; style?: string | null };
+  appointment: { id: string; style?: string | null; recipe?: RecipeLine[] | null };
   services: Service[];
   inventory: InventoryItem[];
   onClose: () => void;
@@ -24558,7 +24852,15 @@ const MaterialsUsedSheet = ({ appointment, services, inventory, onClose }: {
 
   type Row = ServiceMaterial & { keep: boolean };
   const [rows, setRows] = useState<Row[]>(() => {
-    const seed: ServiceMaterial[] = service?.default_materials ?? [];
+    // Prefer the appointment's hair recipe (carried from the pricing
+    // calculator) — it's the exact bill of materials the stylist priced.
+    // Fall back to the matched service's default_materials otherwise.
+    const fromRecipe: ServiceMaterial[] = Array.isArray(appointment.recipe)
+      ? appointment.recipe.map(l => ({ inventory_item_id: l.itemId, quantity: Number(l.quantity) || 0 }))
+      : [];
+    const seed: ServiceMaterial[] = fromRecipe.length > 0
+      ? fromRecipe
+      : (service?.default_materials ?? []);
     return seed
       .filter(m => itemById.has(m.inventory_item_id))
       .map(m => ({ ...m, keep: true }));
@@ -24904,6 +25206,202 @@ const WAITLIST_STATUS_TONE: Record<WaitlistStatus, "warning" | "gold" | "success
   booked:    "success",
   declined:  "danger",
   archived:  "neutral",
+};
+
+// "Build your style" review queue — custom AI-consultation requests from
+// the public booking page. The stylist reviews the intake + AI ballpark,
+// then approves (follow up for a deposit) or denies with a reason.
+const StyleRequestsScreen = ({ store, onBack, onBook }: { store: any; onBack: () => void; onBook?: (req: any) => void }) => {
+  const userId = store?.userId || null;
+  const currency = store?.business?.currency || "USD";
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"open" | "all" | "archived">("open");
+  const [reviewing, setReviewing] = useState<{ row: any; mode: "approve" | "deny" } | null>(null);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!userId) { setLoading(false); return; }
+    setLoading(true); setErr(null);
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from("style_requests")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setRows(data || []);
+    } catch {
+      setErr("Couldn't load style requests.");
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load, intentional
+  useEffect(() => { void load(); }, [load]);
+
+  const filtered = useMemo(() => {
+    if (filter === "all") return rows;
+    if (filter === "archived") return rows.filter(r => ["denied", "archived", "booked"].includes(r.status));
+    return rows.filter(r => ["submitted", "approved", "deposit_pending"].includes(r.status));
+  }, [rows, filter]);
+
+  const openCount = rows.filter(r => r.status === "submitted").length;
+
+  const submitReview = async (status: "approved" | "denied" | "archived") => {
+    if (!reviewing) return;
+    setBusy(true); setErr(null);
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase
+        .from("style_requests")
+        .update({ status, review_notes: note.trim() || null })
+        .eq("id", reviewing.row.id)
+        .eq("user_id", userId);
+      if (error) throw error;
+      setReviewing(null); setNote("");
+      await load();
+    } catch {
+      setErr("Couldn't update the request. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const archive = async (id: string) => {
+    setBusy(true);
+    try {
+      const supabase = getSupabase();
+      await supabase.from("style_requests").update({ status: "archived" }).eq("id", id).eq("user_id", userId);
+      await load();
+    } finally { setBusy(false); }
+  };
+
+  const statusColor = (s: string) =>
+    s === "submitted" ? C.gold : s === "approved" ? C.success : s === "denied" ? C.danger : C.muted;
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Style requests"
+        subtitle="Custom “Build your style” requests"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-3">
+        {err && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>
+          </Card>
+        )}
+
+        <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          {[
+            { id: "open", label: `Open · ${openCount}` },
+            { id: "all", label: `All · ${rows.length}` },
+            { id: "archived", label: "Archive" },
+          ].map(t => (
+            <button type="button" key={t.id} onClick={() => setFilter(t.id as any)}
+              className="flex-1 py-2 rounded-lg text-[12px] font-semibold transition"
+              style={{ background: filter === t.id ? C.espresso : "transparent", color: filter === t.id ? C.cream : C.coffee }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <p className="text-[13px] text-center py-8" style={{ color: C.muted }}>Loading…</p>
+        ) : filtered.length === 0 ? (
+          <Card className="p-5 text-center">
+            <p className="text-sm font-semibold" style={{ color: C.espresso }}>No requests here</p>
+            <p className="text-[12px] mt-1" style={{ color: C.muted }}>
+              When a client uses “Build your style” on your booking page, it lands here for review.
+            </p>
+          </Card>
+        ) : (
+          filtered.map(r => (
+            <Card key={r.id} className="p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold" style={{ color: C.espresso }}>{r.client_name}</p>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: C.ivory, color: statusColor(r.status), textTransform: "uppercase", letterSpacing: "0.04em" }}>{r.status}</span>
+              </div>
+              <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
+                {[r.client_phone, r.client_email].filter(Boolean).join(" · ") || "No contact"}
+              </p>
+
+              {r.photo_path && (() => {
+                const url = getSupabase().storage.from("style-request-photos").getPublicUrl(r.photo_path).data.publicUrl;
+                // eslint-disable-next-line @next/next/no-img-element
+                return <img src={url} alt="Inspiration" style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 12, marginTop: 8 }} />;
+              })()}
+
+              {(r.ai_price_low != null || r.ai_style_family) && (
+                <div className="mt-2 p-2.5 rounded-xl" style={{ background: C.ivory }}>
+                  {r.ai_price_low != null && r.ai_price_high != null && (
+                    <p className="text-[15px] font-bold" style={{ color: C.espresso }}>
+                      ~{fmtMoney(Number(r.ai_price_low), currency)}–{fmtMoney(Number(r.ai_price_high), currency)} <span className="text-[11px] font-medium" style={{ color: C.muted }}>AI estimate</span>
+                    </p>
+                  )}
+                  <p className="text-[11px] mt-0.5" style={{ color: C.coffee }}>
+                    {[r.ai_style_family, r.ai_est_duration_hours ? `~${r.ai_est_duration_hours}h` : null].filter(Boolean).join(" · ")}
+                  </p>
+                  {r.ai_rationale && <p className="text-[11px] mt-1" style={{ color: C.muted, lineHeight: 1.45 }}>{r.ai_rationale}</p>}
+                </div>
+              )}
+
+              <div className="mt-2 text-[12px]" style={{ color: C.coffee, lineHeight: 1.6 }}>
+                <p><strong>Wants:</strong> {[r.size, r.length, r.color].filter(Boolean).join(" · ") || "—"}</p>
+                <p><strong>Hair:</strong> {r.hair_included == null ? "?" : r.hair_included ? "stylist provides" : "client brings"}{r.human_hair == null ? "" : r.human_hair ? " · human" : " · synthetic"}</p>
+                {(r.preferred_date || r.preferred_time) && <p><strong>Wants on:</strong> {[r.preferred_date, r.preferred_time].filter(Boolean).join(" at ")}</p>}
+                {r.notes && <p><strong>Notes:</strong> {r.notes}</p>}
+                {r.review_notes && <p style={{ color: C.muted }}><strong>Your note:</strong> {r.review_notes}</p>}
+              </div>
+
+              {r.status === "submitted" ? (
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <Button variant="outline" onClick={() => { setReviewing({ row: r, mode: "deny" }); setNote(""); }}>Deny</Button>
+                  <Button variant="primary" onClick={() => { setReviewing({ row: r, mode: "approve" }); setNote(""); }}>Approve</Button>
+                </div>
+              ) : r.status === "approved" ? (
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <Button variant="outline" onClick={() => archive(r.id)} disabled={busy}>Archive</Button>
+                  {onBook && (
+                    <Button variant="primary" icon={<CalendarPlus size={16} />} onClick={() => onBook(r)}>Book &amp; deposit</Button>
+                  )}
+                </div>
+              ) : r.status !== "archived" && (
+                <button type="button" onClick={() => archive(r.id)} disabled={busy} className="text-[12px] font-semibold mt-3" style={{ color: C.muted }}>Archive</button>
+              )}
+            </Card>
+          ))
+        )}
+      </div>
+
+      <Sheet open={!!reviewing} onClose={() => setReviewing(null)} title={reviewing?.mode === "approve" ? "Approve request" : "Deny request"}>
+        {reviewing?.mode === "approve" ? (
+          <p className="text-[12px] mb-3" style={{ color: C.muted, lineHeight: 1.5 }}>
+            Approving lets {reviewing?.row?.client_name?.split(" ")[0] || "the client"} know you can do their style. Reach out to confirm the final price and collect a deposit to lock the date.
+          </p>
+        ) : (
+          <p className="text-[12px] mb-3" style={{ color: C.muted, lineHeight: 1.5 }}>
+            Let the client know why — they&apos;ll see your note.
+          </p>
+        )}
+        <Field label={reviewing?.mode === "approve" ? "Note to client (optional)" : "Reason (optional)"}>
+          <Textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
+            placeholder={reviewing?.mode === "approve" ? "Love this style! Let's lock in your date…" : "I'm not taking this style right now…"} />
+        </Field>
+        <div className="mt-4">
+          <Button variant={reviewing?.mode === "approve" ? "primary" : "dark"} fullWidth disabled={busy}
+            onClick={() => submitReview(reviewing?.mode === "approve" ? "approved" : "denied")}>
+            {busy ? "Saving…" : reviewing?.mode === "approve" ? "Approve" : "Deny"}
+          </Button>
+        </div>
+      </Sheet>
+    </div>
+  );
 };
 
 const WaitlistScreen = ({
@@ -32026,9 +32524,41 @@ export default function App() {
       hairCost: q.hairCost, hourlyRate: q.hourlyRate, travelFee: q.travelFee,
       addOns: q.addOns, overhead: q.overhead, profitMargin: q.profitMargin,
       tipPct: q.tipPct, deposit: q.deposit, depositType: q.depositType,
-      notes: q.notes
+      notes: q.notes,
+      // Hair recipe (bill of materials) from the calculator / saved quote,
+      // so completing the appointment can deduct exactly what it used.
+      recipe: Array.isArray(q.recipe) ? q.recipe : (Array.isArray(q.inputs?.recipe) ? q.inputs.recipe : undefined),
     };
     setApptPrefill(newAppt);
+    setSecondary(null);
+    setActive("schedule");
+  };
+
+  // Approved "Build your style" request -> prefill the appointment sheet
+  // with the client + AI estimate, so the existing appointment + deposit +
+  // client-payment flow takes over (no separate payment plumbing). Price
+  // seeds from the AI midpoint; the stylist confirms it and the deposit.
+  const handleStyleRequestToAppt = (r: any) => {
+    const low = Number(r.ai_price_low);
+    const high = Number(r.ai_price_high);
+    const mid = Number.isFinite(low) && Number.isFinite(high) ? Math.round((low + high) / 2) : "";
+    setApptPrefill({
+      clientName: r.client_name || "",
+      clientPhone: r.client_phone || "",
+      clientEmail: r.client_email || "",
+      style: r.ai_style_family || "Custom style",
+      date: r.preferred_date || undefined,
+      time: r.preferred_time || undefined,
+      durationHours: r.ai_est_duration_hours || "",
+      totalPrice: mid,
+      depositRequired: true,
+      notes: r.notes || "",
+    });
+    if (store?.userId) {
+      try {
+        void getSupabase().from("style_requests").update({ status: "booked" }).eq("id", r.id).eq("user_id", store.userId);
+      } catch { /* best-effort */ }
+    }
     setSecondary(null);
     setActive("schedule");
   };
@@ -32213,7 +32743,7 @@ export default function App() {
 
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openStyleRequests={() => setSecondary("styleRequests")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} openSocialTemplates={() => setSecondary("socialTemplates")} />}
       {secondary === "socialTemplates" && <SocialTemplatesScreen store={store} onBack={() => setSecondary("marketing")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
@@ -32238,6 +32768,7 @@ export default function App() {
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "intelligence" && <BookingIntelligenceScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "approvals" && <ApprovalQueueScreen store={store} onBack={() => setSecondary("settings")} focusRequestId={approvalFocusId} clearFocusRequestId={() => setApprovalFocusId(null)} />}
+      {secondary === "styleRequests" && <StyleRequestsScreen store={store} onBack={() => setSecondary("settings")} onBook={handleStyleRequestToAppt} />}
       {secondary === "waitlist" && (
         <WaitlistScreen
           store={store}
