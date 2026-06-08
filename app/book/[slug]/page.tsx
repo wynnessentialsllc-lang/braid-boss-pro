@@ -25,6 +25,8 @@ import {
   fetchPublicAvailability,
   fetchPublicMonthAvailability,
   resolveVariationPricing,
+  ACV_EXTRA_ID,
+  ACV_EXTRA_KIND,
   type PublicService,
   type PublicServiceCategory,
   type PublicSlot,
@@ -828,6 +830,27 @@ export default function PublicBookingPage() {
   const pickedExtras = useMemo(() => {
     return availableExtras.filter(e => selectedExtraIds.includes(e.id));
   }, [availableExtras, selectedExtraIds]);
+
+  // The ACV treatment is a managed extra surfaced as its own checkbox
+  // right under the hair-color picker (so the flow reads "pick color →
+  // opt into ACV"). Split it out of the generic add-ons list so it
+  // isn't shown twice; pricing still flows through availableExtras /
+  // pickedExtras, so the totals and the server submit are unchanged.
+  const acvExtra = useMemo(
+    () => availableExtras.find(e => (e as any).kind === ACV_EXTRA_KIND || e.id === ACV_EXTRA_ID) || null,
+    [availableExtras],
+  );
+  const genericExtras = useMemo(
+    () => availableExtras.filter(e => (e as any).kind !== ACV_EXTRA_KIND && e.id !== ACV_EXTRA_ID),
+    [availableExtras],
+  );
+  const acvSelected = !!acvExtra && selectedExtraIds.includes(acvExtra.id);
+  const toggleAcv = () => {
+    if (!acvExtra) return;
+    setSelectedExtraIds(prev =>
+      prev.includes(acvExtra.id) ? prev.filter(x => x !== acvExtra.id) : [...prev, acvExtra.id],
+    );
+  };
 
   // True when the client's CURRENT selection includes human curly
   // hair — either the picked variation or any picked add-on. Drives
@@ -3025,13 +3048,13 @@ export default function PublicBookingPage() {
                     stacks price + duration on the base/variation.
                     Deposit only bumps if the add-on has
                     include_in_deposit = true. */}
-                {selectedCatalogService && availableExtras.length > 0 && (
+                {selectedCatalogService && genericExtras.length > 0 && (
                   <Field label="Optional add-ons" labelColor={accent}>
                     <p style={{ margin: "0 0 8px", fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
                       Pick any extras you want — your total updates as you tap.
                     </p>
                     <div style={{ display: "grid", gap: 8 }}>
-                      {availableExtras.map(e => {
+                      {genericExtras.map(e => {
                         const picked = selectedExtraIds.includes(e.id);
                         const extraTime = Number(e.duration_hours_delta) || 0;
                         return (
@@ -3142,7 +3165,7 @@ export default function PublicBookingPage() {
               if (!svc || (svc.customization_enabled ?? true) === false) return null;
               const showColor = !!svc.hair_included && !!svc.allow_client_hair_color_selection;
               const showCurl = !!svc.allow_client_curl_pattern_selection && humanHairIncluded;
-              if (!svc.hair_included && !showColor && !showCurl) return null;
+              if (!svc.hair_included && !showColor && !showCurl && !acvExtra) return null;
               const colors: string[] = Array.isArray(svc.allowed_hair_colors) ? svc.allowed_hair_colors : [];
               const curls: string[] = Array.isArray(svc.allowed_curl_patterns) ? svc.allowed_curl_patterns : [];
               const isOther = (v: string) => v.trim().toLowerCase().replace(/\s/g, "") === "custom/other";
@@ -3207,6 +3230,41 @@ export default function PublicBookingPage() {
                         </div>
                       )}
                     </div>
+                  )}
+
+                  {/* ACV treatment — checkbox right after the color
+                      picker: client picks their color, then opts in to
+                      having that braiding hair treated with an apple
+                      cider vinegar rinse. Free shows no price. */}
+                  {acvExtra && (
+                    <label
+                      style={{
+                        display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer",
+                        border: `1.5px solid ${acvSelected ? C.goldDeep : C.hairline}`,
+                        borderRadius: 12, padding: 12,
+                        background: acvSelected ? C.cream : C.paper,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={acvSelected}
+                        onChange={toggleAcv}
+                        style={{ marginTop: 2, width: 18, height: 18, accentColor: C.goldDeep, flex: "0 0 auto" }}
+                      />
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                          <span style={{ fontWeight: 600, color: C.espresso, fontSize: 13 }}>
+                            {acvExtra.name || "Apple cider vinegar (ACV) treatment"}
+                          </span>
+                          <span style={{ fontWeight: 700, color: C.goldDeep, fontSize: 14, whiteSpace: "nowrap" }}>
+                            {(Number(acvExtra.price) || 0) > 0 ? `+$${(Number(acvExtra.price) || 0).toFixed(2)}` : "Free"}
+                          </span>
+                        </span>
+                        <span style={{ display: "block", marginTop: 4, fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
+                          Have your braiding hair treated with an apple cider vinegar rinse to cleanse &amp; soften it.
+                        </span>
+                      </span>
+                    </label>
                   )}
 
                   {showCurl && (
