@@ -225,14 +225,33 @@ export const uploadStylistPhoto = async (
   file: File,
   filename: string = "stylist-photo.jpg",
 ): Promise<UploadLogoResult> => {
-  if (!userId) throw new Error("Sign in required.");
   if (!file) throw new Error("No file selected.");
   if (!/^image\//.test(file.type)) throw new Error("Please choose an image file.");
   if (file.size > 12 * 1024 * 1024) throw new Error("Image is larger than 12 MB.");
 
-  const blob = await compressPortrait(file);
   const supabase = getSupabase();
-  const path = `${userId}/${filename}`;
+  // The bucket's INSERT policy requires (storage.foldername(name))[1]
+  // = auth.uid()::text. If the caller passes a stale userId (signed in
+  // on another tab, switched accounts, etc.) the upload is rejected
+  // with "new row violates row-level security policy" — opaque to the
+  // user. Read the session uid here, surface a clearer error, and
+  // build the path from the truth so it can't drift.
+  const { data: sessionData, error: sessionErr } = await supabase.auth.getUser();
+  if (sessionErr || !sessionData?.user?.id) {
+    throw new Error("Your session expired — please sign in again, then retry.");
+  }
+  const sessionUid = sessionData.user.id;
+  if (userId && userId !== sessionUid) {
+    // Don't fail loudly here — the on-disk path lives under the signed-
+    // in user's folder regardless; just warn so dev mode catches it.
+    if (typeof console !== "undefined") console.warn(
+      "[uploadStylistPhoto] userId mismatch — using session uid",
+      { passed: userId, session: sessionUid },
+    );
+  }
+
+  const blob = await compressPortrait(file);
+  const path = `${sessionUid}/${filename}`;
   const { error: upErr } = await supabase
     .storage
     .from(BUCKET)
@@ -241,7 +260,18 @@ export const uploadStylistPhoto = async (
       contentType: "image/jpeg",
       cacheControl: "3600",
     });
-  if (upErr) throw upErr;
+  if (upErr) {
+    // Pass through the original Supabase message verbatim when it's
+    // already specific (file-too-large, etc.), and rewrite the
+    // generic RLS rejection into something the stylist can act on.
+    const msg = String((upErr as any)?.message || "");
+    if (msg.toLowerCase().includes("row-level security")) {
+      throw new Error(
+        "Upload was rejected. Please sign out and sign back in, then try again.",
+      );
+    }
+    throw upErr;
+  }
 
   const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
   const base = data?.publicUrl;
