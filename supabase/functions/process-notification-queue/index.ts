@@ -87,6 +87,11 @@ type ClaimedRow = {
   appointment_id: string | null;
   client_id: string | null;
   contract_id: string | null;
+  // Provider message id (Twilio SID / Resend id). Normally null for a
+  // freshly-queued row; non-null means a PRIOR dispatch attempt already
+  // handed this message to the provider — see the idempotency guard in
+  // the dispatch loop.
+  provider_message_id: string | null;
 };
 
 // =====================================================================
@@ -2013,6 +2018,30 @@ serve(async (req) => {
         return;
       }
 
+      // Idempotency guard. A non-null provider_message_id on a claimed
+      // row means a PRIOR attempt already handed this message to the
+      // provider (Twilio/Resend accepted it), but the terminal
+      // mark_notification_sent didn't land and sweep_stuck_notifications
+      // later flipped the row back to 'queued'. Do NOT resend — that
+      // would duplicate the text/email and, for SMS, burn a SECOND
+      // prepaid credit. Just finalize the row as sent.
+      if (row.provider_message_id) {
+        const { error } = await admin.rpc("mark_notification_sent", {
+          id_in: row.id,
+          provider_in: row.channel === "sms" ? "twilio" : "resend",
+          provider_message_id_in: row.provider_message_id,
+        });
+        if (error) {
+          console.error(
+            `[process-notification-queue] finalize (already-dispatched) failed for ${row.id}: ${error.message}`,
+          );
+          failed++;
+          return;
+        }
+        sent++;
+        return;
+      }
+
       let result:
         | { ok: true; providerMessageId: string | null }
         | { ok: false; retryable: boolean; error: string };
@@ -2055,6 +2084,23 @@ serve(async (req) => {
       }
 
       if (result.ok) {
+        // Persist the provider message id with a fast, single-column
+        // write BEFORE the terminal mark. If mark_notification_sent then
+        // fails and the row is later swept back to 'queued', the next
+        // claim sees this id and finalizes via the idempotency guard
+        // above instead of resending (no duplicate send, no double
+        // credit charge). Best-effort: mark_notification_sent records it
+        // too, so a hiccup here just leaves the original behavior.
+        if (result.providerMessageId) {
+          try {
+            await admin
+              .from("notification_queue")
+              .update({ provider_message_id: result.providerMessageId })
+              .eq("id", row.id);
+          } catch {
+            /* best-effort */
+          }
+        }
         const { error } = await admin.rpc("mark_notification_sent", {
           id_in: row.id,
           provider_in: provider,
