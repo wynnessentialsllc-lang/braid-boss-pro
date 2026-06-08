@@ -276,6 +276,7 @@ import {
   type ExpenseLike,
   type RecurringInterval,
 } from "./lib/expenses";
+import { computeProfit } from "./lib/pricing-profit";
 import { uploadReceipt, deleteReceipt as deleteReceiptObject, getReceiptUrl } from "./lib/receipt-storage";
 import {
   INVENTORY_CATEGORIES,
@@ -6227,6 +6228,22 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
     [hairCost, hourlyRate, hours, travelFee, overhead, profitMargin, tipPct, addOns, selectedDiscount],
   );
 
+  // Stylist-side profit view. The breakdown above shows what the CLIENT
+  // pays; this turns the same numbers into what the STYLIST keeps —
+  // take-home, $/hour, and profit above their own wage. (See
+  // lib/pricing-profit.ts for the math + rationale.)
+  const profit = useMemo(
+    () => computeProfit({
+      hairCost: result.hairCost,
+      overhead: result.overhead,
+      labor: result.labor,
+      hours: result.hours,
+      subtotal: result.subtotal,
+      tipAmount: result.tipAmount,
+    }),
+    [result.hairCost, result.overhead, result.labor, result.hours, result.subtotal, result.tipAmount],
+  );
+
   // Profit estimate for the warning banner: what the stylist set as
   // their target margin, minus the dollar value of the discount. If
   // the discount swallows the whole margin, surface a soft warning.
@@ -6403,6 +6420,59 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
               {fmtMoney(result.finalPrice, business.currency)}
             </p>
           </div>
+        </PreviewStyleCard>
+
+        {/* Stylist-only profit lens. Same inputs, flipped to "what do I
+            keep?" — the numbers braiders actually run the chair on. */}
+        <PreviewStyleCard style={{ marginTop: 12 }} padding={20}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <SectionEyebrow>Your profit</SectionEyebrow>
+            <span style={{ fontSize: 10.5, fontWeight: 600, color: C.muted, letterSpacing: "0.04em" }}>
+              ONLY YOU SEE THIS
+            </span>
+          </div>
+
+          {/* Hero: take-home per hour — the one number that ranks styles. */}
+          <div style={{ marginTop: 10, marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div>
+              <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 34, fontWeight: 600, color: profit.takeHome >= 0 ? C.goldDeep : C.danger, lineHeight: 1 }}>
+                {profit.takeHomePerHour == null ? "—" : `${fmtMoney(profit.takeHomePerHour, business.currency)}/hr`}
+              </p>
+              <p style={{ margin: "4px 0 0", fontSize: 11.5, color: C.muted }}>
+                Take-home per hour{result.hours > 0 ? ` · ${result.hours}h` : " · add hours"}
+              </p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso, lineHeight: 1 }}>
+                {fmtMoney(profit.takeHome, business.currency)}
+              </p>
+              <p style={{ margin: "4px 0 0", fontSize: 11.5, color: C.muted }}>
+                Take-home{profit.marginPct == null ? "" : ` · ${Math.round(profit.marginPct)}% margin`}
+              </p>
+            </div>
+          </div>
+
+          <div style={{ borderTop: `1px solid rgba(21, 17, 26,0.08)`, paddingTop: 8 }}>
+            <MetricRow label="Service revenue" value={fmtMoney(profit.revenue, business.currency)} />
+            <MetricRow label="− Materials (hair + overhead)" value={`− ${fmtMoney(profit.materialCost, business.currency)}`} />
+            <MetricRow label="= Take-home" value={fmtMoney(profit.takeHome, business.currency)} emphasis="strong" accent />
+            {profit.takeHomeWithTip !== profit.takeHome && (
+              <MetricRow label="+ Tip → with tip" value={fmtMoney(profit.takeHomeWithTip, business.currency)} />
+            )}
+            <MetricRow
+              label={`Profit above your ${fmtMoney(result.hourlyRate, business.currency)}/hr wage`}
+              value={`${profit.profitAboveWage < 0 ? "− " : ""}${fmtMoney(Math.abs(profit.profitAboveWage), business.currency)}`}
+            />
+          </div>
+
+          {profit.profitAboveWage < 0 && result.subtotal > 0 && (
+            <div style={{ marginTop: 10, display: "flex", alignItems: "flex-start", gap: 8, background: C.ivory, border: `1px solid ${C.warning}`, borderRadius: 12, padding: "8px 10px" }}>
+              <AlertTriangle size={15} style={{ color: C.warning, marginTop: 1, flexShrink: 0 }} />
+              <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.45, color: C.coffee }}>
+                This price doesn&apos;t fully cover your time at {fmtMoney(result.hourlyRate, business.currency)}/hr after materials. Raise the price, trim hours, or lower hair cost.
+              </p>
+            </div>
+          )}
         </PreviewStyleCard>
 
         <div className="grid grid-cols-2 gap-3 pt-2">
