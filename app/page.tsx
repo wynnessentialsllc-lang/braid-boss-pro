@@ -23470,6 +23470,23 @@ const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }
   const [quantity, setQuantity] = useState(item?.quantityOnHand != null ? String(item.quantityOnHand) : "0");
   const [threshold, setThreshold] = useState(item?.lowStockThreshold != null ? String(item.lowStockThreshold) : "0");
   const [supplier, setSupplier] = useState(item?.supplier || "");
+  // Per-use consumable helper: enter the package price + how many clients
+  // one package covers, and we compute cost-per-use and set the model to
+  // track "uses" (so depletion + low-stock alerts land on whole numbers).
+  const [showConsumable, setShowConsumable] = useState(false);
+  const [pkgPrice, setPkgPrice] = useState("");
+  const [pkgUses, setPkgUses] = useState("");
+  const perUseCost = (() => {
+    const p = parseMoney(pkgPrice); const u = parseMoney(pkgUses);
+    return p > 0 && u > 0 ? p / u : 0;
+  })();
+  const applyConsumable = () => {
+    if (perUseCost <= 0) return;
+    setUnit("use");
+    setUnitCost(perUseCost.toFixed(2));
+    if (showRawQuantity) setQuantity(String(parseMoney(pkgUses)));
+    setShowConsumable(false);
+  };
   // Per-variation editor rows. qty is editable as a STARTING count on
   // create and on freshly-added rows; for existing rows on an edit it's
   // shown read-only because stock moves through the restock sheet (so we
@@ -23589,6 +23606,43 @@ const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }
             </select>
           </div>
         </div>
+
+        {/* Per-use consumable helper — edge control, gel, spray, etc.
+            that you buy in bulk and use across many clients. */}
+        {!showConsumable ? (
+          <button type="button" onClick={() => setShowConsumable(true)}
+            className="text-[12px] font-semibold" style={{ color: C.goldDeep }}>
+            + Bulk product used per client? (edge control, gel…)
+          </button>
+        ) : (
+          <div className="rounded-xl p-3" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+            <p className="text-[12px] font-semibold" style={{ color: C.espresso }}>Per-use pricing</p>
+            <p className="text-[11px] mt-0.5 mb-2" style={{ color: C.muted, lineHeight: 1.4 }}>
+              Buy in bulk, use a little each time? Enter the package price and how many clients it covers.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: C.muted }}>Package price</label>
+                <input type="text" inputMode="decimal" value={pkgPrice} onChange={e => setPkgPrice(sanitizeMoneyInput(e.target.value))}
+                  placeholder="16.00" className="w-full mt-1 px-3 py-2 rounded-lg text-[14px] tabular-nums" style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }} />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: C.muted }}>Clients per package</label>
+                <input type="text" inputMode="decimal" value={pkgUses} onChange={e => setPkgUses(sanitizeMoneyInput(e.target.value))}
+                  placeholder="10" className="w-full mt-1 px-3 py-2 rounded-lg text-[14px] tabular-nums" style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }} />
+              </div>
+            </div>
+            <div className="flex items-center justify-between mt-2.5">
+              <span className="text-[12px]" style={{ color: C.coffee }}>
+                {perUseCost > 0 ? <>= <strong>{fmtMoney(perUseCost, currency)}</strong> per use</> : "Enter both to calculate"}
+              </span>
+              <button type="button" onClick={applyConsumable} disabled={perUseCost <= 0}
+                className="text-[12px] font-bold px-3 py-1.5 rounded-lg" style={{ background: perUseCost > 0 ? C.espresso : C.hairline, color: perUseCost > 0 ? C.cream : C.muted }}>
+                Use this
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <div>
