@@ -140,10 +140,21 @@ UI.
 
 ---
 
-## Build order
+## Build order / status
 1. ✅ Phase 1 — profit readout.
-2. Phase 2 — `service_recipe` + inventory auto-cost + profit report.
-3. Phase 3a — `style_requests` table + client "Build your style" intake UI
-   (no AI yet: collects photo/answers/date-time, submits to approval).
-4. Phase 3b — AI quote endpoint (Anthropic SDK, behind the API key).
-5. Phase 3c — stylist approve/deny → deposit request wiring.
+2. ✅ Phase 2 — recipe auto-cost (calculator + preset editor), auto-deduct,
+   profitability report.
+3. ✅ Phase 3a — `style_requests` table (migration applied live to the
+   braid-boss project) + tested domain lib + client "Build your style"
+   intake UI on the booking page + **stylist review queue** (Settings →
+   Style requests) with approve/deny + notes.
+4. ✅ Phase 3b — AI quote endpoint (`/api/style-consult`, Anthropic SDK,
+   vision, catalog-anchored pricing). **Activates once `ANTHROPIC_API_KEY`
+   is set in the deployment env**; degrades to a clear message otherwise.
+5. ⏳ Phase 3c (remaining) — on **approve**, auto-create the deposit
+   checkout (Stripe Connect) + client approval notification, instead of the
+   current "approve → follow up manually." Reuses the existing deposit-first
+   booking path; needs runtime/Stripe testing.
+6. ⏳ Enhancement — persist the inspiration **photo** to storage (anon
+   upload bucket) so the stylist sees it in the review queue (v1 uses the
+   photo for the AI estimate only).

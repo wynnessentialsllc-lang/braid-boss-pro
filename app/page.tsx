@@ -15420,7 +15420,7 @@ const SupportCenterScreen = ({
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openSupport }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openSupport?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openStyleRequests, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openSupport }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openStyleRequests?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openSupport?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -16046,6 +16046,22 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                           return parts.join(" · ");
                         })()}
                       </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openStyleRequests && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openStyleRequests}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div aria-hidden style={{ width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center", background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)" }}>
+                      <Sparkles size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Style requests</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>Custom &quot;Build your style&quot; requests from your booking page</p>
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
@@ -25094,6 +25110,189 @@ const WAITLIST_STATUS_TONE: Record<WaitlistStatus, "warning" | "gold" | "success
   archived:  "neutral",
 };
 
+// "Build your style" review queue — custom AI-consultation requests from
+// the public booking page. The stylist reviews the intake + AI ballpark,
+// then approves (follow up for a deposit) or denies with a reason.
+const StyleRequestsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId = store?.userId || null;
+  const currency = store?.business?.currency || "USD";
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"open" | "all" | "archived">("open");
+  const [reviewing, setReviewing] = useState<{ row: any; mode: "approve" | "deny" } | null>(null);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!userId) { setLoading(false); return; }
+    setLoading(true); setErr(null);
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from("style_requests")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setRows(data || []);
+    } catch {
+      setErr("Couldn't load style requests.");
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- async data load, intentional
+  useEffect(() => { void load(); }, [load]);
+
+  const filtered = useMemo(() => {
+    if (filter === "all") return rows;
+    if (filter === "archived") return rows.filter(r => ["denied", "archived", "booked"].includes(r.status));
+    return rows.filter(r => ["submitted", "approved", "deposit_pending"].includes(r.status));
+  }, [rows, filter]);
+
+  const openCount = rows.filter(r => r.status === "submitted").length;
+
+  const submitReview = async (status: "approved" | "denied" | "archived") => {
+    if (!reviewing) return;
+    setBusy(true); setErr(null);
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase
+        .from("style_requests")
+        .update({ status, review_notes: note.trim() || null })
+        .eq("id", reviewing.row.id)
+        .eq("user_id", userId);
+      if (error) throw error;
+      setReviewing(null); setNote("");
+      await load();
+    } catch {
+      setErr("Couldn't update the request. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const archive = async (id: string) => {
+    setBusy(true);
+    try {
+      const supabase = getSupabase();
+      await supabase.from("style_requests").update({ status: "archived" }).eq("id", id).eq("user_id", userId);
+      await load();
+    } finally { setBusy(false); }
+  };
+
+  const statusColor = (s: string) =>
+    s === "submitted" ? C.gold : s === "approved" ? C.success : s === "denied" ? C.danger : C.muted;
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Style requests"
+        subtitle="Custom “Build your style” requests"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-3">
+        {err && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>
+          </Card>
+        )}
+
+        <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          {[
+            { id: "open", label: `Open · ${openCount}` },
+            { id: "all", label: `All · ${rows.length}` },
+            { id: "archived", label: "Archive" },
+          ].map(t => (
+            <button type="button" key={t.id} onClick={() => setFilter(t.id as any)}
+              className="flex-1 py-2 rounded-lg text-[12px] font-semibold transition"
+              style={{ background: filter === t.id ? C.espresso : "transparent", color: filter === t.id ? C.cream : C.coffee }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <p className="text-[13px] text-center py-8" style={{ color: C.muted }}>Loading…</p>
+        ) : filtered.length === 0 ? (
+          <Card className="p-5 text-center">
+            <p className="text-sm font-semibold" style={{ color: C.espresso }}>No requests here</p>
+            <p className="text-[12px] mt-1" style={{ color: C.muted }}>
+              When a client uses “Build your style” on your booking page, it lands here for review.
+            </p>
+          </Card>
+        ) : (
+          filtered.map(r => (
+            <Card key={r.id} className="p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold" style={{ color: C.espresso }}>{r.client_name}</p>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: C.ivory, color: statusColor(r.status), textTransform: "uppercase", letterSpacing: "0.04em" }}>{r.status}</span>
+              </div>
+              <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
+                {[r.client_phone, r.client_email].filter(Boolean).join(" · ") || "No contact"}
+              </p>
+
+              {(r.ai_price_low != null || r.ai_style_family) && (
+                <div className="mt-2 p-2.5 rounded-xl" style={{ background: C.ivory }}>
+                  {r.ai_price_low != null && r.ai_price_high != null && (
+                    <p className="text-[15px] font-bold" style={{ color: C.espresso }}>
+                      ~{fmtMoney(Number(r.ai_price_low), currency)}–{fmtMoney(Number(r.ai_price_high), currency)} <span className="text-[11px] font-medium" style={{ color: C.muted }}>AI estimate</span>
+                    </p>
+                  )}
+                  <p className="text-[11px] mt-0.5" style={{ color: C.coffee }}>
+                    {[r.ai_style_family, r.ai_est_duration_hours ? `~${r.ai_est_duration_hours}h` : null].filter(Boolean).join(" · ")}
+                  </p>
+                  {r.ai_rationale && <p className="text-[11px] mt-1" style={{ color: C.muted, lineHeight: 1.45 }}>{r.ai_rationale}</p>}
+                </div>
+              )}
+
+              <div className="mt-2 text-[12px]" style={{ color: C.coffee, lineHeight: 1.6 }}>
+                <p><strong>Wants:</strong> {[r.size, r.length, r.color].filter(Boolean).join(" · ") || "—"}</p>
+                <p><strong>Hair:</strong> {r.hair_included == null ? "?" : r.hair_included ? "stylist provides" : "client brings"}{r.human_hair == null ? "" : r.human_hair ? " · human" : " · synthetic"}</p>
+                {(r.preferred_date || r.preferred_time) && <p><strong>Wants on:</strong> {[r.preferred_date, r.preferred_time].filter(Boolean).join(" at ")}</p>}
+                {r.notes && <p><strong>Notes:</strong> {r.notes}</p>}
+                {r.review_notes && <p style={{ color: C.muted }}><strong>Your note:</strong> {r.review_notes}</p>}
+              </div>
+
+              {r.status === "submitted" ? (
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <Button variant="outline" onClick={() => { setReviewing({ row: r, mode: "deny" }); setNote(""); }}>Deny</Button>
+                  <Button variant="primary" onClick={() => { setReviewing({ row: r, mode: "approve" }); setNote(""); }}>Approve</Button>
+                </div>
+              ) : r.status !== "archived" && (
+                <button type="button" onClick={() => archive(r.id)} disabled={busy} className="text-[12px] font-semibold mt-3" style={{ color: C.muted }}>Archive</button>
+              )}
+            </Card>
+          ))
+        )}
+      </div>
+
+      <Sheet open={!!reviewing} onClose={() => setReviewing(null)} title={reviewing?.mode === "approve" ? "Approve request" : "Deny request"}>
+        {reviewing?.mode === "approve" ? (
+          <p className="text-[12px] mb-3" style={{ color: C.muted, lineHeight: 1.5 }}>
+            Approving lets {reviewing?.row?.client_name?.split(" ")[0] || "the client"} know you can do their style. Reach out to confirm the final price and collect a deposit to lock the date.
+          </p>
+        ) : (
+          <p className="text-[12px] mb-3" style={{ color: C.muted, lineHeight: 1.5 }}>
+            Let the client know why — they&apos;ll see your note.
+          </p>
+        )}
+        <Field label={reviewing?.mode === "approve" ? "Note to client (optional)" : "Reason (optional)"}>
+          <Textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
+            placeholder={reviewing?.mode === "approve" ? "Love this style! Let's lock in your date…" : "I'm not taking this style right now…"} />
+        </Field>
+        <div className="mt-4">
+          <Button variant={reviewing?.mode === "approve" ? "primary" : "dark"} fullWidth disabled={busy}
+            onClick={() => submitReview(reviewing?.mode === "approve" ? "approved" : "denied")}>
+            {busy ? "Saving…" : reviewing?.mode === "approve" ? "Approve" : "Deny"}
+          </Button>
+        </div>
+      </Sheet>
+    </div>
+  );
+};
+
 const WaitlistScreen = ({
   store, onBack, onConvertToAppointment,
 }: {
@@ -32404,7 +32603,7 @@ export default function App() {
 
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openStyleRequests={() => setSecondary("styleRequests")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} openSocialTemplates={() => setSecondary("socialTemplates")} />}
       {secondary === "socialTemplates" && <SocialTemplatesScreen store={store} onBack={() => setSecondary("marketing")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
@@ -32429,6 +32628,7 @@ export default function App() {
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "intelligence" && <BookingIntelligenceScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "approvals" && <ApprovalQueueScreen store={store} onBack={() => setSecondary("settings")} focusRequestId={approvalFocusId} clearFocusRequestId={() => setApprovalFocusId(null)} />}
+      {secondary === "styleRequests" && <StyleRequestsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "waitlist" && (
         <WaitlistScreen
           store={store}
