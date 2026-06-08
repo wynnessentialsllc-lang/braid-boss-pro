@@ -50,10 +50,9 @@ numbers real instead of estimated.
   (tested in `pricing-profit.test.ts`) + a calculator card ranking saved
   presets by take-home per hour (with margin), highest first.
 
-**Phase 2b remaining (small):**
-- ✅ Recipe field added to the **style-preset editor** (auto-fills hair cost; rides into the calculator + Book-it). Phase 2 complete.
-  presets directly (calculator already reads `preset.recipe`; today recipes
-  persist via saved quotes).
+**Phase 2 complete.**
+- Recipe field added to the **style-preset editor** (auto-fills hair cost;
+  recipes saved on a preset ride into the calculator + Book-it deduction).
 
 - **Data:** a `service_recipe` concept — per service (or per variation),
   a list of `{ inventory_item_id, quantity }`. "Medium Boho Knotless →
