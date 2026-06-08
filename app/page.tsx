@@ -179,6 +179,9 @@ import {
   type ServiceExtra,
   type ServiceMaterial,
   SERVICES_EMPTY_COPY,
+  ACV_EXTRA_ID,
+  ACV_EXTRA_KIND,
+  ACV_EXTRA_NAME,
   formatServicePrice,
   resolveVariationPricing,
   suggestRebookWeeks,
@@ -5565,7 +5568,30 @@ const StyleCustomizationSection = ({
   const set = (patch: any) => onChange({ ...form, ...patch });
   const enabled = form.customization_enabled ?? true;
   const extras: any[] = Array.isArray(form.extras) ? form.extras : [];
-  const setExtras = (next: any[]) => set({ extras: next });
+
+  // The ACV treatment is a managed extra (kind === "acv"): the braider
+  // shows/hides it with its own toggle and prices it (free at 0). We
+  // keep it out of the generic add-ons list so it only ever appears as
+  // the dedicated control below.
+  const acvExtra = extras.find(e => e?.kind === ACV_EXTRA_KIND || e?.id === ACV_EXTRA_ID) || null;
+  const acvOn = !!acvExtra && acvExtra.active !== false;
+  const acvPrice = Number(acvExtra?.price) || 0;
+  const customExtras = extras.filter(e => e?.kind !== ACV_EXTRA_KIND && e?.id !== ACV_EXTRA_ID);
+  // Writing generic add-ons must never drop the managed ACV entry, so
+  // re-append it on every change.
+  const setExtras = (next: any[]) => set({ extras: [...next, ...(acvExtra ? [acvExtra] : [])] });
+  const writeAcv = (patch: any) => {
+    const base = acvExtra || {
+      id: ACV_EXTRA_ID, kind: ACV_EXTRA_KIND, name: ACV_EXTRA_NAME,
+      description: null, price: 0, duration_hours_delta: 0,
+      include_in_deposit: false, active: true,
+    };
+    set({ extras: [...customExtras, { ...base, ...patch }] });
+  };
+  const toggleAcv = (v: boolean) => {
+    if (v) writeAcv({ active: true });
+    else if (acvExtra) set({ extras: [...customExtras, { ...acvExtra, active: false }] });
+  };
 
   const fieldLabel = "block text-[11px] font-bold uppercase tracking-wider mb-1.5";
   const inputCls = "w-full p-2 rounded-lg border text-[13px]";
@@ -5651,6 +5677,45 @@ const StyleCustomizationSection = ({
                 </div>
               )}
 
+              {/* ACV (apple cider vinegar) treatment — a per-service
+                  optional the braider can show/hide and price (free at
+                  0). Sits with the braiding-hair options since it treats
+                  that hair. Stored as a managed extra, so it needs the
+                  extras-capable editor (showAddons). */}
+              {showAddons && (<>
+                <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
+                <CustomToggle
+                  on={acvOn}
+                  onChange={toggleAcv}
+                  label="Offer ACV hair treatment"
+                  help="An apple cider vinegar rinse to cleanse & soften the braiding hair. Clients opt in when they book."
+                />
+                {acvOn && (
+                  <div className="mb-3 pl-[54px]">
+                    <span className="block text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: C.muted }}>
+                      Price — leave 0 for free
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        value={acvPrice}
+                        onChange={e => writeAcv({ price: Math.max(0, Number(e.target.value) || 0) })}
+                        className="w-28 p-2 rounded-lg border text-[13px]"
+                        style={{ borderColor: C.hairline, background: C.paper }}
+                      />
+                    </div>
+                    <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+                      {acvPrice > 0
+                        ? `Clients see it as a +$${acvPrice.toFixed(2)} add-on at booking.`
+                        : "Clients see it as a free option they can check at booking."}
+                    </p>
+                  </div>
+                )}
+              </>)}
+
               <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
 
               <CustomToggle
@@ -5721,7 +5786,7 @@ const StyleCustomizationSection = ({
                 </label>
                 <button
                   type="button"
-                  onClick={() => setExtras([...extras, {
+                  onClick={() => setExtras([...customExtras, {
                     id: `extra_${Math.random().toString(36).slice(2, 8)}`,
                     name: "", description: null, price: 0,
                     duration_hours_delta: 0, include_in_deposit: false, active: true,
@@ -5735,24 +5800,24 @@ const StyleCustomizationSection = ({
               <p className="text-[11px] mb-2" style={{ color: C.muted, lineHeight: 1.5 }}>
                 Optional. Beads, curls, boho pieces, length upgrade, wash/blow dry — your call.
               </p>
-              {extras.length === 0 ? (
+              {customExtras.length === 0 ? (
                 <p className="text-[12px]" style={{ color: C.muted }}>No add-ons — this service stays simple.</p>
               ) : (
                 <div className="space-y-2">
-                  {extras.map((ex, i) => (
+                  {customExtras.map((ex, i) => (
                     <div key={ex.id || i} className="rounded-lg border p-2.5"
                       style={{ borderColor: C.hairline, background: C.cream }}>
                       <div className="flex gap-2 mb-2">
                         <input
                           type="text"
                           value={ex.name || ""}
-                          onChange={e => setExtras(extras.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                          onChange={e => setExtras(customExtras.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
                           placeholder="Add-on name (e.g. Curl ends)"
                           className="flex-1 p-2 rounded-lg border text-[13px]"
                           style={{ borderColor: C.hairline, background: C.paper }}
                         />
                         <button type="button"
-                          onClick={() => setExtras(extras.filter((_, j) => j !== i))}
+                          onClick={() => setExtras(customExtras.filter((_, j) => j !== i))}
                           aria-label="Remove add-on" className="px-2 rounded-lg"
                           style={{ color: C.danger, border: `1px solid ${C.hairline}`, background: C.paper }}>
                           <Trash2 size={14} />
@@ -5764,7 +5829,7 @@ const StyleCustomizationSection = ({
                           <input
                             type="number" inputMode="decimal"
                             value={ex.price ?? 0}
-                            onChange={e => setExtras(extras.map((x, j) => j === i ? { ...x, price: Number(e.target.value) } : x))}
+                            onChange={e => setExtras(customExtras.map((x, j) => j === i ? { ...x, price: Number(e.target.value) } : x))}
                             className="w-full p-1.5 rounded-lg border text-[13px]"
                             style={{ borderColor: C.hairline, background: C.paper }}
                           />
@@ -5774,7 +5839,7 @@ const StyleCustomizationSection = ({
                           <input
                             type="number" inputMode="numeric"
                             value={Math.round(((ex.duration_hours_delta ?? 0) * 60))}
-                            onChange={e => setExtras(extras.map((x, j) => j === i ? { ...x, duration_hours_delta: (Number(e.target.value) || 0) / 60 } : x))}
+                            onChange={e => setExtras(customExtras.map((x, j) => j === i ? { ...x, duration_hours_delta: (Number(e.target.value) || 0) / 60 } : x))}
                             className="w-full p-1.5 rounded-lg border text-[13px]"
                             style={{ borderColor: C.hairline, background: C.paper }}
                           />
@@ -5783,7 +5848,7 @@ const StyleCustomizationSection = ({
                           <input
                             type="checkbox"
                             checked={ex.active !== false}
-                            onChange={e => setExtras(extras.map((x, j) => j === i ? { ...x, active: e.target.checked } : x))}
+                            onChange={e => setExtras(customExtras.map((x, j) => j === i ? { ...x, active: e.target.checked } : x))}
                           />
                           <span className="text-[12px]" style={{ color: C.coffee }}>Active</span>
                         </label>
@@ -9834,7 +9899,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                         <span className="flex-1 min-w-0 text-[12px]" style={{ lineHeight: 1.4 }}>
                           <span style={{ color: C.espresso, fontWeight: 600 }}>{e.name || "Add-on"}</span>
                           <span style={{ color: C.muted }}>
-                            {" "}+{fmtMoney(Number(e.price) || 0, business?.currency)}
+                            {" "}{(Number(e.price) || 0) > 0 ? `+${fmtMoney(Number(e.price) || 0, business?.currency)}` : "Free"}
                             {durDelta > 0 ? ` · +${durDelta}h` : ""}
                             {e.include_in_deposit ? " · in deposit" : ""}
                           </span>
