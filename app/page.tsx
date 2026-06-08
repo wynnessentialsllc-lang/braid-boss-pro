@@ -276,7 +276,7 @@ import {
   type ExpenseLike,
   type RecurringInterval,
 } from "./lib/expenses";
-import { computeProfit } from "./lib/pricing-profit";
+import { computeProfit, rankStyleProfitability } from "./lib/pricing-profit";
 import { recipeCost, lineFromInventoryItem, type RecipeLine } from "./lib/recipe-cost";
 import { uploadReceipt, deleteReceipt as deleteReceiptObject, getReceiptUrl } from "./lib/receipt-storage";
 import {
@@ -6298,6 +6298,13 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
     setShowRecipeSheet(false);
   };
 
+  // Style profitability ranking — which saved styles actually make money,
+  // by take-home per hour. Drives the report card below.
+  const rankedStyles = useMemo(
+    () => rankStyleProfitability((store.presets || []) as any[]),
+    [store.presets],
+  );
+
   const handleSave = async () => {
     if (!styleName && !labelInput) { setShowSaveSheet(true); return; }
     await actuallySave(labelInput || styleName);
@@ -6333,6 +6340,9 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
       discountId: selectedDiscount?.id ?? null,
       discountName: selectedDiscount?.name ?? null,
       discountAmount: result.discountAmount || 0,
+      // Carry the hair recipe so completing the appointment pre-fills the
+      // Materials-used sheet from exactly what this style consumes.
+      recipe: recipe.length > 0 ? recipe : undefined,
     });
   };
 
@@ -6534,6 +6544,37 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
           <Button variant="dark" icon={<CalendarPlus size={18} />} onClick={handleConvertToAppointment} disabled={result.finalPrice <= 0}>Book it</Button>
         </div>
         <Button variant="outline" icon={<RefreshCw size={16} />} onClick={reset} fullWidth>Reset calculator</Button>
+
+        {/* Style profitability — ranks saved presets by take-home per
+            hour so the stylist can see which styles actually pay. */}
+        {rankedStyles.length >= 2 && (
+          <PreviewStyleCard style={{ marginTop: 2 }} padding={20}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <SectionEyebrow>Most profitable styles</SectionEyebrow>
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: C.muted, letterSpacing: "0.04em" }}>BY $/HR</span>
+            </div>
+            <p style={{ margin: "6px 0 10px", fontSize: 11.5, color: C.muted }}>
+              From your saved style presets. Highest take-home per hour first.
+            </p>
+            <div>
+              {rankedStyles.slice(0, 6).map((s, i) => (
+                <div key={s.id} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", padding: "6px 0", borderTop: i === 0 ? "none" : `1px solid rgba(21, 17, 26,0.06)` }}>
+                  <div style={{ minWidth: 0, paddingRight: 10 }}>
+                    <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: C.espresso, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {i === 0 ? "★ " : ""}{s.name}
+                    </p>
+                    <p style={{ margin: "1px 0 0", fontSize: 11, color: C.muted }}>
+                      {fmtMoney(s.takeHome, business.currency)} take-home{s.marginPct == null ? "" : ` · ${Math.round(s.marginPct)}% margin`}
+                    </p>
+                  </div>
+                  <p style={{ margin: 0, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 14, fontWeight: 700, color: s.takeHome >= 0 ? C.goldDeep : C.danger, whiteSpace: "nowrap" }}>
+                    {s.takeHomePerHour == null ? "—" : `${fmtMoney(s.takeHomePerHour, business.currency)}/hr`}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </PreviewStyleCard>
+        )}
 
         {/* Saved Quotes — relocated here from the Home page so the
             calculator is the single home for estimates. Opens the same
@@ -8259,7 +8300,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   // After save, if the appointment was just transitioned to
   // "completed", show the MaterialsUsedSheet before closing so the
   // stylist can confirm what was consumed against the appointment.
-  const [showMaterialsFor, setShowMaterialsFor] = useState<{ id: string; style?: string | null } | null>(null);
+  const [showMaterialsFor, setShowMaterialsFor] = useState<{ id: string; style?: string | null; recipe?: RecipeLine[] | null } | null>(null);
 
   // Recurring
   const [makeRecurring, setMakeRecurring] = useState(false);
@@ -8401,6 +8442,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         dependentName: a?.dependentName ?? null,
         id: a?.id,
         seriesId: a?.seriesId,
+        // Hair recipe carried from the pricing calculator. Rides through
+        // the PATCH-style save and pre-fills the Materials-used sheet when
+        // the appointment is marked completed.
+        recipe: Array.isArray(a?.recipe) ? a.recipe.map((l: any) => ({ ...l })) : [],
       });
       setCustomAddonName("");
       setCustomAddonPrice("");
@@ -9017,7 +9062,11 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     const nowCompleted = (saved as any)?.status === "completed";
     const inventoryReady = Array.isArray(store?.inventoryItems) && store.inventoryItems.length > 0;
     if (!wasCompleted && nowCompleted && inventoryReady) {
-      setShowMaterialsFor({ id: saved.id, style: saved.style ?? form.style ?? null });
+      setShowMaterialsFor({
+        id: saved.id,
+        style: saved.style ?? form.style ?? null,
+        recipe: Array.isArray(saved.recipe) ? saved.recipe : (Array.isArray(form.recipe) ? form.recipe : null),
+      });
       return;
     }
 
@@ -24613,7 +24662,7 @@ const DefaultMaterialsPicker = ({ inventory, value, onChange }: {
 // inventory_apply_movement for each row. Skip is allowed — accuracy
 // matters more than coercion.
 const MaterialsUsedSheet = ({ appointment, services, inventory, onClose }: {
-  appointment: { id: string; style?: string | null };
+  appointment: { id: string; style?: string | null; recipe?: RecipeLine[] | null };
   services: Service[];
   inventory: InventoryItem[];
   onClose: () => void;
@@ -24636,7 +24685,15 @@ const MaterialsUsedSheet = ({ appointment, services, inventory, onClose }: {
 
   type Row = ServiceMaterial & { keep: boolean };
   const [rows, setRows] = useState<Row[]>(() => {
-    const seed: ServiceMaterial[] = service?.default_materials ?? [];
+    // Prefer the appointment's hair recipe (carried from the pricing
+    // calculator) — it's the exact bill of materials the stylist priced.
+    // Fall back to the matched service's default_materials otherwise.
+    const fromRecipe: ServiceMaterial[] = Array.isArray(appointment.recipe)
+      ? appointment.recipe.map(l => ({ inventory_item_id: l.itemId, quantity: Number(l.quantity) || 0 }))
+      : [];
+    const seed: ServiceMaterial[] = fromRecipe.length > 0
+      ? fromRecipe
+      : (service?.default_materials ?? []);
     return seed
       .filter(m => itemById.has(m.inventory_item_id))
       .map(m => ({ ...m, keep: true }));
@@ -32097,7 +32154,10 @@ export default function App() {
       hairCost: q.hairCost, hourlyRate: q.hourlyRate, travelFee: q.travelFee,
       addOns: q.addOns, overhead: q.overhead, profitMargin: q.profitMargin,
       tipPct: q.tipPct, deposit: q.deposit, depositType: q.depositType,
-      notes: q.notes
+      notes: q.notes,
+      // Hair recipe (bill of materials) from the calculator / saved quote,
+      // so completing the appointment can deduct exactly what it used.
+      recipe: Array.isArray(q.recipe) ? q.recipe : (Array.isArray(q.inputs?.recipe) ? q.inputs.recipe : undefined),
     };
     setApptPrefill(newAppt);
     setSecondary(null);

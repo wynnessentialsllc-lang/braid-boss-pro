@@ -38,13 +38,22 @@ numbers real instead of estimated.
   recipe is snapshotted onto saved quotes (`inputs.recipe`) and restored
   from quotes/presets on prefill.
 
-**Phase 2b remaining:**
+**Phase 2b shipped:**
+- **Auto-deduct:** the recipe now rides "Book it" → appointment
+  (`handleConvertQuoteToAppt`, appointment form seed + PATCH save). When the
+  appointment is marked completed, the existing **Materials-used sheet**
+  (confirm-before-deduct) seeds from the appointment's recipe instead of
+  guessing from the service's `default_materials`, then deducts via the
+  existing `inventory_apply_movement` path. Reuses the deduction machinery
+  rather than duplicating it, and keeps the stylist's confirm step.
+- **Most-profitable-styles report:** `rankStyleProfitability`
+  (tested in `pricing-profit.test.ts`) + a calculator card ranking saved
+  presets by take-home per hour (with margin), highest first.
+
+**Phase 2b remaining (small):**
 - Add a recipe field to the **style-preset editor** so recipes persist on
-  presets (calculator already reads `preset.recipe`).
-- **Auto-deduct** the recipe via `inventory_apply_movement` on appointment
-  completion (carry recipe through "Book it" → appointment).
-- **Most/least profitable styles** report (rank presets by `$/hr` + margin
-  using `computeProfit`).
+  presets directly (calculator already reads `preset.recipe`; today recipes
+  persist via saved quotes).
 
 - **Data:** a `service_recipe` concept — per service (or per variation),
   a list of `{ inventory_item_id, quantity }`. "Medium Boho Knotless →

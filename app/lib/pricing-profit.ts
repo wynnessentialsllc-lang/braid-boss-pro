@@ -55,6 +55,71 @@ export type ProfitBreakdown = {
   marginPct: number | null;
 };
 
+/** A saved style preset, reduced to the fields profit ranking needs. */
+export type RankableStyle = {
+  id: string;
+  name?: string | null;
+  basePrice?: number | string | null;
+  hairCost?: number | string | null;
+  overhead?: number | string | null;
+  estimatedHours?: number | string | null;
+  hourlyRate?: number | string | null;
+  defaultAddOns?: Array<{ amount?: number | string | null }> | null;
+};
+
+export type RankedStyle = {
+  id: string;
+  name: string;
+  revenue: number;
+  takeHome: number;
+  takeHomePerHour: number | null;
+  marginPct: number | null;
+};
+
+/**
+ * Rank saved style presets by profitability so a stylist can see which
+ * styles actually make money. Revenue is base price + default add-ons;
+ * cost is hair + overhead; hours/labor come from the preset's estimate.
+ * Sorted by take-home per hour (the metric that matters), highest first;
+ * styles with no hours estimate sort last.
+ */
+export const rankStyleProfitability = (
+  styles: RankableStyle[] | null | undefined,
+): RankedStyle[] => {
+  if (!Array.isArray(styles)) return [];
+  const ranked = styles.map((s) => {
+    const addOnsTotal = Array.isArray(s.defaultAddOns)
+      ? s.defaultAddOns.reduce((sum, a) => sum + (Number(a?.amount) || 0), 0)
+      : 0;
+    const revenue = (Number(s.basePrice) || 0) + addOnsTotal;
+    const hours = Number(s.estimatedHours) || 0;
+    const labor = (Number(s.hourlyRate) || 0) * hours;
+    const p = computeProfit({
+      hairCost: Number(s.hairCost) || 0,
+      overhead: Number(s.overhead) || 0,
+      labor,
+      hours,
+      subtotal: revenue,
+      tipAmount: 0,
+    });
+    return {
+      id: s.id,
+      name: (s.name || "").trim() || "Untitled style",
+      revenue: p.revenue,
+      takeHome: p.takeHome,
+      takeHomePerHour: p.takeHomePerHour,
+      marginPct: p.marginPct,
+    };
+  });
+  // Highest $/hr first; null per-hour (no hours estimate) sorts last.
+  return ranked.sort((a, b) => {
+    if (a.takeHomePerHour == null && b.takeHomePerHour == null) return 0;
+    if (a.takeHomePerHour == null) return 1;
+    if (b.takeHomePerHour == null) return -1;
+    return b.takeHomePerHour - a.takeHomePerHour;
+  });
+};
+
 export const computeProfit = (input: ProfitInputs): ProfitBreakdown => {
   const hairCost = Number(input.hairCost) || 0;
   const overhead = Number(input.overhead) || 0;
