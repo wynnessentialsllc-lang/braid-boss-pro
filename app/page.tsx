@@ -14014,6 +14014,8 @@ const PresetsScreen = ({ store, onBack, onUsePreset }) => {
         <PresetEditorSheet
           preset={creating ? blank() : editing}
           isNew={creating}
+          inventory={(store.inventoryItems || []) as InventoryItem[]}
+          currency={store.business?.currency}
           onClose={() => { setEditing(null); setCreating(false); }}
           onSave={async (p) => { await store.upsertPreset({ ...p, updatedAt: new Date().toISOString() }); trackEvent("preset_saved", { category: "feature" }); setEditing(null); setCreating(false); }}
           onDelete={async (id) => { await store.deletePreset(id); setEditing(null); }}
@@ -14053,8 +14055,35 @@ const PresetCard = ({ preset, business, onClick, onUse }) => {
   );
 };
 
-const PresetEditorSheet = ({ preset, isNew, onClose, onSave, onDelete, onUse }) => {
+const PresetEditorSheet = ({ preset, isNew, inventory = [], currency = "USD", onClose, onSave, onDelete, onUse }: {
+  preset: any; isNew: boolean; inventory?: InventoryItem[]; currency?: string;
+  onClose: () => void; onSave: (p: any) => void; onDelete: (id: string) => void; onUse: (p: any) => void;
+}) => {
   const [p, setP] = useState(preset);
+
+  // Hair recipe (bill of materials) on the preset. Auto-fills hair cost
+  // from inventory and rides along when the preset is used in the
+  // calculator / booked (see lib/recipe-cost.ts).
+  const recipe: RecipeLine[] = Array.isArray(p.recipe) ? p.recipe : [];
+  const recipeTotal = recipeCost(recipe); // trivial sum — no memo needed
+  const addRecipeRow = () => {
+    const first = inventory[0];
+    const line = first
+      ? lineFromInventoryItem(uid(), first as any, 1)
+      : { id: uid(), itemId: "", itemName: "", quantity: 1, unitCost: 0 };
+    setP({ ...p, recipe: [...recipe, line] });
+  };
+  const updateRecipeItem = (rowId: string, itemId: string) => {
+    const item = inventory.find(i => i.id === itemId);
+    setP({ ...p, recipe: recipe.map(l => l.id === rowId
+      ? (item ? lineFromInventoryItem(rowId, item as any, l.quantity) : { ...l, itemId: "" })
+      : l) });
+  };
+  const updateRecipeQty = (rowId: string, qty: string) =>
+    setP({ ...p, recipe: recipe.map(l => l.id === rowId ? { ...l, quantity: parseMoney(qty) } : l) });
+  const removeRecipeRow = (rowId: string) =>
+    setP({ ...p, recipe: recipe.filter(l => l.id !== rowId) });
+  const applyRecipeToHairCost = () => setP({ ...p, hairCost: recipeTotal });
 
   const updateAddOn = (i, key, val) => {
     const list = [...(p.defaultAddOns || [])];
@@ -14092,6 +14121,37 @@ const PresetEditorSheet = ({ preset, isNew, onClose, onSave, onDelete, onUse }) 
           <Field label="Overhead/hr"><MoneyInput value={p.overhead ?? ""} onChange={(v) => setP({ ...p, overhead: parseMoney(v) })} /></Field>
           <Field label="Profit margin"><MoneyInput value={p.profitMargin ?? ""} onChange={(v) => setP({ ...p, profitMargin: parseMoney(v) })} /></Field>
         </div>
+
+        <SectionTitle>Hair recipe</SectionTitle>
+        {inventory.length === 0 ? (
+          <p className="text-xs" style={{ color: C.muted }}>
+            Add inventory items (with unit costs) to build a recipe and auto-fill hair cost.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {recipe.map(l => (
+              <div key={l.id} className="grid grid-cols-[1fr_72px_36px] gap-2 items-center">
+                <Select
+                  value={l.itemId}
+                  onChange={e => updateRecipeItem(l.id, e.target.value)}
+                  options={inventory.map(i => ({ value: i.id, label: `${i.name || "Item"} — ${fmtMoney(Number(i.unitCost) || 0, currency)}` }))}
+                />
+                <MoneyInput prefix="" suffix="×" value={l.quantity} onChange={v => updateRecipeQty(l.id, v)} />
+                <button type="button" onClick={() => removeRecipeRow(l.id)} className="rounded-xl p-2" style={{ background: "rgba(156,61,46,0.1)", color: C.danger }}><X size={16} /></button>
+              </div>
+            ))}
+            <div className="flex items-center justify-between pt-1">
+              <button type="button" onClick={addRecipeRow} className="flex items-center gap-1 text-xs font-semibold" style={{ color: C.goldDeep }}>
+                <Plus size={14} /> Add item
+              </button>
+              {recipe.length > 0 && (
+                <button type="button" onClick={applyRecipeToHairCost} className="text-xs font-semibold" style={{ color: C.goldDeep }}>
+                  Set hair cost → {fmtMoney(recipeTotal, currency)}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         <SectionTitle>Default add-ons</SectionTitle>
 

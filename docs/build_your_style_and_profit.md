@@ -51,7 +51,7 @@ numbers real instead of estimated.
   presets by take-home per hour (with margin), highest first.
 
 **Phase 2b remaining (small):**
-- Add a recipe field to the **style-preset editor** so recipes persist on
+- ✅ Recipe field added to the **style-preset editor** (auto-fills hair cost; rides into the calculator + Book-it). Phase 2 complete.
   presets directly (calculator already reads `preset.recipe`; today recipes
   persist via saved quotes).
 
