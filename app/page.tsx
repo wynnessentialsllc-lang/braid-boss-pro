@@ -184,6 +184,10 @@ import {
   ACV_EXTRA_ID,
   ACV_EXTRA_KIND,
   ACV_EXTRA_NAME,
+  CUSTOM_COLOR_EXTRA_ID,
+  CUSTOM_COLOR_EXTRA_KIND,
+  CUSTOM_COLOR_EXTRA_NAME,
+  CUSTOM_COLOR_DEFAULT_PRICE,
   formatServicePrice,
   resolveVariationPricing,
   suggestRebookWeeks,
@@ -5602,21 +5606,48 @@ const StyleCustomizationSection = ({
   const acvExtra = extras.find(e => e?.kind === ACV_EXTRA_KIND || e?.id === ACV_EXTRA_ID) || null;
   const acvOn = !!acvExtra && acvExtra.active !== false;
   const acvPrice = Number(acvExtra?.price) || 0;
-  const customExtras = extras.filter(e => e?.kind !== ACV_EXTRA_KIND && e?.id !== ACV_EXTRA_ID);
-  // Writing generic add-ons must never drop the managed ACV entry, so
-  // re-append it on every change.
-  const setExtras = (next: any[]) => set({ extras: [...next, ...(acvExtra ? [acvExtra] : [])] });
+  // Customized braiding hair color — another managed extra that
+  // mirrors the ACV shape (toggle + price). Default $25.
+  const customColorExtra = extras.find(
+    e => e?.kind === CUSTOM_COLOR_EXTRA_KIND || e?.id === CUSTOM_COLOR_EXTRA_ID,
+  ) || null;
+  const customColorOn = !!customColorExtra && customColorExtra.active !== false;
+  const customColorPrice = Number(customColorExtra?.price) || 0;
+  const isManagedExtra = (e: any) =>
+    e?.kind === ACV_EXTRA_KIND || e?.id === ACV_EXTRA_ID
+    || e?.kind === CUSTOM_COLOR_EXTRA_KIND || e?.id === CUSTOM_COLOR_EXTRA_ID;
+  const customExtras = extras.filter(e => !isManagedExtra(e));
+  const managedExtras = extras.filter(isManagedExtra);
+  // Writing generic add-ons must never drop the managed entries, so
+  // re-append them on every change.
+  const setExtras = (next: any[]) => set({ extras: [...next, ...managedExtras] });
   const writeAcv = (patch: any) => {
     const base = acvExtra || {
       id: ACV_EXTRA_ID, kind: ACV_EXTRA_KIND, name: ACV_EXTRA_NAME,
       description: null, price: 0, duration_hours_delta: 0,
       include_in_deposit: false, active: true,
     };
-    set({ extras: [...customExtras, { ...base, ...patch }] });
+    const others = extras.filter(e => !(e?.kind === ACV_EXTRA_KIND || e?.id === ACV_EXTRA_ID));
+    set({ extras: [...others, { ...base, ...patch }] });
   };
   const toggleAcv = (v: boolean) => {
     if (v) writeAcv({ active: true });
-    else if (acvExtra) set({ extras: [...customExtras, { ...acvExtra, active: false }] });
+    else if (acvExtra) writeAcv({ active: false });
+  };
+  const writeCustomColor = (patch: any) => {
+    const base = customColorExtra || {
+      id: CUSTOM_COLOR_EXTRA_ID, kind: CUSTOM_COLOR_EXTRA_KIND, name: CUSTOM_COLOR_EXTRA_NAME,
+      description: null, price: CUSTOM_COLOR_DEFAULT_PRICE, duration_hours_delta: 0,
+      include_in_deposit: false, active: true,
+    };
+    const others = extras.filter(
+      e => !(e?.kind === CUSTOM_COLOR_EXTRA_KIND || e?.id === CUSTOM_COLOR_EXTRA_ID),
+    );
+    set({ extras: [...others, { ...base, ...patch }] });
+  };
+  const toggleCustomColor = (v: boolean) => {
+    if (v) writeCustomColor({ active: true });
+    else if (customColorExtra) writeCustomColor({ active: false });
   };
 
   const fieldLabel = "block text-[11px] font-bold uppercase tracking-wider mb-1.5";
@@ -5688,7 +5719,7 @@ const StyleCustomizationSection = ({
               <CustomToggle
                 on={!!form.allow_client_hair_color_selection}
                 onChange={v => set({ allow_client_hair_color_selection: v })}
-                label="Let clients choose braiding hair color"
+                label="Let clients choose basic braiding hair color"
                 help="They pick from the shades you carry — no surprises at the chair."
               />
               {form.allow_client_hair_color_selection && (
@@ -5700,6 +5731,42 @@ const StyleCustomizationSection = ({
                     suggestions={DEFAULT_HAIR_COLORS}
                     suggestLabel="Use suggested colors"
                   />
+                </div>
+              )}
+
+              {/* Customized braiding hair color — managed extra. Clients
+                  describe a combo (e.g. "1B/30/27") and can upload an
+                  inspiration photo. Stacks on the basic-color picker and
+                  rides the standard add-on pricing rails. */}
+              <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
+              <CustomToggle
+                on={customColorOn}
+                onChange={toggleCustomColor}
+                label="Offer customized braiding hair color"
+                help="Clients describe their color combo and can upload an inspiration photo."
+              />
+              {customColorOn && (
+                <div className="mb-3 pl-[54px]">
+                  <span className="block text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: C.muted }}>
+                    Price
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      value={customColorPrice}
+                      onChange={e => writeCustomColor({ price: Math.max(0, Number(e.target.value) || 0) })}
+                      className="w-28 p-2 rounded-lg border text-[13px]"
+                      style={{ borderColor: C.hairline, background: C.paper }}
+                    />
+                  </div>
+                  <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+                    {customColorPrice > 0
+                      ? `Clients see it as a +$${customColorPrice.toFixed(2)} add-on at booking.`
+                      : "Clients see it as a free option they can check at booking."}
+                  </p>
                 </div>
               )}
 
@@ -20797,7 +20864,8 @@ const ServicesScreen = ({
                                     {(() => {
                                       // Don't count the managed ACV entry as a generic add-on.
                                       const n = (Array.isArray(s.extras) ? s.extras : [])
-                                        .filter((x: any) => x.kind !== ACV_EXTRA_KIND && x.id !== ACV_EXTRA_ID).length;
+                                        .filter((x: any) => x.kind !== ACV_EXTRA_KIND && x.id !== ACV_EXTRA_ID
+                                          && x.kind !== CUSTOM_COLOR_EXTRA_KIND && x.id !== CUSTOM_COLOR_EXTRA_ID).length;
                                       return n > 0 ? ` · ${n} add-on${n === 1 ? "" : "s"}` : "";
                                     })()}
                                   </p>
@@ -21302,13 +21370,13 @@ const ServicesScreen = ({
                   Add
                 </Button>
               </div>
-              {(editing.extras || []).filter(x => x.kind !== ACV_EXTRA_KIND && x.id !== ACV_EXTRA_ID).length === 0 ? (
+              {(editing.extras || []).filter(x => x.kind !== ACV_EXTRA_KIND && x.id !== ACV_EXTRA_ID && x.kind !== CUSTOM_COLOR_EXTRA_KIND && x.id !== CUSTOM_COLOR_EXTRA_ID).length === 0 ? (
                 <p className="text-[11px]" style={{ color: C.muted }}>
                   No add-ons yet. Examples: "Waist length +$30", "Curly pieces +$25 / +0.5h", "Triangle parts +$15".
                 </p>
               ) : (
                 <div className="space-y-3">
-                  {(editing.extras || []).filter(x => x.kind !== ACV_EXTRA_KIND && x.id !== ACV_EXTRA_ID).map((e, idx) => {
+                  {(editing.extras || []).filter(x => x.kind !== ACV_EXTRA_KIND && x.id !== ACV_EXTRA_ID && x.kind !== CUSTOM_COLOR_EXTRA_KIND && x.id !== CUSTOM_COLOR_EXTRA_ID).map((e, idx) => {
                     const updateExtra = (patch: Partial<ServiceExtra>) =>
                       setEditing(prev => prev ? {
                         ...prev,
