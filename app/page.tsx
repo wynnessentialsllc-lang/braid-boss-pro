@@ -16811,6 +16811,7 @@ export type NotificationTarget =
   | { kind: "reviews" }
   | { kind: "inbox" }
   | { kind: "packages" }
+  | { kind: "styleRequests" }
   | { kind: "booking_approval"; requestId: string }
   | { kind: "email_log"; queueId: string }
   | { kind: "contract_view"; contractId: string };
@@ -17156,6 +17157,21 @@ const useNotifications = (store: any) => {
               target: { kind: "inbox" } as const,
             };
           }
+          // New "Build your style" request → actionable, appointment-
+          // category bell so it badges. Tap → opens Style requests.
+          if (cat === "style_request") {
+            return {
+              id: String(r.id),
+              category: "appointment" as NotifCategory,
+              kind: "style_request",
+              tone: "gold" as const,
+              icon: <Sparkles size={16} style={{ color: C.goldDeep }} />,
+              title: String(r.title || "New style request"),
+              body: String(r.body || ""),
+              meta: r.created_at ? fmtRelative(r.created_at) : undefined,
+              target: { kind: "styleRequests" } as const,
+            };
+          }
           if (cat === "contract") {
             const contractId = d.bookingContractId || null;
             const apptId = d.appointmentId || null;
@@ -17381,6 +17397,9 @@ const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
       break;
     case "packages":
       ctx.setSecondary("packages");
+      break;
+    case "styleRequests":
+      ctx.setSecondary("styleRequests");
       break;
     case "schedule":
       ctx.setActive("schedule");
