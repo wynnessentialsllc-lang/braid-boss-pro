@@ -114,8 +114,15 @@ export const detectClientInfo = (): { device: string; browser: string } => {
   };
 };
 
-// Upload an optional screenshot to the public support bucket. Returns
-// the public URL, or null on any failure (the report still submits).
+// Upload an optional screenshot to the (private) support bucket. Returns
+// the object PATH, or null on any failure (the report still submits).
+//
+// The bucket is private — support screenshots can contain client PII
+// visible on-screen, so they must not be world-readable by URL. Nothing
+// in the app renders this value; the support team views the object via
+// the Supabase dashboard (full access) or a future signed-URL admin
+// view, so storing the path (re-signable anytime) rather than a public
+// URL is both safer and more useful.
 export const uploadSupportScreenshot = async (
   userId: string,
   file: File,
@@ -131,8 +138,7 @@ export const uploadSupportScreenshot = async (
       cacheControl: "3600",
     });
     if (error) return null;
-    const { data } = supabase.storage.from(SCREENSHOT_BUCKET).getPublicUrl(path);
-    return data?.publicUrl || null;
+    return path;
   } catch {
     return null;
   }
