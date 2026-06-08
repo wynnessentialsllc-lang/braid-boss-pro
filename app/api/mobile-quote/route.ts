@@ -17,10 +17,10 @@ import {
   calculateTravelFee,
   haversineMiles,
   isInServiceArea,
-  normalizeZip,
   MOBILE_FEE_MODELS,
   type MobileFeeModel,
 } from "../../lib/mobile-service";
+import { geocodeAddress } from "../../lib/mapbox-geocode";
 import { rateLimit, clientIp } from "../../lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -39,46 +39,6 @@ type Body = {
   slug?: string;
   service_id?: string;
   address?: string;
-};
-
-type GeocodeHit = { lat: number; lng: number; zip: string; label: string };
-
-const geocodeAddress = async (
-  token: string, address: string,
-): Promise<GeocodeHit | null> => {
-  // Constrain to US addresses + place types we care about. The Mapbox
-  // free tier doesn't charge differently for parameters; this just
-  // shrinks the candidate list.
-  const url = new URL(
-    `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json`,
-  );
-  url.searchParams.set("access_token", token);
-  url.searchParams.set("country", "us");
-  url.searchParams.set("types", "address,postcode,place");
-  url.searchParams.set("limit", "1");
-  url.searchParams.set("autocomplete", "false");
-
-  const res = await fetch(url.toString(), { method: "GET" });
-  if (!res.ok) return null;
-  const body = await res.json().catch(() => null) as any;
-  const feature = body?.features?.[0];
-  if (!feature || !Array.isArray(feature.center) || feature.center.length < 2) return null;
-
-  const [lng, lat] = feature.center as [number, number];
-  // Mapbox returns the postcode in either feature.context (when the
-  // hit is an address) or feature.text (when the hit is the postcode
-  // itself). normalizeZip handles both shapes.
-  const contextZip = Array.isArray(feature.context)
-    ? feature.context.find((c: any) => typeof c?.id === "string" && c.id.startsWith("postcode"))?.text
-    : null;
-  const zip = normalizeZip(contextZip || feature.text || feature.place_name);
-
-  return {
-    lat: Number(lat),
-    lng: Number(lng),
-    zip,
-    label: String(feature.place_name || address).slice(0, 200),
-  };
 };
 
 export async function POST(req: Request) {
@@ -192,11 +152,33 @@ export async function POST(req: Request) {
     return fail(500, "This service's travel pricing is misconfigured.");
   }
 
+  // Fetch the stylist's saved city/state to give Mapbox enough context
+  // to lock onto a street name when the client typed "1234 Knowlton
+  // St" without their city. Plus pass the base coords as a proximity
+  // bias so nearby hits win over identically-named streets elsewhere.
+  let ctxCity: string | null = null;
+  let ctxState: string | null = null;
+  try {
+    const { data: linkRow } = await admin
+      .from("booking_links")
+      .select("business_city, business_state")
+      .eq("user_id", cfgRow.user_id)
+      .maybeSingle();
+    ctxCity = linkRow?.business_city ?? null;
+    ctxState = linkRow?.business_state ?? null;
+  } catch {
+    /* fall through — proceed without city/state context */
+  }
+
   // Geocode + distance. A null geocode (Mapbox couldn't resolve the
   // string) is a soft 422 so the client can retype the address.
-  let hit: GeocodeHit | null = null;
+  let hit: Awaited<ReturnType<typeof geocodeAddress>> = null;
   try {
-    hit = await geocodeAddress(mapboxToken, address);
+    hit = await geocodeAddress(mapboxToken, address, {
+      city: ctxCity,
+      state: ctxState,
+      proximity: { lat: cfgRow.base_lat, lng: cfgRow.base_lng },
+    });
   } catch {
     return fail(502, "Couldn't look up that address. Please try again.");
   }

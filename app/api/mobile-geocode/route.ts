@@ -8,7 +8,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { normalizeZip } from "../../lib/mobile-service";
+import { geocodeAddress } from "../../lib/mapbox-geocode";
 import { rateLimit, clientIp } from "../../lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -77,34 +77,41 @@ export async function POST(req: Request) {
     );
   }
 
-  const url = new URL(
-    `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json`,
-  );
-  url.searchParams.set("access_token", mapboxToken);
-  url.searchParams.set("country", "us");
-  url.searchParams.set("types", "address,postcode,place");
-  url.searchParams.set("limit", "1");
-  url.searchParams.set("autocomplete", "false");
+  // Auto-augment a bare street address with the stylist's saved
+  // city + state from booking_links so "5309 Knowlton St" resolves
+  // instead of failing because the same street name exists in other
+  // states. Best-effort: if the lookup fails, we still geocode the
+  // raw input verbatim.
+  let ctxCity: string | null = null;
+  let ctxState: string | null = null;
+  try {
+    const supabaseUrl2 = process.env.NEXT_PUBLIC_SUPABASE_URL || env("SUPABASE_URL");
+    const serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
+    const admin = createClient(supabaseUrl2, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data: linkRow } = await admin
+      .from("booking_links")
+      .select("business_city, business_state, mobile_base_lat, mobile_base_lng")
+      .eq("user_id", userId)
+      .maybeSingle();
+    ctxCity = linkRow?.business_city ?? null;
+    ctxState = linkRow?.business_state ?? null;
+  } catch {
+    /* fall through — we still try without context */
+  }
 
   try {
-    const res = await fetch(url.toString(), { method: "GET" });
-    if (!res.ok) return fail(502, "Address lookup failed. Please try again.");
-    const data = await res.json().catch(() => null) as any;
-    const feature = data?.features?.[0];
-    if (!feature || !Array.isArray(feature.center) || feature.center.length < 2) {
-      return fail(422, "We couldn't find that address — try adding a city / zip.");
-    }
-    const [lng, lat] = feature.center as [number, number];
-    const contextZip = Array.isArray(feature.context)
-      ? feature.context.find((c: any) => typeof c?.id === "string" && c.id.startsWith("postcode"))?.text
-      : null;
-    const zip = normalizeZip(contextZip || feature.text || feature.place_name);
+    const hit = await geocodeAddress(mapboxToken, address, {
+      city: ctxCity, state: ctxState,
+    });
+    if (!hit) return fail(422, "We couldn't find that address — try adding a city / zip.");
     return NextResponse.json({
       ok: true,
-      lat: Number(lat),
-      lng: Number(lng),
-      zip: zip || null,
-      label: String(feature.place_name || address).slice(0, 200),
+      lat: hit.lat,
+      lng: hit.lng,
+      zip: hit.zip || null,
+      label: hit.label,
     });
   } catch {
     return fail(502, "Address lookup failed. Please try again.");
