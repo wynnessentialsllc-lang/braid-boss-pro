@@ -261,8 +261,11 @@ export const CartDrawer = () => {
             onClick={closeCart}
             aria-label="Close cart"
             style={{
-              width: 36,
-              height: 36,
+              width: 44,
+              height: 44,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
               borderRadius: 999,
               background: "transparent",
               border: 0,
@@ -461,8 +464,8 @@ const CartRow = ({
             <button
               type="button"
               onClick={() => onChange(item.quantity - 1)}
-              aria-label="Decrease"
-              style={{ padding: "6px 12px", background: "transparent", border: 0, color: C.ink, fontWeight: 700, cursor: "pointer" }}
+              aria-label="Decrease quantity"
+              style={{ minWidth: 44, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 12px", background: "transparent", border: 0, color: C.ink, fontWeight: 700, cursor: "pointer" }}
             >
               −
             </button>
@@ -472,10 +475,15 @@ const CartRow = ({
             <button
               type="button"
               onClick={() => onChange(item.quantity + 1)}
-              aria-label="Increase"
+              aria-label="Increase quantity"
               disabled={atMax}
               style={{
-                padding: "6px 12px",
+                minWidth: 44,
+                minHeight: 44,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "0 12px",
                 background: "transparent",
                 border: 0,
                 color: atMax ? C.mutedSoft : C.ink,

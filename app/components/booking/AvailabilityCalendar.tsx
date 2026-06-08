@@ -275,7 +275,25 @@ const CalendarCell = ({ day, status, loading, disabled, selected, onClick }: Cel
         transform: selected ? "scale(1.04)" : "scale(1)",
       }}
     >
-      {day}
+      <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2 }}>
+        <span>{day}</span>
+        {/* Non-color cue so "Open" vs "Limited" isn't conveyed by hue
+            alone (WCAG 1.4.1): a solid dot for open, a hollow ring with a
+            dark-amber edge for limited. Hidden when the cell is selected
+            (its own fill already signals state) or still loading. */}
+        {!loading && !selected && (status === "available" || status === "limited") && (
+          <span
+            aria-hidden
+            style={{
+              width: 5,
+              height: 5,
+              borderRadius: 99,
+              background: status === "available" ? C.goldDeep : "transparent",
+              border: status === "limited" ? "1.5px solid #B45309" : "none",
+            }}
+          />
+        )}
+      </span>
     </button>
   );
 };
