@@ -3678,6 +3678,26 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
       ? (link!.gallery_photos as any[]).map((p, i) => ({ url: p.url, path: p.path || "", sort: typeof p.sort === "number" ? p.sort : i, serviceId: p.serviceId || undefined, label: p.label || undefined }))
       : []
   );
+  // Mobile services — stylist-wide travel base + radius + zip blocklist.
+  // Geocoding happens on save (we call /api/mobile-geocode) so the
+  // public quote route doesn't re-resolve the address on every booking.
+  const [mobileBaseAddress, setMobileBaseAddress] = useState<string>(link?.mobile_base_address || "");
+  const [mobileBaseLat, setMobileBaseLat] = useState<number | null>(
+    link?.mobile_base_lat != null ? Number(link.mobile_base_lat) : null,
+  );
+  const [mobileBaseLng, setMobileBaseLng] = useState<number | null>(
+    link?.mobile_base_lng != null ? Number(link.mobile_base_lng) : null,
+  );
+  const [mobileBaseZip, setMobileBaseZip] = useState<string>(link?.mobile_base_zip || "");
+  const [mobileRadiusMiles, setMobileRadiusMiles] = useState<string>(
+    link?.mobile_radius_miles != null ? String(link.mobile_radius_miles) : "",
+  );
+  const [mobileBlockedZips, setMobileBlockedZips] = useState<string[]>(
+    Array.isArray(link?.mobile_blocked_zips) ? link.mobile_blocked_zips : [],
+  );
+  const [mobileBlockedZipInput, setMobileBlockedZipInput] = useState<string>("");
+  const [mobileGeocoding, setMobileGeocoding] = useState(false);
+  const [mobileGeocodeError, setMobileGeocodeError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [galleryUploading, setGalleryUploading] = useState(false);
@@ -3727,6 +3747,14 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         ? (link!.gallery_photos as any[]).map((p, i) => ({ url: p.url, path: p.path || "", sort: typeof p.sort === "number" ? p.sort : i, serviceId: p.serviceId || undefined, label: p.label || undefined }))
         : []
     );
+    setMobileBaseAddress(link?.mobile_base_address || "");
+    setMobileBaseLat(link?.mobile_base_lat != null ? Number(link.mobile_base_lat) : null);
+    setMobileBaseLng(link?.mobile_base_lng != null ? Number(link.mobile_base_lng) : null);
+    setMobileBaseZip(link?.mobile_base_zip || "");
+    setMobileRadiusMiles(link?.mobile_radius_miles != null ? String(link.mobile_radius_miles) : "");
+    setMobileBlockedZips(Array.isArray(link?.mobile_blocked_zips) ? link.mobile_blocked_zips : []);
+    setMobileBlockedZipInput("");
+    setMobileGeocodeError(null);
     setErr(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot when the sheet opens
   }, [open, link?.slug]);
@@ -3816,6 +3844,22 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
           ...(p.serviceId ? { serviceId: p.serviceId } : {}),
           ...(p.label && p.label.trim() ? { label: p.label.trim() } : {}),
         })),
+        // Mobile services. Coords are written when the stylist clicks
+        // "Verify address" — if the field is blank we clear them so a
+        // half-typed address can't quote an old base location.
+        mobile_base_address: mobileBaseAddress.trim() || null,
+        mobile_base_lat: mobileBaseAddress.trim() ? mobileBaseLat : null,
+        mobile_base_lng: mobileBaseAddress.trim() ? mobileBaseLng : null,
+        mobile_base_zip: mobileBaseAddress.trim() ? (mobileBaseZip.trim() || null) : null,
+        mobile_radius_miles: (() => {
+          const n = Number(mobileRadiusMiles);
+          if (!Number.isFinite(n) || n <= 0) return 0;
+          return Math.min(500, Math.max(0, Math.round(n * 100) / 100));
+        })(),
+        mobile_blocked_zips: mobileBlockedZips
+          .map(z => (z || "").trim())
+          .filter(Boolean)
+          .slice(0, 100),
       };
       const { error } = await supabase
         .from("booking_links")
@@ -4216,6 +4260,165 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
             <Input value={businessState} onChange={(e) => setBusinessState(e.target.value)} placeholder="TX" maxLength={2} />
           </Field>
         </div>
+
+        {/* Mobile Services panel — stylist-wide travel base + radius
+            + blocklist. Each individual service is opted in via its
+            own "Mobile service" toggle in the service editor; this
+            section is the area the public quote route checks against. */}
+        <Card className="p-3.5" style={{ borderColor: C.hairline }}>
+          <div className="flex items-center gap-2 mb-1">
+            <span style={{
+              width: 28, height: 28, borderRadius: 8, display: "grid", placeItems: "center",
+              background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`, color: "#FFFFFF",
+            }}>
+              <MapPin size={14} />
+            </span>
+            <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+              Mobile services
+            </p>
+          </div>
+          <p className="text-[11px] mb-3" style={{ color: C.muted, lineHeight: 1.5 }}>
+            Set your travel base + radius. Clients booking a mobile service enter their address — anything outside your radius (or on the blocked-zip list) is automatically declined.
+          </p>
+
+          <Field label="Travel base address" hint="The address we measure travel distance from (your home / studio).">
+            <div className="flex gap-2">
+              <Input
+                value={mobileBaseAddress}
+                onChange={(e) => {
+                  setMobileBaseAddress(e.target.value);
+                  // Clear coords until re-verified so a half-typed
+                  // address can't piggyback on the old geocode.
+                  setMobileBaseLat(null);
+                  setMobileBaseLng(null);
+                  setMobileBaseZip("");
+                }}
+                placeholder="1234 Main St, Dallas, TX 75201"
+              />
+              <button
+                type="button"
+                disabled={mobileGeocoding || !mobileBaseAddress.trim()}
+                onClick={async () => {
+                  setMobileGeocodeError(null);
+                  setMobileGeocoding(true);
+                  try {
+                    const supabase = getSupabase();
+                    const { data: sess } = await supabase.auth.getSession();
+                    const token = sess?.session?.access_token || "";
+                    const res = await fetch("/api/mobile-geocode", {
+                      method: "POST",
+                      headers: {
+                        "content-type": "application/json",
+                        ...(token ? { authorization: `Bearer ${token}` } : {}),
+                      },
+                      body: JSON.stringify({ address: mobileBaseAddress.trim() }),
+                    });
+                    const body = await res.json().catch(() => ({}));
+                    if (!res.ok || !body?.lat || !body?.lng) {
+                      throw new Error(body?.error || "Couldn't find that address.");
+                    }
+                    setMobileBaseLat(Number(body.lat));
+                    setMobileBaseLng(Number(body.lng));
+                    setMobileBaseZip(String(body.zip || ""));
+                    if (body.label) setMobileBaseAddress(String(body.label));
+                  } catch (e: any) {
+                    setMobileGeocodeError(e?.message || "Couldn't verify that address.");
+                  } finally {
+                    setMobileGeocoding(false);
+                  }
+                }}
+                className="px-3 rounded-lg text-[12px] font-semibold whitespace-nowrap"
+                style={{
+                  background: C.espresso, color: "#FFFFFF",
+                  opacity: mobileGeocoding || !mobileBaseAddress.trim() ? 0.6 : 1,
+                  border: "none",
+                }}
+              >
+                {mobileGeocoding ? "Verifying…" : mobileBaseLat != null ? "Re-verify" : "Verify"}
+              </button>
+            </div>
+          </Field>
+          {mobileBaseLat != null && mobileBaseLng != null && (
+            <p className="text-[11px] mt-1" style={{ color: C.success }}>
+              ✓ Verified{mobileBaseZip ? ` · ${mobileBaseZip}` : ""}
+            </p>
+          )}
+          {mobileGeocodeError && (
+            <p className="text-[11px] mt-1" style={{ color: C.danger }}>{mobileGeocodeError}</p>
+          )}
+
+          <div className="mt-3">
+            <Field label="Service radius (miles)" hint="Clients beyond this distance see a friendly “outside service area” message.">
+              <Input
+                type="number"
+                inputMode="decimal"
+                min={0}
+                max={500}
+                value={mobileRadiusMiles}
+                onChange={(e) => setMobileRadiusMiles(e.target.value)}
+                placeholder="15"
+              />
+            </Field>
+          </div>
+
+          <div className="mt-3">
+            <p className="text-[11px] font-bold uppercase mb-1" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+              Blocked zip codes
+            </p>
+            <p className="text-[11px] mb-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+              Within radius but not somewhere you'll travel? Add zips to refuse. Comma or Enter separates entries.
+            </p>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {mobileBlockedZips.map((z, i) => (
+                <span key={`${z}_${i}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[12px]"
+                  style={{ border: `1px solid ${C.hairline}`, background: C.paper, color: C.espresso }}>
+                  {z}
+                  <button
+                    type="button"
+                    onClick={() => setMobileBlockedZips(mobileBlockedZips.filter((_, idx) => idx !== i))}
+                    style={{ background: "transparent", border: "none", color: C.muted, cursor: "pointer", padding: 0 }}
+                    aria-label={`Remove ${z}`}
+                  >×</button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                value={mobileBlockedZipInput}
+                onChange={(e) => setMobileBlockedZipInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === ",") {
+                    e.preventDefault();
+                    const raw = mobileBlockedZipInput.trim().replace(/[, ]+$/, "");
+                    const parts = raw.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+                    if (parts.length) {
+                      const merged = Array.from(new Set([...mobileBlockedZips, ...parts])).slice(0, 100);
+                      setMobileBlockedZips(merged);
+                    }
+                    setMobileBlockedZipInput("");
+                  }
+                }}
+                placeholder="e.g. 75201, 75204"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const parts = mobileBlockedZipInput.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+                  if (parts.length) {
+                    const merged = Array.from(new Set([...mobileBlockedZips, ...parts])).slice(0, 100);
+                    setMobileBlockedZips(merged);
+                  }
+                  setMobileBlockedZipInput("");
+                }}
+                className="px-3 rounded-lg text-[12px] font-semibold whitespace-nowrap"
+                style={{ background: C.paper, color: C.espresso, border: `1px solid ${C.hairline}` }}
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </Card>
+
         <Field label="Years in business" hint="Optional. Surfaces under your name as social proof.">
           <Input
             type="number"
@@ -5959,6 +6162,259 @@ const StyleCustomizationSection = ({
   );
 };
 
+// Mobile Services — per-service editor. Sibling of StyleCustomization
+// so the editor groups all "client-facing service options" under one
+// vertical column. Toggle gates the whole section; flipping it off
+// leaves the saved fee config intact so flipping back on doesn't lose
+// the stylist's work.
+const MobileServiceSection = ({
+  form, onChange,
+}: { form: any; onChange: (next: any) => void }) => {
+  const [open, setOpen] = useState(false);
+  const set = (patch: any) => onChange({ ...form, ...patch });
+  const enabled = !!form.mobile_service;
+  const model: "flat" | "per_mile" | "hybrid" | "tiered" = form.mobile_fee_model || "flat";
+  const bands: Array<{ max_miles: number; fee: number }> = Array.isArray(form.mobile_tiered_bands)
+    ? form.mobile_tiered_bands : [];
+
+  const fieldLabel = "block text-[11px] font-bold uppercase tracking-wider mb-1.5";
+  const inputCls = "w-full p-2 rounded-lg border text-[13px]";
+  const inputStyle = { borderColor: C.hairline, background: C.paper } as React.CSSProperties;
+
+  const setBand = (i: number, patch: Partial<{ max_miles: number; fee: number }>) => {
+    const next = bands.map((b, idx) => idx === i ? { ...b, ...patch } : b);
+    set({ mobile_tiered_bands: next });
+  };
+  const addBand = () => {
+    const last = bands[bands.length - 1];
+    const nextMiles = last ? Math.max(1, Math.round(Number(last.max_miles) || 0) + 5) : 5;
+    set({ mobile_tiered_bands: [...bands, { max_miles: nextMiles, fee: 0 }] });
+  };
+  const removeBand = (i: number) => {
+    set({ mobile_tiered_bands: bands.filter((_, idx) => idx !== i) });
+  };
+
+  return (
+    <div className="mb-3 rounded-xl border overflow-hidden" style={{ borderColor: C.hairline, background: C.paper }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-3 p-3.5"
+        style={{ background: "transparent", border: "none" }}
+      >
+        <span style={{
+          width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+          display: "grid", placeItems: "center",
+          background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`, color: "#FFFFFF",
+        }}>
+          <MapPin size={16} />
+        </span>
+        <span className="flex-1 min-w-0 text-left">
+          <span className="block text-[14px] font-semibold" style={{ color: C.espresso }}>
+            Mobile service
+          </span>
+          <span className="block text-[11px]" style={{ color: C.muted }}>
+            {enabled
+              ? `On · ${model === "flat" ? "Flat fee" : model === "per_mile" ? "Per mile" : model === "hybrid" ? "Free zone + per mile" : "Tiered by distance"}`
+              : "Off — this service is studio-only"}
+          </span>
+        </span>
+        {open ? <ChevronUp size={18} style={{ color: C.muted }} /> : <ChevronDown size={18} style={{ color: C.muted }} />}
+      </button>
+
+      {open && (
+        <div className="px-3.5 pb-4" style={{ borderTop: `1px solid ${C.hairline}` }}>
+          <div className="pt-1">
+            <CustomToggle
+              on={enabled}
+              onChange={v => set({ mobile_service: v })}
+              label="Offer this service at the client's address"
+              help="Set your travel base + radius once under Customize booking page → Mobile services."
+            />
+          </div>
+
+          {enabled && (
+            <div>
+              <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "8px 0" }} />
+
+              <div className="mb-3">
+                <label className={fieldLabel} style={{ color: C.coffee }}>Travel fee model</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { key: "flat",     label: "Flat fee",     desc: "One price per trip" },
+                    { key: "per_mile", label: "Per mile",     desc: "$ × miles from base" },
+                    { key: "hybrid",   label: "Free + per mi", desc: "Free within X mi, then $/mi" },
+                    { key: "tiered",   label: "Tiered",       desc: "Bands by distance" },
+                  ] as const).map(opt => {
+                    const on = model === opt.key;
+                    return (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => set({ mobile_fee_model: opt.key })}
+                        className="text-left p-2 rounded-lg"
+                        style={{
+                          border: `1.5px solid ${on ? C.goldDeep : C.hairline}`,
+                          background: on ? C.cream : C.paper,
+                        }}
+                      >
+                        <span className="block text-[12px] font-semibold" style={{ color: C.espresso }}>
+                          {opt.label}
+                        </span>
+                        <span className="block text-[10px]" style={{ color: C.muted }}>
+                          {opt.desc}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {model === "flat" && (
+                <div className="mb-3">
+                  <label className={fieldLabel} style={{ color: C.coffee }}>Flat travel fee</label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
+                    <input
+                      type="number" inputMode="decimal" min={0}
+                      value={Number(form.mobile_flat_fee) || 0}
+                      onChange={e => set({ mobile_flat_fee: Math.max(0, Number(e.target.value) || 0) })}
+                      className="w-32 p-2 rounded-lg border text-[13px]"
+                      style={inputStyle}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {model === "per_mile" && (
+                <div className="mb-3">
+                  <label className={fieldLabel} style={{ color: C.coffee }}>Per-mile rate</label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
+                    <input
+                      type="number" inputMode="decimal" min={0}
+                      value={Number(form.mobile_per_mile_fee) || 0}
+                      onChange={e => set({ mobile_per_mile_fee: Math.max(0, Number(e.target.value) || 0) })}
+                      className="w-32 p-2 rounded-lg border text-[13px]"
+                      style={inputStyle}
+                    />
+                    <span className="text-[12px]" style={{ color: C.muted }}>per mile</span>
+                  </div>
+                </div>
+              )}
+
+              {model === "hybrid" && (
+                <div className="mb-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={fieldLabel} style={{ color: C.coffee }}>Free within</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number" inputMode="decimal" min={0}
+                        value={Number(form.mobile_hybrid_free_miles) || 0}
+                        onChange={e => set({ mobile_hybrid_free_miles: Math.max(0, Number(e.target.value) || 0) })}
+                        className="w-24 p-2 rounded-lg border text-[13px]"
+                        style={inputStyle}
+                      />
+                      <span className="text-[12px]" style={{ color: C.muted }}>miles</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className={fieldLabel} style={{ color: C.coffee }}>Then per mile</label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
+                      <input
+                        type="number" inputMode="decimal" min={0}
+                        value={Number(form.mobile_per_mile_fee) || 0}
+                        onChange={e => set({ mobile_per_mile_fee: Math.max(0, Number(e.target.value) || 0) })}
+                        className="w-24 p-2 rounded-lg border text-[13px]"
+                        style={inputStyle}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {model === "tiered" && (
+                <div className="mb-3">
+                  <label className={fieldLabel} style={{ color: C.coffee }}>Distance bands</label>
+                  <p className="text-[11px] mb-2" style={{ color: C.muted }}>
+                    Smallest band that fits the trip wins. Example: "5 mi → $25", "10 mi → $40".
+                  </p>
+                  <div className="space-y-2">
+                    {bands.map((b, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="text-[12px]" style={{ color: C.muted }}>Up to</span>
+                        <input
+                          type="number" inputMode="decimal" min={0}
+                          value={b.max_miles}
+                          onChange={e => setBand(i, { max_miles: Math.max(0, Number(e.target.value) || 0) })}
+                          className="w-20 p-2 rounded-lg border text-[13px]"
+                          style={inputStyle}
+                        />
+                        <span className="text-[12px]" style={{ color: C.muted }}>mi →</span>
+                        <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
+                        <input
+                          type="number" inputMode="decimal" min={0}
+                          value={b.fee}
+                          onChange={e => setBand(i, { fee: Math.max(0, Number(e.target.value) || 0) })}
+                          className="w-24 p-2 rounded-lg border text-[13px]"
+                          style={inputStyle}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeBand(i)}
+                          className="text-[12px] px-2 py-1 rounded"
+                          style={{ color: C.danger, background: "transparent", border: "none" }}
+                          aria-label={`Remove band ${i + 1}`}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addBand}
+                    className="mt-2 px-3 py-1.5 rounded-lg text-[12px] font-semibold"
+                    style={{ border: `1px solid ${C.hairline}`, background: C.paper, color: C.espresso }}
+                  >
+                    + Add band
+                  </button>
+                </div>
+              )}
+
+              <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "8px 0" }} />
+
+              <div className="mb-1">
+                <label className={fieldLabel} style={{ color: C.coffee }}>
+                  Minimum service price (optional)
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
+                  <input
+                    type="number" inputMode="decimal" min={0}
+                    value={form.mobile_minimum_price ?? ""}
+                    onChange={e => {
+                      const v = e.target.value.trim();
+                      set({ mobile_minimum_price: v === "" ? null : Math.max(0, Number(v) || 0) });
+                    }}
+                    placeholder="No minimum"
+                    className="w-32 p-2 rounded-lg border text-[13px]"
+                    style={inputStyle}
+                  />
+                </div>
+                <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+                  Block mobile bookings under this base price (excludes travel fee).
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ============================================================
 //  STUDIO (Services & Contracts)
 // ============================================================
@@ -6243,6 +6699,7 @@ const Studio = ({ store }) => {
             ))}
           </select>
           <StyleCustomizationSection form={serviceForm} onChange={setServiceForm} />
+          <MobileServiceSection form={serviceForm} onChange={setServiceForm} />
           <DefaultMaterialsPicker
             inventory={(store.inventoryItems || []) as InventoryItem[]}
             value={Array.isArray(serviceForm.default_materials) ? serviceForm.default_materials : []}
@@ -20505,6 +20962,13 @@ const ServicesScreen = ({
     allow_style_notes: true,
     allow_inspiration_photos: true,
     included_details: null,
+    mobile_service: false,
+    mobile_fee_model: "flat",
+    mobile_flat_fee: 0,
+    mobile_per_mile_fee: 0,
+    mobile_hybrid_free_miles: 0,
+    mobile_tiered_bands: [],
+    mobile_minimum_price: null,
     });
   };
 
@@ -20554,6 +21018,20 @@ const ServicesScreen = ({
     allow_style_notes: (s as any).allow_style_notes ?? true,
     allow_inspiration_photos: (s as any).allow_inspiration_photos ?? true,
     included_details: (s as any).included_details ?? null,
+    mobile_service: !!(s as any).mobile_service,
+    mobile_fee_model: ((s as any).mobile_fee_model ?? "flat") as Service["mobile_fee_model"],
+    mobile_flat_fee: Number((s as any).mobile_flat_fee) || 0,
+    mobile_per_mile_fee: Number((s as any).mobile_per_mile_fee) || 0,
+    mobile_hybrid_free_miles: Number((s as any).mobile_hybrid_free_miles) || 0,
+    mobile_tiered_bands: Array.isArray((s as any).mobile_tiered_bands)
+      ? ((s as any).mobile_tiered_bands as any[]).map(b => ({
+          max_miles: Number(b?.max_miles) || 0,
+          fee: Number(b?.fee) || 0,
+        }))
+      : [],
+    mobile_minimum_price: (s as any).mobile_minimum_price == null
+      ? null
+      : Number((s as any).mobile_minimum_price),
     });
   };
 
@@ -21487,6 +21965,11 @@ const ServicesScreen = ({
               form={editing}
               onChange={(next: any) => setEditing(next)}
               showAddons={false}
+            />
+
+            <MobileServiceSection
+              form={editing}
+              onChange={(next: any) => setEditing(next)}
             />
 
             <Card className="p-3.5">
