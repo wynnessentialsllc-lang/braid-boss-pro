@@ -6541,6 +6541,26 @@ const MobileServiceSection = ({
                 <p className="text-[11px] mt-1" style={{ color: C.muted }}>
                   Block mobile bookings under this base price (excludes travel fee).
                 </p>
+
+                <div className="mt-3">
+                  <label className={fieldLabel} style={{ color: C.coffee }}>
+                    Note to clients (optional)
+                  </label>
+                  <textarea
+                    value={form.mobile_minimum_price_note || ""}
+                    onChange={e =>
+                      set({ mobile_minimum_price_note: e.target.value.slice(0, 500) || null })
+                    }
+                    rows={3}
+                    placeholder="Example: I require a $200 minimum service for travel — it covers my drive time and lets me give you the full salon experience at home."
+                    maxLength={500}
+                    className={inputCls}
+                    style={{ ...inputStyle, resize: "none", lineHeight: 1.5 }}
+                  />
+                  <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+                    Shown to clients on the booking page when they don&apos;t meet the minimum.
+                  </p>
+                </div>
               </div>
             </div>
           )}
@@ -21105,6 +21125,7 @@ const ServicesScreen = ({
     mobile_hybrid_free_miles: 0,
     mobile_tiered_bands: [],
     mobile_minimum_price: null,
+    mobile_minimum_price_note: null,
     });
   };
 
@@ -21168,6 +21189,7 @@ const ServicesScreen = ({
     mobile_minimum_price: (s as any).mobile_minimum_price == null
       ? null
       : Number((s as any).mobile_minimum_price),
+    mobile_minimum_price_note: (s as any).mobile_minimum_price_note ?? null,
     });
   };
 
