@@ -73,20 +73,36 @@ const fmtTime = (t: string): string => {
     : `${hh}:${String(mins).padStart(2, "0")} ${period}`;
 };
 
-// Stable, padded sequence — the visible suffix is just count, but
-// uniqueness is guaranteed by the caller-supplied id (uid()) so two
-// receipts created in the same millisecond don't collide on a row.
-export const generateReceiptNumber = (type: "receipt" | "invoice", existingCount: number): string => {
+// Monotonic, padded sequence derived from the HIGHEST number already
+// issued for this prefix+year — NOT the array length. Length-based
+// numbering reused an already-issued number after any deletion and
+// collided when two receipts were created before state settled; the
+// row id (uid()) stays unique, but the human-visible R-2026-0007 could
+// be duplicated. Scanning for max suffix keeps the visible number
+// unique and never goes backwards.
+export const generateReceiptNumber = (
+  type: "receipt" | "invoice",
+  existing: ReadonlyArray<{ receiptNumber?: string | null }>,
+): string => {
   const year = new Date().getFullYear();
-  const seq = String(existingCount + 1).padStart(4, "0");
   const prefix = type === "receipt" ? "R" : "INV";
-  return `${prefix}-${year}-${seq}`;
+  const head = `${prefix}-${year}-`;
+  let maxSeq = 0;
+  for (const r of existing || []) {
+    const n = r?.receiptNumber;
+    if (typeof n === "string" && n.startsWith(head)) {
+      const seqNum = parseInt(n.slice(head.length), 10);
+      if (Number.isFinite(seqNum) && seqNum > maxSeq) maxSeq = seqNum;
+    }
+  }
+  const seq = String(maxSeq + 1).padStart(4, "0");
+  return `${head}${seq}`;
 };
 
 export const buildReceiptFromAppointment = (
   a: any,
   type: "receipt" | "invoice",
-  existingCount: number,
+  existing: ReadonlyArray<{ receiptNumber?: string | null }>,
   newId: string,
   clientName?: string,
 ): ReceiptRecord => {
@@ -102,7 +118,7 @@ export const buildReceiptFromAppointment = (
   return {
     id: newId,
     type,
-    receiptNumber: generateReceiptNumber(type, existingCount),
+    receiptNumber: generateReceiptNumber(type, existing),
     appointmentId: a.id,
     clientId: a.clientId,
     clientName: clientName || a.clientName || "Client",
@@ -127,7 +143,7 @@ export const buildReceiptFromAppointment = (
 
 export const buildInvoiceFromQuote = (
   q: any,
-  existingCount: number,
+  existing: ReadonlyArray<{ receiptNumber?: string | null }>,
   newId: string,
   clientName?: string,
 ): ReceiptRecord => {
@@ -135,7 +151,7 @@ export const buildInvoiceFromQuote = (
   return {
     id: newId,
     type: "invoice",
-    receiptNumber: generateReceiptNumber("invoice", existingCount),
+    receiptNumber: generateReceiptNumber("invoice", existing),
     quoteId: q.id,
     clientId: q.clientId,
     clientName: clientName || q.label || "Client",
