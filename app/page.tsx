@@ -12113,7 +12113,15 @@ const ClientProfileSheet = ({
                     {e.detail && <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>{e.detail}</p>}
                   </div>
                   <span className="text-[10px]" style={{ color: C.muted }}>
-                    {(e.ts || "").slice(0, 10) ? fmtDate((e.ts || "").slice(0, 10)) : ""}
+                    {(() => {
+                      // Format in the stylist's LOCAL day, not the UTC date
+                      // baked into the ISO string — slicing the first 10
+                      // chars of a UTC `createdAt` shows tomorrow's date
+                      // after ~4–8pm Pacific (the "Jun 8 at 11pm Jun 7" bug).
+                      if (!e.ts) return "";
+                      const d = new Date(e.ts);
+                      return Number.isNaN(d.getTime()) ? "" : fmtDate(localDateISO(d));
+                    })()}
                   </span>
                 </div>
               ))}
