@@ -286,7 +286,7 @@ export default function BuildYourStyle({ slug, userId, accent = "#7C3AED", curre
       {/* Estimate */}
       <button type="button" onClick={getEstimate} disabled={quoting}
         style={{ width: "100%", padding: 12, borderRadius: 10, border: `1px solid ${accent}`, background: "#fff", color: accent, fontWeight: 700, fontSize: 14, cursor: "pointer", marginBottom: 12 }}>
-        {quoting ? "Estimating…" : quote ? "Re-estimate" : "Get a ballpark quote"}
+        {quoting ? "Estimating…" : quote ? "Re-estimate" : "Get a Quote"}
       </button>
 
       {quote && (
