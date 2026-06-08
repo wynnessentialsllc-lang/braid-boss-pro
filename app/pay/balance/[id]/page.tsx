@@ -358,6 +358,8 @@ const BalancePayInner = ({ id }: { id: string }) => {
                 type="button"
                 key={b.label}
                 onClick={b.action}
+                aria-pressed={b.active}
+                aria-label={`Tip ${b.label}`}
                 style={{
                   appearance: "none", WebkitAppearance: "none", border: `1px solid ${b.active ? C.espresso : C.hairline}`,
                   borderRadius: 12, padding: "10px 0", background: b.active ? C.espresso : "#fff",

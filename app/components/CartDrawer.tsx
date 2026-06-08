@@ -4,9 +4,10 @@
 // mounted globally by app/layout.tsx via the CartProvider; pages
 // don't need to render anything themselves.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCart, type CartItem } from "../lib/cart";
+import { useModalA11y } from "../lib/use-modal-a11y";
 
 const C = {
   cream: "#FFFFFF",
@@ -141,6 +142,12 @@ export const CartDrawer = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [isOpen, closeCart]);
 
+  // Focus management only — Esc and scroll-lock are already handled above,
+  // so opt out of those to avoid double-binding. This moves focus into the
+  // drawer on open, traps Tab inside it, and restores focus on close.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y(isOpen, closeCart, dialogRef, { onEscape: false, lockScroll: false });
+
   const startCheckout = async () => {
     if (!cart.handle) {
       setCheckoutError("Cart isn't scoped to a stylist yet.");
@@ -181,6 +188,7 @@ export const CartDrawer = () => {
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="Cart"
@@ -253,8 +261,11 @@ export const CartDrawer = () => {
             onClick={closeCart}
             aria-label="Close cart"
             style={{
-              width: 36,
-              height: 36,
+              width: 44,
+              height: 44,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
               borderRadius: 999,
               background: "transparent",
               border: 0,
@@ -416,7 +427,7 @@ const CartRow = ({
       >
         {item.image_url ? (
           /* eslint-disable-next-line @next/next/no-img-element */
-          <img src={item.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <img src={item.image_url} alt={item.title || "Product"} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         ) : (
           <div style={{ width: "100%", height: "100%", background: GRADIENTS.primary }} />
         )}
@@ -453,8 +464,8 @@ const CartRow = ({
             <button
               type="button"
               onClick={() => onChange(item.quantity - 1)}
-              aria-label="Decrease"
-              style={{ padding: "6px 12px", background: "transparent", border: 0, color: C.ink, fontWeight: 700, cursor: "pointer" }}
+              aria-label="Decrease quantity"
+              style={{ minWidth: 44, minHeight: 44, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 12px", background: "transparent", border: 0, color: C.ink, fontWeight: 700, cursor: "pointer" }}
             >
               −
             </button>
@@ -464,10 +475,15 @@ const CartRow = ({
             <button
               type="button"
               onClick={() => onChange(item.quantity + 1)}
-              aria-label="Increase"
+              aria-label="Increase quantity"
               disabled={atMax}
               style={{
-                padding: "6px 12px",
+                minWidth: 44,
+                minHeight: 44,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "0 12px",
                 background: "transparent",
                 border: 0,
                 color: atMax ? C.mutedSoft : C.ink,

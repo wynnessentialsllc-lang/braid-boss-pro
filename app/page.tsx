@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef, useId } from "react";
 import { createPortal } from "react-dom";
 import {
   getSupabase,
@@ -109,6 +109,7 @@ import { useStripeConnect, type StripeConnectProfile } from "./lib/stripe-connec
 import { trackEvent } from "./lib/track";
 import { isAdminUser } from "./lib/admin";
 import { getAuthRedirectUrl } from "./lib/site-url";
+import { useModalA11y } from "./lib/use-modal-a11y";
 import {
   startSubscription,
   openBillingPortal,
@@ -2435,6 +2436,12 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
   // bar collapse and over-tall sheets clip past the top of the
   // viewport on mobile Safari).
   const [vv, setVv] = useState<{ height: number; offsetTop: number } | null>(null);
+  // Accessibility: trap focus inside the sheet, restore it to the opener
+  // on close, support Escape, and lock background scroll. The sheet had
+  // none of this before — Tab escaped behind the aria-modal overlay.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useModalA11y(open, onClose, dialogRef);
   useEffect(() => {
     if (!open) return;
     const updateFromVisualViewport = () => {
@@ -2476,6 +2483,11 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
       }}
       onClick={onClose}>
       <div className="bbp-sheet w-full max-w-[480px] rounded-t-3xl flex flex-col"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         style={{
           background: C.cream,
           maxHeight: sheetMaxHeight,
@@ -2484,6 +2496,9 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
           // grabber and the "Edit Appointment" header are never
           // hidden behind the browser chrome.
           paddingTop: "env(safe-area-inset-top, 0px)",
+          // Focus ring on the dialog container itself is undesirable when
+          // we programmatically focus it as a fallback.
+          outline: "none",
         }}
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-center pt-3 pb-1">
@@ -2492,7 +2507,7 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
         <div className="flex items-center justify-between px-5 pb-3 pt-2 gap-2" style={{ borderBottom: `1px solid ${C.hairline}` }}>
           <div className="flex items-center gap-2 min-w-0">
             {leftAction}
-            <h2 className="truncate" style={{ fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, color: C.espresso }}>{title}</h2>
+            <h2 id={titleId} className="truncate" style={{ fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, color: C.espresso }}>{title}</h2>
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {rightAction}

@@ -499,6 +499,14 @@ export default function PublicBookingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // When a submit error appears (failed validation or a server error),
+  // bring the submit area + the (role=alert) message into view. The form
+  // is long, so an error rendered at the bottom was easy to miss — it
+  // read as a dead button. Screen readers get the alert; sighted users
+  // get scrolled to it.
+  useEffect(() => {
+    if (submitError) scrollToSubmit();
+  }, [submitError, scrollToSubmit]);
   // Pay-in-full BNPL choice. When the stylist opted in and the booking
   // takes a deposit, we pause after submit and let the client choose
   // between paying the deposit (card) or the full ticket (BNPL/card)
@@ -1052,6 +1060,13 @@ export default function PublicBookingPage() {
     setSubmitError(null);
     if (!name.trim()) { setSubmitError("Please enter your name."); return; }
     if (!phone.trim() && !email.trim()) { setSubmitError("Phone or email is required."); return; }
+    // Catch a typo'd email before submit — it's often the stylist's only
+    // way to send the confirmation, so a silent failure here loses the
+    // booking. Light shape check only (don't reject unusual-but-valid).
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setSubmitError("That email doesn't look right — please double-check it.");
+      return;
+    }
     if (!preferredDate) { setSubmitError("Please pick a date for your appointment."); return; }
     if (!preferredTime) { setSubmitError("Please pick a time for your appointment."); return; }
     {
@@ -3410,10 +3425,10 @@ export default function PublicBookingPage() {
             </Field>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <Field label="Phone">
-                <Input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="555-0123" autoComplete="tel" />
+                <Input type="tel" inputMode="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="555-0123" autoComplete="tel" />
               </Field>
               <Field label="Email">
-                <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" autoComplete="email" />
+                <Input type="email" inputMode="email" autoCapitalize="none" spellCheck={false} value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" autoComplete="email" />
               </Field>
             </div>
             {/* Who's this appointment for — defaults to the booker.
@@ -3628,7 +3643,7 @@ export default function PublicBookingPage() {
               );
             })()}
             {submitError && (
-              <p style={{ fontSize: 12, color: C.danger }}>{submitError}</p>
+              <p role="alert" aria-live="assertive" style={{ fontSize: 12, color: C.danger }}>{submitError}</p>
             )}
             <button ref={bookingSubmitRef} type="submit" disabled={submitting || (noShowConsentRequired && !noShowConsent)}
               // 2026 refresh: primary booking CTA now uses the brand

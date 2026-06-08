@@ -91,19 +91,33 @@ const Brand = ({ studio }: { studio?: string }) => {
   );
 };
 
-const Star = ({ filled, onClick, onHover }: { filled: boolean; onClick: () => void; onHover: () => void }) => (
+const Star = ({ value, filled, pressed, onClick, onHover }: {
+  value: number;
+  filled: boolean;
+  pressed: boolean;
+  onClick: () => void;
+  onHover: () => void;
+}) => (
   <button
     type="button"
     onClick={onClick}
     onMouseEnter={onHover}
-    onTouchStart={onHover}
-    aria-label="Rate"
+    role="radio"
+    aria-checked={pressed}
+    aria-label={`${value} star${value > 1 ? "s" : ""}`}
     style={{
       appearance: "none",
       WebkitAppearance: "none",
       background: "transparent",
       border: "none",
-      padding: 6,
+      // ≥44px tap target (WCAG 2.5.5) — the glyph is 38px, so a little
+      // padding gets the hit area over the line without changing the look.
+      minWidth: 44,
+      minHeight: 44,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 4,
       cursor: "pointer",
       lineHeight: 1,
       fontSize: 38,
@@ -289,11 +303,18 @@ const ReviewInner = ({ token }: { token: string }) => {
           {when ? ` · ${when}` : ""}
         </p>
 
-        <div style={{ display: "flex", justifyContent: "center", gap: 2, marginTop: 22, marginBottom: 6 }}>
+        <div
+          role="radiogroup"
+          aria-label="Star rating"
+          onMouseLeave={() => setHoverStars(0)}
+          style={{ display: "flex", justifyContent: "center", gap: 2, marginTop: 22, marginBottom: 6 }}
+        >
           {[1, 2, 3, 4, 5].map((n) => (
             <Star
               key={n}
+              value={n}
               filled={n <= shown}
+              pressed={n <= stars}
               onClick={() => setStars(n)}
               onHover={() => setHoverStars(n)}
             />
