@@ -25096,20 +25096,43 @@ const MaterialsUsedSheet = ({ appointment, services, inventory, onClose }: {
     setErr(null);
     setBusy(true);
     try {
+      // Aggregate the rows by item so repeated rows for the same item
+      // become ONE movement, then deduct with a DETERMINISTIC movement id
+      // per (appointment, item). inventory_movements' PK is (user_id, id)
+      // and the RPC deducts + records the movement in one transaction, so
+      // a duplicate id — from a retry after a partial failure, or from
+      // un-completing and re-completing the appointment — raises (23505)
+      // and rolls back the deduct. That makes materials-used idempotent:
+      // inventory can never be double-deducted for the same appointment.
+      const byItem = new Map<string, number>();
       for (const r of rows) {
         if (!r.keep) continue;
         if (!r.inventory_item_id || r.quantity <= 0) continue;
-        const item = itemById.get(r.inventory_item_id);
-        if (!item) continue;
-        // negative delta: use on client.
-        await applyMovement({
-          itemId: r.inventory_item_id,
-          delta: -Math.abs(r.quantity),
-          reason: "service_use",
-          appointmentId: appointment.id,
-          unitCostSnapshot: itemUnitCost(item),
-          note: appointment.style || null,
-        });
+        if (!itemById.get(r.inventory_item_id)) continue;
+        byItem.set(
+          r.inventory_item_id,
+          (byItem.get(r.inventory_item_id) ?? 0) + Math.abs(r.quantity),
+        );
+      }
+      for (const [itemId, qty] of byItem) {
+        const item = itemById.get(itemId)!;
+        try {
+          await applyMovement({
+            itemId,
+            delta: -Math.abs(qty),
+            reason: "service_use",
+            appointmentId: appointment.id,
+            unitCostSnapshot: itemUnitCost(item),
+            note: appointment.style || null,
+            movementId: `service_use:${appointment.id}:${itemId}`,
+          });
+        } catch (e: any) {
+          // 23505 = unique_violation on the movements PK → this item was
+          // already deducted for this appointment. No-op so confirm still
+          // succeeds.
+          if (e?.code === "23505") continue;
+          throw e;
+        }
       }
       onClose();
     } catch (e: any) {
