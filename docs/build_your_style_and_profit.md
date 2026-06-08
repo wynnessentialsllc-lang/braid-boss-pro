@@ -29,6 +29,23 @@ facing profit view.
 **Goal:** stop making braiders type hair cost by hand, and make profit
 numbers real instead of estimated.
 
+**Phase 2a shipped:**
+- `app/lib/recipe-cost.ts` — pure, tested (`recipe-cost.test.ts`):
+  `recipeCost`, `recipeCostFromInventory`, `lineFromInventoryItem`.
+- Calculator: **"Build hair cost from inventory"** sheet — pick the
+  packs/bundles a style uses (from `store.inventoryItems`, with unit
+  costs), live-totals them, and one-tap sets the hair-cost field. The
+  recipe is snapshotted onto saved quotes (`inputs.recipe`) and restored
+  from quotes/presets on prefill.
+
+**Phase 2b remaining:**
+- Add a recipe field to the **style-preset editor** so recipes persist on
+  presets (calculator already reads `preset.recipe`).
+- **Auto-deduct** the recipe via `inventory_apply_movement` on appointment
+  completion (carry recipe through "Book it" → appointment).
+- **Most/least profitable styles** report (rank presets by `$/hr` + margin
+  using `computeProfit`).
+
 - **Data:** a `service_recipe` concept — per service (or per variation),
   a list of `{ inventory_item_id, quantity }`. "Medium Boho Knotless →
   2× braiding hair, 2× human bundle."

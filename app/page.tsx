@@ -277,6 +277,7 @@ import {
   type RecurringInterval,
 } from "./lib/expenses";
 import { computeProfit } from "./lib/pricing-profit";
+import { recipeCost, lineFromInventoryItem, type RecipeLine } from "./lib/recipe-cost";
 import { uploadReceipt, deleteReceipt as deleteReceiptObject, getReceiptUrl } from "./lib/receipt-storage";
 import {
   INVENTORY_CATEGORIES,
@@ -460,7 +461,7 @@ import {
   Star, Heart, Repeat, Play, Pause, Square, Timer as TimerIcon, Zap, Award,
   BarChart3, Layers, MessageSquare, Send, AlertTriangle, CheckCircle2,
   XCircle, Filter, MoreHorizontal, SlidersHorizontal, LogOut,
-  LifeBuoy, Bug, Lightbulb, PlayCircle, ShieldCheck, HelpCircle
+  LifeBuoy, Bug, Lightbulb, PlayCircle, ShieldCheck, HelpCircle, Package
 } from "lucide-react";
 
 /* ============================================================
@@ -6170,6 +6171,12 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
   const [profitMargin, setProfitMargin] = useState<string | number>(business.profitMargin || 0);
   const [tipPct, setTipPct] = useState<string | number>(0);
   const [addOns, setAddOns] = useState<EntityRecord[]>([]);
+  // Hair recipe (bill of materials) backing the hair/product cost. When
+  // set, the calculator auto-sums it into hairCost so the stylist never
+  // hand-types it. Snapshotted onto saved quotes/presets via inputs.recipe.
+  const [recipe, setRecipe] = useState<RecipeLine[]>([]);
+  const [showRecipeSheet, setShowRecipeSheet] = useState(false);
+  const inventoryItems = (store.inventoryItems || []) as InventoryItem[];
   const [savedFlash, setSavedFlash] = useState(false);
   const [labelInput, setLabelInput] = useState("");
   const [showSaveSheet, setShowSaveSheet] = useState(false);
@@ -6183,6 +6190,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
       setHours(q.inputs?.hours ?? ""); setTravelFee(q.inputs?.travelFee ?? 0);
       setOverhead(q.inputs?.overhead ?? ""); setProfitMargin(q.inputs?.profitMargin ?? 0);
       setTipPct(q.inputs?.tipPct ?? 0); setAddOns(q.inputs?.addOns || []);
+      setRecipe(Array.isArray(q.inputs?.recipe) ? q.inputs.recipe : []);
       setLabelInput(q.label || "");
       onClearPrefill?.();
     }
@@ -6199,6 +6207,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
       setOverhead(p.overhead ?? "");
       setProfitMargin(p.profitMargin ?? 0);
       setAddOns((p.defaultAddOns || []).map(a => ({ ...a, id: uid() })));
+      setRecipe(Array.isArray(p.recipe) ? p.recipe.map((l: RecipeLine) => ({ ...l, id: uid() })) : []);
       onClearPresetPrefill?.();
       trackEvent("preset_used", { category: "feature" });
     }
@@ -6256,12 +6265,38 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
     setStyleName(""); setHairCost(""); setHourlyRate(business.hourlyRate);
     setHours(""); setTravelFee(business.defaultTravelFee || 0);
     setOverhead(""); setProfitMargin(business.profitMargin || 0);
-    setTipPct(0); setAddOns([]); setLabelInput(""); setSelectedDiscountId(null);
+    setTipPct(0); setAddOns([]); setRecipe([]); setLabelInput(""); setSelectedDiscountId(null);
   };
 
   const addAddOn = () => setAddOns([...addOns, { id: uid(), name: "", amount: "" }]);
   const updateAddOn = (id, field, val) => setAddOns(addOns.map(a => a.id === id ? { ...a, [field]: val } : a));
   const removeAddOn = (id) => setAddOns(addOns.filter(a => a.id !== id));
+
+  // ---- Hair recipe (build hair cost from inventory) -------------------
+  const recipeTotal = useMemo(() => recipeCost(recipe), [recipe]);
+  const addRecipeRow = () => {
+    const first = inventoryItems[0];
+    setRecipe(prev => [
+      ...prev,
+      first
+        ? lineFromInventoryItem(uid(), first, 1)
+        : { id: uid(), itemId: "", itemName: "", quantity: 1, unitCost: 0 },
+    ]);
+  };
+  const updateRecipeItem = (rowId: string, itemId: string) => {
+    const item = inventoryItems.find(i => i.id === itemId);
+    setRecipe(prev => prev.map(l => l.id === rowId
+      ? (item ? { ...lineFromInventoryItem(rowId, item, l.quantity) } : { ...l, itemId: "" })
+      : l));
+  };
+  const updateRecipeQty = (rowId: string, qty: string) => {
+    setRecipe(prev => prev.map(l => l.id === rowId ? { ...l, quantity: Number(qty) || 0 } : l));
+  };
+  const removeRecipeRow = (rowId: string) => setRecipe(prev => prev.filter(l => l.id !== rowId));
+  const applyRecipeToHairCost = () => {
+    setHairCost(String(recipeTotal));
+    setShowRecipeSheet(false);
+  };
 
   const handleSave = async () => {
     if (!styleName && !labelInput) { setShowSaveSheet(true); return; }
@@ -6271,7 +6306,7 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
     const quote: any = {
       label: label || styleName || "Untitled quote",
       style: styleName,
-      inputs: { hairCost, hourlyRate, hours, travelFee, overhead, profitMargin, tipPct, addOns },
+      inputs: { hairCost, hourlyRate, hours, travelFee, overhead, profitMargin, tipPct, addOns, recipe },
       breakdown: result,
       // Snapshot the discount so historical quotes don't reprice if
       // the discount is later renamed or deleted.
@@ -6333,6 +6368,23 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
           <Field label="Overhead" hint="supplies, utils"><MoneyInput value={overhead} onChange={setOverhead} /></Field>
           <Field label="Profit margin" hint="flat $"><MoneyInput value={profitMargin} onChange={setProfitMargin} /></Field>
         </div>
+
+        {/* Build hair cost from inventory — auto-sums packs/bundles so the
+            stylist never hand-types it, and the profit numbers stay real. */}
+        <button type="button" onClick={() => setShowRecipeSheet(true)}
+          className="w-full p-3 rounded-xl flex items-center gap-3 text-left active:scale-[0.99] transition"
+          style={{ background: C.ivory, border: `1px dashed ${C.caramel}`, color: C.coffee }}>
+          <div className="rounded-full p-2" style={{ background: C.gold, color: "#FFFFFF" }}><Package size={16} /></div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold" style={{ color: C.espresso }}>Build hair cost from inventory</p>
+            <p className="text-xs" style={{ color: C.muted }}>
+              {recipe.length > 0
+                ? `${recipe.length} item${recipe.length > 1 ? "s" : ""} · ${fmtMoney(recipeTotal, business.currency)}`
+                : "Pick the packs & bundles this style uses"}
+            </p>
+          </div>
+          <ChevronRight size={16} style={{ color: C.muted }} />
+        </button>
 
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -6511,6 +6563,53 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
           </div>
         </Card>
       </div>
+
+      <Sheet open={showRecipeSheet} onClose={() => setShowRecipeSheet(false)} title="Hair recipe">
+        {inventoryItems.length === 0 ? (
+          <Card className="p-4 text-center">
+            <p className="text-sm" style={{ color: C.coffee }}>No inventory items yet.</p>
+            <p className="text-xs mt-1" style={{ color: C.muted }}>
+              Add your hair, bundles, and supplies in Inventory (with unit costs) to build a recipe here.
+            </p>
+          </Card>
+        ) : (
+          <>
+            <p className="text-xs mb-3" style={{ color: C.muted }}>
+              Pick what this style uses. We&apos;ll total it from your inventory unit costs.
+            </p>
+            <div className="space-y-2">
+              {recipe.map(l => (
+                <div key={l.id} className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <Select
+                      value={l.itemId}
+                      onChange={e => updateRecipeItem(l.id, e.target.value)}
+                      options={inventoryItems.map(i => ({
+                        value: i.id,
+                        label: `${i.name || "Item"} — ${fmtMoney(Number(i.unitCost) || 0, business.currency)}`,
+                      }))}
+                    />
+                  </div>
+                  <div className="w-20"><MoneyInput prefix="" suffix="×" value={l.quantity} onChange={v => updateRecipeQty(l.id, v)} /></div>
+                  <button type="button" onClick={() => removeRecipeRow(l.id)} className="p-2 rounded-lg" style={{ color: C.danger }}><Trash2 size={18} /></button>
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={addRecipeRow} className="flex items-center gap-1 text-xs font-semibold mt-3" style={{ color: C.goldDeep }}>
+              <Plus size={14} /> Add item
+            </button>
+            <div className="flex items-center justify-between mt-4 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
+              <span className="text-sm font-semibold" style={{ color: C.espresso }}>Hair cost</span>
+              <span className="text-lg font-bold" style={{ color: C.goldDeep }}>{fmtMoney(recipeTotal, business.currency)}</span>
+            </div>
+            <div className="mt-4">
+              <Button variant="primary" fullWidth onClick={applyRecipeToHairCost} disabled={recipe.length === 0}>
+                Use {fmtMoney(recipeTotal, business.currency)} as hair cost
+              </Button>
+            </div>
+          </>
+        )}
+      </Sheet>
 
       <Sheet open={showSaveSheet} onClose={() => setShowSaveSheet(false)} title="Name this quote">
         <Field label="Quote label">
