@@ -184,6 +184,8 @@ export const INVENTORY_UNITS = [
   "each",
   "roll",
   "yard",
+  "use",
+  "application",
 ] as const;
 export type InventoryUnit = (typeof INVENTORY_UNITS)[number];
 
