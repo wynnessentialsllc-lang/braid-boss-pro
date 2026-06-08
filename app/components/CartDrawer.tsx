@@ -4,9 +4,10 @@
 // mounted globally by app/layout.tsx via the CartProvider; pages
 // don't need to render anything themselves.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCart, type CartItem } from "../lib/cart";
+import { useModalA11y } from "../lib/use-modal-a11y";
 
 const C = {
   cream: "#FFFFFF",
@@ -141,6 +142,12 @@ export const CartDrawer = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [isOpen, closeCart]);
 
+  // Focus management only — Esc and scroll-lock are already handled above,
+  // so opt out of those to avoid double-binding. This moves focus into the
+  // drawer on open, traps Tab inside it, and restores focus on close.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y(isOpen, closeCart, dialogRef, { onEscape: false, lockScroll: false });
+
   const startCheckout = async () => {
     if (!cart.handle) {
       setCheckoutError("Cart isn't scoped to a stylist yet.");
@@ -181,6 +188,7 @@ export const CartDrawer = () => {
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="Cart"
