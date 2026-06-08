@@ -23,7 +23,33 @@
 -- underlying insert/update.
 
 -- ---------------------------------------------------------------------
--- Helper-free trigger: fired AFTER INSERT on style_requests.
+-- Studio name resolver.
+--
+-- The braider's business name lives in settings.data.business
+-- ("BUSINESS NAME" in the app), NOT profiles.business_name (which the
+-- email worker's generic enrichment reads and which is usually empty).
+-- Resolve it the way the rest of the app does — settings first — and
+-- fall back through the public booking-link name and the profile so a
+-- studio name is found wherever it was set.
+-- ---------------------------------------------------------------------
+create or replace function public.style_request_studio_name(uid uuid)
+returns text
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  select coalesce(
+    nullif(trim((select data->'business'->>'businessName' from public.settings where user_id = uid)), ''),
+    nullif(trim((select business_name from public.booking_links where user_id = uid limit 1)), ''),
+    nullif(trim((select business_name from public.profiles where id = uid)), ''),
+    nullif(trim((select full_name from public.profiles where id = uid)), ''),
+    'your stylist'
+  );
+$$;
+
+-- ---------------------------------------------------------------------
+-- Fired AFTER INSERT on style_requests.
 -- ---------------------------------------------------------------------
 create or replace function public.style_requests_notify_submitted()
 returns trigger
@@ -41,16 +67,7 @@ declare
   v_contact     text;
   v_body        text;
 begin
-  -- Studio name for branding (mirrors the worker's enrichStudioName).
-  begin
-    select coalesce(nullif(trim(business_name), ''), nullif(trim(full_name), ''))
-      into v_studio
-      from public.profiles
-     where id = NEW.user_id;
-  exception when others then
-    v_studio := null;
-  end;
-  v_studio := coalesce(v_studio, 'your stylist');
+  v_studio := public.style_request_studio_name(NEW.user_id);
 
   -- Stylist's own email, for the "review needed" alert.
   begin
@@ -72,7 +89,6 @@ begin
                  nullif(trim(coalesce(NEW.client_email, '')), '')), '');
 
   -- 1) In-app bell entry for the stylist — the "review needed" alert.
-  --    Deterministic id so a re-fire can't duplicate it.
   begin
     insert into public.notifications (id, user_id, category, title, body, data)
     values (
@@ -164,16 +180,7 @@ begin
   if NEW.status <> 'denied' then return NEW; end if;
   if NEW.client_email is null or position('@' in NEW.client_email) = 0 then return NEW; end if;
 
-  begin
-    select coalesce(nullif(trim(business_name), ''), nullif(trim(full_name), ''))
-      into v_studio
-      from public.profiles
-     where id = NEW.user_id;
-  exception when others then
-    v_studio := null;
-  end;
-  v_studio := coalesce(v_studio, 'your stylist');
-
+  v_studio := public.style_request_studio_name(NEW.user_id);
   v_first := coalesce(nullif(split_part(trim(coalesce(NEW.client_name, '')), ' ', 1), ''), 'there');
 
   v_body :=
