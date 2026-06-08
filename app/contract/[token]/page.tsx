@@ -81,7 +81,14 @@ export default function ContractSigningPage() {
       "get_public_contract_by_token",
       { token_in: token },
     );
-    if (error) { setLoadError(error.message); setLoading(false); return; }
+    if (error) {
+      // Don't surface raw RPC/Postgres errors to a public signer — they're
+      // alarming and can leak internals. Log for debugging, show friendly copy.
+      console.warn("[contract] load failed:", error.message);
+      setLoadError("This signing link isn't valid. Ask your stylist to resend it.");
+      setLoading(false);
+      return;
+    }
     const row = Array.isArray(data) && data.length > 0 ? (data[0] as PublicContract) : null;
     setContract(row);
     if (row) {
@@ -115,7 +122,11 @@ export default function ContractSigningPage() {
       user_agent_in: typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 256) : null,
     });
     setSubmitting(false);
-    if (error) { setSubmitError(error.message); return; }
+    if (error) {
+      console.warn("[contract] sign failed:", error.message);
+      setSubmitError("We couldn't record your signature. Please try again, or contact your stylist.");
+      return;
+    }
     setOutcome("signed");
   };
 
@@ -130,7 +141,11 @@ export default function ContractSigningPage() {
       user_agent_in: typeof navigator !== "undefined" ? navigator.userAgent.slice(0, 256) : null,
     });
     setSubmitting(false);
-    if (error) { setSubmitError(error.message); return; }
+    if (error) {
+      console.warn("[contract] decline failed:", error.message);
+      setSubmitError("We couldn't record your response. Please try again, or contact your stylist.");
+      return;
+    }
     setOutcome("declined");
   };
 

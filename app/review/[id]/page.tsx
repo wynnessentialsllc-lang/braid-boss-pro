@@ -136,7 +136,11 @@ const ReviewInner = ({ token }: { token: string }) => {
         const supabase = getSupabase();
         const { data, error } = await supabase.rpc("public_get_review_by_token", { token_in: token });
         if (cancelled) return;
-        if (error) { setErr(error.message); return; }
+        if (error) {
+          console.warn("[review] load failed:", error.message);
+          setErr("This review link isn't valid. Ask your stylist to resend it.");
+          return;
+        }
         const v = data as ReviewInfo;
         setInfo(v);
         if (v.ok && v.already_submitted) {
@@ -171,7 +175,8 @@ const ReviewInner = ({ token }: { token: string }) => {
         display_name_in: displayName.trim() || null,
       });
       if (error) {
-        setErr(error.message);
+        console.warn("[review] submit failed:", error.message);
+        setErr("Couldn't save your review. Please try again.");
         trackEvent("review_submit_failed", { category: "error" });
         setBusy(false);
         return;
