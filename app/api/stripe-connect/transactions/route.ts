@@ -132,6 +132,17 @@ export async function POST(req: Request) {
       const tipCents = Number(meta.tip_cents ?? meta.tip ?? 0);
       const refundList = Array.isArray(c?.refunds?.data) ? c.refunds.data : [];
       const refundedTotal = cents(c?.amount_refunded);
+      // A fully-refunded charge is surfaced as a single "Refund" row, so
+      // it must be dated when the refund actually happened — the latest
+      // refund's timestamp — not when the original charge was created.
+      const isFullyRefunded = refundedTotal > 0 && refundedTotal >= cents(c.amount);
+      const latestRefundCreated = refundList.reduce(
+        (max: number, r: any) => Math.max(max, Number(r?.created) || 0),
+        0,
+      );
+      const rowCreatedUnix = isFullyRefunded && latestRefundCreated > 0
+        ? latestRefundCreated
+        : (c.created || 0);
       const bookingRequestId = meta.booking_request_id || meta.bookingRequestId || null;
       const br = bookingRequestId ? bookingRequestMap.get(String(bookingRequestId)) : null;
       return {
@@ -140,7 +151,7 @@ export async function POST(req: Request) {
         fee,
         net,
         tip: Number.isFinite(tipCents) && tipCents > 0 ? Math.round(tipCents) / 100 : 0,
-        paid_at: new Date((c.created || 0) * 1000).toISOString(),
+        paid_at: new Date(rowCreatedUnix * 1000).toISOString(),
         // Prefer the booking's client over the card's billing name: the
         // person being served is who the stylist recognizes, not whoever
         // happened to pay (a friend/parent paying a deposit is common).
@@ -173,7 +184,7 @@ export async function POST(req: Request) {
             : meta.booking_request_id
               ? "deposit"
               : "full",
-        type: refundedTotal > 0 && refundedTotal >= cents(c.amount) ? "refund" : "charge",
+        type: isFullyRefunded ? "refund" : "charge",
         refunds: refundList.map((r: any) => ({
           id: String(r.id),
           amount: cents(r.amount),

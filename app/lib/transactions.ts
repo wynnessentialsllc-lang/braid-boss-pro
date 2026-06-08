@@ -326,10 +326,15 @@ export const fromManualRecord = (r: any): Transaction => {
 // it onto our Transaction so the route stays a thin proxy.
 
 export const fromStripeRecord = (r: any): Transaction => {
-  const amount = roundCents(parseMoney(r.amount));
+  const rawAmount = roundCents(parseMoney(r.amount));
   const fee = roundCents(parseMoney(r.fee));
-  const net = roundCents(parseMoney(r.net ?? amount - fee));
-  const isRefund = r.type === "refund" || amount < 0;
+  const rawNet = roundCents(parseMoney(r.net ?? rawAmount - fee));
+  const isRefund = r.type === "refund" || rawAmount < 0;
+  // Refunds are money OUT: store them signed-negative (matching the
+  // manual-refund path) so they read as "−$X" and reduce revenue on the
+  // refund date instead of inflating it.
+  const amount = isRefund ? -Math.abs(rawAmount) : rawAmount;
+  const net = isRefund ? -Math.abs(rawNet) : rawNet;
   return {
     id: `stripe-${String(r.id)}`,
     source: "stripe",

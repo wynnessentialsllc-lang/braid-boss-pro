@@ -123,3 +123,35 @@ describe("mergeTransactions de-dupe", () => {
     expect(merged.some((t) => t.id === "stripe-ch_orphan")).toBe(true);
   });
 });
+
+describe("fromStripeRecord refund signing", () => {
+  it("signs a refund negative (money out) and keeps the refund-dated timestamp", () => {
+    // What the route now emits for a fully-refunded deposit charge:
+    // type 'refund', positive charge amount, paid_at = the refund's date.
+    const t = fromStripeRecord({
+      id: "ch_refunded",
+      amount: 25,
+      net: 23.97,
+      type: "refund",
+      payment_type: "deposit",
+      paid_at: "2026-06-07T21:00:00.000Z",
+      refunds: [{ id: "re_1", amount: 25, date: "2026-06-07T21:00:00.000Z" }],
+    });
+    expect(t.type).toBe("refund");
+    expect(t.amount).toBe(-25);   // reads as -$25 and reduces revenue
+    expect(t.net).toBe(-23.97);
+    expect(t.paidAt).toBe("2026-06-07T21:00:00.000Z");
+  });
+
+  it("leaves a normal charge positive", () => {
+    const t = fromStripeRecord({
+      id: "ch_ok",
+      amount: 100,
+      net: 96.8,
+      type: "charge",
+      payment_type: "full",
+    });
+    expect(t.amount).toBe(100);
+    expect(t.net).toBe(96.8);
+  });
+});

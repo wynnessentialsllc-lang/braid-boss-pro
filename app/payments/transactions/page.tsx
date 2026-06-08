@@ -100,6 +100,12 @@ const fmtFullDate = (iso: string): string => {
   }) + " at " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 };
 
+// Local YYYY-MM-DD (never UTC). toISOString() returns the UTC date, which
+// rolls forward to tomorrow after ~4–8pm Pacific — wrong for a default
+// "today" date or an export stamp on the stylist's wall clock.
+const localDateStr = (d: Date = new Date()): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
 export default function PaymentsTransactionsPage() {
   return (
     <Suspense fallback={<LoadingShell />}>
@@ -225,14 +231,14 @@ function Inner() {
 
   const handleExportCsv = useCallback(async () => {
     const csv = buildTransactionsCsv(visible);
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = localDateStr();
     const r = await downloadCsv(`transactions-${stamp}.csv`, csv);
     flashToast(r.ok ? "CSV exported" : "Export failed");
   }, [visible, flashToast]);
 
   const handleExportXls = useCallback(async () => {
     const xls = buildTransactionsXls(visible);
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = localDateStr();
     const r = await downloadFile({
       filename: `transactions-${stamp}.xls`,
       mimeType: "application/vnd.ms-excel",
@@ -942,7 +948,7 @@ function ManualSheet({
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [apptId, setApptId] = useState<string>("");
   const [note, setNote] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => localDateStr());
 
   // Picking an appointment auto-fills client + service so a manual cash
   // payment links cleanly to the booking.
