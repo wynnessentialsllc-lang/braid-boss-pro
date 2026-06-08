@@ -441,7 +441,7 @@ import {
 import { buildCsv } from "./lib/csv";
 import ImportStudio, { IMPORT_TAGLINE } from "./components/ImportStudio";
 import { deriveClientInsights, formatLastBookedHint } from "./lib/client-insights";
-import { uploadBookingLogo, removeBookingLogo, uploadBookingBanner, removeBookingBanner } from "./lib/booking-logo-storage";
+import { uploadBookingLogo, removeBookingLogo, uploadBookingBanner, removeBookingBanner, uploadStylistPhoto, removeStylistPhoto } from "./lib/booking-logo-storage";
 import { uploadServiceCover } from "./lib/service-cover-storage";
 import { uploadGalleryPhoto, removeGalleryPhoto, GALLERY_LIMITS, type GalleryPhoto } from "./lib/booking-gallery-storage";
 import { openExternal } from "./lib/open-external";
@@ -3656,6 +3656,9 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   const [headerTheme, setHeaderTheme] = useState<string>(link?.header_theme || "classic");
   const [tagline, setTagline] = useState<string>(link?.tagline || "");
   const [about, setAbout] = useState<string>(link?.about || "");
+  // Photo of the stylist herself — fills the "Meet your stylist" card +
+  // About panel on the spotlight hero. Separate from the studio logo.
+  const [stylistPhotoUrl, setStylistPhotoUrl] = useState<string>(link?.stylist_photo_url || "");
   const [logoUrl, setLogoUrl] = useState<string>(link?.logo_url || "");
   const [locationText, setLocationText] = useState<string>(link?.location_text || "");
   const [phone, setPhone] = useState<string>(link?.phone || "");
@@ -3700,9 +3703,11 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   const [mobileGeocodeError, setMobileGeocodeError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [stylistPhotoUploading, setStylistPhotoUploading] = useState(false);
   const [galleryUploading, setGalleryUploading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const stylistPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const bannerInputRef = useRef<HTMLInputElement | null>(null);
   const [bannerUploading, setBannerUploading] = useState(false);
@@ -3729,6 +3734,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
     setHeaderTheme(link?.header_theme || "classic");
     setTagline(link?.tagline || "");
     setAbout(link?.about || "");
+    setStylistPhotoUrl(link?.stylist_photo_url || "");
     setLogoUrl(link?.logo_url || "");
     setLocationText(link?.location_text || "");
     setPhone(link?.phone || "");
@@ -3819,6 +3825,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         header_theme: themeOut,
         tagline: tagline.trim() || null,
         about: about.trim() || null,
+        stylist_photo_url: stylistPhotoUrl.trim() || null,
         logo_url: logoUrl.trim() || null,
         phone: phone.trim() || null,
         policies: policies.trim() || null,
@@ -3948,6 +3955,92 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
               <Textarea value={about} onChange={(e) => setAbout(e.target.value)} rows={4}
                 placeholder="Thank you for booking with me! I specialize in protective styles that last…" />
             </Field>
+            {/* Stylist photo — a picture of her, distinct from the studio
+                logo. Powers the Spotlight "Meet your stylist" card +
+                the About panel that expands from it. Stored as
+                stylist-photo.jpg under the user's folder so it never
+                overwrites the logo. Falls back to the logo when blank. */}
+            <div>
+              <p className="text-[11px] font-bold uppercase mb-1" style={{ color: C.muted, letterSpacing: "0.14em" }}>Your photo</p>
+              <p className="text-[11px] mb-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+                Optional — a photo of you for the “Meet your stylist” card. Tapping it opens your bio. Leave blank to use your logo.
+              </p>
+              <div className="flex items-center gap-3" style={{ flexWrap: "wrap" }}>
+                {stylistPhotoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={stylistPhotoUrl}
+                    alt="Stylist photo preview"
+                    style={{
+                      height: 72, width: 72, objectFit: "cover",
+                      borderRadius: 16, background: C.cream,
+                      border: `1px solid ${C.hairline}`,
+                    }}
+                  />
+                ) : (
+                  <div
+                    aria-hidden
+                    style={{
+                      height: 72, width: 72, borderRadius: 16,
+                      border: `1px dashed ${C.caramel}`,
+                      background: C.cream,
+                      display: "grid", placeItems: "center",
+                      color: C.muted, fontSize: 11, letterSpacing: "0.08em",
+                      textTransform: "uppercase", fontWeight: 700, textAlign: "center", padding: 4,
+                    }}
+                  >
+                    Uses logo
+                  </div>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <input
+                    ref={stylistPhotoInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!f) return;
+                      if (!userId) { setErr("Sign in required."); return; }
+                      setErr(null);
+                      setStylistPhotoUploading(true);
+                      try {
+                        const { publicUrl } = await uploadStylistPhoto(userId, f);
+                        setStylistPhotoUrl(publicUrl);
+                      } catch (ex: any) {
+                        setErr(ex?.message || "Upload failed.");
+                      } finally {
+                        setStylistPhotoUploading(false);
+                      }
+                    }}
+                  />
+                  <Button
+                    variant="outline"
+                    icon={<Upload size={14} />}
+                    onClick={() => stylistPhotoInputRef.current?.click()}
+                    disabled={stylistPhotoUploading}
+                  >
+                    {stylistPhotoUploading ? "Uploading…" : stylistPhotoUrl ? "Replace photo" : "Upload photo"}
+                  </Button>
+                  {stylistPhotoUrl && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (userId) {
+                          try { await removeStylistPhoto(userId); } catch { /* ignore */ }
+                        }
+                        setStylistPhotoUrl("");
+                      }}
+                      className="text-[11px] font-semibold"
+                      style={{ color: C.danger, background: "transparent", border: 0, padding: "4px 0", textAlign: "left" }}
+                    >
+                      Remove photo
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
           </>
         )}
         <div>
@@ -20205,6 +20298,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
     header_theme?: string | null;
     tagline?: string | null;
     about?: string | null;
+    stylist_photo_url?: string | null;
   } | null>(null);
   const [bookingBusy, setBookingBusy] = useState(false);
   const [bookingCopied, setBookingCopied] = useState(false);
@@ -20249,7 +20343,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
       const { data: link } = await supabase
         .from("booking_links")
         .select(
-          "slug, active, intro, business_name, shop_name, shop_description, shop_logo_url, shop_banner_url, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business, header_theme, tagline, about"
+          "slug, active, intro, business_name, shop_name, shop_description, shop_logo_url, shop_banner_url, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business, header_theme, tagline, about, stylist_photo_url"
         )
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
