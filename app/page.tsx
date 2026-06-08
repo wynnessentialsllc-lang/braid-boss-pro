@@ -25333,7 +25333,7 @@ const WAITLIST_STATUS_TONE: Record<WaitlistStatus, "warning" | "gold" | "success
 // "Build your style" review queue — custom AI-consultation requests from
 // the public booking page. The stylist reviews the intake + AI ballpark,
 // then approves (follow up for a deposit) or denies with a reason.
-const StyleRequestsScreen = ({ store, onBack, onBook }: { store: any; onBack: () => void; onBook?: (req: any) => void }) => {
+const StyleRequestsScreen = ({ store, onBack, onOpenApproval }: { store: any; onBack: () => void; onOpenApproval?: (bookingRequestId: string) => void }) => {
   const userId = store?.userId || null;
   const currency = store?.business?.currency || "USD";
   const [rows, setRows] = useState<any[]>([]);
@@ -25400,6 +25400,30 @@ const StyleRequestsScreen = ({ store, onBack, onBook }: { store: any; onBack: ()
       await supabase.from("style_requests").update({ status: "archived" }).eq("id", id).eq("user_id", userId);
       await load();
     } finally { setBusy(false); }
+  };
+
+  // Approve -> convert the request into a deposit-first booking and hand
+  // it to the normal Approvals queue (focused), where the stylist sets
+  // the deposit and the client gets the pay link. The conversion RPC is
+  // idempotent, so a double-tap reuses the same booking.
+  const approveToBooking = async (req: any) => {
+    if (!req?.id) return;
+    setBusy(true); setErr(null);
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.rpc("convert_style_request_to_booking", {
+        style_request_id_in: req.id,
+      });
+      if (error) throw error;
+      const brId = String((data as any)?.id || "");
+      setReviewing(null); setNote("");
+      await load();
+      if (brId && onOpenApproval) onOpenApproval(brId);
+    } catch {
+      setErr("Couldn't set up the booking. Try again.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const statusColor = (s: string) =>
@@ -25489,9 +25513,7 @@ const StyleRequestsScreen = ({ store, onBack, onBook }: { store: any; onBack: ()
               ) : r.status === "approved" ? (
                 <div className="grid grid-cols-2 gap-2 mt-3">
                   <Button variant="outline" onClick={() => archive(r.id)} disabled={busy}>Archive</Button>
-                  {onBook && (
-                    <Button variant="primary" icon={<CalendarPlus size={16} />} onClick={() => onBook(r)}>Book &amp; deposit</Button>
-                  )}
+                  <Button variant="primary" icon={<CalendarPlus size={16} />} disabled={busy} onClick={() => approveToBooking(r)}>Set up deposit</Button>
                 </div>
               ) : r.status !== "archived" && (
                 <button type="button" onClick={() => archive(r.id)} disabled={busy} className="text-[12px] font-semibold mt-3" style={{ color: C.muted }}>Archive</button>
@@ -25501,24 +25523,26 @@ const StyleRequestsScreen = ({ store, onBack, onBook }: { store: any; onBack: ()
         )}
       </div>
 
-      <Sheet open={!!reviewing} onClose={() => setReviewing(null)} title={reviewing?.mode === "approve" ? "Approve request" : "Deny request"}>
+      <Sheet open={!!reviewing} onClose={() => setReviewing(null)} title={reviewing?.mode === "approve" ? "Approve & set up deposit" : "Deny request"}>
         {reviewing?.mode === "approve" ? (
           <p className="text-[12px] mb-3" style={{ color: C.muted, lineHeight: 1.5 }}>
-            Approving lets {reviewing?.row?.client_name?.split(" ")[0] || "the client"} know you can do their style. Reach out to confirm the final price and collect a deposit to lock the date.
+            This turns {reviewing?.row?.client_name?.split(" ")[0] || "the client"}&apos;s request into a booking and opens your Approvals queue, where you set the deposit. They&apos;ll get an email with a secure link to pay it and lock in the date — just like a normal booking.
           </p>
         ) : (
           <p className="text-[12px] mb-3" style={{ color: C.muted, lineHeight: 1.5 }}>
-            Let the client know why — they&apos;ll see your note.
+            Let the client know why — they&apos;ll get an email with your reason.
           </p>
         )}
-        <Field label={reviewing?.mode === "approve" ? "Note to client (optional)" : "Reason (optional)"}>
-          <Textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
-            placeholder={reviewing?.mode === "approve" ? "Love this style! Let's lock in your date…" : "I'm not taking this style right now…"} />
-        </Field>
+        {reviewing?.mode === "deny" && (
+          <Field label="Reason (optional)">
+            <Textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
+              placeholder="I'm not taking this style right now…" />
+          </Field>
+        )}
         <div className="mt-4">
           <Button variant={reviewing?.mode === "approve" ? "primary" : "dark"} fullWidth disabled={busy}
-            onClick={() => submitReview(reviewing?.mode === "approve" ? "approved" : "denied")}>
-            {busy ? "Saving…" : reviewing?.mode === "approve" ? "Approve" : "Deny"}
+            onClick={() => reviewing?.mode === "approve" ? approveToBooking(reviewing.row) : submitReview("denied")}>
+            {busy ? "Saving…" : reviewing?.mode === "approve" ? "Approve & set up deposit" : "Deny"}
           </Button>
         </div>
       </Sheet>
@@ -32656,33 +32680,14 @@ export default function App() {
     setActive("schedule");
   };
 
-  // Approved "Build your style" request -> prefill the appointment sheet
-  // with the client + AI estimate, so the existing appointment + deposit +
-  // client-payment flow takes over (no separate payment plumbing). Price
-  // seeds from the AI midpoint; the stylist confirms it and the deposit.
-  const handleStyleRequestToAppt = (r: any) => {
-    const low = Number(r.ai_price_low);
-    const high = Number(r.ai_price_high);
-    const mid = Number.isFinite(low) && Number.isFinite(high) ? Math.round((low + high) / 2) : "";
-    setApptPrefill({
-      clientName: r.client_name || "",
-      clientPhone: r.client_phone || "",
-      clientEmail: r.client_email || "",
-      style: r.ai_style_family || "Custom style",
-      date: r.preferred_date || undefined,
-      time: r.preferred_time || undefined,
-      durationHours: r.ai_est_duration_hours || "",
-      totalPrice: mid,
-      depositRequired: true,
-      notes: r.notes || "",
-    });
-    if (store?.userId) {
-      try {
-        void getSupabase().from("style_requests").update({ status: "booked" }).eq("id", r.id).eq("user_id", store.userId);
-      } catch { /* best-effort */ }
-    }
-    setSecondary(null);
-    setActive("schedule");
+  // Approved "Build your style" request -> the StyleRequestsScreen has
+  // already converted it into a booking_request (deposit-first), so just
+  // open the Approvals queue focused on that booking. From there the
+  // stylist sets the deposit and the client gets the pay link — the same
+  // proven flow every other booking uses.
+  const handleStyleRequestToApproval = (bookingRequestId: string) => {
+    setApprovalFocusId(bookingRequestId);
+    setSecondary("approvals");
   };
 
   const handleUsePreset = (p) => {
@@ -32890,7 +32895,7 @@ export default function App() {
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "intelligence" && <BookingIntelligenceScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "approvals" && <ApprovalQueueScreen store={store} onBack={() => setSecondary("settings")} focusRequestId={approvalFocusId} clearFocusRequestId={() => setApprovalFocusId(null)} />}
-      {secondary === "styleRequests" && <StyleRequestsScreen store={store} onBack={() => setSecondary("settings")} onBook={handleStyleRequestToAppt} />}
+      {secondary === "styleRequests" && <StyleRequestsScreen store={store} onBack={() => setSecondary("settings")} onOpenApproval={handleStyleRequestToApproval} />}
       {secondary === "waitlist" && (
         <WaitlistScreen
           store={store}
