@@ -3063,7 +3063,7 @@ export default function PublicBookingPage() {
                                 {e.name || "Add-on"}
                               </span>
                               <span style={{ fontWeight: 700, color: C.goldDeep, fontSize: 14, whiteSpace: "nowrap" }}>
-                                +${(Number(e.price) || 0).toFixed(2)}
+                                {(Number(e.price) || 0) > 0 ? `+$${(Number(e.price) || 0).toFixed(2)}` : "Free"}
                               </span>
                             </div>
                             {(e.description || extraTime > 0 || e.include_in_deposit) && (

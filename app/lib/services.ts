@@ -39,7 +39,40 @@ export type ServiceExtra = {
   include_in_deposit?: boolean | null;
   active?: boolean | null;
   sort_order?: number | null;
+  // Marks a managed, first-class optional that the editor surfaces as
+  // its own labeled toggle instead of a generic add-on row (e.g. the
+  // ACV hair treatment). Stored in the same services.extras jsonb so it
+  // reuses the whole booking pipeline — pricing, deposit, anti-tamper
+  // validation, and the appointment snapshot — for free. Plain add-ons
+  // leave this null/undefined.
+  kind?: string | null;
 };
+
+// The ACV (apple cider vinegar) hair treatment is a managed extra: a
+// per-service optional the braider can show/hide and price (free when
+// 0). It lives in services.extras tagged with this kind so it rides the
+// existing add-on rails, but the editor renders it as its own toggle.
+export const ACV_EXTRA_KIND = "acv";
+export const ACV_EXTRA_ID = "acv_treatment";
+export const ACV_EXTRA_NAME = "Apple cider vinegar (ACV) treatment";
+
+export const findAcvExtra = (
+  extras: ServiceExtra[] | null | undefined,
+): ServiceExtra | null =>
+  (extras || []).find(
+    e => e?.kind === ACV_EXTRA_KIND || e?.id === ACV_EXTRA_ID,
+  ) || null;
+
+// Enabled = present AND not soft-disabled. Toggling off keeps the entry
+// (so its configured price survives) but flips active to false, which
+// hides it from the booking page exactly like an inactive add-on.
+export const isAcvTreatmentEnabled = (
+  s: Pick<Service, "extras"> | null | undefined,
+): boolean => {
+  const e = findAcvExtra(s?.extras);
+  return !!e && e.active !== false;
+};
+
 
 export type ServiceAddOn = {
   id: string;
@@ -587,6 +620,9 @@ export const useServices = (
         include_in_deposit: e.include_in_deposit === true,
         active: e.active === false ? false : true,
         sort_order: Number.isFinite(e.sort_order) ? Number(e.sort_order) : 0,
+        // Preserve the managed-optional marker (e.g. "acv") so the
+        // editor keeps surfacing it as a dedicated toggle on reload.
+        kind: e.kind ? String(e.kind) : null,
       })),
     };
     const { data, error: err } = draft.id
