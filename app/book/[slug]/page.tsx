@@ -37,6 +37,7 @@ import {
   type MonthDayStatus,
 } from "../../lib/services";
 import { trackEvent } from "../../lib/track";
+import { useModalA11y } from "../../lib/use-modal-a11y";
 import {
   fetchPublicReviews,
   fetchPublicProducts,
@@ -200,6 +201,11 @@ type LinkConfig = {
   header_theme?: string | null;
   tagline?: string | null;
   about?: string | null;
+  // Dedicated "Meet your stylist" portrait — a photo of the stylist
+  // herself, distinct from logo_url (the studio brand mark). Added by
+  // 20261010 migration. Optional; the hero/About panel falls back to
+  // logo_url then the first gallery photo when empty.
+  stylist_photo_url?: string | null;
   // Branded share handle (profiles.public_slug) — surfaces in the
   // /@handle storefront header as the @ display below the title.
   // Falls back to the canonical slug when not set.
@@ -258,6 +264,11 @@ export default function PublicBookingPage() {
   const [link, setLink] = useState<LinkConfig | null>(null);
   const [linkLoading, setLinkLoading] = useState(true);
   const [linkError, setLinkError] = useState<string | null>(null);
+  // "Meet your stylist" → tap the hero card to expand the About panel
+  // (portrait + full bio + details) in place, without leaving the page.
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const aboutRef = useRef<HTMLDivElement | null>(null);
+  useModalA11y(aboutOpen, () => setAboutOpen(false), aboutRef);
   // Canonical slug — `link.slug` once resolved, urlSlug as a fallback
   // during the first paint. Every downstream effect / RPC reads this
   // so a branded URL feeds the existing per-link queries without
@@ -707,6 +718,7 @@ export default function PublicBookingPage() {
             header_theme: (row.header_theme as string | null) ?? null,
             tagline: (row.tagline as string | null) ?? null,
             about: (row.about as string | null) ?? null,
+            stylist_photo_url: (row.stylist_photo_url as string | null) ?? null,
             branded_slug: (row.branded_slug as string | null) ?? null,
           };
           setLink(config);
@@ -1617,9 +1629,11 @@ export default function PublicBookingPage() {
   const tagline = (link?.tagline || "").trim();
   const about = (link?.about || "").trim();
   // Portrait for the 'spotlight' "Meet your stylist" hero — prefer the
-  // uploaded logo, fall back to the first gallery photo, else a tinted
-  // gradient placeholder so the card never renders a broken image.
+  // dedicated stylist photo (a picture of her), then the uploaded logo,
+  // then the first gallery photo, else a tinted gradient placeholder so
+  // the card never renders a broken image.
   const heroPortrait =
+    link?.stylist_photo_url ||
     link?.logo_url ||
     (Array.isArray(link?.gallery_photos) && link!.gallery_photos!.length > 0
       ? link!.gallery_photos!.slice().sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))[0]?.url || ""
@@ -1877,12 +1891,23 @@ export default function PublicBookingPage() {
         ) : headerTheme === "spotlight" ? (
           <div className="bbp-hero-rise" style={{ marginTop: -56 }}>
             <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setAboutOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setAboutOpen(true);
+                }
+              }}
+              aria-haspopup="dialog"
+              aria-label={`Meet your stylist — ${link?.business_name || "about the stylist"}`}
               style={{
                 display: "flex", gap: 14, alignItems: "center",
                 background: C.paper, border: `1px solid ${C.hairline}`,
                 borderRadius: 20, padding: 14,
                 boxShadow: "0 18px 44px -22px rgba(21, 17, 26, 0.30)",
-                overflow: "hidden",
+                overflow: "hidden", cursor: "pointer",
               }}
             >
               <div
@@ -1943,6 +1968,15 @@ export default function PublicBookingPage() {
                   }}>@{displayHandle}</p>
                 ) : null}
               </div>
+              <span
+                aria-hidden
+                style={{
+                  flexShrink: 0, alignSelf: "center", color: accent,
+                  fontSize: 22, lineHeight: 1, fontWeight: 400,
+                }}
+              >
+                ›
+              </span>
             </div>
             {about && (
               <p style={{ fontSize: 14, lineHeight: 1.6, color: C.coffee, margin: "12px 2px 0" }}>
@@ -4388,6 +4422,155 @@ export default function PublicBookingPage() {
                 <span aria-hidden style={{ fontSize: 18, lineHeight: 1 }}>›</span>
               </span>
             </button>
+          </div>
+        );
+      })()}
+
+      {/* "Meet your stylist" → About panel. Expands in place from the
+          spotlight hero card with a larger portrait + the full bio +
+          a few details, then drops the visitor straight into booking.
+          Degrades gracefully: shows whatever fields are populated. */}
+      {aboutOpen && (() => {
+        const aboutLocation =
+          (link?.location_text || "").trim() ||
+          [link?.business_city, link?.business_state].filter(Boolean).join(", ").trim();
+        const years = link?.years_in_business;
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`About ${link?.business_name || "your stylist"}`}
+            onClick={() => setAboutOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(26, 15, 8, 0.78)",
+              zIndex: 9999,
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "center",
+              padding: "max(24px, env(safe-area-inset-top)) 0 0",
+            }}
+          >
+            <div
+              ref={aboutRef}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "100%", maxWidth: 480,
+                maxHeight: "92vh", overflowY: "auto",
+                background: C.paper,
+                borderTopLeftRadius: 24, borderTopRightRadius: 24,
+                boxShadow: "0 -16px 48px -16px rgba(21, 17, 26, 0.5)",
+                padding: "20px 20px max(24px, env(safe-area-inset-bottom))",
+                position: "relative",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setAboutOpen(false)}
+                aria-label="Close"
+                style={{
+                  position: "absolute", top: 14, right: 14,
+                  width: 36, height: 36, borderRadius: 999,
+                  background: C.ivory, color: C.coffee,
+                  border: `1px solid ${C.hairline}`,
+                  fontSize: 20, lineHeight: 1, cursor: "pointer", padding: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                ×
+              </button>
+
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+                <div
+                  style={{
+                    width: 132, height: 132, borderRadius: 24, overflow: "hidden",
+                    border: `1px solid ${C.hairline}`, flexShrink: 0,
+                    boxShadow: "0 14px 36px -16px rgba(21, 17, 26, 0.3)",
+                  }}
+                >
+                  {heroPortrait ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={heroPortrait}
+                      alt={link?.business_name || "Your stylist"}
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                  ) : (
+                    <div
+                      aria-hidden
+                      style={{ width: "100%", height: "100%", background: "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)" }}
+                    />
+                  )}
+                </div>
+                <p
+                  style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: "0.2em",
+                    textTransform: "uppercase", color: accent, margin: "16px 0 0",
+                  }}
+                >
+                  Meet your stylist
+                </p>
+                <h2
+                  style={{
+                    fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 28,
+                    color: C.brandPrimary, lineHeight: 1.1, margin: "4px 0 0",
+                  }}
+                >
+                  {link?.business_name || "Welcome"}
+                </h2>
+                {tagline ? (
+                  <p
+                    style={{
+                      fontFamily: FONT_DISPLAY, fontStyle: "italic", fontWeight: 500,
+                      fontSize: 16, color: C.coffee, margin: "4px 0 0", lineHeight: 1.3,
+                    }}
+                  >
+                    {tagline}
+                  </p>
+                ) : displayHandle ? (
+                  <p style={{ fontSize: 12, color: C.muted, margin: "4px 0 0" }}>@{displayHandle}</p>
+                ) : null}
+                {(aboutLocation || (typeof years === "number" && years > 0)) && (
+                  <p style={{ fontSize: 12.5, color: C.muted, margin: "10px 0 0" }}>
+                    {[
+                      aboutLocation || null,
+                      typeof years === "number" && years > 0
+                        ? `${years} yr${years === 1 ? "" : "s"} in business`
+                        : null,
+                    ].filter(Boolean).join("  •  ")}
+                  </p>
+                )}
+              </div>
+
+              {about ? (
+                <p
+                  style={{
+                    fontSize: 15, lineHeight: 1.7, color: C.coffee,
+                    margin: "20px 0 0", whiteSpace: "pre-line",
+                  }}
+                >
+                  {about}
+                </p>
+              ) : (
+                <p style={{ fontSize: 14, lineHeight: 1.6, color: C.muted, margin: "20px 0 0", textAlign: "center" }}>
+                  {link?.business_name || "Your stylist"} hasn&apos;t added a bio yet — tap below to book your appointment.
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={() => { setAboutOpen(false); scrollToBooking(); }}
+                style={{
+                  marginTop: 24, width: "100%", padding: "16px 20px",
+                  borderRadius: 999, border: "none", cursor: "pointer",
+                  background: accent, color: "#fff",
+                  fontSize: 16, fontWeight: 800, letterSpacing: "0.01em",
+                }}
+              >
+                Book an appointment
+              </button>
+            </div>
           </div>
         );
       })()}
