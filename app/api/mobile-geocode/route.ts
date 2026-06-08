@@ -37,9 +37,13 @@ export async function POST(req: Request) {
   }
 
   let supabaseUrl: string;
+  let anonKey: string;
+  let serviceKey: string;
   let mapboxToken: string;
   try {
     supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || env("SUPABASE_URL");
+    anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || env("SUPABASE_ANON_KEY");
+    serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
   } catch (e: any) {
     return fail(500, e?.message || "Server is not configured.");
   }
@@ -54,7 +58,7 @@ export async function POST(req: Request) {
   const auth = req.headers.get("authorization") || "";
   const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
   if (!token) return fail(401, "Please sign in.");
-  const supabase = createClient(supabaseUrl, env("SUPABASE_ANON_KEY"), {
+  const supabase = createClient(supabaseUrl, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
     global: { headers: { Authorization: `Bearer ${token}` } },
   });
@@ -85,14 +89,12 @@ export async function POST(req: Request) {
   let ctxCity: string | null = null;
   let ctxState: string | null = null;
   try {
-    const supabaseUrl2 = process.env.NEXT_PUBLIC_SUPABASE_URL || env("SUPABASE_URL");
-    const serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
-    const admin = createClient(supabaseUrl2, serviceKey, {
+    const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
     const { data: linkRow } = await admin
       .from("booking_links")
-      .select("business_city, business_state, mobile_base_lat, mobile_base_lng")
+      .select("business_city, business_state")
       .eq("user_id", userId)
       .maybeSingle();
     ctxCity = linkRow?.business_city ?? null;
