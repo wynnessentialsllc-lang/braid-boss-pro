@@ -5680,41 +5680,41 @@ const StyleCustomizationSection = ({
               {/* ACV (apple cider vinegar) treatment — a per-service
                   optional the braider can show/hide and price (free at
                   0). Sits with the braiding-hair options since it treats
-                  that hair. Stored as a managed extra, so it needs the
-                  extras-capable editor (showAddons). */}
-              {showAddons && (<>
-                <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
-                <CustomToggle
-                  on={acvOn}
-                  onChange={toggleAcv}
-                  label="Offer ACV hair treatment"
-                  help="An apple cider vinegar rinse to cleanse & soften the braiding hair. Clients opt in when they book."
-                />
-                {acvOn && (
-                  <div className="mb-3 pl-[54px]">
-                    <span className="block text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: C.muted }}>
-                      Price — leave 0 for free
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        min={0}
-                        value={acvPrice}
-                        onChange={e => writeAcv({ price: Math.max(0, Number(e.target.value) || 0) })}
-                        className="w-28 p-2 rounded-lg border text-[13px]"
-                        style={{ borderColor: C.hairline, background: C.paper }}
-                      />
-                    </div>
-                    <p className="text-[11px] mt-1" style={{ color: C.muted }}>
-                      {acvPrice > 0
-                        ? `Clients see it as a +$${acvPrice.toFixed(2)} add-on at booking.`
-                        : "Clients see it as a free option they can check at booking."}
-                    </p>
+                  that hair. It's a customization (not the generic add-ons
+                  manager), so it renders in BOTH service editors —
+                  independent of showAddons. Both editors persist
+                  services.extras, where the managed entry lives. */}
+              <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
+              <CustomToggle
+                on={acvOn}
+                onChange={toggleAcv}
+                label="Offer ACV hair treatment"
+                help="An apple cider vinegar rinse to cleanse & soften the braiding hair. Clients opt in when they book."
+              />
+              {acvOn && (
+                <div className="mb-3 pl-[54px]">
+                  <span className="block text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: C.muted }}>
+                    Price — leave 0 for free
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      value={acvPrice}
+                      onChange={e => writeAcv({ price: Math.max(0, Number(e.target.value) || 0) })}
+                      className="w-28 p-2 rounded-lg border text-[13px]"
+                      style={{ borderColor: C.hairline, background: C.paper }}
+                    />
                   </div>
-                )}
-              </>)}
+                  <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+                    {acvPrice > 0
+                      ? `Clients see it as a +$${acvPrice.toFixed(2)} add-on at booking.`
+                      : "Clients see it as a free option they can check at booking."}
+                  </p>
+                </div>
+              )}
 
               <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
 
@@ -20725,9 +20725,12 @@ const ServicesScreen = ({
                                   <p className="text-[10.5px]" style={{ color: C.muted }}>
                                     {formatServicePrice(s, currency)}
                                     {s.add_ons.length > 0 ? ` · ${s.add_ons.length} variation${s.add_ons.length === 1 ? "" : "s"}` : ""}
-                                    {Array.isArray(s.extras) && s.extras.length > 0
-                                      ? ` · ${s.extras.length} add-on${s.extras.length === 1 ? "" : "s"}`
-                                      : ""}
+                                    {(() => {
+                                      // Don't count the managed ACV entry as a generic add-on.
+                                      const n = (Array.isArray(s.extras) ? s.extras : [])
+                                        .filter((x: any) => x.kind !== ACV_EXTRA_KIND && x.id !== ACV_EXTRA_ID).length;
+                                      return n > 0 ? ` · ${n} add-on${n === 1 ? "" : "s"}` : "";
+                                    })()}
                                   </p>
                                 </div>
                                 <ChevronRight size={14} style={{ color: C.muted, marginTop: 2, flexShrink: 0 }} />
@@ -21230,13 +21233,13 @@ const ServicesScreen = ({
                   Add
                 </Button>
               </div>
-              {(editing.extras || []).length === 0 ? (
+              {(editing.extras || []).filter(x => x.kind !== ACV_EXTRA_KIND && x.id !== ACV_EXTRA_ID).length === 0 ? (
                 <p className="text-[11px]" style={{ color: C.muted }}>
                   No add-ons yet. Examples: "Waist length +$30", "Curly pieces +$25 / +0.5h", "Triangle parts +$15".
                 </p>
               ) : (
                 <div className="space-y-3">
-                  {(editing.extras || []).map((e, idx) => {
+                  {(editing.extras || []).filter(x => x.kind !== ACV_EXTRA_KIND && x.id !== ACV_EXTRA_ID).map((e, idx) => {
                     const updateExtra = (patch: Partial<ServiceExtra>) =>
                       setEditing(prev => prev ? {
                         ...prev,
