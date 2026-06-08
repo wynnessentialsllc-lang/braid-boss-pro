@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
+import BuildYourStyle from "../../components/booking/BuildYourStyle";
 import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LABEL } from "../../lib/waitlist";
 import { emitAnalyticsEvent } from "../../lib/analytics-events";
 import { SMS_ENABLED } from "../../lib/features";
@@ -2398,6 +2399,11 @@ export default function PublicBookingPage() {
                 (see the "3 · Your details" block below) so the client
                 configures their style and picks a time before being
                 asked who they are. */}
+            {/* Build your style — AI consultation for clients who don't see
+                the style they want. Collapsed CTA by default. */}
+            {link?.user_id && (
+              <BuildYourStyle slug={slug} userId={link.user_id} accent={accent} />
+            )}
             {hasCatalog ? (
               <>
                 {/* The "Choose a service" heading lives below (after the
