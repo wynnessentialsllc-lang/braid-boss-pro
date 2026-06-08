@@ -418,6 +418,12 @@ export type ApplyMovementInput = {
   businessExpenseId?: string | null;
   unitCostSnapshot?: number | null;
   note?: string | null;
+  // Optional DETERMINISTIC movement id. Defaults to a fresh uid(). Pass a
+  // stable id (e.g. per appointment+item) to make a movement idempotent:
+  // inventory_movements' PK is (user_id, id) and the RPC deducts + inserts
+  // the movement in one transaction, so a duplicate id raises (Postgres
+  // 23505) and rolls back the deduct instead of double-applying it.
+  movementId?: string;
 };
 
 export type ApplyMovementResult = {
@@ -437,7 +443,7 @@ export const applyMovement = async (
   if (!input.delta || !Number.isFinite(input.delta)) throw new Error("applyMovement: delta required");
   const supabase = getSupabase();
   const { data, error } = await supabase.rpc("inventory_apply_movement", {
-    movement_id_in: uid(),
+    movement_id_in: input.movementId ?? uid(),
     item_id_in: input.itemId,
     delta_in: input.delta,
     reason_in: input.reason,
