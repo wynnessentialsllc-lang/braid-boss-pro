@@ -25113,7 +25113,7 @@ const WAITLIST_STATUS_TONE: Record<WaitlistStatus, "warning" | "gold" | "success
 // "Build your style" review queue — custom AI-consultation requests from
 // the public booking page. The stylist reviews the intake + AI ballpark,
 // then approves (follow up for a deposit) or denies with a reason.
-const StyleRequestsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+const StyleRequestsScreen = ({ store, onBack, onBook }: { store: any; onBack: () => void; onBook?: (req: any) => void }) => {
   const userId = store?.userId || null;
   const currency = store?.business?.currency || "USD";
   const [rows, setRows] = useState<any[]>([]);
@@ -25233,6 +25233,12 @@ const StyleRequestsScreen = ({ store, onBack }: { store: any; onBack: () => void
                 {[r.client_phone, r.client_email].filter(Boolean).join(" · ") || "No contact"}
               </p>
 
+              {r.photo_path && (() => {
+                const url = getSupabase().storage.from("style-request-photos").getPublicUrl(r.photo_path).data.publicUrl;
+                // eslint-disable-next-line @next/next/no-img-element
+                return <img src={url} alt="Inspiration" style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 12, marginTop: 8 }} />;
+              })()}
+
               {(r.ai_price_low != null || r.ai_style_family) && (
                 <div className="mt-2 p-2.5 rounded-xl" style={{ background: C.ivory }}>
                   {r.ai_price_low != null && r.ai_price_high != null && (
@@ -25259,6 +25265,13 @@ const StyleRequestsScreen = ({ store, onBack }: { store: any; onBack: () => void
                 <div className="grid grid-cols-2 gap-2 mt-3">
                   <Button variant="outline" onClick={() => { setReviewing({ row: r, mode: "deny" }); setNote(""); }}>Deny</Button>
                   <Button variant="primary" onClick={() => { setReviewing({ row: r, mode: "approve" }); setNote(""); }}>Approve</Button>
+                </div>
+              ) : r.status === "approved" ? (
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <Button variant="outline" onClick={() => archive(r.id)} disabled={busy}>Archive</Button>
+                  {onBook && (
+                    <Button variant="primary" icon={<CalendarPlus size={16} />} onClick={() => onBook(r)}>Book &amp; deposit</Button>
+                  )}
                 </div>
               ) : r.status !== "archived" && (
                 <button type="button" onClick={() => archive(r.id)} disabled={busy} className="text-[12px] font-semibold mt-3" style={{ color: C.muted }}>Archive</button>
@@ -32423,6 +32436,35 @@ export default function App() {
     setActive("schedule");
   };
 
+  // Approved "Build your style" request -> prefill the appointment sheet
+  // with the client + AI estimate, so the existing appointment + deposit +
+  // client-payment flow takes over (no separate payment plumbing). Price
+  // seeds from the AI midpoint; the stylist confirms it and the deposit.
+  const handleStyleRequestToAppt = (r: any) => {
+    const low = Number(r.ai_price_low);
+    const high = Number(r.ai_price_high);
+    const mid = Number.isFinite(low) && Number.isFinite(high) ? Math.round((low + high) / 2) : "";
+    setApptPrefill({
+      clientName: r.client_name || "",
+      clientPhone: r.client_phone || "",
+      clientEmail: r.client_email || "",
+      style: r.ai_style_family || "Custom style",
+      date: r.preferred_date || undefined,
+      time: r.preferred_time || undefined,
+      durationHours: r.ai_est_duration_hours || "",
+      totalPrice: mid,
+      depositRequired: true,
+      notes: r.notes || "",
+    });
+    if (store?.userId) {
+      try {
+        void getSupabase().from("style_requests").update({ status: "booked" }).eq("id", r.id).eq("user_id", store.userId);
+      } catch { /* best-effort */ }
+    }
+    setSecondary(null);
+    setActive("schedule");
+  };
+
   const handleUsePreset = (p) => {
     setCalcPresetPrefill(p);
     setSecondary(null);
@@ -32628,7 +32670,7 @@ export default function App() {
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "intelligence" && <BookingIntelligenceScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "approvals" && <ApprovalQueueScreen store={store} onBack={() => setSecondary("settings")} focusRequestId={approvalFocusId} clearFocusRequestId={() => setApprovalFocusId(null)} />}
-      {secondary === "styleRequests" && <StyleRequestsScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "styleRequests" && <StyleRequestsScreen store={store} onBack={() => setSecondary("settings")} onBook={handleStyleRequestToAppt} />}
       {secondary === "waitlist" && (
         <WaitlistScreen
           store={store}

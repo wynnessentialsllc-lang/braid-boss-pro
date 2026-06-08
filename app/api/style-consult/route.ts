@@ -142,17 +142,38 @@ export async function POST(req: Request) {
     `Catalog (JSON): ${JSON.stringify(catalog)}`;
 
   const userContent: Anthropic.ContentBlockParam[] = [];
+  let imageData: string | null = null;
   if (body.image_base64 && body.media_type && ALLOWED_MEDIA.has(body.media_type)) {
     // Strip a data: URL prefix if present.
-    const data = body.image_base64.includes(",")
+    imageData = body.image_base64.includes(",")
       ? body.image_base64.slice(body.image_base64.indexOf(",") + 1)
       : body.image_base64;
     userContent.push({
       type: "image",
-      source: { type: "base64", media_type: body.media_type as any, data },
+      source: { type: "base64", media_type: body.media_type as any, data: imageData },
     });
   }
   userContent.push({ type: "text", text: promptText });
+
+  // Persist the inspiration photo server-side (service role bypasses the
+  // anon write restriction) so the stylist can see it in their review
+  // queue. Best-effort: a storage failure never blocks the estimate.
+  let photoPath: string | null = null;
+  if (imageData) {
+    try {
+      const ext = body.media_type === "image/png" ? "png"
+        : body.media_type === "image/webp" ? "webp"
+        : body.media_type === "image/gif" ? "gif" : "jpg";
+      const path = `${userId}/${crypto.randomUUID()}.${ext}`;
+      const buffer = Buffer.from(imageData, "base64");
+      const { error: upErr } = await admin.storage
+        .from("style-request-photos")
+        .upload(path, buffer, { contentType: body.media_type || "image/jpeg", upsert: false });
+      if (!upErr) photoPath = path;
+    } catch {
+      // ignore — photo persistence is non-critical
+    }
+  }
 
   // Forced tool call = robust structured output across SDK versions.
   const tool: Anthropic.Tool = {
@@ -209,6 +230,7 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     ok: true,
+    photo_path: photoPath,
     quote: {
       styleFamily: ai.styleFamily,
       sizeGuess: ai.sizeGuess,

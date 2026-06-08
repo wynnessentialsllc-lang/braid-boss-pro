@@ -90,6 +90,7 @@ export default function BuildYourStyle({ slug, userId, accent = "#7C3AED", curre
   const [email, setEmail] = useState("");
 
   const [quote, setQuote] = useState<Quote | null>(null);
+  const [savedPhotoPath, setSavedPhotoPath] = useState<string | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -148,6 +149,7 @@ export default function BuildYourStyle({ slug, userId, accent = "#7C3AED", curre
       const body = await res.json().catch(() => ({}));
       if (!res.ok) { setError(body?.error || "Couldn't get an estimate."); return; }
       setQuote(body.quote as Quote);
+      if (typeof body.photo_path === "string") setSavedPhotoPath(body.photo_path);
     } catch {
       setError("Couldn't reach the estimator. You can still send your request to the stylist.");
     } finally {
@@ -167,7 +169,7 @@ export default function BuildYourStyle({ slug, userId, accent = "#7C3AED", curre
         client_name: name.trim(),
         client_phone: phone.trim() || null,
         client_email: email.trim() || null,
-        photo_path: null, // v1: not persisted
+        photo_path: savedPhotoPath, // persisted by the estimate route (if used)
         size: size || null,
         length: length || null,
         hair_included: hairIncluded === "" ? null : hairIncluded === "yes",

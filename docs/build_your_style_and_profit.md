@@ -151,10 +151,12 @@ UI.
 4. ✅ Phase 3b — AI quote endpoint (`/api/style-consult`, Anthropic SDK,
    vision, catalog-anchored pricing). **Activates once `ANTHROPIC_API_KEY`
    is set in the deployment env**; degrades to a clear message otherwise.
-5. ⏳ Phase 3c (remaining) — on **approve**, auto-create the deposit
-   checkout (Stripe Connect) + client approval notification, instead of the
-   current "approve → follow up manually." Reuses the existing deposit-first
-   booking path; needs runtime/Stripe testing.
-6. ⏳ Enhancement — persist the inspiration **photo** to storage (anon
-   upload bucket) so the stylist sees it in the review queue (v1 uses the
-   photo for the AI estimate only).
+5. ✅ Phase 3c — **"Book & deposit"**: approving a request, then booking,
+   prefills the appointment sheet (client + AI estimate + desired
+   date/time + `depositRequired`) and hands off to the EXISTING appointment
+   + deposit + client-payment flow — no separate Stripe plumbing. The
+   request is marked `booked`.
+6. ✅ Photo persistence — inspiration photo is uploaded server-side by
+   `/api/style-consult` (service role) to the public `style-request-photos`
+   bucket and shown in the stylist's review queue. (Persists when the
+   client taps "Get a ballpark quote.")
