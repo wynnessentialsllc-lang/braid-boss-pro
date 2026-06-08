@@ -16,6 +16,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isAdminUser } from "../../../lib/admin";
+import { rateLimit, clientIp } from "../../../lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +26,9 @@ const MAX_CATEGORY = 64;
 const MAX_PATH = 200;
 const MAX_UA = 256;
 const MAX_SESSION = 64;
+// Cap the free-form metadata blob so a caller can't bloat the table with
+// multi-MB jsonb payloads on this unauthenticated, service-role insert.
+const MAX_METADATA_CHARS = 4_000;
 
 const cleanStr = (v: unknown, max: number): string | null => {
   if (typeof v !== "string") return null;
@@ -43,6 +47,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, dropped: "no_env" }, { status: 200 });
   }
 
+  // Best-effort flood guard. This is a public, service-role insert, so a
+  // script could otherwise spray rows. Generous per-IP cap; legit
+  // fire-and-forget tracking never approaches it. Drop silently (200) so
+  // the client never sees a tracking error.
+  const ipGate = rateLimit("analytics:ip", clientIp(req), 60, 60_000);
+  if (!ipGate.ok) {
+    return NextResponse.json({ ok: true, dropped: "rate_limited" }, { status: 200 });
+  }
+
   let body: any;
   try {
     body = await req.json();
@@ -58,10 +71,18 @@ export async function POST(req: Request) {
   const session_id = cleanStr(body?.session_id, MAX_SESSION);
   const path = cleanStr(body?.path, MAX_PATH);
   const user_agent = cleanStr(req.headers.get("user-agent"), MAX_UA);
-  const metadata =
+  // Accept only a plain object, and drop it entirely if it serializes
+  // beyond the cap so oversized blobs can't bloat the jsonb column.
+  let metadata: Record<string, unknown> =
     body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
       ? body.metadata
       : {};
+  try {
+    if (JSON.stringify(metadata).length > MAX_METADATA_CHARS) metadata = {};
+  } catch {
+    // Non-serializable (e.g. circular) — drop it.
+    metadata = {};
+  }
 
   // Resolve user_id + email from the request's bearer token if
   // present; never trust body.user_id directly. The email is only

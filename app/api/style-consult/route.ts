@@ -22,12 +22,24 @@ import {
   type AiStyleQuote,
 } from "../../lib/style-request";
 import type { Service } from "../../lib/services";
+import { rateLimit, clientIp } from "../../lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Hard ceiling on the inline inspiration photo. base64 inflates bytes by
+// ~33%, so ~9.4M chars ≈ a 7 MB image — generous for a phone photo while
+// refusing payloads crafted to balloon the vision bill / storage upload.
+const MAX_IMAGE_B64_CHARS = 9_400_000;
+
 const fail = (status: number, message: string) =>
   NextResponse.json({ error: message }, { status });
+
+const tooMany = (retryAfter: number) =>
+  NextResponse.json(
+    { error: "Too many requests — please wait a moment and try again." },
+    { status: 429, headers: { "retry-after": String(retryAfter) } },
+  );
 
 const env = (k: string): string => {
   const v = process.env[k];
@@ -62,6 +74,22 @@ export async function POST(req: Request) {
 
   const slug = (body.slug || "").trim();
   if (!slug) return fail(400, "Missing booking link.");
+
+  // Reject oversized inline images before doing any work — every call
+  // here costs a Claude vision request + a storage upload.
+  if (typeof body.image_base64 === "string" && body.image_base64.length > MAX_IMAGE_B64_CHARS) {
+    return fail(413, "That photo is too large. Please use an image under ~7 MB.");
+  }
+
+  // Best-effort cost-abuse guard: this endpoint fans out to Claude Opus
+  // vision on every call. Cap per-IP and per-slug request rates. Limits
+  // are generous enough that a real client trying a couple of styles is
+  // never affected.
+  const ip = clientIp(req);
+  const ipGate = rateLimit("style-consult:ip", ip, 8, 60_000);
+  if (!ipGate.ok) return tooMany(ipGate.retryAfter);
+  const slugGate = rateLimit("style-consult:slug", slug.toLowerCase(), 30, 60_000);
+  if (!slugGate.ok) return tooMany(slugGate.retryAfter);
 
   // Graceful degradation when the AI key isn't configured.
   let anthropicKey: string;

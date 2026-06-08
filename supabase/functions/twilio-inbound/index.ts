@@ -122,8 +122,16 @@ serve(async (req) => {
     return twiml(200);
   }
 
-  // Signature validation — only when we have the token to validate with.
-  if (TWILIO_AUTH_TOKEN) {
+  // Signature validation. Fail CLOSED: with no token configured we can't
+  // prove the request came from Twilio, and this endpoint has verify_jwt
+  // off — processing unsigned requests would let anyone spoof a `From`
+  // number to toggle another client's SMS opt-in/out (STOP/START). Refuse
+  // rather than process unauthenticated.
+  if (!TWILIO_AUTH_TOKEN) {
+    console.error("[twilio-inbound] TWILIO_AUTH_TOKEN unset — refusing unsigned request");
+    return twiml(403);
+  }
+  {
     const url = PUBLIC_WEBHOOK_URL || req.url;
     const ok = await verifyTwilioSignature(
       url,
@@ -134,8 +142,6 @@ serve(async (req) => {
       console.warn("[twilio-inbound] bad signature, rejecting");
       return twiml(403);
     }
-  } else {
-    console.warn("[twilio-inbound] TWILIO_AUTH_TOKEN unset — skipping signature check");
   }
 
   const from = String(params["From"] || "");

@@ -209,6 +209,21 @@ const BalancePayInner = ({ id }: { id: string }) => {
 
   // ---- Success state ----
   if (showSuccess) {
+    // The amount the client paid here is the BALANCE, not the gross
+    // service total (that would wrongly include the deposit they already
+    // paid). Prefer the live balance_due; if the row was zeroed out once
+    // the balance settled, reconstruct it from the stable snapshot
+    // (net of discount, minus deposit). Tip isn't shown — it can't be
+    // recovered after the Stripe redirect and the emailed Stripe receipt
+    // already itemizes the exact charged total including any tip.
+    const paidBalance = (() => {
+      const due = Number(info.balance_due) || 0;
+      if (due > 0) return due;
+      const sub = Number(info.total_price) || 0;
+      const disc = Math.max(0, Number(info.discount_amount) || 0);
+      const dep = Number(info.deposit_paid) || 0;
+      return Math.max(0, sub - disc - dep);
+    })();
     return (
       <Shell>
         <Brand studio={info && (info as any).ok ? (info as any).studio_name : undefined} />
@@ -227,7 +242,7 @@ const BalancePayInner = ({ id }: { id: string }) => {
           </div>
           <Row label="Service" value={info.service_name || "—"} />
           {when && <Row label="Appointment" value={when} />}
-          <Row label="Amount" value={fmtMoney((info.total_price || 0) - 0)} accent />
+          <Row label="Balance paid" value={fmtMoney(paidBalance)} accent />
         </div>
       </Shell>
     );

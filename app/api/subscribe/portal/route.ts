@@ -42,14 +42,23 @@ export async function POST(req: Request) {
     return fail(500, e?.message || "Server is not configured.");
   }
 
-  let body: { userId?: string } = {};
-  try { body = await req.json(); } catch { /* empty */ }
-  const userId = (body?.userId || "").trim();
-  if (!userId) return fail(400, "Missing user.");
+  // Auth: the caller MUST present a valid Supabase access token, and we
+  // derive the user id from THAT — never from the request body. Trusting
+  // a body-supplied userId would let anyone open another user's Stripe
+  // billing portal (view their card/invoices, cancel their plan) just by
+  // knowing their UUID. A leftover `userId` in the body is ignored.
+  const authHeader = req.headers.get("authorization") || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!token) return fail(401, "Missing access token.");
 
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
+  const { data: userData, error: whoErr } = await admin.auth.getUser(token);
+  if (whoErr || !userData?.user) return fail(401, "Could not identify the signed-in user.");
+  const userId = userData.user.id;
+
   const { data: profile, error } = await admin
     .from("profiles")
     .select("stripe_customer_id")
