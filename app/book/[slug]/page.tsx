@@ -2399,11 +2399,6 @@ export default function PublicBookingPage() {
                 (see the "3 · Your details" block below) so the client
                 configures their style and picks a time before being
                 asked who they are. */}
-            {/* Build your style — AI consultation for clients who don't see
-                the style they want. Collapsed CTA by default. */}
-            {link?.user_id && (
-              <BuildYourStyle slug={slug} userId={link.user_id} accent={accent} />
-            )}
             {hasCatalog ? (
               <>
                 {/* The "Choose a service" heading lives below (after the
@@ -2590,6 +2585,12 @@ export default function PublicBookingPage() {
                     </p>
                   );
                 })()}
+                {/* Build your style — AI consultation for clients who don't
+                    see the style they want. Sits under "Browse by category"
+                    and before the service menu. Collapsed CTA by default. */}
+                {link?.user_id && (
+                  <BuildYourStyle slug={slug} userId={link.user_id} accent={accent} />
+                )}
                 {/* Acuity-style service menu. The dropdown was hidden
                     behind a tap; cards put every option in front of
                     the client with the cover photo, name, duration,
