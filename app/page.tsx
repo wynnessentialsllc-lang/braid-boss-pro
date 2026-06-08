@@ -15687,8 +15687,9 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
           </div>
         </Card>
 
-        {openDiscounts && (
-          <>
+            {/* Catalog + Booking entries each stand on their own
+                gate below, so a single missing prop can't blank the
+                whole lower half of Settings. */}
             <SectionTitle>Catalog</SectionTitle>
             {openServices && (
               <Card className="p-4 active:scale-[0.99]" onClick={openServices}>
@@ -16378,6 +16379,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               </div>
             </Card>
 
+            {openDiscounts && (<>
             <SectionTitle>Studio offers</SectionTitle>
             <Card className="p-4 active:scale-[0.99]" onClick={openDiscounts}>
               <div className="flex items-center justify-between">
