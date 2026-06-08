@@ -12,7 +12,13 @@
 // perspective.
 
 import { parseCsv, pickField } from "./csv";
-import { INVENTORY_CATEGORIES, INVENTORY_UNITS, type InventoryItem } from "./inventory";
+import {
+  INVENTORY_CATEGORIES,
+  INVENTORY_UNITS,
+  isForSale,
+  type InventoryItem,
+  type InventoryItemType,
+} from "./inventory";
 
 export type CsvImportRow = {
   // Parsed item. id is generated client-side now so we can link
@@ -87,6 +93,19 @@ const closestCategory = (raw: string): string | null => {
   return partial || s; // free-text category is allowed, just less ideal
 };
 
+// Map a free-text type cell to a stored item type. Tolerant of the
+// words a stylist might use ("sell", "supply", "used on clients", …).
+// Defaults to "retail" so a missing/garbled cell keeps the item
+// sellable — matching the column default in the DB.
+const closestItemType = (raw: string): InventoryItemType => {
+  const s = (raw || "").trim().toLowerCase();
+  if (!s) return "retail";
+  if (/\bboth\b|sold *(&|and|\/|\+) *use/.test(s)) return "both";
+  if (/sale|sell|retail|resell|store|shop/.test(s)) return "retail";
+  if (/service|used|use|supply|supplies|consum|client/.test(s)) return "service";
+  return "retail";
+};
+
 const closestUnit = (raw: string): string | null => {
   const s = (raw || "").trim().toLowerCase();
   if (!s) return null;
@@ -139,6 +158,12 @@ export const parseInventoryCsv = (
 
     const skuRaw = pickField(r, ["sku", "code"]);
     const categoryRaw = pickField(r, ["category", "type"]);
+    // Dedicated item-type column. Kept distinct from the "type" alias
+    // above (which maps to category) so a sheet can carry both. When
+    // absent, we infer below from whether a retail price is present.
+    const itemTypeRaw = pickField(r, [
+      "item type", "item_type", "usage", "use", "sell or use", "sale or service", "stock type",
+    ]);
     const unitRaw = pickField(r, ["unit", "uom"]);
     const unitCostRaw = pickField(r, ["unit cost", "cost", "unit price", "cost per unit"]);
     const retailPriceRaw = pickField(r, ["retail price", "price", "sale price", "retail"]);
@@ -183,6 +208,13 @@ export const parseInventoryCsv = (
     const isDuplicateName = !!name && existingNames.has(name.toLowerCase());
     if (isDuplicateName) warnings.push("An inventory item with this name already exists.");
 
+    // Type: explicit column wins; otherwise infer from the row — a
+    // retail price or a matched storefront product means it's for sale,
+    // anything else is treated as a service supply.
+    const itemTypeValue: InventoryItemType = itemTypeRaw
+      ? closestItemType(itemTypeRaw)
+      : (retailPrice != null || matchedProductId ? "retail" : "service");
+
     const item: InventoryItem = {
       id: genId(),
       name,
@@ -196,6 +228,7 @@ export const parseInventoryCsv = (
       supplier: supplierRaw || null,
       photoPath: null,
       storefrontProductId: matchedProductId,
+      itemType: itemTypeValue,
       archivedAt: null,
     };
 
@@ -328,6 +361,8 @@ export const buildShopSeedSuggestions = (
       supplier: null,
       photoPath: p.image_url || null,
       storefrontProductId: p.id,
+      // Seeded straight from the storefront, so it's store stock.
+      itemType: "retail",
       archivedAt: null,
     };
     out.push({
@@ -407,6 +442,10 @@ export const buildPushToStorefrontSuggestions = (
   for (const i of (items || [])) {
     if (!i?.id || !i?.name) continue;
     if (i.archivedAt) continue;
+    // Service-only supplies aren't for sale — don't offer them as
+    // storefront drafts. Already-linked items still surface so their
+    // status shows even if mis-typed.
+    if (!isForSale(i) && !i.storefrontProductId) continue;
     const linked = i.storefrontProductId ? productById.get(i.storefrontProductId) || null : null;
     const retail = i.retailPrice == null ? null : Number(i.retailPrice);
     out.push({
@@ -443,8 +482,9 @@ export const buildPushToStorefrontSuggestions = (
 // the primary aliases parseInventoryCsv looks for, so a stylist who
 // fills this in and re-imports is guaranteed to round-trip.
 export const INVENTORY_CSV_TEMPLATE = [
-  "name,category,unit,unit_cost,retail_price,quantity,low_stock_threshold,sku,supplier,storefront_product",
-  "X-Pression Pre-Stretched 24in (Black),Braiding hair,bundle,6.50,,12,4,XP24-1B,Outre,",
-  "Got2b Glued Edge Control,Products,each,5.99,9.99,6,2,G2B-EC,Got2b,got2b-glued-edge-control",
-  "Rat-tail comb,Tools,each,2.25,,3,1,,Diane,",
+  "name,category,item_type,unit,unit_cost,retail_price,quantity,low_stock_threshold,sku,supplier,storefront_product",
+  "X-Pression Pre-Stretched 24in (Black),Braiding hair,service,bundle,6.50,,12,4,XP24-1B,Outre,",
+  "Got2b Glued Edge Control,Products,both,each,5.99,9.99,6,2,G2B-EC,Got2b,got2b-glued-edge-control",
+  "Bonnet (satin),Products,retail,each,3.00,12.00,8,2,BNT-ST,Generic,",
+  "Rat-tail comb,Tools,service,each,2.25,,3,1,,Diane,",
 ].join("\r\n");

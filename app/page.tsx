@@ -280,9 +280,15 @@ import { uploadReceipt, deleteReceipt as deleteReceiptObject, getReceiptUrl } fr
 import {
   INVENTORY_CATEGORIES,
   INVENTORY_UNITS,
+  INVENTORY_ITEM_TYPES,
   type InventoryItem,
+  type InventoryItemType,
   type InventoryMovement,
   type MovementReason,
+  itemType,
+  itemTypeLabel,
+  isForSale,
+  isServiceUse,
   applyMovement,
   computeInventoryTotals,
   computeMaterialsCostInRange,
@@ -22763,7 +22769,7 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
   const archived = useMemo(() => itemsRaw.filter(i => !isActiveItem(i)), [itemsRaw]);
   const totals = useMemo(() => computeInventoryTotals(items), [items]);
 
-  const [filter, setFilter] = useState<"all" | "low" | "archived">("all");
+  const [filter, setFilter] = useState<"all" | "sale" | "service" | "low" | "archived">("all");
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<InventoryItem | null>(null);
   const [openSheet, setOpenSheet] = useState(false);
@@ -22792,7 +22798,7 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
   // the storefront (not yet linked to a product, not archived). When
   // this is 0 we hide the entry point so the hub stays tidy.
   const pushableToShopCount = useMemo(
-    () => items.filter(i => !i.storefrontProductId).length,
+    () => items.filter(i => !i.storefrontProductId && isForSale(i)).length,
     [items],
   );
 
@@ -22800,7 +22806,12 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
     const base = filter === "archived" ? archived : items;
     const q = query.trim().toLowerCase();
     return base
-      .filter(i => filter !== "low" || isLowStock(i))
+      .filter(i => {
+        if (filter === "low") return isLowStock(i);
+        if (filter === "sale") return isForSale(i);
+        if (filter === "service") return isServiceUse(i);
+        return true;
+      })
       .filter(i => !q || [i.name, i.sku, i.category, i.supplier]
         .filter(Boolean)
         .some(v => String(v).toLowerCase().includes(q)))
@@ -22850,6 +22861,16 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
             <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso, marginTop: 2 }}>{fmtMoney(totals.totalValue, currency)}</p>
           </div>
           <div className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
+            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>For sale</p>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso, marginTop: 2 }}>{totals.forSaleCount}</p>
+            <p className="text-[10px] tabular-nums" style={{ color: C.muted }}>{fmtMoney(totals.forSaleValue, currency)}</p>
+          </div>
+          <div className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
+            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Used on clients</p>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso, marginTop: 2 }}>{totals.serviceCount}</p>
+            <p className="text-[10px] tabular-nums" style={{ color: C.muted }}>{fmtMoney(totals.serviceValue, currency)}</p>
+          </div>
+          <div className="rounded-2xl p-3" style={{ background: "#fff", border: `1px solid ${C.hairline}` }}>
             <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Low stock</p>
             <p style={{
               fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, marginTop: 2,
@@ -22870,6 +22891,8 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
         <div className="flex gap-2 overflow-x-auto bbp-scroll -mx-1 px-1">
           {([
             { key: "all" as const,      label: "All" },
+            { key: "sale" as const,     label: `For sale${totals.forSaleCount ? ` · ${totals.forSaleCount}` : ""}` },
+            { key: "service" as const,  label: `Used on clients${totals.serviceCount ? ` · ${totals.serviceCount}` : ""}` },
             { key: "low" as const,      label: `Low${totals.lowStockCount ? ` · ${totals.lowStockCount}` : ""}` },
             { key: "archived" as const, label: `Archived${archived.length ? ` · ${archived.length}` : ""}` },
           ]).map(p => (
@@ -23031,7 +23054,28 @@ const InventoryScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
                       <Layers size={16} style={{ color: low ? C.danger : C.goldDeep }} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{i.name}</p>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{i.name}</p>
+                        {(() => {
+                          const t = itemType(i);
+                          // Distinct tints so store stock and service
+                          // supplies read apart at a glance.
+                          const style =
+                            t === "service"
+                              ? { bg: "rgba(124,58,237,0.12)", ink: C.goldDeep, label: "Service" }
+                              : t === "both"
+                                ? { bg: C.cream, ink: C.coffee, label: "Both" }
+                                : { bg: "rgba(92,124,74,0.14)", ink: C.success, label: "Sale" };
+                          return (
+                            <span
+                              className="flex-shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide"
+                              style={{ background: style.bg, color: style.ink, letterSpacing: "0.06em" }}
+                            >
+                              {style.label}
+                            </span>
+                          );
+                        })()}
+                      </div>
                       <p className="text-[11px]" style={{ color: C.muted }}>
                         {[i.category, displayUnit(i.unit) ? `per ${displayUnit(i.unit)}` : null, i.sku ? `SKU ${i.sku}` : null].filter(Boolean).join(" · ") || "—"}
                       </p>
@@ -23170,6 +23214,9 @@ const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }
   const [name, setName] = useState(item?.name || "");
   const [sku, setSku] = useState(item?.sku || "");
   const [category, setCategory] = useState<string>(item?.category || INVENTORY_CATEGORIES[0]);
+  // Store stock vs. service supply. Existing items keep their stored
+  // type; new items default to "retail" (the safe, sellable default).
+  const [typeValue, setTypeValue] = useState<InventoryItemType>(item ? itemType(item) : "retail");
   const [unit, setUnit] = useState<string>(item?.unit || INVENTORY_UNITS[0]);
   const [unitCost, setUnitCost] = useState(item?.unitCost != null ? String(item.unitCost) : "");
   const [retailPrice, setRetailPrice] = useState(item?.retailPrice != null && item?.retailPrice !== "" ? String(item.retailPrice) : "");
@@ -23237,6 +23284,7 @@ const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }
         name: name.trim(),
         sku: sku.trim() || null,
         category,
+        itemType: typeValue,
         unit,
         unitCost: parseMoney(unitCost),
         retailPrice: retailPrice ? parseMoney(retailPrice) : null,
@@ -23269,6 +23317,37 @@ const InventoryItemEditorSheet = ({ item, currency, onClose, onSave, onArchive }
             className="w-full mt-1 px-3 py-2.5 rounded-xl text-[14px]"
             style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
           />
+        </div>
+
+        <div>
+          <label className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Type</label>
+          <div className="grid grid-cols-3 gap-1.5 mt-1">
+            {INVENTORY_ITEM_TYPES.map(t => {
+              const on = typeValue === t.value;
+              return (
+                <button
+                  type="button"
+                  key={t.value}
+                  onClick={() => setTypeValue(t.value)}
+                  className="px-2 py-2 rounded-xl text-[12px] font-semibold active:scale-[0.97] transition"
+                  style={{
+                    background: on ? C.espresso : C.cream,
+                    color: on ? C.cream : C.coffee,
+                    border: `1px solid ${on ? C.espresso : C.hairline}`,
+                  }}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] mt-1.5" style={{ color: C.muted }}>
+            {typeValue === "retail"
+              ? "Sold to clients. Can be pushed to your storefront."
+              : typeValue === "service"
+                ? "Used on clients during a service — not for sale."
+                : "Sold to clients and used during services."}
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -24367,6 +24446,14 @@ const DefaultMaterialsPicker = ({ inventory, value, onChange }: {
     for (const i of active) m.set(i.id, i);
     return m;
   }, [active]);
+  // Materials are consumed ON the client, so only offer service-usable
+  // items (service / both). Anything already selected stays selectable
+  // so an existing config never silently loses a row.
+  const selectedIds = useMemo(() => new Set(value.map(m => m.inventory_item_id)), [value]);
+  const options = useMemo(
+    () => active.filter(i => isServiceUse(i) || selectedIds.has(i.id)),
+    [active, selectedIds],
+  );
 
   const setMaterial = (i: number, patch: Partial<ServiceMaterial>) => {
     const next = value.map((m, idx) => idx === i ? { ...m, ...patch } : m);
@@ -24374,16 +24461,16 @@ const DefaultMaterialsPicker = ({ inventory, value, onChange }: {
   };
   const removeMaterial = (i: number) => onChange(value.filter((_, idx) => idx !== i));
   const addMaterial = () => {
-    if (active.length === 0) return;
-    onChange([...value, { inventory_item_id: active[0].id, quantity: 1 }]);
+    if (options.length === 0) return;
+    onChange([...value, { inventory_item_id: options[0].id, quantity: 1 }]);
   };
 
   return (
     <div className="mb-2 p-3 rounded-lg border" style={{ background: C.paper, borderColor: C.hairline }}>
       <div className="flex items-center justify-between mb-2">
         <p className="text-[11px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>Default materials</p>
-        {active.length === 0 ? (
-          <span className="text-[11px]" style={{ color: C.muted }}>Add inventory items first</span>
+        {options.length === 0 ? (
+          <span className="text-[11px]" style={{ color: C.muted }}>Add a &ldquo;Used on clients&rdquo; item first</span>
         ) : (
           <button type="button" onClick={addMaterial} className="text-[11px] font-semibold" style={{ color: C.goldDeep }}>+ Add</button>
         )}
@@ -24405,7 +24492,7 @@ const DefaultMaterialsPicker = ({ inventory, value, onChange }: {
                   style={{ borderColor: C.hairline, background: C.paper, color: C.espresso }}
                 >
                   {!item && <option value={m.inventory_item_id}>(missing item)</option>}
-                  {active.map(opt => (
+                  {options.map(opt => (
                     <option key={opt.id} value={opt.id}>{opt.name}</option>
                   ))}
                 </select>
@@ -24459,6 +24546,10 @@ const MaterialsUsedSheet = ({ appointment, services, inventory, onClose }: {
   }, [appointment.style, services]);
 
   const activeInventory = useMemo(() => inventory.filter(isActiveItem), [inventory]);
+  // Only items used ON clients (service / both) belong here. Pre-filled
+  // rows from a service can still reference a retail-only item, so the
+  // per-row <select> below re-adds the current selection when needed.
+  const serviceInventory = useMemo(() => activeInventory.filter(isServiceUse), [activeInventory]);
   const itemById = useMemo(() => {
     const m = new Map<string, InventoryItem>();
     for (const i of activeInventory) m.set(i.id, i);
@@ -24476,8 +24567,9 @@ const MaterialsUsedSheet = ({ appointment, services, inventory, onClose }: {
   const [err, setErr] = useState<string | null>(null);
 
   const addRow = () => {
-    if (activeInventory.length === 0) return;
-    setRows(prev => [...prev, { inventory_item_id: activeInventory[0].id, quantity: 1, keep: true }]);
+    const first = serviceInventory[0] || activeInventory[0];
+    if (!first) return;
+    setRows(prev => [...prev, { inventory_item_id: first.id, quantity: 1, keep: true }]);
   };
 
   const handleConfirm = async () => {
@@ -24535,7 +24627,13 @@ const MaterialsUsedSheet = ({ appointment, services, inventory, onClose }: {
                       className="flex-1 px-2 py-2 rounded-lg text-[13px]"
                       style={{ background: C.cream, border: `1px solid ${C.hairline}`, color: C.espresso }}
                     >
-                      {activeInventory.map(opt => (
+                      {/* Service-usable items, plus the current pick if
+                          it's a retail-only item carried over from the
+                          service's defaults. */}
+                      {(serviceInventory.some(o => o.id === r.inventory_item_id) || !item
+                        ? serviceInventory
+                        : [item, ...serviceInventory]
+                      ).map(opt => (
                         <option key={opt.id} value={opt.id}>{opt.name}</option>
                       ))}
                     </select>
