@@ -104,10 +104,17 @@ export async function POST(req: Request) {
       `Payment is not complete yet (status: ${session.payment_status || "unknown"}).`,
     );
   }
-  if (session.client_reference_id && session.client_reference_id !== userId) {
+  // Ownership: the lifetime/founding Payment Link stamps
+  // client_reference_id with the buyer's Supabase user id. Require it to
+  // be present AND match the signed-in caller. Previously a falsy
+  // client_reference_id skipped this check entirely — which let a user
+  // replay ANY paid platform Checkout Session that didn't set it (e.g. an
+  // SMS-credit pack, whose checkout never sets client_reference_id) to
+  // unlock lifetime access for the price of a cheap add-on. Fail closed.
+  if (!session.client_reference_id || session.client_reference_id !== userId) {
     return fail(
       403,
-      "This receipt belongs to a different account.",
+      "This receipt can't be matched to your account.",
     );
   }
 

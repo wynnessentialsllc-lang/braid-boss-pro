@@ -82,9 +82,19 @@ export const openBillingPortal = async (
 ): Promise<{ ok: boolean; error?: string }> => {
   if (typeof window === "undefined") return { ok: false, error: "no_window" };
   try {
+    // Identify the caller server-side via their access token — the route
+    // derives the user from the JWT, not from the body, so the userId arg
+    // is only used as a local convenience here.
+    const supabase = getSupabase();
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    if (!accessToken) return { ok: false, error: "not_signed_in" };
     const res = await fetch("/api/subscribe/portal", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
       body: JSON.stringify({ userId }),
     });
     const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
