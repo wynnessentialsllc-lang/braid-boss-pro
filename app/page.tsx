@@ -25343,6 +25343,8 @@ const StyleRequestsScreen = ({ store, onBack, onOpenApproval }: { store: any; on
   const [err, setErr] = useState<string | null>(null);
   const [filter, setFilter] = useState<"open" | "all" | "archived">("open");
   const [reviewing, setReviewing] = useState<{ row: any; mode: "approve" | "deny" } | null>(null);
+  // Full-detail view for a tapped request (whole photo + every field).
+  const [viewing, setViewing] = useState<any | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -25471,6 +25473,12 @@ const StyleRequestsScreen = ({ store, onBack, onOpenApproval }: { store: any; on
         ) : (
           filtered.map(r => (
             <Card key={r.id} className="p-4">
+              <button
+                type="button"
+                onClick={() => setViewing(r)}
+                className="w-full text-left active:opacity-90 transition"
+                style={{ background: "transparent", border: 0, padding: 0, margin: 0, font: "inherit", color: "inherit", cursor: "pointer", display: "block" }}
+              >
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-semibold" style={{ color: C.espresso }}>{r.client_name}</p>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: C.ivory, color: statusColor(r.status), textTransform: "uppercase", letterSpacing: "0.04em" }}>{r.status}</span>
@@ -25506,6 +25514,10 @@ const StyleRequestsScreen = ({ store, onBack, onOpenApproval }: { store: any; on
                 {r.notes && <p><strong>Notes:</strong> {r.notes}</p>}
                 {r.review_notes && <p style={{ color: C.muted }}><strong>Your note:</strong> {r.review_notes}</p>}
               </div>
+              <div className="flex items-center gap-1 mt-2 text-[11px] font-semibold" style={{ color: C.goldDeep }}>
+                <ImageIcon size={12} /> Tap to view full photo &amp; details
+              </div>
+              </button>
 
               {r.status === "submitted" ? (
                 <div className="grid grid-cols-2 gap-2 mt-3">
@@ -25547,6 +25559,94 @@ const StyleRequestsScreen = ({ store, onBack, onOpenApproval }: { store: any; on
             {busy ? "Saving…" : reviewing?.mode === "approve" ? "Approve & set up deposit" : "Deny"}
           </Button>
         </div>
+      </Sheet>
+
+      {/* Full-detail view — the whole inspiration photo (tap to open at
+          full resolution) plus every field, so the stylist can read the
+          request without the card's cropping. Actions mirror the card. */}
+      <Sheet open={!!viewing} onClose={() => setViewing(null)} title={viewing?.client_name || "Style request"}>
+        {viewing && (() => {
+          const v = viewing;
+          const photoUrl = v.photo_path
+            ? getSupabase().storage.from("style-request-photos").getPublicUrl(v.photo_path).data.publicUrl
+            : null;
+          const Row = ({ label, value }: { label: string; value: React.ReactNode }) => (
+            <div className="flex gap-2 py-1.5" style={{ borderTop: `1px solid ${C.hairline}` }}>
+              <span className="text-[12px] font-semibold w-28 flex-shrink-0" style={{ color: C.muted }}>{label}</span>
+              <span className="text-[12px] flex-1" style={{ color: C.espresso, lineHeight: 1.5 }}>{value}</span>
+            </div>
+          );
+          return (
+            <div className="space-y-3 pb-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px]" style={{ color: C.muted }}>
+                  {[v.client_phone, v.client_email].filter(Boolean).join(" · ") || "No contact"}
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: C.ivory, color: statusColor(v.status), textTransform: "uppercase", letterSpacing: "0.04em" }}>{v.status}</span>
+              </div>
+
+              {photoUrl && (
+                <button
+                  type="button"
+                  onClick={() => { try { window.open(photoUrl, "_blank", "noopener,noreferrer"); } catch { /* no-op */ } }}
+                  className="w-full active:opacity-90 transition"
+                  style={{ background: C.ivory, border: `1px solid ${C.hairline}`, borderRadius: 12, padding: 0, cursor: "zoom-in", overflow: "hidden", display: "block" }}
+                  aria-label="Open full-size photo"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={photoUrl} alt="Inspiration" style={{ width: "100%", maxHeight: "58vh", objectFit: "contain", display: "block" }} />
+                  <span className="flex items-center justify-center gap-1 py-1.5 text-[11px] font-semibold" style={{ color: C.goldDeep }}>
+                    <Search size={12} /> Tap photo to open full size
+                  </span>
+                </button>
+              )}
+
+              {(v.ai_price_low != null || v.ai_style_family) && (
+                <div className="p-3 rounded-xl" style={{ background: C.ivory }}>
+                  {v.ai_price_low != null && v.ai_price_high != null && (
+                    <p className="text-[16px] font-bold" style={{ color: C.espresso }}>
+                      ~{fmtMoney(Number(v.ai_price_low), currency)}–{fmtMoney(Number(v.ai_price_high), currency)} <span className="text-[11px] font-medium" style={{ color: C.muted }}>AI estimate</span>
+                    </p>
+                  )}
+                  <p className="text-[11px] mt-0.5" style={{ color: C.coffee }}>
+                    {[v.ai_style_family, v.ai_est_duration_hours ? `~${v.ai_est_duration_hours}h` : null].filter(Boolean).join(" · ") || "—"}
+                  </p>
+                  {v.ai_rationale && <p className="text-[12px] mt-1.5" style={{ color: C.muted, lineHeight: 1.5 }}>{v.ai_rationale}</p>}
+                </div>
+              )}
+
+              <div>
+                <Row label="Size" value={v.size || "—"} />
+                <Row label="Length" value={v.length || "—"} />
+                <Row label="Color" value={v.color || "—"} />
+                <Row label="Hair" value={`${v.hair_included == null ? "?" : v.hair_included ? "stylist provides" : "client brings"}${v.human_hair == null ? "" : v.human_hair ? " · human" : " · synthetic"}`} />
+                <Row label="Wants on" value={[v.preferred_date, v.preferred_time].filter(Boolean).join(" at ") || "—"} />
+                {v.notes && <Row label="Client notes" value={v.notes} />}
+                {v.review_notes && <Row label="Your note" value={v.review_notes} />}
+                {v.client_email && (
+                  <Row label="Email" value={<a href={`mailto:${v.client_email}`} style={{ color: C.goldDeep }}>{v.client_email}</a>} />
+                )}
+                {v.client_phone && (
+                  <Row label="Phone" value={<a href={`tel:${v.client_phone}`} style={{ color: C.goldDeep }}>{v.client_phone}</a>} />
+                )}
+              </div>
+
+              {v.status === "submitted" ? (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <Button variant="outline" disabled={busy} onClick={() => { setViewing(null); setReviewing({ row: v, mode: "deny" }); setNote(""); }}>Deny</Button>
+                  <Button variant="primary" disabled={busy} onClick={() => { setViewing(null); setReviewing({ row: v, mode: "approve" }); setNote(""); }}>Approve</Button>
+                </div>
+              ) : v.status === "approved" ? (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <Button variant="outline" disabled={busy} onClick={() => { setViewing(null); archive(v.id); }}>Archive</Button>
+                  <Button variant="primary" icon={<CalendarPlus size={16} />} disabled={busy} onClick={() => { setViewing(null); approveToBooking(v); }}>Set up deposit</Button>
+                </div>
+              ) : v.status !== "archived" && (
+                <Button variant="outline" fullWidth disabled={busy} onClick={() => { setViewing(null); archive(v.id); }}>Archive</Button>
+              )}
+            </div>
+          );
+        })()}
       </Sheet>
     </div>
   );
