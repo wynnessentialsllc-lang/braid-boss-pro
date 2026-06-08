@@ -178,3 +178,82 @@ export const removeBookingBanner = async (
   const supabase = getSupabase();
   await supabase.storage.from(BUCKET).remove([`${userId}/${filename}`]);
 };
+
+// ---- Stylist portrait ("Meet your stylist" photo) ------------------
+// A photo of the stylist herself, distinct from the studio logo. Shares
+// the booking-logos bucket — its RLS already pins writes to
+// {auth.uid()}/<filename> and opens reads, so a sibling
+// stylist-photo.jpg needs no new bucket or migration. Compressed to a
+// portrait-friendly cap (larger than the square logo) so it stays crisp
+// in the hero card and the expanded About panel. The resulting public
+// URL goes into booking_links.stylist_photo_url (20261010 migration).
+const PORTRAIT_MAX_DIM = 768;
+const PORTRAIT_QUALITY = 0.85;
+
+const compressPortrait = (file: File): Promise<Blob> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error("read failed"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("decode failed"));
+      img.onload = () => {
+        const ratio = img.width > img.height
+          ? Math.min(1, PORTRAIT_MAX_DIM / img.width)
+          : Math.min(1, PORTRAIT_MAX_DIM / img.height);
+        const w = Math.max(1, Math.round(img.width * ratio));
+        const h = Math.max(1, Math.round(img.height * ratio));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { reject(new Error("canvas unavailable")); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(
+          (blob) => blob ? resolve(blob) : reject(new Error("encode failed")),
+          "image/jpeg",
+          PORTRAIT_QUALITY,
+        );
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+
+export const uploadStylistPhoto = async (
+  userId: string,
+  file: File,
+  filename: string = "stylist-photo.jpg",
+): Promise<UploadLogoResult> => {
+  if (!userId) throw new Error("Sign in required.");
+  if (!file) throw new Error("No file selected.");
+  if (!/^image\//.test(file.type)) throw new Error("Please choose an image file.");
+  if (file.size > 12 * 1024 * 1024) throw new Error("Image is larger than 12 MB.");
+
+  const blob = await compressPortrait(file);
+  const supabase = getSupabase();
+  const path = `${userId}/${filename}`;
+  const { error: upErr } = await supabase
+    .storage
+    .from(BUCKET)
+    .upload(path, blob, {
+      upsert: true,
+      contentType: "image/jpeg",
+      cacheControl: "3600",
+    });
+  if (upErr) throw upErr;
+
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  const base = data?.publicUrl;
+  if (!base) throw new Error("Couldn't resolve uploaded URL.");
+  return { publicUrl: `${base}?v=${Date.now()}`, path };
+};
+
+export const removeStylistPhoto = async (
+  userId: string,
+  filename: string = "stylist-photo.jpg",
+): Promise<void> => {
+  if (!userId) return;
+  const supabase = getSupabase();
+  await supabase.storage.from(BUCKET).remove([`${userId}/${filename}`]);
+};
