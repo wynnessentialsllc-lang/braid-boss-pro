@@ -1978,11 +1978,9 @@ export default function PublicBookingPage() {
                 ›
               </span>
             </div>
-            {about && (
-              <p style={{ fontSize: 14, lineHeight: 1.6, color: C.coffee, margin: "12px 2px 0" }}>
-                {about}
-              </p>
-            )}
+            {/* Bio lives in the About panel that opens when the card
+                is tapped — keeping it inline here pushed the location
+                pills + social icons off the visible page. */}
           </div>
         ) : (
           <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginTop: -44 }}>
