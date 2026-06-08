@@ -1751,6 +1751,7 @@ export default function PublicBookingPage() {
                 background: C.paper, border: `1px solid ${C.hairline}`,
                 borderRadius: 20, padding: 14,
                 boxShadow: "0 18px 44px -22px rgba(21, 17, 26, 0.30)",
+                overflow: "hidden",
               }}
             >
               <div
@@ -1778,13 +1779,15 @@ export default function PublicBookingPage() {
                   style={{
                     fontSize: 10, fontWeight: 700, letterSpacing: "0.2em",
                     textTransform: "uppercase", color: accent, margin: 0,
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}
                 >
                   Meet your stylist
                 </p>
                 <h1
                   style={{
-                    fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 700,
+                    fontFamily: FONT_DISPLAY, fontWeight: 700,
+                    fontSize: "clamp(18px, 5.5vw, 24px)",
                     color: C.brandPrimary, lineHeight: 1.1, margin: "4px 0 0",
                     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                   }}
@@ -1795,14 +1798,18 @@ export default function PublicBookingPage() {
                   <p
                     style={{
                       fontFamily: FONT_DISPLAY, fontStyle: "italic", fontWeight: 500,
-                      fontSize: 15, color: C.coffee, margin: "2px 0 0",
+                      fontSize: "clamp(13px, 3.8vw, 15px)",
+                      color: C.coffee, margin: "2px 0 0",
                       whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                     }}
                   >
                     {tagline}
                   </p>
                 ) : displayHandle ? (
-                  <p style={{ fontSize: 12, color: C.muted, margin: "2px 0 0" }}>@{displayHandle}</p>
+                  <p style={{
+                    fontSize: 12, color: C.muted, margin: "2px 0 0",
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  }}>@{displayHandle}</p>
                 ) : null}
               </div>
             </div>
