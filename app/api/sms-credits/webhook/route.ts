@@ -79,7 +79,15 @@ export async function POST(req: Request) {
   try { evt = JSON.parse(rawBody); }
   catch { return NextResponse.json({ error: "bad json" }, { status: 400 }); }
 
-  if (evt?.type !== "checkout.session.completed") {
+  // BNPL methods (Klarna/Afterpay/etc.) settle asynchronously: the
+  // session completes with payment_status != 'paid', then Stripe fires
+  // checkout.session.async_payment_succeeded once funds clear. Fulfill on
+  // either, so delayed-settlement purchases still credit.
+  const FULFILL_EVENTS = new Set([
+    "checkout.session.completed",
+    "checkout.session.async_payment_succeeded",
+  ]);
+  if (!FULFILL_EVENTS.has(evt?.type)) {
     return NextResponse.json({ received: true, ignored: evt?.type }, { status: 200 });
   }
 

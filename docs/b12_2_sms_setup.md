@@ -136,7 +136,10 @@ This endpoint is its own Stripe webhook (like `founding-checkout` and
    ```
    https://<your-app-domain>/api/sms-credits/webhook
    ```
-   Event: `checkout.session.completed`.
+   Events: `checkout.session.completed` **and**
+   `checkout.session.async_payment_succeeded` (the second covers BNPL —
+   Klarna/Afterpay — which settle asynchronously; without it those
+   purchases never credit).
 2. Copy the endpoint's signing secret and set it in the app's env
    (Vercel): `STRIPE_SMS_WEBHOOK_SECRET=whsec_...`
    - If unset, the route falls back to `STRIPE_DEPOSIT_WEBHOOK_SECRET`,
