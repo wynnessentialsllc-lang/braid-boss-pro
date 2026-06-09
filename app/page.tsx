@@ -3903,14 +3903,16 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         </div>
 
         {headerTheme !== "classic" && (
-          <>
-            <Field label="Specialty tagline" hint="Shown in your hero — e.g. “Knotless / Boho / Box Braid Specialist”.">
-              <Input value={tagline} onChange={(e) => setTagline(e.target.value)} placeholder="Knotless / Boho / Box Braid Specialist" maxLength={80} />
-            </Field>
-            <Field label="Meet your stylist" hint="Optional — a short bio shown in the editorial & spotlight headers.">
-              <Textarea value={about} onChange={(e) => setAbout(e.target.value)} rows={4}
-                placeholder="Thank you for booking with me! I specialize in protective styles that last…" />
-            </Field>
+          <Field label="Specialty tagline" hint="Shown in your hero — e.g. “Knotless / Boho / Box Braid Specialist”.">
+            <Input value={tagline} onChange={(e) => setTagline(e.target.value)} placeholder="Knotless / Boho / Box Braid Specialist" maxLength={80} />
+          </Field>
+        )}
+        {/* Bio + photo apply on every header style — on Classic the
+            "Meet your stylist" card opens them in a panel too. */}
+        <Field label="Meet your stylist" hint="Optional — a short bio. Visitors open it by tapping your “Meet your stylist” card on any header style.">
+          <Textarea value={about} onChange={(e) => setAbout(e.target.value)} rows={4}
+            placeholder="Thank you for booking with me! I specialize in protective styles that last…" />
+        </Field>
             {/* Stylist photo — a picture of her, distinct from the studio
                 logo. Powers the Spotlight "Meet your stylist" card +
                 the About panel that expands from it. Stored as
@@ -3997,8 +3999,6 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
                 </div>
               </div>
             </div>
-          </>
-        )}
         <div>
           <p className="text-[11px] font-bold uppercase mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>Studio logo</p>
           <div className="flex items-center gap-3" style={{ flexWrap: "wrap" }}>

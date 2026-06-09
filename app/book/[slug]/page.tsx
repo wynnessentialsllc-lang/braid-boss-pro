@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
 import BuildYourStyle from "../../components/booking/BuildYourStyle";
@@ -1509,6 +1509,12 @@ export default function PublicBookingPage() {
       : "") ||
     "";
 
+  // Whether the "Meet your stylist" About panel has anything worth
+  // opening — a written bio or a dedicated photo of the stylist. Gates
+  // the tap-to-open affordance across all three header themes so a hero
+  // with nothing extra to show stays a plain (non-interactive) lockup.
+  const hasAboutPanel = Boolean(about) || Boolean(link?.stylist_photo_url);
+
   // Never render the profile chrome with placeholder data. Until the
   // real booking link resolves, show only the branded loader; if it
   // failed to resolve, show a clean not-found state. This kills the
@@ -1700,12 +1706,26 @@ export default function PublicBookingPage() {
         {headerTheme === "editorial" ? (
           <div
             className="bbp-hero-rise"
+            {...(hasAboutPanel ? {
+              role: "button",
+              tabIndex: 0,
+              onClick: () => setAboutOpen(true),
+              onKeyDown: (e: ReactKeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setAboutOpen(true);
+                }
+              },
+              "aria-haspopup": "dialog" as const,
+              "aria-label": `Meet your stylist — ${link?.business_name || "about the stylist"}`,
+            } : {})}
             style={{
               marginTop: -52,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
               textAlign: "center",
+              cursor: hasAboutPanel ? "pointer" : "default",
             }}
           >
             <div
@@ -1756,27 +1776,41 @@ export default function PublicBookingPage() {
                 {about}
               </p>
             )}
+            {hasAboutPanel && (
+              <span
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 4,
+                  marginTop: 12, fontSize: 11, fontWeight: 700,
+                  letterSpacing: "0.12em", textTransform: "uppercase", color: accent,
+                }}
+              >
+                Meet your stylist
+                <span aria-hidden style={{ fontSize: 15, lineHeight: 1 }}>›</span>
+              </span>
+            )}
           </div>
         ) : headerTheme === "spotlight" ? (
           <div className="bbp-hero-rise" style={{ marginTop: -56 }}>
             <div
-              role="button"
-              tabIndex={0}
-              onClick={() => setAboutOpen(true)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setAboutOpen(true);
-                }
-              }}
-              aria-haspopup="dialog"
-              aria-label={`Meet your stylist — ${link?.business_name || "about the stylist"}`}
+              {...(hasAboutPanel ? {
+                role: "button",
+                tabIndex: 0,
+                onClick: () => setAboutOpen(true),
+                onKeyDown: (e: ReactKeyboardEvent) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setAboutOpen(true);
+                  }
+                },
+                "aria-haspopup": "dialog" as const,
+                "aria-label": `Meet your stylist — ${link?.business_name || "about the stylist"}`,
+              } : {})}
               style={{
                 display: "flex", gap: 14, alignItems: "center",
                 background: C.paper, border: `1px solid ${C.hairline}`,
                 borderRadius: 20, padding: 14,
                 boxShadow: "0 18px 44px -22px rgba(21, 17, 26, 0.30)",
-                overflow: "hidden", cursor: "pointer",
+                overflow: "hidden", cursor: hasAboutPanel ? "pointer" : "default",
               }}
             >
               <div
@@ -1837,15 +1871,17 @@ export default function PublicBookingPage() {
                   }}>@{displayHandle}</p>
                 ) : null}
               </div>
-              <span
-                aria-hidden
-                style={{
-                  flexShrink: 0, alignSelf: "center", color: accent,
-                  fontSize: 22, lineHeight: 1, fontWeight: 400,
-                }}
-              >
-                ›
-              </span>
+              {hasAboutPanel && (
+                <span
+                  aria-hidden
+                  style={{
+                    flexShrink: 0, alignSelf: "center", color: accent,
+                    fontSize: 22, lineHeight: 1, fontWeight: 400,
+                  }}
+                >
+                  ›
+                </span>
+              )}
             </div>
             {about && (
               <p style={{ fontSize: 14, lineHeight: 1.6, color: C.coffee, margin: "12px 2px 0" }}>
@@ -1854,7 +1890,25 @@ export default function PublicBookingPage() {
             )}
           </div>
         ) : (
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginTop: -44 }}>
+          <div
+            {...(hasAboutPanel ? {
+              role: "button",
+              tabIndex: 0,
+              onClick: () => setAboutOpen(true),
+              onKeyDown: (e: ReactKeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setAboutOpen(true);
+                }
+              },
+              "aria-haspopup": "dialog" as const,
+              "aria-label": `Meet your stylist — ${link?.business_name || "about the stylist"}`,
+            } : {})}
+            style={{
+              display: "flex", alignItems: "flex-start", gap: 14, marginTop: -44,
+              cursor: hasAboutPanel ? "pointer" : "default",
+            }}
+          >
             <div
               style={{
                 width: 88, height: 88, borderRadius: 18,
@@ -1913,6 +1967,18 @@ export default function PublicBookingPage() {
                 >
                   @{displayHandle}
                 </p>
+              )}
+              {hasAboutPanel && (
+                <span
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 4,
+                    marginTop: 8, fontSize: 11, fontWeight: 700,
+                    letterSpacing: "0.12em", textTransform: "uppercase", color: accent,
+                  }}
+                >
+                  Meet your stylist
+                  <span aria-hidden style={{ fontSize: 15, lineHeight: 1 }}>›</span>
+                </span>
               )}
             </div>
           </div>
