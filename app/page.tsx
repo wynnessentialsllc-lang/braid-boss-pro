@@ -22153,7 +22153,7 @@ const ServicesScreen = ({
                           />
                         </Field>
                       </div>
-                      {(editing.hair_sourcing === "client" || editing.hair_sourcing === "choice") && (
+                      {((editing as any).hair_sourcing === "client" || (editing as any).hair_sourcing === "choice") && (
                         <div className="grid grid-cols-2 gap-2 mt-2">
                           <Field label="Hair packs" hint="Blank = service default">
                             <Input
