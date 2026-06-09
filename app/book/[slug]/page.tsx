@@ -3691,7 +3691,38 @@ export default function PublicBookingPage() {
                 picked service is offered mobile. Out-of-area / blocked
                 zips short-circuit the booking before the calendar so
                 the client never picks a slot only to be rejected. */}
-            {isMobileService && selectedCatalogService && (
+            {isMobileService && selectedCatalogService && (() => {
+              const svc: any = selectedCatalogService;
+              const feeModel: string = svc.mobile_fee_model || "flat";
+              const fmt = (n: number) =>
+                Number.isFinite(n)
+                  ? (n % 1 === 0 ? `$${n.toFixed(0)}` : `$${n.toFixed(2)}`)
+                  : "$0";
+              const fmtMiles = (n: number) =>
+                Number.isFinite(n) ? `${n % 1 === 0 ? n.toFixed(0) : n.toFixed(1)} mi` : "0 mi";
+              const tieredBands: Array<{ max_miles: number; fee: number }> =
+                Array.isArray(svc.mobile_tiered_bands)
+                  ? svc.mobile_tiered_bands
+                      .map((b: any) => ({
+                        max_miles: Number(b?.max_miles) || 0,
+                        fee: Number(b?.fee) || 0,
+                      }))
+                      .filter((b: any) => b.max_miles > 0)
+                      .sort((a: any, b: any) => a.max_miles - b.max_miles)
+                  : [];
+              const minPrice = svc.mobile_minimum_price == null
+                ? null
+                : Number(svc.mobile_minimum_price);
+              const minNote = typeof svc.mobile_minimum_price_note === "string"
+                ? svc.mobile_minimum_price_note.trim()
+                : "";
+              const hasFeeInfo =
+                (feeModel === "flat" && Number(svc.mobile_flat_fee) > 0)
+                || ((feeModel === "per_mile" || feeModel === "hybrid")
+                    && Number(svc.mobile_per_mile_fee) > 0)
+                || (feeModel === "tiered" && tieredBands.length > 0);
+              const showSummary = hasFeeInfo || minPrice != null || !!minNote;
+              return (
               <div
                 style={{
                   padding: 14, borderRadius: 14,
@@ -3710,6 +3741,80 @@ export default function PublicBookingPage() {
                     Your stylist comes to you. Enter your address — we'll check the area and quote the travel fee before you book.
                   </p>
                 </div>
+
+                {showSummary && (
+                  <div style={{
+                    padding: 12, borderRadius: 12, background: C.cream,
+                    border: `1px solid ${C.hairline}`, display: "grid", gap: 8,
+                  }}>
+                    {hasFeeInfo && (
+                      <div>
+                        <p style={{
+                          margin: 0, fontSize: 10, fontWeight: 800, letterSpacing: "0.12em",
+                          textTransform: "uppercase", color: C.coffee,
+                        }}>
+                          Travel fee
+                        </p>
+                        {feeModel === "flat" && (
+                          <p style={{ margin: "4px 0 0", fontSize: 13, color: C.espresso, lineHeight: 1.5 }}>
+                            <strong>{fmt(Number(svc.mobile_flat_fee))}</strong> per trip
+                          </p>
+                        )}
+                        {feeModel === "per_mile" && (
+                          <p style={{ margin: "4px 0 0", fontSize: 13, color: C.espresso, lineHeight: 1.5 }}>
+                            <strong>{fmt(Number(svc.mobile_per_mile_fee))}</strong> per mile from the stylist's base
+                          </p>
+                        )}
+                        {feeModel === "hybrid" && (
+                          <p style={{ margin: "4px 0 0", fontSize: 13, color: C.espresso, lineHeight: 1.5 }}>
+                            Free within <strong>{fmtMiles(Number(svc.mobile_hybrid_free_miles))}</strong>,
+                            then <strong>{fmt(Number(svc.mobile_per_mile_fee))}</strong> per mile after
+                          </p>
+                        )}
+                        {feeModel === "tiered" && tieredBands.length > 0 && (
+                          <ul style={{
+                            margin: "6px 0 0", padding: 0, listStyle: "none",
+                            display: "grid", gap: 3,
+                          }}>
+                            {tieredBands.map((b, i) => (
+                              <li key={i} style={{
+                                display: "flex", justifyContent: "space-between",
+                                fontSize: 13, color: C.espresso, lineHeight: 1.4,
+                              }}>
+                                <span>Up to {fmtMiles(b.max_miles)}</span>
+                                <strong>{fmt(b.fee)}</strong>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                    {minPrice != null && minPrice > 0 && (
+                      <div style={{
+                        paddingTop: hasFeeInfo ? 8 : 0,
+                        borderTop: hasFeeInfo ? `1px solid ${C.hairline}` : "none",
+                      }}>
+                        <p style={{
+                          margin: 0, fontSize: 10, fontWeight: 800, letterSpacing: "0.12em",
+                          textTransform: "uppercase", color: C.coffee,
+                        }}>
+                          Mobile booking minimum
+                        </p>
+                        <p style={{ margin: "4px 0 0", fontSize: 13, color: C.espresso, lineHeight: 1.5 }}>
+                          <strong>{fmt(minPrice)}</strong> service price (travel fee not included)
+                        </p>
+                        {minNote && (
+                          <p style={{
+                            margin: "4px 0 0", fontSize: 12, color: C.coffee,
+                            lineHeight: 1.5, whiteSpace: "pre-wrap",
+                          }}>
+                            {minNote}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <Field label="Your address">
                   <input
                     value={clientAddress}
@@ -3784,7 +3889,8 @@ export default function PublicBookingPage() {
                   </Field>
                 )}
               </div>
-            )}
+              );
+            })()}
             {/* Calendar + details + submit only after a service is picked
                 (or in legacy free-form mode), so the landing reads
                 cleanly as a menu. */}
