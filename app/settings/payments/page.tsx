@@ -190,6 +190,43 @@ function PaymentsInner() {
     }
   }, [bnplEnabled, bnplSaving]);
 
+  // Tap to Pay (in-person payments) enablement + self-test. Calls the
+  // opt-in /api/terminal/enable endpoint, which requests the
+  // card_present capability on the connected account and provisions a
+  // Terminal Location. The result tells the stylist (and us) whether
+  // Stripe has Tap to Pay ready — i.e. whether a support ticket is even
+  // needed — without anyone guessing.
+  const [ttpBusy, setTtpBusy] = useState(false);
+  const [ttpResult, setTtpResult] = useState<
+    { ready: boolean; card_present: string; location_id: string | null } | null
+  >(null);
+  const [ttpError, setTtpError] = useState<string | null>(null);
+
+  const handleEnableTapToPay = useCallback(async () => {
+    if (ttpBusy) return;
+    setTtpBusy(true);
+    setTtpError(null);
+    setTtpResult(null);
+    try {
+      const supabase = getSupabase();
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (!token) throw new Error("Please sign in again.");
+      const res = await fetch("/api/terminal/enable", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ access_token: token }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || "Couldn't enable in-person payments.");
+      setTtpResult(body);
+    } catch (e: any) {
+      setTtpError(e?.message || "Something went wrong. Try again.");
+    } finally {
+      setTtpBusy(false);
+    }
+  }, [ttpBusy]);
+
   // Detect the platform-side blocker: Stripe refuses to create
   // connected accounts until the platform owner accepts the Connect
   // responsibilities in the Stripe dashboard. We surface a friendly
@@ -495,6 +532,60 @@ function PaymentsInner() {
           {bnplError && (
             <p style={{ fontSize: 12, color: C.danger }}>{bnplError}</p>
           )}
+        </div>
+      )}
+
+      {/* In-person payments (Tap to Pay). Only meaningful once the
+          account can take charges. The button is also the probe that
+          tells us whether Stripe has Tap to Pay enabled for this
+          account — answering the "do I need a support ticket?" question
+          definitively instead of guessing. */}
+      {status === "active" && (
+        <div
+          style={{
+            padding: 16,
+            borderRadius: 14,
+            background: C.cream,
+            border: `1px solid ${C.hairline}`,
+            display: "grid",
+            gap: 10,
+          }}
+        >
+          <div>
+            <p style={{ fontSize: 14, fontWeight: 700, color: C.espresso }}>
+              Accept in-person payments (Tap to Pay)
+            </p>
+            <p style={{ fontSize: 12, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
+              Tap a client&apos;s card or phone right on your iPhone — no reader needed.
+              Check whether Stripe has Tap to Pay ready on your account.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={ttpBusy}
+            onClick={() => void handleEnableTapToPay()}
+            style={{ ...primaryButtonStyle, opacity: ttpBusy ? 0.6 : 1 }}
+          >
+            {ttpBusy ? "Checking…" : "Enable / check Tap to Pay"}
+          </button>
+          {ttpResult && (
+            ttpResult.ready ? (
+              <p style={{ fontSize: 12, color: C.success, lineHeight: 1.5 }}>
+                ✅ Tap to Pay is enabled on your account — you&apos;re all set on the Stripe side.
+              </p>
+            ) : ttpResult.card_present === "pending" ? (
+              <p style={{ fontSize: 12, color: C.warning, lineHeight: 1.5 }}>
+                ⏳ Stripe is reviewing Tap to Pay for your account — this can take a little while.
+                No action needed; check back shortly.
+              </p>
+            ) : (
+              <p style={{ fontSize: 12, color: C.warning, lineHeight: 1.5 }}>
+                Tap to Pay isn&apos;t active yet (status: {ttpResult.card_present}). If it stays
+                inactive, contact Stripe support to enable Tap to Pay for your account.
+              </p>
+            )
+          )}
+          {ttpError && <p style={{ fontSize: 12, color: C.danger, lineHeight: 1.5 }}>{ttpError}</p>}
         </div>
       )}
 
