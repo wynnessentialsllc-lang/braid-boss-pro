@@ -7,7 +7,16 @@ export default function PrivacyPage() {
     <LegalShell
       title="Privacy Policy"
       intro="Braid Boss Pro is a tool for independent braiders to organize their business. We treat your data like it’s ours — minimal, scoped to you, and never sold."
-      updated="June 7, 2026">
+      updated="June 9, 2026">
+
+      <LegalSection title="Who we are">
+        <p>
+          Braid Boss Pro is owned and operated by <strong>Wynn Essentials, LLC</strong>, the legal
+          entity behind this website and the SMS / email communications sent from{" "}
+          <a href="mailto:hello@braidbosspro.app">hello@braidbosspro.app</a>. All references to
+          “Braid Boss Pro,” “we,” “us,” or “our” in this policy mean Wynn Essentials, LLC.
+        </p>
+      </LegalSection>
 
       <LegalSection title="What we collect">
         <p>The data Braid Boss Pro stores is the data you put in. Specifically:</p>
@@ -104,7 +113,8 @@ export default function PrivacyPage() {
 
       <LegalSection title="Contact">
         <p>
-          Questions? Contact <a href="mailto:hello@hairwellnessslab.com">hello@hairwellnessslab.com</a>.
+          Questions? Contact <strong>Wynn Essentials, LLC</strong> at{" "}
+          <a href="mailto:hello@braidbosspro.app">hello@braidbosspro.app</a>.
         </p>
       </LegalSection>
     </LegalShell>
