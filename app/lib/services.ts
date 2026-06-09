@@ -204,6 +204,11 @@ export type HairSpec = {
   packs?: string | null;   // e.g. "5" (text so "5-6" is allowed)
   prep?: string | null;    // e.g. "Come washed + blow-dried"
   buyUrl?: string | null;  // optional link to the exact product
+  // v2 buy-from-me ('choice' mode): price the stylist charges to supply
+  // the hair, and the inventory item it draws from (deducted on
+  // appointment completion). Both null = bring-your-own only.
+  sellPrice?: number | null;
+  inventoryItemId?: string | null;
 };
 
 export type Service = {
@@ -662,12 +667,18 @@ export const useServices = (
           const t = typeof v === "string" ? v.trim() : "";
           return t ? t.slice(0, n) : null;
         };
+        const sell = (() => {
+          const n = typeof s.sellPrice === "number" ? s.sellPrice : Number(s.sellPrice);
+          return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+        })();
         return {
           brand: clip(s.brand, 80),
           color: clip(s.color, 60),
           packs: clip(s.packs, 40),
           prep: clip(s.prep, 280),
           buyUrl: clip(s.buyUrl, 500),
+          sellPrice: sell,
+          inventoryItemId: clip(s.inventoryItemId, 64),
         };
       })(),
       // Default materials — array of { inventory_item_id, quantity }.
