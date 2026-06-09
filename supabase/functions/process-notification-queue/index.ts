@@ -1724,7 +1724,14 @@ const smsText = (row: ClaimedRow): string => {
     row.payload && typeof row.payload === "object" && typeof row.payload.smsText === "string"
       ? row.payload.smsText
       : "";
-  const txt = String(fromPayload || row.body || "").trim();
+  let txt = String(fromPayload || row.body || "").trim();
+  if (!txt) return "";
+  // Carrier compliance (A2P 10DLC / CTIA): every outbound message must
+  // carry opt-out instructions, and content filters look for them. Append
+  // unless the body already references STOP so we don't double up.
+  if (!/\bSTOP\b/i.test(txt)) {
+    txt = `${txt} Reply STOP to opt out.`;
+  }
   // Hard cap so a bad payload can't fan out into many billed segments.
   return txt.length > 480 ? `${txt.slice(0, 477)}...` : txt;
 };
