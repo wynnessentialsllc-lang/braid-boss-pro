@@ -8529,7 +8529,12 @@ const ListCalendarView = ({
 }) => {
   const [filter, setFilter] = useState<"upcoming" | "today" | "past" | "all">("upcoming");
   const filtered = useMemo(() => {
-    let list = (allAppts as any[]).filter(a => showCanceled || !isCanceledAppointment(a));
+    // Client appointments only — personal events / blocked time live on
+    // the calendar, not in the appointments list (matches the dashboard
+    // Upcoming/Today lists, which also use isRealAppointment).
+    let list = (allAppts as any[])
+      .filter(a => isRealAppointment(a))
+      .filter(a => showCanceled || !isCanceledAppointment(a));
     if (filter === "today") list = list.filter(a => a.date === today);
     else if (filter === "upcoming") list = list.filter(a => a.date >= today && a.status !== "completed");
     else if (filter === "past") list = list.filter(a => a.date < today || a.status === "completed");
