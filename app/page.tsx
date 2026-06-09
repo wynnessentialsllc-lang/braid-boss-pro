@@ -11200,6 +11200,33 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                 }}>
                 Mark balance paid (manual)
               </Button>
+              {form.status === "completed" && (
+                <Button variant="outline" icon={<RefreshCw size={14} />} fullWidth className="mt-2"
+                  onClick={async () => {
+                    // Stuck state: completed but with a balance due (e.g. a
+                    // checkout reset under the old code that left status
+                    // "completed"). Fully un-complete it so it leaves
+                    // earnings, and drop any receipt.
+                    const net = Math.max(0, (Number(form.totalPrice) || 0) - (Number(form.discountAmount) || 0));
+                    setForm({
+                      ...form,
+                      depositPaid: 0,
+                      balanceDue: net,
+                      paymentStatus: "pending",
+                      paymentDate: "",
+                      paymentMethod: "",
+                      paymentNotes: "",
+                      status: "confirmed",
+                    });
+                    if (form.id && deleteReceipt) {
+                      for (const r of (receipts || []).filter((x: any) => x.appointmentId === form.id)) {
+                        try { await deleteReceipt(r.id); } catch { /* best-effort */ }
+                      }
+                    }
+                  }}>
+                  Reset checkout (un-complete)
+                </Button>
+              )}
             </>
           ) : (
             <Button variant="outline" icon={<RefreshCw size={14} />} fullWidth
