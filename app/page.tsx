@@ -9404,7 +9404,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   const {
     upsertAppointment, deleteAppointment, clients, upsertClient, business,
     recurringSeries, upsertSeries, deleteSeries, scheduleRemindersForAppointment,
-    appointments, reminderSettings, receipts, upsertReceipt,
+    appointments, reminderSettings, receipts, upsertReceipt, deleteReceipt,
   } = store;
   const [form, setForm] = useState<EntityRecord>({});
   const [showNewClient, setShowNewClient] = useState(false);
@@ -11406,14 +11406,31 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             </>
           ) : (
             <Button variant="outline" icon={<RefreshCw size={14} />} fullWidth
-              onClick={() => setForm({
-                ...form,
-                depositPaid: 0,
-                paymentStatus: "pending",
-                paymentDate: "",
-                paymentMethod: "",
-                paymentNotes: "",
-              })}>
+              onClick={async () => {
+                const net = Math.max(0, (Number(form.totalPrice) || 0) - (Number(form.discountAmount) || 0));
+                setForm({
+                  ...form,
+                  depositPaid: 0,
+                  balanceDue: net,
+                  paymentStatus: "pending",
+                  paymentDate: "",
+                  paymentMethod: "",
+                  paymentNotes: "",
+                  // Reverse the checkout's completion too, so the
+                  // appointment drops out of earnings (Total earned / yearly)
+                  // and Money income — those count status==="completed" OR
+                  // paymentStatus==="paid". "confirmed" (not "scheduled")
+                  // avoids a spurious "Late" badge on a past date.
+                  status: form.status === "completed" ? "confirmed" : form.status,
+                });
+                // Remove any receipt generated for this appointment so it
+                // leaves the Money page's Receipts & Invoices list.
+                if (form.id && deleteReceipt) {
+                  for (const r of (receipts || []).filter((x: any) => x.appointmentId === form.id)) {
+                    try { await deleteReceipt(r.id); } catch { /* best-effort */ }
+                  }
+                }
+              }}>
               Reset payment
             </Button>
           )}
