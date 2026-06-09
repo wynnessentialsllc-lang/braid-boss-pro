@@ -104,7 +104,12 @@ export async function POST(req: Request) {
     "line_items[0][price_data][product_data][description]",
     `${pack.label} pack · ${pack.credits} text messages`,
   );
-  form.set("success_url", `${baseUrl}/payment-success?type=sms_credits`);
+  // Credits are fulfilled by the webhook (record_sms_credit_purchase),
+  // so the return page just needs to land the stylist back in the app —
+  // NOT /payment-success, which is the lifetime-access verifier and
+  // errors without a session_id. Balance refreshes when the SMS credits
+  // screen reopens.
+  form.set("success_url", `${baseUrl}/?sms_credits=success`);
   form.set("cancel_url", `${baseUrl}/?sms_credits=cancelled`);
   form.set("metadata[purpose]", "sms_credits");
   form.set("metadata[sms_credit_purchase_id]", String(purchase.id));
