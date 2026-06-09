@@ -102,7 +102,11 @@ const FAQS_PRODUCT: Faq[] = [
   },
   {
     q: "What features are included?",
-    a: "Every account gets: branded booking link (/@yourhandle), real-time calendar, deposit collection, Stripe Connect payments, contracts + e-sign, pricing calculator + saved quotes, client management, retail storefront with product variants + inventory, order tracking, reminder automation, mobile dashboard, and PWA install. Every feature is unlocked during the 14-day free trial.",
+    a: "Every account gets: branded booking link (/@yourhandle), real-time calendar, deposit collection, Stripe Connect payments, contracts + e-sign, pricing calculator + saved quotes, client management, retail storefront with product variants + inventory, order tracking, email + SMS text reminders, mobile dashboard, and PWA install. Every feature is unlocked during the 14-day free trial.",
+  },
+  {
+    q: "Can I text my clients?",
+    a: "Yes. Braid Boss Pro can text clients automatically — booking confirmations, a day-before and 2-hour reminder, balance reminders, and a post-visit review request — from a verified number. You switch SMS on in Account → Notifications, clients opt in on your booking page, and texts run on prepaid credits (1 credit = 1 text). Clients can reply STOP to opt out anytime.",
   },
   {
     q: "How long does setup take?",

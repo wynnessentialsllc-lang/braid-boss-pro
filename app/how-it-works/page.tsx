@@ -240,9 +240,11 @@ export default function HowItWorksPage() {
             title="Turn on reminders"
             body={
               <>
-                Settings → Reminders. The night-before text + day-of confirmation
-                cuts no-shows by ~40% on average — the single best ROI button in
-                the app.
+                Settings → Reminders, then <strong>Account → Notifications →
+                Text messages (SMS)</strong> to switch on texting. Booking
+                confirmations, a night-before and 2-hour reminder, and a
+                post-visit review request can go by text — cutting no-shows
+                ~40%. Clients opt in at booking; texts run on prepaid credits.
               </>
             }
             delay={200}
@@ -294,6 +296,13 @@ export default function HowItWorksPage() {
           <Faq q="What if I don't take deposits yet?">
             Deposits are optional per service. You can run the entire calendar
             + client + retail workflow without a single deposit.
+          </Faq>
+          <Faq q="Can Braid Boss Pro text my clients?">
+            Yes. Turn on SMS in Account → Notifications, and clients who opt in
+            at booking get text confirmations, a day-before and 2-hour reminder,
+            balance nudges, and a review request — sent from a verified number.
+            Texts run on prepaid credits (Settings → SMS credits), and clients
+            can reply STOP to opt out anytime.
           </Faq>
           <Faq q="Does the storefront need Stripe?">
             Only if you want to take card payments. You can list products as

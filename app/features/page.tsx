@@ -12,6 +12,7 @@ import {
   ShoppingBag,
   Bell,
   Mail,
+  MessageSquare,
   Smartphone,
   Hourglass,
   Layers,
@@ -269,23 +270,30 @@ export default function FeaturesPage() {
         <FeatureGrid>
           <FeatureCard
             tone="primary"
-            icon={<Bell size={22} />}
-            title="Reminder rules"
-            body="Auto-text the night before. Confirm the day of. Nudge a balance the morning after. Set it once."
+            icon={<MessageSquare size={22} />}
+            title="Text reminders (SMS)"
+            body="Booking confirmations, a day-before and 2-hour reminder, balance nudges, and a post-visit review request — sent by text. Clients opt in at booking; you control it with one switch and prepaid credits."
           />
           <FeatureCard
             tone="secondary"
-            icon={<Mail size={22} />}
-            title="Email automation"
-            body="Order confirmations, deposit receipts, fulfillment updates — all on your brand, sent automatically."
+            icon={<Bell size={22} />}
+            title="Reminder rules"
+            body="Confirm the day of. Nudge a balance the morning after. Choose email, text, or both — set it once and it runs."
             delay={100}
           />
           <FeatureCard
             tone="primary"
+            icon={<Mail size={22} />}
+            title="Email automation"
+            body="Order confirmations, deposit receipts, fulfillment updates — all on your brand, sent automatically."
+            delay={200}
+          />
+          <FeatureCard
+            tone="soft-c"
             icon={<Layers size={22} />}
             title="Style presets"
             body="Re-usable templates for the styles you book most. One tap pre-fills duration, price, and the contract."
-            delay={200}
+            delay={300}
           />
         </FeatureGrid>
       </Section>
