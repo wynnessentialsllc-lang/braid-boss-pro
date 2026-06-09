@@ -7,7 +7,18 @@ export default function TermsPage() {
     <LegalShell
       title="Terms of Service"
       intro="Plain language. Read it, use the app, focus on your clients."
-      updated="May 8, 2026">
+      updated="June 9, 2026">
+
+      <LegalSection title="Who we are">
+        <p>
+          Braid Boss Pro is owned and operated by <strong>Wynn Essentials, LLC</strong>. All
+          references to “Braid Boss Pro,” “we,” “us,” or “our” in these Terms mean Wynn
+          Essentials, LLC. The website at{" "}
+          <a href="https://braidbosspro.app">https://braidbosspro.app</a> and the email address{" "}
+          <a href="mailto:hello@braidbosspro.app">hello@braidbosspro.app</a> are operated by
+          Wynn Essentials, LLC.
+        </p>
+      </LegalSection>
 
       <LegalSection title="What Braid Boss Pro is">
         <p>
@@ -72,7 +83,8 @@ export default function TermsPage() {
 
       <LegalSection title="Contact">
         <p>
-          Questions? Contact <a href="mailto:hello@hairwellnessslab.com">hello@hairwellnessslab.com</a>.
+          Questions? Contact <strong>Wynn Essentials, LLC</strong> at{" "}
+          <a href="mailto:hello@braidbosspro.app">hello@braidbosspro.app</a>.
         </p>
       </LegalSection>
     </LegalShell>
