@@ -53,6 +53,13 @@ const isEditableTarget = (el: EventTarget | null): boolean => {
   return !!editable;
 };
 
+// Any open sheet / modal / drawer renders with aria-modal="true" (the
+// Sheet and CartDrawer components both do, and only while open). When one
+// is up, the page behind it is still at scrollY 0, so a downward drag
+// inside the modal would otherwise trigger a refresh — suppress it.
+const isModalOpen = (): boolean =>
+  typeof document !== "undefined" && !!document.querySelector('[aria-modal="true"]');
+
 const PullToRefresh = () => {
   const [phase, setPhase] = useState<Phase>("idle");
   const [distance, setDistance] = useState(0);
@@ -100,6 +107,7 @@ const PullToRefresh = () => {
     const onTouchStart = (e: TouchEvent) => {
       if (refreshing.current) return;
       if (window.scrollY > 0) return;
+      if (isModalOpen()) return;
       if (isEditableTarget(e.target)) return;
       if (e.touches.length !== 1) return;
       startY.current = e.touches[0].clientY;
