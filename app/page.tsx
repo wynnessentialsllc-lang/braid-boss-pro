@@ -20172,6 +20172,62 @@ const ServerPushTogglesSection = ({ userId }: { userId: string }) => {
   );
 };
 
+// Per-stylist master switch for client SMS. Default OFF; the flag is
+// flipped through the set_sms_notifications_enabled SECURITY DEFINER RPC
+// because profiles is locked for direct client writes. The queue gate
+// (queue_notification) enforces this server-side regardless of the UI.
+const SmsNotificationsToggleSection = ({ userId }: { userId: string }) => {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from("profiles")
+        .select("sms_notifications_enabled")
+        .eq("id", userId)
+        .maybeSingle();
+      if (cancelled) return;
+      setEnabled(!!data?.sms_notifications_enabled);
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const persist = useCallback(async (next: boolean) => {
+    setBusy(true);
+    setEnabled(next);
+    try {
+      const supabase = getSupabase();
+      await supabase.rpc("set_sms_notifications_enabled", { enabled_in: next });
+    } finally {
+      setBusy(false);
+    }
+  }, [userId]);
+
+  if (enabled === null) return null;
+
+  return (
+    <div className="mt-4 pt-3 space-y-2" style={{ borderTop: `1px solid ${C.hairline}` }}>
+      <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+        Text messages (SMS)
+      </p>
+      <p className="text-[11px] mb-2" style={{ color: C.muted }}>
+        Send clients appointment confirmations, reminders, balance, and rebooking texts. Clients still opt in when booking, and each text uses one SMS credit.
+      </p>
+      <div className="flex items-center justify-between py-1">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold" style={{ color: C.espresso }}>SMS notifications</p>
+          <p className="text-[11px]" style={{ color: C.muted }}>Master switch for all client text messages</p>
+        </div>
+        <Toggle checked={enabled} onChange={(v) => void persist(v)} />
+      </div>
+      {busy && <p className="text-[11px] text-right" style={{ color: C.muted }}>Saving…</p>}
+    </div>
+  );
+};
+
 const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport, openBookingRequests, pendingRequests = 0 }: {
   email: string | null;
   mode: AuthMode;
@@ -20803,6 +20859,9 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
                 </Button>
                 {testStatus && <p className="text-[11px] mt-2 text-center" style={{ color: testStatus.startsWith("Couldn't") ? C.danger : C.success }}>{testStatus}</p>}
               </>
+            )}
+            {SMS_ENABLED && mode === "authed" && userId && (
+              <SmsNotificationsToggleSection userId={userId} />
             )}
           </Card>
         )}
