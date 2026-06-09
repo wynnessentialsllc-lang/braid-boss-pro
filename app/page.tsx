@@ -20481,7 +20481,7 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
       const { data: link } = await supabase
         .from("booking_links")
         .select(
-          "slug, active, intro, business_name, shop_name, shop_description, shop_logo_url, shop_banner_url, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business, header_theme, tagline, about, stylist_photo_url"
+          "slug, active, intro, business_name, shop_name, shop_description, shop_logo_url, shop_banner_url, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business, header_theme, tagline, about, stylist_photo_url, mobile_base_address, mobile_base_lat, mobile_base_lng, mobile_base_zip, mobile_radius_miles, mobile_blocked_zips"
         )
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
