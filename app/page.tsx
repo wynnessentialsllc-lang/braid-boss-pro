@@ -169,8 +169,10 @@ import {
   type CalendarPrefs,
   type CalendarView,
   type ColorMode,
+  type CalendarTheme,
   type AppointmentColor,
   useCalendarPrefs,
+  CALENDAR_THEMES,
   colorForAppointment,
   computeDayStatus,
 } from "./lib/calendar";
@@ -2755,6 +2757,38 @@ const TabBar = ({ active, setActive }: {
 const STATUS_TONE = { scheduled: "neutral", confirmed: "gold", completed: "success", cancelled: "danger", canceled: "danger", no_show: "warning" };
 const STATUS_LABEL = { scheduled: "Scheduled", confirmed: "Confirmed", completed: "Completed", cancelled: "Cancelled", canceled: "Canceled", no_show: "No-show" };
 const REMINDER_STATUS_TONE = { pending: "warning", sent: "gold", delivered: "success", failed: "danger", cancelled: "neutral" };
+
+// ---- BOOKING SOURCE ATTRIBUTION ----------------------------------------
+// "Where did this client find me?" Stored free-text on appointments
+// (referral_source); these presets power the in-app chip picker and the
+// Analytics "Where bookings come from" breakdown. Anything the stylist
+// types is preserved — the labels map just prettifies the known keys.
+const REFERRAL_SOURCE_PRESETS: Array<{ value: string; label: string }> = [
+  { value: "instagram", label: "Instagram" },
+  { value: "tiktok", label: "TikTok" },
+  { value: "facebook", label: "Facebook" },
+  { value: "google", label: "Google" },
+  { value: "yelp", label: "Yelp" },
+  { value: "referral", label: "Friend / referral" },
+  { value: "returning_client", label: "Returning" },
+  { value: "walk_in", label: "Walk-in" },
+];
+const REFERRAL_SOURCE_LABELS: Record<string, string> = {
+  instagram: "Instagram", tiktok: "TikTok", facebook: "Facebook",
+  google: "Google", yelp: "Yelp", referral: "Friend / referral",
+  returning_client: "Returning", walk_in: "Walk-in",
+  // Auto-stamped buckets — public booking links + waitlist conversions.
+  direct_link: "Booking link", public_booking: "Booking link",
+  waitlist: "Waitlist", manual: "Added manually", other: "Other",
+};
+// Normalize a free-text source into a stable key (lowercase, spaces→_).
+const normalizeReferralSource = (raw: string | null | undefined): string =>
+  (raw || "").trim().toLowerCase().replace(/\s+/g, "_");
+const referralSourceLabel = (raw: string | null | undefined): string => {
+  const k = normalizeReferralSource(raw);
+  if (!k) return "Untagged";
+  return REFERRAL_SOURCE_LABELS[k] || (raw as string);
+};
 
 // ============================================================
 //  TIMER MINI PILL
@@ -7760,8 +7794,39 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
     shiftWeek(dx < 0 ? 1 : -1);
   };
 
+  // Calendar theme — soft on-brand backdrop + optional Aura glow. Purely
+  // decorative (pointer-events: none) so it never interferes with taps.
+  const calTheme = CALENDAR_THEMES[prefs.theme] ?? CALENDAR_THEMES.studio;
+
   return (
-    <div className="bbp-fade pb-32">
+    <div className="bbp-fade pb-32" style={{ position: "relative" }}>
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: 0, left: 0, right: 0,
+          height: 220,
+          background: calTheme.banner,
+          pointerEvents: "none",
+          zIndex: 0,
+        }}
+      />
+      {prefs.aura && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            top: -60, left: "50%", transform: "translateX(-50%)",
+            width: 460, height: 320,
+            background: calTheme.glow,
+            filter: "blur(60px)",
+            opacity: 0.85,
+            pointerEvents: "none",
+            zIndex: 0,
+          }}
+        />
+      )}
+      <div style={{ position: "relative", zIndex: 1 }}>
       {/* HEADER — overflow / month / plus */}
       <div
         className="flex items-center justify-between px-5 pt-4 pb-2"
@@ -7972,6 +8037,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
             selectedDate={selectedDate}
           />
         )}
+      </div>
       </div>
 
       <FAB onClick={() => setEditing({})} />
@@ -8973,6 +9039,70 @@ const CalendarSettingsSheet = ({
           </div>
         </div>
 
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+            Theme
+          </p>
+          <div className="flex flex-wrap gap-2.5">
+            {(Object.keys(CALENDAR_THEMES) as CalendarTheme[]).map(key => {
+              const t = CALENDAR_THEMES[key];
+              const on = prefs.theme === key;
+              return (
+                <button
+                  type="button"
+                  key={key}
+                  onClick={() => setPrefs({ theme: key })}
+                  className="flex flex-col items-center gap-1.5 active:scale-[0.97] transition"
+                  aria-pressed={on}
+                  style={{ width: 60 }}
+                >
+                  <span
+                    style={{
+                      width: 52, height: 52, borderRadius: 14,
+                      background: t.swatch,
+                      border: on ? `2.5px solid ${C.espresso}` : `2.5px solid transparent`,
+                      boxShadow: on ? "0 6px 16px -6px rgba(124,58,237,0.5)" : "0 2px 6px rgba(21,17,26,0.10)",
+                    }}
+                  />
+                  <span className="text-[10px] font-semibold" style={{ color: on ? C.espresso : C.muted }}>{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+            Effects
+          </p>
+          <Card className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Aura glow</p>
+              <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>A soft themed glow behind your day. Pure vibes.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPrefs({ aura: !prefs.aura })}
+              role="switch"
+              aria-checked={prefs.aura}
+              className="relative rounded-full transition"
+              style={{ width: 44, height: 26, background: prefs.aura ? C.goldDeep : C.hairline }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  top: 3, left: prefs.aura ? 21 : 3,
+                  width: 20, height: 20, borderRadius: 999,
+                  background: C.paper,
+                  transition: "left 0.18s",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.12)",
+                }}
+              />
+            </button>
+          </Card>
+        </div>
+
         <Button variant="primary" fullWidth onClick={onClose}>Done</Button>
       </div>
     </Sheet>
@@ -9340,6 +9470,9 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         // Booking provenance. New manual appts land as "manual";
         // existing rows keep whatever was previously stamped.
         source: a?.source ?? (a?.id ? null : "manual"),
+        // Referral attribution — "how did they find you?" Free-text in
+        // the DB; the form drives it via the chip picker below.
+        referralSource: a?.referralSource ?? a?.referral_source ?? "",
         // Calendar item kind. Default 'appointment' so existing rows
         // keep their pre-migration semantics. Personal events / blocked
         // time hide the client + payment sections in the form.
@@ -11374,6 +11507,34 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         <Field label="Notes">
           <Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Hair texture, prep notes, anything to remember…" rows={3} />
         </Field>
+
+        {isAppointment && (
+          <Field label="How did they find you?">
+            <div className="flex flex-wrap gap-2">
+              {REFERRAL_SOURCE_PRESETS.map(s => {
+                const on = normalizeReferralSource(form.referralSource) === s.value;
+                return (
+                  <button
+                    type="button"
+                    key={s.value}
+                    onClick={() => setForm({ ...form, referralSource: on ? "" : s.value })}
+                    className="px-3 py-1.5 rounded-full text-[12px] font-semibold active:scale-[0.97] transition"
+                    style={{
+                      background: on ? C.gold : C.paper,
+                      color: on ? "#FFFFFF" : C.coffee,
+                      border: `1px solid ${on ? C.gold : C.hairline}`,
+                    }}
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] mt-2" style={{ color: C.muted }}>
+              Tag the source to see what fills your chair in Analytics. Bookings from your link are tagged automatically.
+            </p>
+          </Field>
+        )}
 
         {isAppointment && form.id && form.clientId && (
           <button
@@ -17528,6 +17689,27 @@ const AnalyticsScreen = ({ clients, appointments, commLog, business, today, onBa
   const retention = useMemo(() => calculateRetentionAnalytics(clients, appointments, today), [clients, appointments, today]);
   const comms = useMemo(() => calculateCommunicationAnalytics(commLog), [commLog]);
 
+  // "Where bookings come from" — tally real appointments by referral
+  // source. Falls back to booking provenance (public link / waitlist)
+  // when the stylist hasn't tagged a source, and buckets the rest as
+  // "Untagged" so the totals always reconcile with the appointment count.
+  const sourceBreakdown = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of appointments) {
+      if (a?.kind && a.kind !== "appointment") continue;
+      if (isCanceledAppointment(a)) continue;
+      let key = normalizeReferralSource(a?.referralSource ?? a?.referral_source);
+      if (!key) {
+        const src = (a?.source || "").toLowerCase();
+        key = src === "public_booking" ? "direct_link" : src === "waitlist" ? "waitlist" : "untagged";
+      }
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([key, count]) => ({ key, label: key === "untagged" ? "Untagged" : referralSourceLabel(key), count }))
+      .sort((a, b) => b.count - a.count);
+  }, [appointments]);
+
   const noData = (appointments?.length || 0) === 0;
   const limitedStyle = styleStats.length === 0;
   const limitedRetention = retention.repeatBookingRatePct === 0 && retention.rebookingCandidates === 0 && retention.averageDaysBetween === null;
@@ -17582,6 +17764,27 @@ const AnalyticsScreen = ({ clients, appointments, commLog, business, today, onBa
                 <AnalyticsStatRow label="No-shows" value={apptStats.noShow} />
                 <AnalyticsStatRow label="Busiest day" value={apptStats.busiestDow ? `${apptStats.busiestDow.name}` : "—"} hint={apptStats.busiestDow ? `${apptStats.busiestDow.count} bookings` : undefined} />
                 <AnalyticsStatRow label="Avg duration" value={apptStats.averageDurationHours > 0 ? `${apptStats.averageDurationHours.toFixed(1)}h` : "—"} />
+              </Card>
+            </div>
+
+            <div>
+              <SectionTitle>Where bookings come from</SectionTitle>
+              <Card className="p-4 space-y-3">
+                {sourceBreakdown.map(s => {
+                  const max = sourceBreakdown[0].count || 1;
+                  return (
+                    <div key={s.key}>
+                      <div className="flex items-baseline justify-between mb-1">
+                        <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>{s.label}</p>
+                        <p className="text-[12px] font-mono" style={{ color: C.goldDeep }}>{s.count}</p>
+                      </div>
+                      <AnalyticsBar value={s.count} max={max} color={C.gold} />
+                    </div>
+                  );
+                })}
+                <p className="text-[10px]" style={{ color: C.muted }}>
+                  Tag a source on any appointment to sharpen this. Link bookings are counted automatically.
+                </p>
               </Card>
             </div>
 
@@ -27790,6 +27993,10 @@ const ApprovalQueueScreen = ({
         // analytics breakdowns. The approval flow always lands as
         // public_booking; manual creates pick up "manual" below.
         source: "public_booking",
+        // Referral attribution — anything booked through the public link
+        // is auto-tagged "Booking link" so it shows up in the Analytics
+        // "Where bookings come from" breakdown without manual tagging.
+        referralSource: "direct_link",
         // depositRequired comes straight from the snapshot the submit
         // RPC stamped onto the booking_request row. Drives the
         // dashboard "Deposit due" filter so we don't flag rows where
