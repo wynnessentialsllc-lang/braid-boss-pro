@@ -5930,8 +5930,8 @@ const ColorTagInput = ({
 };
 
 const StyleCustomizationSection = ({
-  form, onChange, showAddons = true,
-}: { form: any; onChange: (next: any) => void; showAddons?: boolean }) => {
+  form, onChange, showAddons = true, inventory = [],
+}: { form: any; onChange: (next: any) => void; showAddons?: boolean; inventory?: InventoryItem[] }) => {
   const [open, setOpen] = useState(false);
   const set = (patch: any) => onChange({ ...form, ...patch });
   const enabled = form.customization_enabled ?? true;
@@ -6124,6 +6124,19 @@ const StyleCustomizationSection = ({
                             placeholder="Buy-from-me price ($) — e.g. 35"
                             className={inputCls} style={inputStyle}
                           />
+                          {Number(spec.sellPrice) > 0 && (
+                            <select
+                              value={spec.inventoryItemId || ""}
+                              onChange={e => setSpec({ inventoryItemId: e.target.value || null })}
+                              className={inputCls}
+                              style={{ ...inputStyle, marginTop: 8 }}
+                            >
+                              <option value="">Deduct from inventory on completion… (optional)</option>
+                              {inventory.filter(i => isActiveItem(i) && isServiceUse(i)).map(i => (
+                                <option key={i.id} value={i.id}>{i.name || i.id}</option>
+                              ))}
+                            </select>
+                          )}
                         </div>
                       )}
                     </div>
@@ -7008,7 +7021,7 @@ const Studio = ({ store }) => {
               <option key={c.id} value={c.id}>{c.title}</option>
             ))}
           </select>
-          <StyleCustomizationSection form={serviceForm} onChange={setServiceForm} />
+          <StyleCustomizationSection form={serviceForm} onChange={setServiceForm} inventory={(store.inventoryItems || []) as InventoryItem[]} />
           <MobileServiceSection form={serviceForm} onChange={setServiceForm} />
           <DefaultMaterialsPicker
             inventory={(store.inventoryItems || []) as InventoryItem[]}
@@ -9235,7 +9248,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   // After save, if the appointment was just transitioned to
   // "completed", show the MaterialsUsedSheet before closing so the
   // stylist can confirm what was consumed against the appointment.
-  const [showMaterialsFor, setShowMaterialsFor] = useState<{ id: string; style?: string | null; recipe?: RecipeLine[] | null } | null>(null);
+  const [showMaterialsFor, setShowMaterialsFor] = useState<{ id: string; style?: string | null; recipe?: RecipeLine[] | null; addons?: any[] | null } | null>(null);
 
   // Recurring
   const [makeRecurring, setMakeRecurring] = useState(false);
@@ -10005,6 +10018,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         id: saved.id,
         style: saved.style ?? form.style ?? null,
         recipe: Array.isArray(saved.recipe) ? saved.recipe : (Array.isArray(form.recipe) ? form.recipe : null),
+        addons: Array.isArray((saved as any).addons) ? (saved as any).addons : (Array.isArray((form as any).addons) ? (form as any).addons : null),
       });
       return;
     }
@@ -22220,7 +22234,7 @@ const ServicesScreen = ({
                           />
                         </Field>
                       </div>
-                      {(editing.hair_sourcing === "client" || editing.hair_sourcing === "choice") && (
+                      {((editing as any).hair_sourcing === "client" || (editing as any).hair_sourcing === "choice") && (
                         <div className="grid grid-cols-2 gap-2 mt-2">
                           <Field label="Hair packs" hint="Blank = service default">
                             <Input
@@ -22427,6 +22441,7 @@ const ServicesScreen = ({
               form={editing}
               onChange={(next: any) => setEditing(next)}
               showAddons={false}
+              inventory={(store.inventoryItems || []) as InventoryItem[]}
             />
 
             <MobileServiceSection
@@ -26056,7 +26071,7 @@ const DefaultMaterialsPicker = ({ inventory, value, onChange }: {
 // inventory_apply_movement for each row. Skip is allowed — accuracy
 // matters more than coercion.
 const MaterialsUsedSheet = ({ appointment, services, inventory, onClose }: {
-  appointment: { id: string; style?: string | null; recipe?: RecipeLine[] | null };
+  appointment: { id: string; style?: string | null; recipe?: RecipeLine[] | null; addons?: any[] | null };
   services: Service[];
   inventory: InventoryItem[];
   onClose: () => void;
@@ -26092,9 +26107,26 @@ const MaterialsUsedSheet = ({ appointment, services, inventory, onClose }: {
     const seed: ServiceMaterial[] = fromRecipe.length > 0
       ? fromRecipe
       : (service?.default_materials ?? []);
-    return seed
-      .filter(m => itemById.has(m.inventory_item_id))
-      .map(m => ({ ...m, keep: true }));
+    // Stylist-supplied hair purchase ("buy from me"): if this booking
+    // included the buy_hair extra and the service links the hair to an
+    // inventory item, pre-seed that deduction (qty = pack count).
+    const extra: ServiceMaterial[] = [];
+    const boughtHair = Array.isArray(appointment.addons)
+      && appointment.addons.some((a: any) => a?.id === "buy_hair_from_stylist" || a?.kind === "buy_hair");
+    const hairItem = (service as any)?.hair_spec?.inventoryItemId as string | undefined;
+    if (boughtHair && hairItem) {
+      const packs = parseInt(String((service as any)?.hair_spec?.packs || "").replace(/[^0-9]/g, ""), 10) || 0;
+      if (packs > 0) extra.push({ inventory_item_id: hairItem, quantity: packs });
+    }
+    // Merge, summing quantity if the hair item is already seeded.
+    const merged = new Map<string, number>();
+    for (const m of [...seed, ...extra]) {
+      if (!m.inventory_item_id) continue;
+      merged.set(m.inventory_item_id, (merged.get(m.inventory_item_id) ?? 0) + (Number(m.quantity) || 0));
+    }
+    return Array.from(merged.entries())
+      .filter(([id]) => itemById.has(id))
+      .map(([inventory_item_id, quantity]) => ({ inventory_item_id, quantity, keep: true }));
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
