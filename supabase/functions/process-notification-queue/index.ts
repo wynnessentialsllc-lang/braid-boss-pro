@@ -757,6 +757,7 @@ const renderAppointmentReminder = (p: Record<string, any>) => {
     <p style="font-size:15px;line-height:24px;margin:0 0 14px;">Your appointment with <strong>${escape(studioName)}</strong>${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}${when ? ` is on <strong>${escape(when)}</strong>` : " is coming up soon"}.</p>
     ${recipientLine(p)}
     ${customizationBlock(p)}
+    ${hairBringBlock(p)}
     ${p.prepInstructions ? `<p style="font-size:13px;line-height:20px;color:${C.coffee};margin:0 0 14px;"><strong>Prep:</strong> ${escape(p.prepInstructions)}</p>` : ""}
     <p style="font-size:14px;line-height:22px;margin:0 0 18px;color:${C.coffee};">If everything still looks good, no action needed — we just wanted to give you a heads up.</p>
     ${portalButton(p)}
