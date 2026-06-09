@@ -2840,6 +2840,35 @@ const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: {
   const apptDateTime = appt.date && appt.time ? new Date(`${appt.date}T${appt.time}:00`).getTime() : null;
   const isLate = apptDateTime && apptDateTime < now && appt.status === "scheduled";
 
+  // Personal events / blocked time aren't client appointments — render
+  // them as a simple block (their own title, no client/style/price/
+  // booking-status) instead of "Unnamed client · Style not set · $0.00".
+  const kind = appt.kind || "appointment";
+  if (kind === "personal" || kind === "blocked") {
+    const isBlocked = kind === "blocked";
+    const title = appt.eventTitle || appt.event_title
+      || (isBlocked ? "Unavailable" : "Personal event");
+    const allDay = appt.isAllDay ?? appt.is_all_day ?? false;
+    return (
+      <Card className="p-4 cursor-pointer active:scale-[0.99] transition" onClick={onClick}>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <Pill tone="neutral">{isBlocked ? "Unavailable" : "Personal"}</Pill>
+          </div>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso, lineHeight: 1.15 }} className="truncate">
+            {title}
+          </p>
+          <p className="text-xs mt-1.5 flex items-center gap-3" style={{ color: C.muted }}>
+            <span className="flex items-center gap-1"><Calendar size={11} />{fmtDate(appt.date)}</span>
+            {allDay
+              ? <span className="flex items-center gap-1"><Clock size={11} />All day</span>
+              : (appt.time && <span className="flex items-center gap-1"><Clock size={11} />{fmtTime(appt.time)}</span>)}
+          </p>
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <Card className="p-4 cursor-pointer active:scale-[0.99] transition" onClick={onClick}>
       <div className="flex items-start justify-between gap-3">
