@@ -6033,24 +6033,71 @@ const StyleCustomizationSection = ({
             <div style={{ opacity: 1 }}>
               <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
 
-              <CustomToggle
-                on={!!form.hair_included}
-                onChange={v => set({ hair_included: v })}
-                label="Hair is included with this service"
-                help="Shows a premium “Hair included” badge to clients."
-              />
-              {form.hair_included && (
-                <div className="mb-3 pl-[54px]">
-                  <input
-                    type="text"
-                    value={form.included_hair_description || ""}
-                    onChange={e => set({ included_hair_description: e.target.value })}
-                    placeholder="Example: 1B prestretched braiding hair included"
-                    className={inputCls}
-                    style={inputStyle}
-                  />
-                </div>
-              )}
+              {/* Hair sourcing — who supplies the hair, plus the
+                  shopping-list spec shown to clients who bring their own.
+                  hair_included is kept in sync so the existing "Hair
+                  included" badge + email copy keep working. */}
+              {(() => {
+                const mode = ((form.hair_sourcing as string) || (form.hair_included ? "included" : "included"));
+                const spec = (form.hair_spec || {}) as Record<string, string>;
+                const setMode = (m: string) => set({ hair_sourcing: m, hair_included: m === "included" });
+                const setSpec = (patch: Record<string, string>) => set({ hair_spec: { ...spec, ...patch } });
+                const opts: Array<[string, string]> = [
+                  ["included", "I provide it"],
+                  ["client", "Client brings it"],
+                  ["choice", "Client's choice"],
+                ];
+                return (
+                  <div className="mb-3">
+                    <p style={{ fontSize: 12, fontWeight: 700, color: C.coffee, marginBottom: 6 }}>Who provides the hair?</p>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {opts.map(([val, label]) => {
+                        const active = mode === val;
+                        return (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => setMode(val)}
+                            style={{
+                              flex: "1 1 30%", minWidth: 96, padding: "8px 10px", borderRadius: 10,
+                              fontSize: 12, fontWeight: 700, cursor: "pointer",
+                              background: active ? C.espresso : "transparent",
+                              color: active ? "#FFFFFF" : C.coffee,
+                              border: `1px solid ${active ? C.espresso : C.hairline}`,
+                            }}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {mode === "included" && (
+                      <input
+                        type="text"
+                        value={form.included_hair_description || ""}
+                        onChange={e => set({ included_hair_description: e.target.value })}
+                        placeholder="Example: 1B prestretched braiding hair included"
+                        className={inputCls}
+                        style={{ ...inputStyle, marginTop: 8 }}
+                      />
+                    )}
+                    {(mode === "client" || mode === "choice") && (
+                      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                        <p style={{ fontSize: 11, color: C.muted }}>
+                          Tell clients exactly what to buy — shown on your booking page and in their confirmation.
+                        </p>
+                        <input type="text" value={spec.brand || ""} onChange={e => setSpec({ brand: e.target.value })} placeholder="Hair type / brand — e.g. X-pression Kanekalon" className={inputCls} style={inputStyle} />
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <input type="text" value={spec.color || ""} onChange={e => setSpec({ color: e.target.value })} placeholder="Color — e.g. 1B" className={inputCls} style={{ ...inputStyle, flex: 1 }} />
+                          <input type="text" value={spec.packs || ""} onChange={e => setSpec({ packs: e.target.value })} placeholder="# packs — e.g. 5" className={inputCls} style={{ ...inputStyle, flex: 1 }} />
+                        </div>
+                        <input type="text" value={spec.prep || ""} onChange={e => setSpec({ prep: e.target.value })} placeholder="Prep notes — e.g. come washed + blow-dried" className={inputCls} style={inputStyle} />
+                        <input type="text" value={spec.buyUrl || ""} onChange={e => setSpec({ buyUrl: e.target.value })} placeholder="Where to buy (optional link)" className={inputCls} style={inputStyle} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
 
