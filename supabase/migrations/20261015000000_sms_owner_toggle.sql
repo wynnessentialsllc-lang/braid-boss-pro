@@ -36,8 +36,12 @@ as $$
   );
 $$;
 
+-- Only the service-role worker calls this directly; the enqueue gate
+-- reaches it from inside SECURITY DEFINER queue_notification (which runs
+-- as its owner), so authenticated does NOT need execute. Keeping it off
+-- authenticated avoids exposing another stylist's SMS flag over the API.
 revoke all on function public.sms_notifications_enabled_for(uuid) from public;
-grant execute on function public.sms_notifications_enabled_for(uuid) to authenticated, service_role;
+grant execute on function public.sms_notifications_enabled_for(uuid) to service_role;
 
 -- Owner-controlled setter. Flips the flag for the calling stylist only;
 -- never touches any other column or row.
