@@ -352,7 +352,13 @@ const MarketingFooter = () => (
         </Link>
       </nav>
       <p style={{ fontSize: 11, color: C.mutedSoft }}>
-        © {new Date().getFullYear()} Braid Boss Pro. Built for stylists, by stylists.
+        © {new Date().getFullYear()} <strong style={{ color: C.coffee }}>Wynn Essentials, LLC</strong>. Braid Boss Pro is built for stylists, by stylists.
+      </p>
+      <p style={{ fontSize: 11, color: C.mutedSoft }}>
+        braidbosspro.app is operated by Wynn Essentials, LLC ·{" "}
+        <a href="mailto:hello@braidbosspro.app" style={{ color: C.mutedSoft, textDecoration: "underline" }}>
+          hello@braidbosspro.app
+        </a>
       </p>
     </div>
   </footer>
