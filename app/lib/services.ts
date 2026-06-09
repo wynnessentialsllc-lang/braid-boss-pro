@@ -342,6 +342,8 @@ export type ServiceInput = Pick<
   | "cover_image_url"
   | "before_after_image_url"
   | "hair_included"
+  | "hair_sourcing"
+  | "hair_spec"
   | "included_hair_description"
   | "allow_client_hair_color_selection"
   | "allowed_hair_colors"

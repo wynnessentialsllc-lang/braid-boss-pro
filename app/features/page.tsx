@@ -32,6 +32,12 @@ import {
   CtaFooter,
 } from "../components/marketing/MarketingShell";
 import { FeatureCard, FeatureGrid } from "../components/marketing/FeatureCard";
+import {
+  AppointmentActionShowcase,
+  CalendarShowcase,
+  SourceOrbitShowcase,
+  ClientInfoShowcase,
+} from "../components/marketing/ShowcaseSections";
 
 export const metadata: Metadata = {
   title: "Features · Braid Boss Pro — the business OS for braiders",
@@ -128,6 +134,10 @@ export default function FeaturesPage() {
         </FeatureGrid>
       </Section>
 
+      {/* Spotlight — action sheet + customizable calendar */}
+      <AppointmentActionShowcase />
+      <CalendarShowcase />
+
       {/* Pricing & Income */}
       <Section
         eyebrow="Pricing & Income Tools"
@@ -195,6 +205,9 @@ export default function FeaturesPage() {
         </FeatureGrid>
       </Section>
 
+      {/* Spotlight — easy access to client info */}
+      <ClientInfoShowcase />
+
       {/* Policies & Contracts */}
       <Section
         eyebrow="Policies & Contracts"
@@ -260,6 +273,9 @@ export default function FeaturesPage() {
           />
         </FeatureGrid>
       </Section>
+
+      {/* Spotlight — track appointments by source */}
+      <SourceOrbitShowcase />
 
       {/* Automation & Communication */}
       <Section
