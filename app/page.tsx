@@ -10225,6 +10225,34 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     }, 0);
   };
 
+  // Rebook — one tap from the appointment to draft her NEXT install.
+  // Reuses the duplicate pipeline (fresh status + cleared payment), but
+  // pre-dates it to the service's typical rebook cadence so the stylist
+  // lands on the right week instead of today.
+  const handleRebook = () => {
+    if (!form.id) return;
+    const weeks = suggestRebookWeeks(form.style) || 6;
+    const next: any = {
+      ...form,
+      id: undefined,
+      seriesId: undefined,
+      date: addDaysISO(todayISO(), weeks * 7),
+      status: "scheduled",
+      depositPaid: 0,
+      paymentStatus: "",
+      paymentDate: "",
+      paymentMethod: "",
+      paymentNotes: "",
+      discountId: null,
+      discountName: null,
+      discountAmount: 0,
+    };
+    onClose();
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("bbp:duplicate-appointment", { detail: next }));
+    }, 0);
+  };
+
   const openQuickReschedule = () => {
     setRescheduleDate(form.date || todayISO());
     setRescheduleTime(form.time || "10:00");
@@ -11347,6 +11375,22 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           <Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Hair texture, prep notes, anything to remember…" rows={3} />
         </Field>
 
+        {isAppointment && form.id && form.clientId && (
+          <button
+            type="button"
+            onClick={handleRebook}
+            className="w-full font-semibold rounded-xl px-5 py-3.5 text-[15px] transition active:scale-[0.97] flex items-center justify-center gap-2"
+            style={{
+              background: "linear-gradient(135deg, #22C55E 0%, #16A34A 100%)",
+              color: "#FFFFFF",
+              border: "1.5px solid transparent",
+              boxShadow: "0 10px 24px -10px rgba(34, 197, 94, 0.5)",
+              letterSpacing: "0.01em",
+            }}
+          >
+            <CalendarPlus size={18} /> Rebook next visit
+          </button>
+        )}
         {isAppointment && form.id && (
           <div className="grid grid-cols-2 gap-3">
             <Button variant="outline" icon={<RefreshCw size={16} />} onClick={openQuickReschedule}>Reschedule</Button>
@@ -12332,6 +12376,17 @@ const ClientProfileSheet = ({
   const lastVisit = past.length > 0 ? past[past.length - 1].date : null;
   const upcomingCount = future.length + todays.length;
 
+  // No-shows live IN cAppts (no_show isn't a canceled status); cancellations
+  // are bucketed separately above. Surfaced as top-level stats so the
+  // client-info card reads at a glance, the way a front-desk view should.
+  const noShowCount = useMemo(() => cAppts.filter(a => a?.status === "no_show").length, [cAppts]);
+  const cancellationCount = cancelledClientAppts.length;
+  // "Client since" = earliest recorded visit, falling back to when the
+  // client record itself was created (covers brand-new, never-booked clients).
+  const clientSinceISO =
+    firstVisit ||
+    (typeof (client as any)?.createdAt === "string" ? String((client as any).createdAt).slice(0, 10) : null);
+
   // Derived insights — surfaced at the top of the profile sheet as
   // short conversational lines + a "Last booked: X · 7 weeks ago"
   // booking-assist hint. Pure derivation from existing data; safe to
@@ -12476,18 +12531,6 @@ const ClientProfileSheet = ({
     );
   };
 
-  const StatTile = ({ label, value, hint }: { label: string; value: string; hint?: string }) => (
-    <Card className="p-3.5">
-      <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.14em" }}>
-        {label}
-      </p>
-      <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso, lineHeight: 1.05 }}>
-        {value}
-      </p>
-      {hint && <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>{hint}</p>}
-    </Card>
-  );
-
   const Section = ({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) => (
     <div>
       <div className="flex items-center justify-between mb-2">
@@ -12520,32 +12563,56 @@ const ClientProfileSheet = ({
       }
     >
       <div className="space-y-5 pb-2">
-        {/* SUMMARY STATS */}
-        <div className="grid grid-cols-2 gap-3">
-          <StatTile label="Total visits" value={String(completed.length)} hint={`${cAppts.length} on the books`} />
-          <StatTile label="Upcoming" value={String(upcomingCount)} hint={upcomingCount === 0 ? "Nothing scheduled" : "future bookings"} />
-          <StatTile label="Last visit" value={lastVisit ? fmtDate(lastVisit) : "—"} />
-          <StatTile label="First visit" value={firstVisit ? fmtDate(firstVisit) : "—"} />
-          {/* Lifetime spend — green to read as "money earned." Uses
-              the brand-success gradient and a soft green halo so the
-              card pops on the white client sheet without fighting
-              the rest of the page color story. */}
-          <Card
-            className="p-3.5 col-span-2"
-            style={{
-              background: "linear-gradient(135deg, #22C55E 0%, #16A34A 100%)",
-              border: "0",
-              boxShadow: "0 10px 28px -10px rgba(34, 197, 94, 0.45)",
-            }}
-          >
-            <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: "rgba(255, 255, 255, 0.92)", letterSpacing: "0.14em" }}>Lifetime spend</p>
-            <p className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600, color: "#FFFFFF", lineHeight: 1 }}>
-              {fmtMoney(lifetimeSpend, currency)}
-            </p>
-            {insights.averageTicket > 0 && (
-              <p className="mt-1 text-[11px]" style={{ color: "rgba(255, 255, 255, 0.78)" }}>
-                Avg ticket {fmtMoney(insights.averageTicket, currency)}
-              </p>
+        {/* SUMMARY STATS — client-info card. A single Vagaro-style
+            grid that puts the whole relationship (tenure, visits,
+            money, reliability) on one glanceable surface. */}
+        <div className="space-y-3">
+          <Card className="p-0 overflow-hidden">
+            <div className="grid grid-cols-3">
+              {[
+                { label: "Client since", value: clientSinceISO ? fmtDate(clientSinceISO) : "—" },
+                { label: "Appointments", value: String(completed.length) },
+                { label: "Lifetime spend", value: fmtMoney(lifetimeSpend, currency), accent: C.mintDeep },
+                { label: "Last visit", value: lastVisit ? fmtDate(lastVisit) : "—" },
+                { label: "No-shows", value: String(noShowCount), accent: noShowCount > 0 ? C.danger : undefined },
+                { label: "Cancellations", value: String(cancellationCount), accent: cancellationCount > 0 ? C.warning : undefined },
+              ].map((s, i) => (
+                <div
+                  key={s.label}
+                  className="px-3 py-4 text-center"
+                  style={{
+                    borderRight: i % 3 !== 2 ? `1px solid ${C.hairline}` : undefined,
+                    borderTop: i >= 3 ? `1px solid ${C.hairline}` : undefined,
+                  }}
+                >
+                  <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: s.accent || C.espresso, lineHeight: 1.1 }}>
+                    {s.value}
+                  </p>
+                  <p className="mt-1 text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.1em" }}>
+                    {s.label}
+                  </p>
+                </div>
+              ))}
+            </div>
+            {(upcomingCount > 0 || insights.averageTicket > 0) && (
+              <div
+                className="px-3 py-2.5 flex items-center justify-center gap-2 flex-wrap text-center"
+                style={{ borderTop: `1px solid ${C.hairline}`, background: C.ivory }}
+              >
+                {upcomingCount > 0 && (
+                  <span className="text-[12px] font-semibold" style={{ color: C.gold }}>
+                    {upcomingCount} upcoming {upcomingCount === 1 ? "booking" : "bookings"}
+                  </span>
+                )}
+                {upcomingCount > 0 && insights.averageTicket > 0 && (
+                  <span aria-hidden style={{ width: 3, height: 3, borderRadius: 99, background: C.mutedSoft }} />
+                )}
+                {insights.averageTicket > 0 && (
+                  <span className="text-[12px]" style={{ color: C.muted }}>
+                    Avg ticket {fmtMoney(insights.averageTicket, currency)}
+                  </span>
+                )}
+              </div>
             )}
           </Card>
         </div>
