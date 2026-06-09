@@ -55,6 +55,22 @@ for an owner with the switch off are dropped at enqueue with reason
 (and a client opted in on the booking form, and the stylist holds
 credits). Flipped via the `set_sms_notifications_enabled` RPC.
 
+### SMS-covered events
+
+Once a stylist's master switch is on (and the client opted in + credits
+exist), these send a client SMS through the queue:
+
+| Event | Type | Where it's enqueued |
+|---|---|---|
+| Booking received | `booking_confirmation` | `enqueue_public_booking_emails` |
+| Appointment approved / confirmed | `appointment_confirmed` | `enqueue_appointment_confirmation` |
+| Reschedule approved | `appointment_confirmed` (date-aware dedupe) | `enqueue_appointment_confirmation` re-fired on re-approval |
+| 24-hour reminder | `appointment_reminder` | `enqueue_due_appointment_reminders` (cron */30) |
+| 2-hour reminder | `appointment_reminder_2h` (SMS only) | `enqueue_due_2h_sms_reminders` (cron */15) |
+| Review request | `review_request` | `enqueue_due_review_requests` (post-visit) |
+
+Every outbound SMS gets `Reply STOP to opt out.` appended by the worker.
+
 ## 2. A2P 10DLC registration (required for US sending)
 
 US carriers **block** application-to-person SMS from unregistered local
