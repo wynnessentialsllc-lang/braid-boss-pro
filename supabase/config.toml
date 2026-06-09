@@ -27,6 +27,12 @@ verify_jwt = false
 # (HMAC-SHA1 keyed by TWILIO_AUTH_TOKEN) before touching any state.
 verify_jwt = false
 
+[functions.twilio-status]
+# PUBLIC. Twilio's message delivery-status callback — Twilio cannot send
+# a Supabase JWT. Verifies X-Twilio-Signature (HMAC-SHA1 keyed by
+# TWILIO_AUTH_TOKEN) before recording delivery state / refunding credits.
+verify_jwt = false
+
 # Authenticated functions (verify_jwt = true is the default, listed
 # here for documentation only — no entry needed):
 #
