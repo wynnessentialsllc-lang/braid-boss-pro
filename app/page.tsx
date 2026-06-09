@@ -10386,6 +10386,48 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     }, 0);
   };
 
+  // Checkout — one tap to close out the appointment from the calendar:
+  // collect the outstanding balance (net of any store credit already
+  // applied), mark it paid + completed, persist, then drop straight
+  // into the receipt. Consolidates the manual "mark paid → save →
+  // generate receipt" steps into a single Vagaro-style action.
+  const handleCheckout = async () => {
+    if (!form.id) return;
+    const netTotal = Math.max(0, parseMoney(form.totalPrice) - parseMoney(form.discountAmount));
+    const creditApplied = Math.max(0, parseMoney(form.creditApplied));
+    const collected = Math.max(0, netTotal - creditApplied);
+    const canonical = Array.isArray(store?.appointments)
+      ? store.appointments.find((x: any) => x?.id === form.id)
+      : null;
+    const original = (canonical && typeof canonical === "object") ? canonical
+      : (appt && typeof appt === "object") ? appt : {};
+    const checkedOut: any = {
+      ...original,
+      ...form,
+      depositPaid: collected,
+      creditApplied,
+      paymentStatus: "paid",
+      paymentDate: form.paymentDate || todayISO(),
+      paymentMethod: form.paymentMethod || "cash",
+      status: (!isCanceledAppointment(form) && form.status !== "no_show") ? "completed" : form.status,
+    };
+    const saved = await upsertAppointment(checkedOut);
+    if (!saved) return; // Gated by upgrade sheet.
+    if (openReceipt) {
+      try {
+        const clientName = clients.find((c: any) => c.id === form.clientId)?.name || form.clientName || "Client";
+        const rcp = buildReceiptFromAppointment(saved, "receipt", receipts || [], `rcp_${uid()}`, clientName);
+        const savedRcp = await upsertReceipt(rcp);
+        onClose();
+        openReceipt(savedRcp as ReceiptRecord);
+        return;
+      } catch {
+        /* receipt is best-effort — the checkout itself already saved */
+      }
+    }
+    onClose();
+  };
+
   const openQuickReschedule = () => {
     setRescheduleDate(form.date || todayISO());
     setRescheduleTime(form.time || "10:00");
@@ -11536,10 +11578,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           </Field>
         )}
 
-        {isAppointment && form.id && form.clientId && (
+        {isAppointment && form.id && form.paymentStatus !== "paid" && form.status !== "no_show" && !isCanceledAppointment(form) && parseMoney(form.totalPrice) > 0 && (
           <button
             type="button"
-            onClick={handleRebook}
+            onClick={handleCheckout}
             className="w-full font-semibold rounded-xl px-5 py-3.5 text-[15px] transition active:scale-[0.97] flex items-center justify-center gap-2"
             style={{
               background: "linear-gradient(135deg, #22C55E 0%, #16A34A 100%)",
@@ -11549,8 +11591,14 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
               letterSpacing: "0.01em",
             }}
           >
-            <CalendarPlus size={18} /> Rebook next visit
+            <DollarSign size={18} />
+            {balanceDue > 0 ? `Checkout · ${fmtMoney(balanceDue, business?.currency)}` : "Checkout"}
           </button>
+        )}
+        {isAppointment && form.id && form.clientId && (
+          <Button variant="outline" icon={<CalendarPlus size={16} />} onClick={handleRebook} fullWidth>
+            Rebook next visit
+          </Button>
         )}
         {isAppointment && form.id && (
           <div className="grid grid-cols-2 gap-3">
