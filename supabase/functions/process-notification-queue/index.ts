@@ -60,6 +60,13 @@ const MARKETING_NOTIFICATION_TYPES = new Set<string>([
 const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID") || "";
 const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN") || "";
 const TWILIO_PHONE_NUMBER = Deno.env.get("TWILIO_PHONE_NUMBER") || "";
+// Preferred sender. A Messaging Service (MG...) lets Twilio pick the
+// right number from its sender pool and carries the toll-free / A2P
+// registration. When set we send with MessagingServiceSid instead of a
+// bare From number; TWILIO_PHONE_NUMBER stays as the fallback so an
+// older single-number deploy keeps working.
+const TWILIO_MESSAGING_SERVICE_SID =
+  Deno.env.get("TWILIO_MESSAGING_SERVICE_SID") || "";
 
 const BATCH_LIMIT = 25;
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
@@ -1724,7 +1731,14 @@ const smsText = (row: ClaimedRow): string => {
     row.payload && typeof row.payload === "object" && typeof row.payload.smsText === "string"
       ? row.payload.smsText
       : "";
-  const txt = String(fromPayload || row.body || "").trim();
+  let txt = String(fromPayload || row.body || "").trim();
+  if (!txt) return "";
+  // Carrier compliance (A2P 10DLC / CTIA): every outbound message must
+  // carry opt-out instructions, and content filters look for them. Append
+  // unless the body already references STOP so we don't double up.
+  if (!/\bSTOP\b/i.test(txt)) {
+    txt = `${txt} Reply STOP to opt out.`;
+  }
   // Hard cap so a bad payload can't fan out into many billed segments.
   return txt.length > 480 ? `${txt.slice(0, 477)}...` : txt;
 };
@@ -1735,9 +1749,15 @@ const sendViaTwilio = async (
   | { ok: true; providerMessageId: string | null }
   | { ok: false; retryable: boolean; error: string }
 > => {
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER) {
-    // Non-retryable: missing config won't fix itself on retry. Email
-    // rows in the same batch are unaffected (per-row dispatch).
+  if (
+    !TWILIO_ACCOUNT_SID ||
+    !TWILIO_AUTH_TOKEN ||
+    (!TWILIO_MESSAGING_SERVICE_SID && !TWILIO_PHONE_NUMBER)
+  ) {
+    // Non-retryable: missing config won't fix itself on retry. Need the
+    // account creds plus a sender — either a Messaging Service SID or a
+    // From number. Email rows in the same batch are unaffected (per-row
+    // dispatch).
     return { ok: false, retryable: false, error: "twilio_env_missing" };
   }
   const to = toE164(row.recipient_phone);
@@ -1751,7 +1771,13 @@ const sendViaTwilio = async (
   try {
     const form = new URLSearchParams();
     form.set("To", to);
-    form.set("From", TWILIO_PHONE_NUMBER);
+    // Prefer the Messaging Service (sender pool + A2P/toll-free
+    // registration); fall back to a single From number.
+    if (TWILIO_MESSAGING_SERVICE_SID) {
+      form.set("MessagingServiceSid", TWILIO_MESSAGING_SERVICE_SID);
+    } else {
+      form.set("From", TWILIO_PHONE_NUMBER);
+    }
     form.set("Body", body);
     const res = await fetch(TWILIO_ENDPOINT, {
       method: "POST",

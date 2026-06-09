@@ -12,8 +12,14 @@ doc is purely operational.
 
 ## 1. Twilio account + sending number (required)
 
+**Live config (toll-free, verified):**
+- Messaging Service SID: `MG72a42abd8c856af96835c99c49ba5fe7`
+- Toll-Free Number: `+18556298377` (attached to the Messaging Service)
+
 1. Create / sign in to a Twilio account.
-2. Buy a phone number (or provision a Messaging Service) capable of SMS.
+2. Provision a Messaging Service and attach a sending number (done — see
+   above). Sending through the Messaging Service is preferred: it carries
+   the toll-free / A2P registration and manages the sender pool.
 3. Set the project secrets so the dispatch worker can send. **These are
    Supabase function secrets, not `.env.local`** — edge functions only
    see secrets set on the project:
@@ -21,18 +27,49 @@ doc is purely operational.
    supabase secrets set \
      TWILIO_ACCOUNT_SID=AC_xxx \
      TWILIO_AUTH_TOKEN=xxx \
-     TWILIO_PHONE_NUMBER=+1XXXXXXXXXX \
+     TWILIO_MESSAGING_SERVICE_SID=MG72a42abd8c856af96835c99c49ba5fe7 \
      --project-ref bjqazhplxqqhftekspfl
    ```
-   - `TWILIO_PHONE_NUMBER` must be E.164 (`+1...`).
-   - The worker (`process-notification-queue`) reads all three. Until
-     they're set, every SMS row terminal-fails with `twilio_env_missing`
-     (email is unaffected — dispatch is per-row).
+   - The worker (`process-notification-queue`) prefers
+     `TWILIO_MESSAGING_SERVICE_SID` and sends with `MessagingServiceSid`.
+     `TWILIO_PHONE_NUMBER` (E.164 `+1...`) is an optional fallback for a
+     single-number deploy; with a Messaging Service it isn't needed.
+   - Until `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and a sender
+     (Messaging Service SID **or** phone number) are set, every SMS row
+     terminal-fails with `twilio_env_missing` (email is unaffected —
+     dispatch is per-row).
 
 Verify:
 ```bash
 supabase secrets list --project-ref bjqazhplxqqhftekspfl | grep -i twilio
 ```
+
+### Per-stylist master switch
+
+Beyond the platform-wide `SMS_ENABLED` code flag, each stylist has an
+account-level switch — `profiles.sms_notifications_enabled`, **default
+OFF** — toggled in **Account → Notifications → Text messages (SMS)**. The
+queue gate in `queue_notification()` enforces it server-side: SMS rows
+for an owner with the switch off are dropped at enqueue with reason
+`sms_disabled_by_owner`. So no texts go out until the stylist flips it on
+(and a client opted in on the booking form, and the stylist holds
+credits). Flipped via the `set_sms_notifications_enabled` RPC.
+
+### SMS-covered events
+
+Once a stylist's master switch is on (and the client opted in + credits
+exist), these send a client SMS through the queue:
+
+| Event | Type | Where it's enqueued |
+|---|---|---|
+| Booking received | `booking_confirmation` | `enqueue_public_booking_emails` |
+| Appointment approved / confirmed | `appointment_confirmed` | `enqueue_appointment_confirmation` |
+| Reschedule approved | `appointment_confirmed` (date-aware dedupe) | `enqueue_appointment_confirmation` re-fired on re-approval |
+| 24-hour reminder | `appointment_reminder` | `enqueue_due_appointment_reminders` (cron */30) |
+| 2-hour reminder | `appointment_reminder_2h` (SMS only) | `enqueue_due_2h_sms_reminders` (cron */15) |
+| Review request | `review_request` | `enqueue_due_review_requests` (post-visit) |
+
+Every outbound SMS gets `Reply STOP to opt out.` appended by the worker.
 
 ## 2. A2P 10DLC registration (required for US sending)
 

@@ -497,10 +497,12 @@ export default function PublicBookingPage() {
   const [preferredDate, setPreferredDate] = useState("");
   const [preferredTime, setPreferredTime] = useState("");
   const [notes, setNotes] = useState("");
-  // SMS reminders opt-in. Default on — most clients want a text
-  // reminder; they can untick it. Threaded into the booking request
-  // so the reminder scheduler knows whether to also send SMS.
-  const [smsOptIn, setSmsOptIn] = useState(true);
+  // SMS reminders opt-in. Default OFF so the client gives affirmative,
+  // express consent by actively ticking the box — a pre-checked box is
+  // not valid consent under CTIA/TCPA and is a common A2P 10DLC campaign
+  // rejection reason. Threaded into the booking request so the reminder
+  // scheduler knows whether to also send SMS.
+  const [smsOptIn, setSmsOptIn] = useState(false);
   // Style customization (hair color + curl pattern) — only shown
   // when the selected service enables them. "Custom / Other" reveals
   // a small free-text field saved to customization_summary.
