@@ -88,7 +88,11 @@ export const LegalShell = ({
             <Link href="/">Open the app</Link>
           </div>
           <p className="mt-3 text-[11px]" style={{ color: C.muted }}>
-            © {new Date().getFullYear()} Braid Boss Pro. Built for braiders, by people who love your work.
+            © {new Date().getFullYear()} <strong>Wynn Essentials, LLC</strong>. Braid Boss Pro is built for braiders, by people who love your work.
+          </p>
+          <p className="mt-1 text-[11px]" style={{ color: C.muted }}>
+            braidbosspro.app is operated by Wynn Essentials, LLC · Contact{" "}
+            <a href="mailto:hello@braidbosspro.app">hello@braidbosspro.app</a>
           </p>
         </footer>
       </main>
