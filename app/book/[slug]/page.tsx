@@ -911,7 +911,8 @@ export default function PublicBookingPage() {
   const genericExtras = useMemo(
     () => availableExtras.filter(
       e => (e as any).kind !== ACV_EXTRA_KIND && e.id !== ACV_EXTRA_ID
-        && (e as any).kind !== CUSTOM_COLOR_EXTRA_KIND && e.id !== CUSTOM_COLOR_EXTRA_ID,
+        && (e as any).kind !== CUSTOM_COLOR_EXTRA_KIND && e.id !== CUSTOM_COLOR_EXTRA_ID
+        && (e as any).kind !== "buy_hair" && e.id !== "buy_hair_from_stylist",
     ),
     [availableExtras],
   );
@@ -976,10 +977,26 @@ export default function PublicBookingPage() {
   const isMobileService = !!(selectedCatalogService as any)?.mobile_service;
   // Hair sourcing — what the client needs to know/bring for this service.
   const hairSourcing = ((selectedCatalogService as any)?.hair_sourcing as string) || "included";
-  const hairSpec = (((selectedCatalogService as any)?.hair_spec) || {}) as { brand?: string; color?: string; packs?: string; prep?: string; buyUrl?: string };
+  const hairSpec = (((selectedCatalogService as any)?.hair_spec) || {}) as { brand?: string; color?: string; packs?: string; prep?: string; buyUrl?: string; sellPrice?: number | null };
   const hairAckRequired = hairSourcing === "client";
+  // Per-variation hair overrides (phase 3): the picked variation can set
+  // its own packs/color; fall back to the service-level spec.
+  const selectedHairVariation = (variations as any[]).find((v: any) => v.id === selectedVariationId) || null;
+  const displayPacks = (selectedHairVariation?.variation_hair_packs || hairSpec.packs) || null;
+  const displayColor = (selectedHairVariation?.variation_hair_color || hairSpec.color) || null;
   const showHairSpec = (hairSourcing === "client" || hairSourcing === "choice")
-    && !!(hairSpec.brand || hairSpec.color || hairSpec.packs || hairSpec.prep || hairSpec.buyUrl);
+    && !!(hairSpec.brand || displayColor || displayPacks || hairSpec.prep || hairSpec.buyUrl);
+  // Buy-from-me (phase 2): a managed extra mirrors hair_spec.sellPrice so
+  // the purchase rides the trusted add-on price/deposit rails. Surfaced
+  // as the "Buy from me" side of the choice toggle below.
+  const buyHairExtra = (availableExtras as any[]).find((e: any) => e?.kind === "buy_hair" || e?.id === "buy_hair_from_stylist") || null;
+  const buyHairSelected = !!buyHairExtra && selectedExtraIds.includes(buyHairExtra.id);
+  const setBuyHair = (on: boolean) => {
+    if (!buyHairExtra) return;
+    setSelectedExtraIds(prev => on
+      ? Array.from(new Set([...prev, buyHairExtra.id]))
+      : prev.filter(id => id !== buyHairExtra.id));
+  };
   // Travel fee from the most recent in-area quote. Gated on the mobile
   // toggle so flipping services doesn't carry over a stale quote.
   const travelFee = isMobileService && mobileQuote?.in_area && Number.isFinite(mobileQuote.travel_fee)
@@ -4123,27 +4140,55 @@ export default function PublicBookingPage() {
               const buyHref = hairSpec.buyUrl
                 ? (/^https?:\/\//i.test(hairSpec.buyUrl) ? hairSpec.buyUrl : `https://${hairSpec.buyUrl}`)
                 : null;
-              const ackWhat = [hairSpec.packs && `${hairSpec.packs} packs`, hairSpec.color].filter(Boolean).join(" ");
+              const ackWhat = [displayPacks && `${displayPacks} packs`, displayColor].filter(Boolean).join(" ");
+              const sell = (typeof hairSpec.sellPrice === "number" && hairSpec.sellPrice > 0) ? hairSpec.sellPrice : null;
+              const offersBuy = hairSourcing === "choice" && !!buyHairExtra && !!sell;
               return (
                 <div style={{ padding: 14, borderRadius: 14, background: C.paper, border: `1px solid ${C.hairline}`, marginBottom: 4 }}>
                   <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", color: C.goldDeep || C.gold, margin: 0 }}>
                     {hairSourcing === "client" ? "You supply the hair" : "Hair — your choice"}
                   </p>
-                  <p style={{ ...hairLine, marginTop: 6 }}>
-                    {hairSourcing === "client"
-                      ? "This service doesn't include hair — please bring your own to your appointment."
-                      : "You can bring your own hair, or ask your stylist about buying it from them."}
-                  </p>
-                  {showHairSpec && (
-                    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
-                      <p style={{ fontSize: 11, fontWeight: 700, color: C.espresso, margin: 0 }}>Hair you&apos;ll need</p>
-                      {hairSpec.brand && <p style={hairLine}><strong>Type:</strong> {hairSpec.brand}</p>}
-                      {hairSpec.color && <p style={hairLine}><strong>Color:</strong> {hairSpec.color}</p>}
-                      {hairSpec.packs && <p style={hairLine}><strong>Packs:</strong> {hairSpec.packs}</p>}
-                      {hairSpec.prep && <p style={hairLine}><strong>Prep:</strong> {hairSpec.prep}</p>}
-                      {buyHref && <p style={hairLine}><a href={buyHref} target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Where to buy →</a></p>}
+
+                  {offersBuy && (
+                    <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+                      {([["own", "I'll bring my own"], ["buy", `Buy from me +$${(sell as number).toFixed(2)}`]] as Array<[string, string]>).map(([val, label]) => {
+                        const active = val === "buy" ? buyHairSelected : !buyHairSelected;
+                        return (
+                          <button key={val} type="button" onClick={() => setBuyHair(val === "buy")}
+                            style={{ flex: 1, padding: "9px 10px", borderRadius: 10, fontSize: 12.5, fontWeight: 700, cursor: "pointer",
+                              background: active ? C.espresso : "transparent", color: active ? "#FFFFFF" : C.coffee,
+                              border: `1px solid ${active ? C.espresso : C.hairline}` }}>
+                            {label}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
+
+                  {offersBuy && buyHairSelected ? (
+                    <p style={{ ...hairLine, marginTop: 10 }}>
+                      Your stylist will supply the hair — <strong>${(sell as number).toFixed(2)}</strong> is added to your total.
+                    </p>
+                  ) : (
+                    <>
+                      <p style={{ ...hairLine, marginTop: offersBuy ? 10 : 6 }}>
+                        {hairSourcing === "client"
+                          ? "This service doesn't include hair — please bring your own to your appointment."
+                          : "Bring your own hair to your appointment."}
+                      </p>
+                      {showHairSpec && (
+                        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+                          <p style={{ fontSize: 11, fontWeight: 700, color: C.espresso, margin: 0 }}>Hair you&apos;ll need</p>
+                          {hairSpec.brand && <p style={hairLine}><strong>Type:</strong> {hairSpec.brand}</p>}
+                          {displayColor && <p style={hairLine}><strong>Color:</strong> {displayColor}</p>}
+                          {displayPacks && <p style={hairLine}><strong>Packs:</strong> {displayPacks}</p>}
+                          {hairSpec.prep && <p style={hairLine}><strong>Prep:</strong> {hairSpec.prep}</p>}
+                          {buyHref && <p style={hairLine}><a href={buyHref} target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Where to buy →</a></p>}
+                        </div>
+                      )}
+                    </>
+                  )}
+
                   {hairSourcing === "client" && (
                     <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", marginTop: 12 }}>
                       <input type="checkbox" checked={hairAck} onChange={e => setHairAck(e.target.checked)}
