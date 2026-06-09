@@ -121,7 +121,7 @@ export default function PricingPage() {
               "Online Booking",
               "Deposits & Payments",
               "Digital Contracts",
-              "Appointment Reminders",
+              "Email & SMS Reminders",
               "Client Management CRM",
               "Reviews & Testimonials",
               "Business Analytics",

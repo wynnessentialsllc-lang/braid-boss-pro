@@ -650,6 +650,21 @@ export const EDUCATION_CATEGORIES: EducationCategory[] = [
           "Add one \"Choose all that apply\" question (e.g. \"Any of these concerns?\") with 3–4 options, then preview it on your booking link.",
         relatedTool: "Settings → Intake form",
       },
+      {
+        id: "use-sms-text-reminders",
+        title: "How to use SMS text reminders",
+        readMinutes: 3,
+        body: [
+          "Text messages get opened far more than email, so turning on SMS means more clients actually see their confirmations and show up on time. Braid Boss Pro can text clients automatically: booking confirmations, a reminder the day before, a \"starting soon\" nudge about two hours out, balance reminders, and a post-visit review request. These are transactional — never spam.",
+          "Turn it on in Account → Notifications → Text messages (SMS). It's off by default, so flip the switch on when you're ready. This is your master switch for every client text.",
+          "Texts run on prepaid credits — 1 credit = 1 text. Buy a pack in Settings → SMS credits (Starter, Standard, or Pro). Your balance shows there, and you'll get a heads-up when it runs low. Credits don't expire, and if a text ever fails to deliver, that credit is refunded automatically.",
+          "Clients opt in themselves: on your public booking link there's a consent checkbox (unchecked by default) where they agree to receive appointment texts. Only clients who tick it — and who gave a phone number — get texted. Anyone can reply STOP at any time to opt out, or HELP for help; the app honors that automatically on every future send.",
+          "Nothing sends until three things are true: your SMS switch is on, the client opted in, and you have credits. If any one is off, the appointment still works exactly as before — SMS is purely an add-on layer.",
+        ],
+        tryThisWeek:
+          "Turn on Account → Notifications → Text messages (SMS), buy a Starter credit pack, then open your own booking link and confirm the SMS opt-in checkbox shows when you enter a phone number.",
+        relatedTool: "Account → Notifications · Settings → SMS credits",
+      },
     ],
   },
 ];
