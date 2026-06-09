@@ -27993,10 +27993,12 @@ const ApprovalQueueScreen = ({
         // analytics breakdowns. The approval flow always lands as
         // public_booking; manual creates pick up "manual" below.
         source: "public_booking",
-        // Referral attribution — anything booked through the public link
-        // is auto-tagged "Booking link" so it shows up in the Analytics
-        // "Where bookings come from" breakdown without manual tagging.
-        referralSource: "direct_link",
+        // Referral attribution — use the source detected at booking
+        // time (Instagram / TikTok / Google / ... from UTM or referrer),
+        // falling back to the generic "Booking link" bucket when none
+        // was captured. Feeds the Analytics "Where bookings come from"
+        // breakdown with no manual tagging.
+        referralSource: req.referral_source || "direct_link",
         // depositRequired comes straight from the snapshot the submit
         // RPC stamped onto the booking_request row. Drives the
         // dashboard "Deposit due" filter so we don't flag rows where
