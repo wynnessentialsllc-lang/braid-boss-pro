@@ -24,6 +24,12 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Image upload (client style photos, product images). iOS
+	     hard-crashes the picker if these strings are missing. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Braid Boss Pro needs access to your photos so you can add client style photos and product images.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Braid Boss Pro needs camera access so you can take client style photos and product images.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
