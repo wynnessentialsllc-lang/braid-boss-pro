@@ -67,6 +67,14 @@ const TWILIO_PHONE_NUMBER = Deno.env.get("TWILIO_PHONE_NUMBER") || "";
 // older single-number deploy keeps working.
 const TWILIO_MESSAGING_SERVICE_SID =
   Deno.env.get("TWILIO_MESSAGING_SERVICE_SID") || "";
+// Where Twilio POSTs delivery receipts (twilio-status edge function),
+// which flip the queue row to delivered/failed and refund undelivered
+// sends. Defaults to this project's functions domain; override if needed.
+const TWILIO_STATUS_CALLBACK_URL =
+  Deno.env.get("TWILIO_STATUS_CALLBACK_URL") ||
+  (SUPABASE_URL
+    ? `https://${new URL(SUPABASE_URL).hostname.split(".")[0]}.functions.supabase.co/twilio-status`
+    : "");
 
 const BATCH_LIMIT = 25;
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
@@ -1779,6 +1787,11 @@ const sendViaTwilio = async (
       form.set("From", TWILIO_PHONE_NUMBER);
     }
     form.set("Body", body);
+    // Ask Twilio to POST delivery receipts so we can mark
+    // delivered/failed and refund carrier-dropped (e.g. 30032) sends.
+    if (TWILIO_STATUS_CALLBACK_URL) {
+      form.set("StatusCallback", TWILIO_STATUS_CALLBACK_URL);
+    }
     const res = await fetch(TWILIO_ENDPOINT, {
       method: "POST",
       headers: {
