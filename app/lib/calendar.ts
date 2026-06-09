@@ -9,17 +9,39 @@ import { useEffect, useState } from "react";
 
 export type CalendarView = "day" | "week" | "list" | "income";
 export type ColorMode = "status" | "service" | "deposit" | "balance";
+export type CalendarTheme = "studio" | "sunset" | "orchid" | "mint" | "midnight";
+
+// Named gradient themes for the Schedule surface. `banner` paints the
+// soft strip behind the date header; `glow` is the blurred Aura cloud.
+// All tuned to the Braid Boss Pro palette so they read as "on brand,"
+// never neon. `ink`/`onBanner` keep header text legible on each.
+export const CALENDAR_THEMES: Record<CalendarTheme, {
+  label: string;
+  swatch: string;
+  banner: string;
+  glow: string;
+}> = {
+  studio:   { label: "Studio",   swatch: "linear-gradient(135deg, #7C3AED, #FF4D6D)", banner: "linear-gradient(135deg, rgba(124,58,237,0.10), rgba(255,77,109,0.10))", glow: "radial-gradient(closest-side, rgba(124,58,237,0.45), rgba(255,77,109,0.25), transparent)" },
+  sunset:   { label: "Sunset",   swatch: "linear-gradient(135deg, #FF4D6D, #FF7A45)", banner: "linear-gradient(135deg, rgba(255,77,109,0.12), rgba(255,122,69,0.12))", glow: "radial-gradient(closest-side, rgba(255,77,109,0.5), rgba(255,122,69,0.28), transparent)" },
+  orchid:   { label: "Orchid",   swatch: "linear-gradient(135deg, #7C3AED, #B14BE0)", banner: "linear-gradient(135deg, rgba(124,58,237,0.14), rgba(177,75,224,0.12))", glow: "radial-gradient(closest-side, rgba(124,58,237,0.5), rgba(177,75,224,0.3), transparent)" },
+  mint:     { label: "Mint",     swatch: "linear-gradient(135deg, #22C55E, #7C3AED)", banner: "linear-gradient(135deg, rgba(34,197,94,0.12), rgba(124,58,237,0.10))", glow: "radial-gradient(closest-side, rgba(34,197,94,0.45), rgba(124,58,237,0.22), transparent)" },
+  midnight: { label: "Midnight", swatch: "linear-gradient(135deg, #4C2A6B, #15111A)", banner: "linear-gradient(135deg, rgba(76,42,107,0.16), rgba(21,17,26,0.10))", glow: "radial-gradient(closest-side, rgba(124,58,237,0.4), rgba(21,17,26,0.2), transparent)" },
+};
 
 export type CalendarPrefs = {
   view: CalendarView;
   colorMode: ColorMode;
   showCanceled: boolean;
+  theme: CalendarTheme;
+  aura: boolean;
 };
 
 export const DEFAULT_CALENDAR_PREFS: CalendarPrefs = {
   view: "day",
   colorMode: "status",
   showCanceled: false,
+  theme: "studio",
+  aura: false,
 };
 
 const STORAGE_KEY = "bbp-calendar-prefs";
@@ -34,6 +56,8 @@ const readPrefs = (): CalendarPrefs => {
       view: ["day", "week", "list", "income"].includes(parsed?.view) ? parsed.view : "day",
       colorMode: ["status", "service", "deposit", "balance"].includes(parsed?.colorMode) ? parsed.colorMode : "status",
       showCanceled: !!parsed?.showCanceled,
+      theme: (["studio", "sunset", "orchid", "mint", "midnight"].includes(parsed?.theme) ? parsed.theme : "studio") as CalendarTheme,
+      aura: !!parsed?.aura,
     };
   } catch {
     return DEFAULT_CALENDAR_PREFS;

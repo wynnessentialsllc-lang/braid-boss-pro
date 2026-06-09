@@ -41,6 +41,10 @@ export type BookingRequestRecord = {
   preferred_time: string | null;
   notes: string | null;
   status: "pending" | "approved" | "declined" | "converted" | string;
+  // Where the booking came from (instagram / tiktok / google / ...),
+  // detected from UTM/referrer at submit time. Null when undetected;
+  // the approval flow then falls back to "direct_link".
+  referral_source: string | null;
   approval_status: ApprovalStatus;
   deposit_amount: number | null;
   deposit_paid: boolean;

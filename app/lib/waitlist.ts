@@ -294,6 +294,50 @@ export const collectPublicContext = (): { timezone: string | null; locale: strin
   return { timezone, locale };
 };
 
+// Best-effort booking-source detection for public links. Reads UTM
+// params first (utm_source / source / ref), then falls back to the
+// referrer hostname. Returns a normalized source key the app already
+// understands (instagram / tiktok / facebook / google / yelp /
+// direct_link), or null when nothing recognizable is present — callers
+// then fall back to the generic "Booking link" bucket.
+//
+// Tip for stylists: append ?utm_source=instagram (or tiktok, etc.) to
+// the link you drop in each bio to get exact attribution even when the
+// referrer is stripped (which in-app browsers usually do).
+const SOURCE_UTM_MAP: Record<string, string> = {
+  ig: "instagram", insta: "instagram", instagram: "instagram",
+  tiktok: "tiktok", tt: "tiktok",
+  fb: "facebook", facebook: "facebook", meta: "facebook",
+  google: "google", googleads: "google", adwords: "google", gmb: "google",
+  yelp: "yelp",
+  linkinbio: "direct_link", linktree: "direct_link", bio: "direct_link", link: "direct_link",
+};
+const KNOWN_SOURCES = ["instagram", "tiktok", "facebook", "google", "yelp", "direct_link"];
+
+export const detectBookingSource = (): string | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const utm = (params.get("utm_source") || params.get("source") || params.get("ref") || "")
+      .trim().toLowerCase();
+    if (utm) {
+      if (SOURCE_UTM_MAP[utm]) return SOURCE_UTM_MAP[utm];
+      if (KNOWN_SOURCES.includes(utm)) return utm;
+    }
+    const ref = (typeof document !== "undefined" ? document.referrer : "").toLowerCase();
+    if (ref) {
+      if (ref.includes("instagram")) return "instagram";
+      if (ref.includes("tiktok")) return "tiktok";
+      if (ref.includes("facebook") || ref.includes("//fb.") || ref.includes(".fb.")) return "facebook";
+      if (ref.includes("google")) return "google";
+      if (ref.includes("yelp")) return "yelp";
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
 export const submitPublicWaitlistRequest = async (params: {
   ownerUserId: string;
   client_name: string;

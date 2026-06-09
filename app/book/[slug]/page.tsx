@@ -45,7 +45,7 @@ import {
   type PublicReview,
   type PublicProduct,
 } from "../../lib/storefront";
-import { collectPublicContext } from "../../lib/waitlist";
+import { collectPublicContext, detectBookingSource } from "../../lib/waitlist";
 import { fetchStylistReviews, type StylistReview } from "../../lib/marketplace";
 
 // Local-date "YYYY-MM-DD" — never UTC-shifts so the calendar lines up
@@ -1463,6 +1463,24 @@ export default function PublicBookingPage() {
             });
           } catch {
             /* booking already saved — recipient is non-fatal */
+          }
+        }
+
+        // Booking-source attribution — best-effort, never blocks the
+        // booking. Detects where the client came from (UTM tag or
+        // referrer) and stamps it on the request; the approval flow
+        // copies it onto the appointment so it feeds the Analytics
+        // "Where bookings come from" breakdown. Null = couldn't tell,
+        // and the app falls back to the generic "Booking link" bucket.
+        const detectedSource = detectBookingSource();
+        if (detectedSource) {
+          try {
+            await supabase.rpc("public_tag_booking_source", {
+              request_id_in: newRequestId,
+              referral_source_in: detectedSource,
+            });
+          } catch {
+            /* booking already saved — attribution is non-fatal */
           }
         }
 
