@@ -6039,12 +6039,12 @@ const StyleCustomizationSection = ({
                   never alters the standard setup. */}
               {(() => {
                 const mode = ((form.hair_sourcing as string) || "included");
-                const spec = (form.hair_spec || {}) as Record<string, string>;
+                const spec = (form.hair_spec || {}) as Record<string, any>;
                 // Switching INTO client-supplied marks hair not-included;
                 // switching back leaves the stylist's hair_included toggle.
                 const setMode = (m: string) =>
                   set(m === "included" ? { hair_sourcing: "included" } : { hair_sourcing: m, hair_included: false });
-                const setSpec = (patch: Record<string, string>) => set({ hair_spec: { ...spec, ...patch } });
+                const setSpec = (patch: Record<string, any>) => set({ hair_spec: { ...spec, ...patch } });
 
                 if (mode === "included") {
                   return (
@@ -6112,6 +6112,20 @@ const StyleCustomizationSection = ({
                       </div>
                       <input type="text" value={spec.prep || ""} onChange={e => setSpec({ prep: e.target.value })} placeholder="Prep notes — e.g. come washed + blow-dried" className={inputCls} style={inputStyle} />
                       <input type="text" value={spec.buyUrl || ""} onChange={e => setSpec({ buyUrl: e.target.value })} placeholder="Where to buy (optional link)" className={inputCls} style={inputStyle} />
+                      {mode === "choice" && (
+                        <div style={{ marginTop: 2, paddingTop: 8, borderTop: `1px solid ${C.hairline}` }}>
+                          <p style={{ fontSize: 11, color: C.muted, marginBottom: 6 }}>
+                            Optional: let clients <strong>buy the hair from you</strong> at booking. Blank = bring-your-own only.
+                          </p>
+                          <input
+                            type="number" inputMode="decimal" min={0} step="1"
+                            value={spec.sellPrice ?? ""}
+                            onChange={e => setSpec({ sellPrice: e.target.value === "" ? null : Number(e.target.value) })}
+                            placeholder="Buy-from-me price ($) — e.g. 35"
+                            className={inputCls} style={inputStyle}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -21482,6 +21496,9 @@ const ServicesScreen = ({
         if (field === "variation_description") {
           return { ...a, variation_description: String(value ?? "") };
         }
+        if (field === "variation_hair_packs" || field === "variation_hair_color") {
+          return { ...a, [field]: String(value ?? "") } as ServiceAddOn;
+        }
         if (field === "amount") {
           return { ...a, amount: parseMoney(value) };
         }
@@ -22136,6 +22153,26 @@ const ServicesScreen = ({
                           />
                         </Field>
                       </div>
+                      {(editing.hair_sourcing === "client" || editing.hair_sourcing === "choice") && (
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          <Field label="Hair packs" hint="Blank = service default">
+                            <Input
+                              type="text"
+                              value={a.variation_hair_packs ?? ""}
+                              onChange={e => updateAddOn(a.id, "variation_hair_packs", e.target.value)}
+                              placeholder="e.g. 5, 5-6, 8"
+                            />
+                          </Field>
+                          <Field label="Hair color" hint="Blank = service default">
+                            <Input
+                              type="text"
+                              value={a.variation_hair_color ?? ""}
+                              onChange={e => updateAddOn(a.id, "variation_hair_color", e.target.value)}
+                              placeholder="e.g. 1B, 27"
+                            />
+                          </Field>
+                        </div>
+                      )}
                       <div className="mt-2 flex items-center justify-between">
                         <div>
                           <p className="text-[12px] font-semibold" style={{ color: C.espresso }}>Deposit required</p>

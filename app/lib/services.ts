@@ -90,6 +90,22 @@ export const findCustomColorExtra = (
     e => e?.kind === CUSTOM_COLOR_EXTRA_KIND || e?.id === CUSTOM_COLOR_EXTRA_ID,
   ) || null;
 
+// Buy-from-me (hair sourcing v2): when a 'choice' service has a hair
+// sell price, we mirror it into a managed extra so the purchase rides
+// the same trusted price/deposit/submit rails as ACV — no core RPC math
+// changes. Synced from hair_spec.sellPrice on save; surfaced on the
+// booking page as the "Buy from me" side of the choice toggle.
+export const BUY_HAIR_EXTRA_KIND = "buy_hair";
+export const BUY_HAIR_EXTRA_ID = "buy_hair_from_stylist";
+export const BUY_HAIR_EXTRA_NAME = "Braiding hair (supplied by your stylist)";
+
+export const findBuyHairExtra = (
+  extras: ServiceExtra[] | null | undefined,
+): ServiceExtra | null =>
+  (extras || []).find(
+    e => e?.kind === BUY_HAIR_EXTRA_KIND || e?.id === BUY_HAIR_EXTRA_ID,
+  ) || null;
+
 export const isCustomColorEnabled = (
   s: Pick<Service, "extras"> | null | undefined,
 ): boolean => {
@@ -111,6 +127,11 @@ export type ServiceAddOn = {
   // Shown to clients on the booking page when this variation is
   // selected (e.g. what's included with this option).
   variation_description?: string | null;
+  // v2 phase 3 — per-variation hair overrides for client-supplied
+  // services (packs scale with length/density). Blank = use the
+  // service-level hair_spec. Display only; no pricing effect.
+  variation_hair_packs?: string | null;
+  variation_hair_color?: string | null;
 };
 
 // Resolved per-variation pricing. When `addonId` is null/unknown we
@@ -619,6 +640,10 @@ export const useServices = (
             : null;
         out.variation_description =
           (a.variation_description || "").trim().slice(0, 280) || null;
+        out.variation_hair_packs =
+          ((a as any).variation_hair_packs || "").toString().trim().slice(0, 40) || null;
+        out.variation_hair_color =
+          ((a as any).variation_hair_color || "").toString().trim().slice(0, 60) || null;
         return out;
       }),
       prep_instructions: draft.prep_instructions?.trim() || null,
@@ -737,21 +762,49 @@ export const useServices = (
       // Round-trip the optional add-ons. Keep null/undefined sane and
       // coerce numeric fields so we never persist NaN. Each entry is
       // stored verbatim in services.extras jsonb.
-      extras: (draft.extras || []).map(e => ({
-        id: e.id || `extra_${Math.random().toString(36).slice(2, 8)}`,
-        name: (e.name || "").trim(),
-        description: e.description?.trim() || null,
-        price: Number.isFinite(e.price) ? Number(e.price) : 0,
-        duration_hours_delta: e.duration_hours_delta != null && Number.isFinite(e.duration_hours_delta)
-          ? Number(e.duration_hours_delta)
-          : 0,
-        include_in_deposit: e.include_in_deposit === true,
-        active: e.active === false ? false : true,
-        sort_order: Number.isFinite(e.sort_order) ? Number(e.sort_order) : 0,
-        // Preserve the managed-optional marker (e.g. "acv") so the
-        // editor keeps surfacing it as a dedicated toggle on reload.
-        kind: e.kind ? String(e.kind) : null,
-      })),
+      extras: (() => {
+        const mapped = (draft.extras || []).map(e => ({
+          id: e.id || `extra_${Math.random().toString(36).slice(2, 8)}`,
+          name: (e.name || "").trim(),
+          description: e.description?.trim() || null,
+          price: Number.isFinite(e.price) ? Number(e.price) : 0,
+          duration_hours_delta: e.duration_hours_delta != null && Number.isFinite(e.duration_hours_delta)
+            ? Number(e.duration_hours_delta)
+            : 0,
+          include_in_deposit: e.include_in_deposit === true,
+          active: e.active === false ? false : true,
+          sort_order: Number.isFinite(e.sort_order) ? Number(e.sort_order) : 0,
+          // Preserve the managed-optional marker (e.g. "acv") so the
+          // editor keeps surfacing it as a dedicated toggle on reload.
+          kind: e.kind ? String(e.kind) : null,
+        }));
+        // Sync the buy-from-me managed extra from the hair spec so the
+        // purchase rides the existing add-on price/deposit rails. Only a
+        // 'choice' service with a positive sell price keeps one.
+        const withoutBuyHair = mapped.filter(
+          e => e.kind !== "buy_hair" && e.id !== "buy_hair_from_stylist",
+        );
+        const sourcing = String((draft as any).hair_sourcing || "included");
+        const sell = (() => {
+          const raw = (((draft as any).hair_spec || {}) as any).sellPrice;
+          const n = typeof raw === "number" ? raw : Number(raw);
+          return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
+        })();
+        if (sourcing === "choice" && sell > 0) {
+          withoutBuyHair.push({
+            id: "buy_hair_from_stylist",
+            name: "Braiding hair (supplied by your stylist)",
+            description: null,
+            price: sell,
+            duration_hours_delta: 0,
+            include_in_deposit: false,
+            active: true,
+            sort_order: 0,
+            kind: "buy_hair",
+          });
+        }
+        return withoutBuyHair;
+      })(),
     };
     const { data, error: err } = draft.id
       ? await supabase.from("services").update(payload).eq("id", draft.id).eq("user_id", userId).select("*").maybeSingle()
