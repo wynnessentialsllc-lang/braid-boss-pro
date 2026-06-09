@@ -196,6 +196,16 @@ export const resolveVariationPricing = (
   };
 };
 
+// The "what to buy" spec a client sees when they supply their own hair.
+// All optional — a stylist can fill in as much or as little as they want.
+export type HairSpec = {
+  brand?: string | null;   // e.g. "X-pression / Kanekalon"
+  color?: string | null;   // e.g. "1B"
+  packs?: string | null;   // e.g. "5" (text so "5-6" is allowed)
+  prep?: string | null;    // e.g. "Come washed + blow-dried"
+  buyUrl?: string | null;  // optional link to the exact product
+};
+
 export type Service = {
   id: string;
   user_id: string;
@@ -244,6 +254,12 @@ export type Service = {
   allow_inspiration_photos: boolean;
   included_details: string | null;
   customization_enabled: boolean;
+  // Hair sourcing v1 — who supplies the hair for this service, plus a
+  // structured shopping-list spec shown to the client when they do.
+  // 'included' (stylist supplies; default), 'client' (client brings
+  // their own), 'choice' (client picks at booking). Default-safe.
+  hair_sourcing: "included" | "client" | "choice";
+  hair_spec: HairSpec;
   // Inventory V1 — typical materials consumed by this service.
   // Pre-fills the "Materials used" sheet on appointment completion;
   // stylist can confirm or edit before the inventory_apply_movement
@@ -634,6 +650,26 @@ export const useServices = (
       allow_inspiration_photos: draft.allow_inspiration_photos ?? true,
       included_details: draft.included_details?.trim() || null,
       customization_enabled: draft.customization_enabled ?? true,
+      // Hair sourcing v1. Mode is validated against the DB check; the
+      // spec is clipped per-field so a long paste can't bloat the row.
+      hair_sourcing: (() => {
+        const m = String((draft as any).hair_sourcing || "included");
+        return ["included", "client", "choice"].includes(m) ? m : "included";
+      })(),
+      hair_spec: (() => {
+        const s = ((draft as any).hair_spec || {}) as Record<string, unknown>;
+        const clip = (v: unknown, n: number): string | null => {
+          const t = typeof v === "string" ? v.trim() : "";
+          return t ? t.slice(0, n) : null;
+        };
+        return {
+          brand: clip(s.brand, 80),
+          color: clip(s.color, 60),
+          packs: clip(s.packs, 40),
+          prep: clip(s.prep, 280),
+          buyUrl: clip(s.buyUrl, 500),
+        };
+      })(),
       // Default materials — array of { inventory_item_id, quantity }.
       // Drop rows missing an id or with a non-positive quantity so the
       // appointment-completion sheet never tries to deduct against a
@@ -793,6 +829,8 @@ export type PublicService = Pick<
   | "mobile_tiered_bands"
   | "mobile_minimum_price"
   | "mobile_minimum_price_note"
+  | "hair_sourcing"
+  | "hair_spec"
 >;
 
 export const fetchPublicServices = async (
@@ -846,6 +884,10 @@ export const fetchPublicServices = async (
       : [],
     mobile_minimum_price: s.mobile_minimum_price == null ? null : Number(s.mobile_minimum_price),
     mobile_minimum_price_note: s.mobile_minimum_price_note ?? null,
+    hair_sourcing: (["included", "client", "choice"].includes(s.hair_sourcing)
+      ? s.hair_sourcing
+      : "included") as Service["hair_sourcing"],
+    hair_spec: (s.hair_spec && typeof s.hair_spec === "object" ? s.hair_spec : {}) as HairSpec,
   }));
   return { ok: true, services };
 };

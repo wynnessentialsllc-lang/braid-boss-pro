@@ -6033,24 +6033,89 @@ const StyleCustomizationSection = ({
             <div style={{ opacity: 1 }}>
               <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
 
-              <CustomToggle
-                on={!!form.hair_included}
-                onChange={v => set({ hair_included: v })}
-                label="Hair is included with this service"
-                help="Shows a premium “Hair included” badge to clients."
-              />
-              {form.hair_included && (
-                <div className="mb-3 pl-[54px]">
-                  <input
-                    type="text"
-                    value={form.included_hair_description || ""}
-                    onChange={e => set({ included_hair_description: e.target.value })}
-                    placeholder="Example: 1B prestretched braiding hair included"
-                    className={inputCls}
-                    style={inputStyle}
-                  />
-                </div>
-              )}
+              {/* Hair sourcing. Default = the original "Hair is included"
+                  toggle, unchanged for braiders who supply the hair. The
+                  client-supplied flow is a separate opt-in reveal so it
+                  never alters the standard setup. */}
+              {(() => {
+                const mode = ((form.hair_sourcing as string) || "included");
+                const spec = (form.hair_spec || {}) as Record<string, string>;
+                // Switching INTO client-supplied marks hair not-included;
+                // switching back leaves the stylist's hair_included toggle.
+                const setMode = (m: string) =>
+                  set(m === "included" ? { hair_sourcing: "included" } : { hair_sourcing: m, hair_included: false });
+                const setSpec = (patch: Record<string, string>) => set({ hair_spec: { ...spec, ...patch } });
+
+                if (mode === "included") {
+                  return (
+                    <div className="mb-1">
+                      <CustomToggle
+                        on={!!form.hair_included}
+                        onChange={v => set({ hair_included: v })}
+                        label="Hair is included with this service"
+                        help="Shows a premium “Hair included” badge to clients."
+                      />
+                      {form.hair_included && (
+                        <div className="mb-2 pl-[54px]">
+                          <input
+                            type="text"
+                            value={form.included_hair_description || ""}
+                            onChange={e => set({ included_hair_description: e.target.value })}
+                            placeholder="Example: 1B prestretched braiding hair included"
+                            className={inputCls}
+                            style={inputStyle}
+                          />
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setMode("client")}
+                        style={{ background: "transparent", border: "none", padding: "2px 0", marginLeft: 54, color: C.gold, fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                      >
+                        Don&apos;t supply the hair? Set up client-supplied →
+                      </button>
+                    </div>
+                  );
+                }
+
+                // Client-supplied opt-in panel (alternative flow).
+                return (
+                  <div className="mb-2" style={{ padding: 12, borderRadius: 12, border: `1px solid ${C.hairline}`, background: C.paper }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                      <p style={{ fontSize: 12, fontWeight: 700, color: C.coffee, margin: 0 }}>Client-supplied hair</p>
+                      <button type="button" onClick={() => setMode("included")}
+                        style={{ background: "transparent", border: "none", color: C.gold, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+                        ← I provide the hair
+                      </button>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                      {(([["client", "Client brings it"], ["choice", "Client's choice"]]) as Array<[string, string]>).map(([val, label]) => {
+                        const active = mode === val;
+                        return (
+                          <button key={val} type="button" onClick={() => setMode(val)}
+                            style={{ flex: 1, padding: "8px 10px", borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: "pointer",
+                              background: active ? C.espresso : "transparent", color: active ? "#FFFFFF" : C.coffee,
+                              border: `1px solid ${active ? C.espresso : C.hairline}` }}>
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+                      Tell clients exactly what to buy — shown on your booking page and in their confirmation.
+                    </p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <input type="text" value={spec.brand || ""} onChange={e => setSpec({ brand: e.target.value })} placeholder="Hair type / brand — e.g. X-pression Kanekalon" className={inputCls} style={inputStyle} />
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input type="text" value={spec.color || ""} onChange={e => setSpec({ color: e.target.value })} placeholder="Color — e.g. 1B" className={inputCls} style={{ ...inputStyle, flex: 1 }} />
+                        <input type="text" value={spec.packs || ""} onChange={e => setSpec({ packs: e.target.value })} placeholder="# packs — e.g. 5" className={inputCls} style={{ ...inputStyle, flex: 1 }} />
+                      </div>
+                      <input type="text" value={spec.prep || ""} onChange={e => setSpec({ prep: e.target.value })} placeholder="Prep notes — e.g. come washed + blow-dried" className={inputCls} style={inputStyle} />
+                      <input type="text" value={spec.buyUrl || ""} onChange={e => setSpec({ buyUrl: e.target.value })} placeholder="Where to buy (optional link)" className={inputCls} style={inputStyle} />
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div style={{ borderTop: `1px solid ${C.hairline}`, margin: "6px 0" }} />
 

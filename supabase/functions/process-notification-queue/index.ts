@@ -229,6 +229,17 @@ const contractBlock = (p: Record<string, any>): string => {
     + `<p style="font-size:14px;line-height:22px;margin:0 0 6px;color:${C.coffee};">Please review and sign ${v.length > 1 ? "these agreements" : "this agreement"} to lock in your appointment.</p>`
     + v.map((c) => ctaButton(v.length > 1 && c.title ? `Review & sign — ${c.title}` : "Review and sign agreement", String(c.url))).join("");
 };
+// Hair-to-bring callout — shown when the service is client-supplied and
+// the stylist filled in a hair spec (payload.hairBring). Empty otherwise.
+const hairBringBlock = (p: Record<string, any>): string => {
+  const hair = String(p.hairBring ?? "").trim();
+  if (!hair) return "";
+  return `<div style="margin-top:12px;padding:12px 14px;border-radius:12px;background:#FAF5EA;border:1px solid ${C.hairline};">
+    <p style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 4px;font-weight:700;">Hair to bring</p>
+    <p style="font-size:13px;line-height:20px;color:${C.coffee};margin:0;">${escape(hair)}</p>
+  </div>`;
+};
+
 const portalButton = (p: Record<string, any>): string => {
   const url = String(p.portalUrl || "").trim();
   if (!url) return "";
@@ -270,6 +281,7 @@ const renderBookingConfirmation = (p: Record<string, any>) => {
     <p style="font-size:14px;line-height:22px;color:${C.coffee};">${escape(nextLine)}</p>
     ${recipientLine(p)}
     ${customizationBlock(p)}
+    ${hairBringBlock(p)}
     ${p.prepReminder ? `<p style="font-size:13px;line-height:20px;color:${C.coffee};margin-top:12px;"><strong>Prep:</strong> ${escape(p.prepReminder)}</p>` : ""}
     ${portalButton(p)}
     <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:18px;">
@@ -691,6 +703,7 @@ const renderAppointmentConfirmed = (p: Record<string, any>) => {
     ${recipientLine(p)}
     ${balanceLine}
     ${customizationBlock(p)}
+    ${hairBringBlock(p)}
     ${contractBlock(p)}
     <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">
       We'll send a reminder closer to the day. If anything changes, reply to this email and ${escape(studioName)} will get it.
@@ -744,6 +757,7 @@ const renderAppointmentReminder = (p: Record<string, any>) => {
     <p style="font-size:15px;line-height:24px;margin:0 0 14px;">Your appointment with <strong>${escape(studioName)}</strong>${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}${when ? ` is on <strong>${escape(when)}</strong>` : " is coming up soon"}.</p>
     ${recipientLine(p)}
     ${customizationBlock(p)}
+    ${hairBringBlock(p)}
     ${p.prepInstructions ? `<p style="font-size:13px;line-height:20px;color:${C.coffee};margin:0 0 14px;"><strong>Prep:</strong> ${escape(p.prepInstructions)}</p>` : ""}
     <p style="font-size:14px;line-height:22px;margin:0 0 18px;color:${C.coffee};">If everything still looks good, no action needed — we just wanted to give you a heads up.</p>
     ${portalButton(p)}

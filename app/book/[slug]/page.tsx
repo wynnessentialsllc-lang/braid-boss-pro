@@ -547,6 +547,8 @@ export default function PublicBookingPage() {
   // no-show protection on AND the booking will save a card (deposit).
   const [noShowFee, setNoShowFee] = useState<PublicNoShowFee | null>(null);
   const [noShowConsent, setNoShowConsent] = useState(false);
+  // Hair sourcing — client acknowledges they're bringing their own hair.
+  const [hairAck, setHairAck] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -972,6 +974,12 @@ export default function PublicBookingPage() {
   // True when the selected service is offered mobile. Drives the
   // address input + travel quote on the booking page.
   const isMobileService = !!(selectedCatalogService as any)?.mobile_service;
+  // Hair sourcing — what the client needs to know/bring for this service.
+  const hairSourcing = ((selectedCatalogService as any)?.hair_sourcing as string) || "included";
+  const hairSpec = (((selectedCatalogService as any)?.hair_spec) || {}) as { brand?: string; color?: string; packs?: string; prep?: string; buyUrl?: string };
+  const hairAckRequired = hairSourcing === "client";
+  const showHairSpec = (hairSourcing === "client" || hairSourcing === "choice")
+    && !!(hairSpec.brand || hairSpec.color || hairSpec.packs || hairSpec.prep || hairSpec.buyUrl);
   // Travel fee from the most recent in-area quote. Gated on the mobile
   // toggle so flipping services doesn't carry over a stale quote.
   const travelFee = isMobileService && mobileQuote?.in_area && Number.isFinite(mobileQuote.travel_fee)
@@ -1290,6 +1298,12 @@ export default function PublicBookingPage() {
     // protection on AND this booking will save a card (deposit).
     if (noShowConsentRequired && !noShowConsent) {
       setSubmitError("Please agree to the no-show fee policy to continue.");
+      return;
+    }
+    // Client-supplied hair: require the client to acknowledge they're
+    // bringing their own hair before booking.
+    if (hairAckRequired && !hairAck) {
+      setSubmitError("Please confirm you'll bring your own hair to continue.");
       return;
     }
     setSubmitting(true);
@@ -4104,6 +4118,44 @@ export default function PublicBookingPage() {
                 </div>
               </details>
             )}
+            {(hairSourcing === "client" || hairSourcing === "choice") && (() => {
+              const hairLine: React.CSSProperties = { fontSize: 12.5, color: C.coffee, lineHeight: 1.5, margin: 0 };
+              const buyHref = hairSpec.buyUrl
+                ? (/^https?:\/\//i.test(hairSpec.buyUrl) ? hairSpec.buyUrl : `https://${hairSpec.buyUrl}`)
+                : null;
+              const ackWhat = [hairSpec.packs && `${hairSpec.packs} packs`, hairSpec.color].filter(Boolean).join(" ");
+              return (
+                <div style={{ padding: 14, borderRadius: 14, background: C.paper, border: `1px solid ${C.hairline}`, marginBottom: 4 }}>
+                  <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase", color: C.goldDeep || C.gold, margin: 0 }}>
+                    {hairSourcing === "client" ? "You supply the hair" : "Hair — your choice"}
+                  </p>
+                  <p style={{ ...hairLine, marginTop: 6 }}>
+                    {hairSourcing === "client"
+                      ? "This service doesn't include hair — please bring your own to your appointment."
+                      : "You can bring your own hair, or ask your stylist about buying it from them."}
+                  </p>
+                  {showHairSpec && (
+                    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+                      <p style={{ fontSize: 11, fontWeight: 700, color: C.espresso, margin: 0 }}>Hair you&apos;ll need</p>
+                      {hairSpec.brand && <p style={hairLine}><strong>Type:</strong> {hairSpec.brand}</p>}
+                      {hairSpec.color && <p style={hairLine}><strong>Color:</strong> {hairSpec.color}</p>}
+                      {hairSpec.packs && <p style={hairLine}><strong>Packs:</strong> {hairSpec.packs}</p>}
+                      {hairSpec.prep && <p style={hairLine}><strong>Prep:</strong> {hairSpec.prep}</p>}
+                      {buyHref && <p style={hairLine}><a href={buyHref} target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Where to buy →</a></p>}
+                    </div>
+                  )}
+                  {hairSourcing === "client" && (
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", marginTop: 12 }}>
+                      <input type="checkbox" checked={hairAck} onChange={e => setHairAck(e.target.checked)}
+                        style={{ marginTop: 2, width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }} />
+                      <span style={{ fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
+                        I understand I need to bring my own hair{ackWhat ? ` (${ackWhat})` : ""} to this appointment.
+                      </span>
+                    </label>
+                  )}
+                </div>
+              );
+            })()}
             <Field label="Notes">
               <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
                 placeholder="Hair length, anything you want me to know…"
@@ -4220,7 +4272,7 @@ export default function PublicBookingPage() {
             {submitError && (
               <p role="alert" aria-live="assertive" style={{ fontSize: 12, color: C.danger }}>{submitError}</p>
             )}
-            <button ref={bookingSubmitRef} type="submit" disabled={submitting || (noShowConsentRequired && !noShowConsent)}
+            <button ref={bookingSubmitRef} type="submit" disabled={submitting || (noShowConsentRequired && !noShowConsent) || (hairAckRequired && !hairAck)}
               // 2026 refresh: primary booking CTA now uses the brand
               // purple→coral gradient with a soft halo shadow. The
               // stylist's accent still drives borders/chips, but the
@@ -4238,8 +4290,8 @@ export default function PublicBookingPage() {
                 fontSize: 15,
                 letterSpacing: "0.02em",
                 boxShadow: submitting ? "none" : SHADOWS.primaryGlow,
-                cursor: submitting || (noShowConsentRequired && !noShowConsent) ? "default" : "pointer",
-                opacity: submitting || (noShowConsentRequired && !noShowConsent) ? 0.6 : 1,
+                cursor: submitting || (noShowConsentRequired && !noShowConsent) || (hairAckRequired && !hairAck) ? "default" : "pointer",
+                opacity: submitting || (noShowConsentRequired && !noShowConsent) || (hairAckRequired && !hairAck) ? 0.6 : 1,
                 transition: "transform 120ms ease, box-shadow 120ms ease",
               }}>
               {submitting
