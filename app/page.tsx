@@ -1947,6 +1947,15 @@ const useStorage = () => {
     }
     setReminders(prev => prev.filter(r => !(r.appointmentId === appt.id && r.status === "pending")));
 
+    // A cancelled / no-show appointment must not keep OR regenerate
+    // pending reminders. Without this guard, saving the appointment with
+    // status="cancelled" clears the old reminders above and then
+    // immediately re-plans a fresh set — so they linger as "Pending" in
+    // the inbox and (once auto-dispatch ships) would fire at the client.
+    // Clearing them above is the whole job in that case.
+    const apptStatus = (appt?.status || "").toLowerCase();
+    if (apptStatus === "cancelled" || apptStatus === "canceled" || apptStatus === "no_show") return [];
+
     if (!reminderSettings.enabled || appt.remindersEnabled === false) return [];
     const planned = planRemindersForAppointment(appt, reminderSettings, reminderTemplates, business);
     for (const p of planned) await safeStorage.set(`reminders:${p.id}`, p);
@@ -10264,6 +10273,13 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         });
       }
 
+      // Pull any still-pending automated reminders for this appointment
+      // so they don't sit in the inbox (or fire at the client) for a
+      // visit that's no longer happening. This cancel path writes the
+      // status directly and doesn't run the reminder scheduler, so we
+      // clear them explicitly.
+      await store.cancelRemindersForAppt(form.id);
+
       if (body.refunded > 0) {
         alert(`Cancelled. Refunded $${Number(body.refunded).toFixed(2)} to the client via Stripe.`);
       } else if (body.failures?.length) {
@@ -10332,6 +10348,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     if (!window.confirm(
       "Permanently delete this appointment? This removes it from your schedule, history, and reports. This cannot be undone.",
     )) return;
+    await store.cancelRemindersForAppt(form.id);
     await deleteAppointment(form.id);
     onClose();
   };
@@ -10363,6 +10380,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             cancelledAt: new Date().toISOString(),
             cancellationReason: "recurring series cancelled",
           });
+          await store.cancelRemindersForAppt(f.id);
         }
       } catch (e) {
         console.warn("[appt] series cancel failed for", f.id, e);
@@ -14545,6 +14563,32 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
     else if (filter === "failed") list = list.filter(r => r.status === "failed");
     return list.sort((a, b) => (a.scheduledFor || "").localeCompare(b.scheduledFor || ""));
   }, [store.reminders, filter]);
+
+  // Self-heal legacy data: a reminder created before its appointment was
+  // cancelled (or from a build prior to the cancel→clear fix) can linger
+  // as "pending". Cancel any whose appointment is now cancelled / no-show
+  // so it leaves the queue and never dispatches. The upsert flips it out
+  // of "pending", so this can't loop.
+  useEffect(() => {
+    const isDead = (s: unknown) => {
+      const v = String(s || "").toLowerCase();
+      return v === "cancelled" || v === "canceled" || v === "no_show";
+    };
+    const deadApptIds = new Set(
+      (store.appointments || [])
+        .filter((a: any) => a?.id && isDead(a.status))
+        .map((a: any) => a.id),
+    );
+    if (deadApptIds.size === 0) return;
+    const stuck = (store.reminders || []).filter(
+      (r: any) => r.status === "pending" && r.appointmentId && deadApptIds.has(r.appointmentId),
+    );
+    if (stuck.length === 0) return;
+    void (async () => {
+      for (const r of stuck) await store.upsertReminder({ ...r, status: "cancelled" });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.reminders, store.appointments]);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 1800); };
 
