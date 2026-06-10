@@ -252,6 +252,7 @@ import {
   todayCompletedAppts,
   weekRevenueAppts,
   weekClientRows,
+  clientRowsForPrefix,
   type WeekClientRow,
   avgTicket30dBreakdown,
   type AvgTicketBreakdown,
@@ -3378,6 +3379,8 @@ type KpiDetailKind =
   | "today"
   | "week"
   | "weekClients"
+  | "monthClients"
+  | "yearClients"
   | "avgTicket"
   | "deposits"
   | "pending"
@@ -3388,6 +3391,8 @@ const KPI_TITLES: Record<KpiDetailKind, string> = {
   today: "Today's revenue",
   week: "This week's revenue",
   weekClients: "Clients this week",
+  monthClients: "Clients this month",
+  yearClients: "Clients this year",
   avgTicket: "Average ticket (30 days)",
   deposits: "Deposits this week",
   pending: "Pending balances",
@@ -3516,6 +3521,48 @@ const KpiDetailSheet = ({
             <Hero value={String(rows.length)} hint={`Unique clients booked this week`} />
             {rows.length === 0 ? (
               <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No clients on the books this week.</p></Card>
+            ) : rows.map(r => (
+              <Card key={r.clientId} className="p-3.5 mb-2 flex items-center justify-between">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{r.clientName}</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>{r.visitCount} {r.visitCount === 1 ? "visit" : "visits"}</p>
+                </div>
+                <span className="text-[13px] font-semibold tabular-nums" style={{ color: C.goldDeep }}>
+                  {fmtMoney(r.totalSpend, currency)}
+                </span>
+              </Card>
+            ))}
+          </>
+        );
+      }
+      case "monthClients": {
+        const rows = clientRowsForPrefix(appointments, today.slice(0, 7));
+        return (
+          <>
+            <Hero value={String(rows.length)} hint={`Unique clients booked this month`} />
+            {rows.length === 0 ? (
+              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No clients on the books this month.</p></Card>
+            ) : rows.map(r => (
+              <Card key={r.clientId} className="p-3.5 mb-2 flex items-center justify-between">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{r.clientName}</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>{r.visitCount} {r.visitCount === 1 ? "visit" : "visits"}</p>
+                </div>
+                <span className="text-[13px] font-semibold tabular-nums" style={{ color: C.goldDeep }}>
+                  {fmtMoney(r.totalSpend, currency)}
+                </span>
+              </Card>
+            ))}
+          </>
+        );
+      }
+      case "yearClients": {
+        const rows = clientRowsForPrefix(appointments, today.slice(0, 4));
+        return (
+          <>
+            <Hero value={String(rows.length)} hint={`Unique clients booked this year`} />
+            {rows.length === 0 ? (
+              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No clients on the books this year.</p></Card>
             ) : rows.map(r => (
               <Card key={r.clientId} className="p-3.5 mb-2 flex items-center justify-between">
                 <div className="min-w-0 flex-1">
@@ -4914,16 +4961,11 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
     // Sun–Sat week (not appointments Sun→today), matching the detail
     // sheet that uses weekClientRows.
     const weekClients = weekClientRows(appointments, today).length;
-    // Distinct clients booked this month / this year (non-cancelled real
-    // appointments). Falls back to client name when an appointment has no
-    // clientId, so a named walk-in still counts once.
-    const realAppts = appointments.filter((a: any) => a && (!a.kind || a.kind === "appointment") && !isCanceledAppointment(a));
-    const monthPrefix = today.slice(0, 7);
-    const yearPrefix = today.slice(0, 4);
-    const distinctClients = (pred: (a: any) => boolean) =>
-      new Set(realAppts.filter(pred).map((a: any) => a.clientId || a.clientName).filter(Boolean)).size;
-    const monthClients = distinctClients((a: any) => (a.date || "").startsWith(monthPrefix));
-    const yearClients = distinctClients((a: any) => (a.date || "").startsWith(yearPrefix));
+    // Distinct billable clients booked this calendar month / year. Uses
+    // the same helper the detail sheets render, so the tile count and the
+    // tapped-through list always match.
+    const monthClients = clientRowsForPrefix(appointments, today.slice(0, 7)).length;
+    const yearClients = clientRowsForPrefix(appointments, today.slice(0, 4)).length;
     return { weekRevenue, weekAppts: weekClients, monthClients, yearClients, pendingBalance, monthProfit: calculateProfit(monthIncome, monthExpense) };
   }, [appointments, transactions, today]);
   // Pending balance rows for the dashboard list, projected from the
@@ -5131,12 +5173,12 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
         <div>
           <SectionTitle>More stats</SectionTitle>
           <div className="grid grid-cols-2 gap-2.5">
-            <KpiCard label="Month clients" value={stats.monthClients} icon={<Users size={16} />} tone="primary" onClick={() => setActive("clients")} compact riseDelay={0} />
+            <KpiCard label="Month clients" value={stats.monthClients} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("monthClients")} compact riseDelay={0} />
             <KpiCard label="Avg ticket (30d)" value={money(revenueStats.averageTicket30d)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => openKpi("avgTicket")} compact riseDelay={40} />
             <KpiCard label="Month expected" value={money(revenueStats.monthExpected)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "primary" : "neutral"} onClick={() => openKpi("monthExpected")} compact riseDelay={80} />
             <KpiCard label="Total earned" value={money(revenueStats.monthEarned)} icon={<TrendingUp size={16} />} tone={revenueStats.monthEarned > 0 ? "success" : "neutral"} onClick={() => openKpi("monthEarned")} compact riseDelay={120} />
             <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={money(revenueStats.yearMade)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => goToMoney("all")} compact riseDelay={160} />
-            <KpiCard label={`${new Date().getFullYear()} clients`} value={stats.yearClients} icon={<Users size={16} />} tone="primary" onClick={() => setActive("clients")} compact riseDelay={200} />
+            <KpiCard label={`${new Date().getFullYear()} clients`} value={stats.yearClients} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("yearClients")} compact riseDelay={200} />
           </div>
         </div>
 
