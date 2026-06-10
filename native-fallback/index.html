@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<!--
+  Native shell offline fallback.
+
+  The iOS/Android app loads the live site via Capacitor server.url
+  (capacitor.config.ts). This page is the bundled webDir — Capacitor
+  only shows it if the live site can't be reached (no connection). It
+  offers a Retry that reloads into the live app.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Braid Boss Pro</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: linear-gradient(160deg, #7C3AED 0%, #B14BE0 45%, #FF4D6D 100%);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+      }
+      .wrap { max-width: 340px; }
+      .mark {
+        font-weight: 800;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        font-size: 13px;
+        opacity: 0.92;
+        margin-bottom: 20px;
+      }
+      h1 { font-size: 24px; line-height: 1.2; margin: 0 0 10px; font-weight: 800; }
+      p { font-size: 15px; line-height: 1.5; margin: 0 0 24px; opacity: 0.9; }
+      button {
+        appearance: none;
+        border: 0;
+        background: #fff;
+        color: #7C3AED;
+        font-weight: 800;
+        font-size: 15px;
+        letter-spacing: 0.02em;
+        padding: 14px 28px;
+        border-radius: 14px;
+        cursor: pointer;
+        box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.35);
+      }
+      button:active { transform: scale(0.97); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="mark">Braid Boss Pro</div>
+      <h1>You're offline</h1>
+      <p>We couldn't reach Braid Boss Pro. Check your connection and try again.</p>
+      <button type="button" onclick="location.href='https://braidbosspro.app'">Try again</button>
+    </div>
+  </body>
+</html>
