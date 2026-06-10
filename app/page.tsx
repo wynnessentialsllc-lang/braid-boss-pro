@@ -9423,11 +9423,11 @@ const CancelledWaitlistNotify = ({
 // subtitle, optional chevron — styled to match the "all from your
 // chair" features-page menu we advertise. Keeps the full action set.
 const ApptActionRow = ({
-  icon, iconColor, chip, title, sub, onClick, chevron, danger,
+  icon, iconColor, chip, title, sub, onClick, chevron, danger, badge,
 }: {
   icon: React.ReactNode; iconColor: string; chip: string;
   title: string; sub?: string; onClick: () => void;
-  chevron?: boolean; danger?: boolean;
+  chevron?: boolean; danger?: boolean; badge?: React.ReactNode;
 }) => (
   <button
     type="button"
@@ -9441,6 +9441,11 @@ const ApptActionRow = ({
       <span className="block font-semibold" style={{ fontSize: 13.5, color: danger ? C.danger : C.espresso }}>{title}</span>
       {sub && <span className="block truncate" style={{ fontSize: 11.5, color: C.muted }}>{sub}</span>}
     </span>
+    {badge != null && badge !== false && badge !== "" && (
+      <span className="shrink-0" style={{ fontSize: 11, fontWeight: 700, color: C.coffee, background: C.ivory, border: `1px solid ${C.hairline}`, borderRadius: 999, padding: "2px 8px" }}>
+        {badge}
+      </span>
+    )}
     {chevron && <ChevronRight size={16} style={{ color: C.mutedSoft }} />}
   </button>
 );
@@ -13106,32 +13111,37 @@ const ClientProfileSheet = ({
             view is open. Tapping a row switches into that detail view. */}
         {section === null && (
           <div className="rounded-2xl p-1" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+            {/* Soft per-section colour treatment — muted luxury tones
+                (no neon) so categories scan at a glance. Count/status
+                badges only appear when the data already on the component
+                is non-empty. */}
             {([
-              { key: "overview", icon: <Users size={16} />, title: "Overview", sub: "Client since, lifetime spend, visits, no-shows & cancellations" },
-              { key: "appointments", icon: <Calendar size={16} />, title: "Appointments", sub: "Upcoming, previous, rebook & booking history" },
-              { key: "money", icon: <DollarSign size={16} />, title: "Money", sub: "Transactions, deposits, credits & payment details" },
-              { key: "loyalty", icon: <Award size={16} />, title: "Loyalty & Packages", sub: "Points, rewards, prepaid visits & packages" },
-              { key: "details", icon: <ScrollText size={16} />, title: "Client Details", sub: "Hair notes, allergies, birthday, referrals & preferences" },
-              { key: "contact", icon: <MessageSquare size={16} />, title: "Contact & Reminders", sub: "Phone, email, reminders & marketing status" },
-              { key: "tags", icon: <Star size={16} />, title: "Tags", sub: "VIP, new client, sensitive scalp & custom tags" },
-              { key: "photos", icon: <Camera size={16} />, title: "Photos & Files", sub: "Inspiration, before/after & scalp references" },
-              { key: "activity", icon: <Clock size={16} />, title: "Activity", sub: "Recent appointments, payments & updates" },
-            ] as { key: string; icon: React.ReactNode; title: string; sub: string }[]).map(r => (
+              { key: "overview", icon: <Users size={16} />, color: "#3B6CB5", chip: "rgba(59,108,181,0.12)", title: "Overview", sub: "Client since, lifetime spend, visits, no-shows & cancellations" },
+              { key: "appointments", icon: <Calendar size={16} />, color: "#B7791F", chip: "rgba(183,121,31,0.12)", title: "Appointments", sub: "Upcoming, previous, rebook & booking history", badge: cAppts.length > 0 ? String(cAppts.length) : undefined },
+              { key: "money", icon: <DollarSign size={16} />, color: "#15803D", chip: "rgba(34,197,94,0.12)", title: "Money", sub: "Transactions, deposits, credits & payment details", badge: lifetimeSpend > 0 ? fmtMoney(lifetimeSpend, currency) : undefined },
+              { key: "loyalty", icon: <Award size={16} />, color: C.brandPrimary, chip: "rgba(124,58,237,0.10)", title: "Loyalty & Packages", sub: "Points, rewards, prepaid visits & packages" },
+              { key: "details", icon: <ScrollText size={16} />, color: "#A8466A", chip: "rgba(168,70,106,0.11)", title: "Client Details", sub: "Hair notes, allergies, birthday, referrals & preferences" },
+              { key: "contact", icon: <MessageSquare size={16} />, color: "#127C76", chip: "rgba(18,124,118,0.11)", title: "Contact & Reminders", sub: "Phone, email, reminders & marketing status" },
+              { key: "tags", icon: <Star size={16} />, color: "#B45C34", chip: "rgba(180,92,52,0.12)", title: "Tags", sub: "VIP, new client, sensitive scalp & custom tags", badge: tags.length > 0 ? String(tags.length) : undefined },
+              { key: "photos", icon: <Camera size={16} />, color: "#4B45A8", chip: "rgba(75,69,168,0.11)", title: "Photos & Files", sub: "Inspiration, before/after & scalp references", badge: cPhotos.length > 0 ? String(cPhotos.length) : undefined },
+              { key: "activity", icon: <Clock size={16} />, color: "#54606E", chip: "rgba(84,96,110,0.11)", title: "Activity", sub: "Recent appointments, payments & updates", badge: activity.length > 0 ? String(activity.length) : undefined },
+            ] as { key: string; icon: React.ReactNode; color: string; chip: string; title: string; sub: string; badge?: React.ReactNode }[]).map(r => (
               <ApptActionRow
                 key={r.key}
                 icon={r.icon}
-                iconColor={C.brandPrimary}
-                chip="rgba(124,58,237,0.10)"
+                iconColor={r.color}
+                chip={r.chip}
                 title={r.title}
                 sub={r.sub}
+                badge={r.badge}
                 chevron
                 onClick={() => setSection(r.key)}
               />
             ))}
             <ApptActionRow
               icon={<Edit3 size={16} />}
-              iconColor={C.goldDeep}
-              chip={C.ivory}
+              iconColor="#8A7256"
+              chip="rgba(138,114,86,0.12)"
               title="Edit Profile"
               sub="Update client information"
               chevron
