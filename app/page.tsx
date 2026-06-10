@@ -12964,6 +12964,18 @@ const ClientProfileSheet = ({
     </div>
   );
 
+  // Read-only label + value row. Falls back to a muted "Not set" so the
+  // field is always visible on the profile (no need to open Edit to
+  // check whether it's filled in).
+  const Detail = ({ label, value }: { label: string; value?: React.ReactNode }) => (
+    <div>
+      <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>{label}</p>
+      <p className="text-[13px] mt-1" style={{ color: value ? C.coffee : C.mutedSoft, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+        {value || "Not set"}
+      </p>
+    </div>
+  );
+
   return (
     <Sheet
       open={open}
@@ -13082,6 +13094,63 @@ const ClientProfileSheet = ({
             onDuplicate={onBookAppointment}
           />
         )}
+
+        {/* CLIENT DETAILS — preferred styles, scalp sensitivity,
+            allergies, family, birthday, referred-by and notes, always
+            visible (with a "Not set" placeholder) so none of it lives
+            only behind the Edit button. */}
+        <Section
+          title="Client details"
+          action={
+            <button type="button" onClick={onEdit} className="text-[11px] font-bold uppercase tracking-wider" style={{ color: C.goldDeep, letterSpacing: "0.08em" }}>
+              Edit
+            </button>
+          }
+        >
+          <Card className="p-3.5 space-y-3">
+            <Detail
+              label="Preferred styles"
+              value={Array.isArray(client?.preferredStyles) && client.preferredStyles.length > 0
+                ? client.preferredStyles.join(", ")
+                : undefined}
+            />
+            <Detail
+              label="Scalp sensitivity"
+              value={client?.scalpSensitivity && client.scalpSensitivity !== "None"
+                ? client.scalpSensitivity
+                : undefined}
+            />
+            <Detail label="Allergies" value={client?.allergies || undefined} />
+            <Detail
+              label="Family members"
+              value={Array.isArray(client?.dependents) && client.dependents.filter((d: any) => d?.name).length > 0
+                ? client.dependents
+                    .filter((d: any) => d?.name)
+                    .map((d: any) => (d.note ? `${d.name} (${d.note})` : d.name))
+                    .join(", ")
+                : undefined}
+            />
+            <Detail
+              label="Birthday"
+              value={(() => {
+                if (!client?.birthday) return undefined;
+                const d = new Date(`${client.birthday}T12:00:00`);
+                return Number.isNaN(d.getTime())
+                  ? client.birthday
+                  : d.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+              })()}
+            />
+            <Detail
+              label="Referred by"
+              value={(() => {
+                if (!client?.referredByClientId) return undefined;
+                const ref = ((store.clients as any[]) || []).find((c: any) => c?.id === client.referredByClientId);
+                return ref?.name || "Another client";
+              })()}
+            />
+            <Detail label="Notes" value={client?.notes || undefined} />
+          </Card>
+        </Section>
 
         {/* Loyalty — renders only when the program is enabled. */}
         {client?.id && (
@@ -13281,70 +13350,11 @@ const ClientProfileSheet = ({
           </Card>
         </Section>
 
-        {/* NOTES & FILES */}
-        <Section title="Notes & files">
+        {/* FILES & MARKETING — the client-detail fields now live in the
+            "Client details" section near the top; this keeps the photos
+            summary and the marketing-email status. */}
+        <Section title="Files & marketing">
           <Card className="p-3.5 space-y-3">
-            {client?.notes ? (
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Notes</p>
-                <p className="text-[13px] mt-1" style={{ color: C.coffee, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{client.notes}</p>
-              </div>
-            ) : (
-              <p className="text-[12px]" style={{ color: C.muted }}>No notes yet — open Edit to add one.</p>
-            )}
-            {client?.allergies && (
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Allergies</p>
-                <p className="text-[13px] mt-1" style={{ color: C.coffee, lineHeight: 1.5 }}>{client.allergies}</p>
-              </div>
-            )}
-            {client?.scalpSensitivity && client?.scalpSensitivity !== "None" && (
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Scalp sensitivity</p>
-                <p className="text-[13px] mt-1" style={{ color: C.coffee }}>{client.scalpSensitivity}</p>
-              </div>
-            )}
-            {Array.isArray(client?.preferredStyles) && client.preferredStyles.length > 0 && (
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Preferred styles</p>
-                <p className="text-[13px] mt-1" style={{ color: C.coffee, lineHeight: 1.5 }}>{client.preferredStyles.join(", ")}</p>
-              </div>
-            )}
-            {Array.isArray(client?.dependents) && client.dependents.filter((d: any) => d?.name).length > 0 && (
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Family members</p>
-                <p className="text-[13px] mt-1" style={{ color: C.coffee, lineHeight: 1.5 }}>
-                  {client.dependents
-                    .filter((d: any) => d?.name)
-                    .map((d: any) => (d.note ? `${d.name} (${d.note})` : d.name))
-                    .join(", ")}
-                </p>
-              </div>
-            )}
-            {client?.birthday && (
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Birthday</p>
-                <p className="text-[13px] mt-1" style={{ color: C.coffee }}>
-                  {(() => {
-                    const d = new Date(`${client.birthday}T12:00:00`);
-                    return Number.isNaN(d.getTime())
-                      ? client.birthday
-                      : d.toLocaleDateString("en-US", { month: "long", day: "numeric" });
-                  })()}
-                </p>
-              </div>
-            )}
-            {client?.referredByClientId && (
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Referred by</p>
-                <p className="text-[13px] mt-1" style={{ color: C.coffee }}>
-                  {(() => {
-                    const ref = ((store.clients as any[]) || []).find((c: any) => c?.id === client.referredByClientId);
-                    return ref?.name || "Another client";
-                  })()}
-                </p>
-              </div>
-            )}
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Marketing emails</p>
               <p className="text-[13px] mt-1" style={{ color: client?.marketingEmailsEnabled !== false ? C.coffee : C.muted }}>
