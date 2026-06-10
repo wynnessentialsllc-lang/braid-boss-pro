@@ -3290,7 +3290,7 @@ const RebookingScreen = ({
 // conic gradient under a glass-blur layer); no animation library.
 // Honours prefers-reduced-motion.
 const DashboardHero = ({
-  greeting, ownerName, today, todayRevenue, weekAppts, currency,
+  greeting, ownerName, today, todayRevenue, weekAppts, currency, cloudReady = true,
 }: {
   greeting: string;
   ownerName: string | null;
@@ -3298,6 +3298,7 @@ const DashboardHero = ({
   todayRevenue: number;
   weekAppts: number;
   currency: string;
+  cloudReady?: boolean;
 }) => {
   return (
     <div
@@ -3371,7 +3372,7 @@ const DashboardHero = ({
               Today
             </p>
             <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: "#FFFFFF", lineHeight: 1 }}>
-              {fmtMoney(todayRevenue, currency)}
+              {cloudReady ? fmtMoney(todayRevenue, currency) : "—"}
             </p>
           </div>
           <div
@@ -4855,9 +4856,14 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   );
 };
 
-const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient, openQuickTx, openSettings, openInventory, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openInventory?: () => void; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; openAppointmentRecord?: (a: any) => void }) => {
+const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient, openQuickTx, openSettings, openInventory, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, cloudReady = true, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openInventory?: () => void; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; cloudReady?: boolean; openAppointmentRecord?: (a: any) => void }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
+
+  // Until the first cloud pull lands, the figures below come from a
+  // possibly-stale local cache. Show "—" for money rather than flash an
+  // out-of-date number that snaps to the real value a second later.
+  const money = (v: number) => (cloudReady ? fmtMoney(v, business.currency) : "—");
 
   // Dashboard orchestration: each section gets a focused, de-duped list
   // so the same appointment never renders in more than one card.
@@ -5064,6 +5070,7 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
           todayRevenue={revenueStats.todayRevenue}
           weekAppts={stats.weekAppts}
           currency={business.currency}
+          cloudReady={cloudReady}
         />
 
         {/* Hierarchy: money-critical cards get a dedicated headline
@@ -5085,7 +5092,7 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
               // The neutral-when-zero downshift is removed so the
               // tile reads the same whether the day is empty or
               // not — the value itself is the indicator.
-              value={fmtMoney(revenueStats.todayRevenue, business.currency)}
+              value={money(revenueStats.todayRevenue)}
               icon={<DollarSign size={16} />}
               tone="success"
               onClick={() => openKpi("today")}
@@ -5093,7 +5100,7 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
             />
             <KpiCard
               label="Week revenue"
-              value={fmtMoney(stats.weekRevenue, business.currency)}
+              value={money(stats.weekRevenue)}
               icon={<ArrowUpRight size={16} />}
               tone="gold"
               onClick={() => openKpi("week")}
@@ -5105,7 +5112,7 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
                 Month Profit) without making the whole row mono. */}
             <KpiCard
               label="Deposits (week)"
-              value={fmtMoney(revenueStats.weekDeposits, business.currency)}
+              value={money(revenueStats.weekDeposits)}
               icon={<Check size={16} />}
               tone="success"
               onClick={() => openKpi("deposits")}
@@ -5113,7 +5120,7 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
             />
             <KpiCard
               label="Pending balance"
-              value={fmtMoney(stats.pendingBalance, business.currency)}
+              value={money(stats.pendingBalance)}
               icon={<Clock size={16} />}
               tone={stats.pendingBalance > 0 ? "warning" : "neutral"}
               onClick={() => openKpi("pending")}
@@ -5127,10 +5134,10 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
           <SectionTitle>More stats</SectionTitle>
           <div className="grid grid-cols-2 gap-2.5">
             <KpiCard label="Week clients" value={stats.weekAppts} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("weekClients")} compact riseDelay={0} />
-            <KpiCard label="Avg ticket (30d)" value={fmtMoney(revenueStats.averageTicket30d, business.currency)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => openKpi("avgTicket")} compact riseDelay={40} />
-            <KpiCard label="Month expected" value={fmtMoney(revenueStats.monthExpected, business.currency)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "primary" : "neutral"} onClick={() => openKpi("monthExpected")} compact riseDelay={80} />
-            <KpiCard label="Total earned" value={fmtMoney(revenueStats.monthEarned, business.currency)} icon={<TrendingUp size={16} />} tone={revenueStats.monthEarned > 0 ? "success" : "neutral"} onClick={() => openKpi("monthEarned")} compact riseDelay={120} />
-            <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={fmtMoney(revenueStats.yearMade, business.currency)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => goToMoney("all")} compact riseDelay={160} />
+            <KpiCard label="Avg ticket (30d)" value={money(revenueStats.averageTicket30d)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => openKpi("avgTicket")} compact riseDelay={40} />
+            <KpiCard label="Month expected" value={money(revenueStats.monthExpected)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "primary" : "neutral"} onClick={() => openKpi("monthExpected")} compact riseDelay={80} />
+            <KpiCard label="Total earned" value={money(revenueStats.monthEarned)} icon={<TrendingUp size={16} />} tone={revenueStats.monthEarned > 0 ? "success" : "neutral"} onClick={() => openKpi("monthEarned")} compact riseDelay={120} />
+            <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={money(revenueStats.yearMade)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => goToMoney("all")} compact riseDelay={160} />
           </div>
         </div>
 
@@ -19792,6 +19799,11 @@ const useCloudSync = (userId: string | null, store: any) => {
     try { return window.localStorage.getItem(SYNC_LAST_OK_KEY); } catch { return null; }
   });
   const [pendingCount, setPendingCount] = useState<number>(0);
+  // True once the first cloud pull has hydrated the store this session.
+  // Until then the UI shows the local cache, which can be stale vs. the
+  // cloud (e.g. edits made on the web). Money figures gate on this so we
+  // don't flash an out-of-date balance on cold open.
+  const [initialPullComplete, setInitialPullComplete] = useState(false);
   const initialPullDone = useRef(false);
   const settingsHash = useRef<string>("");
   // Per-table hash map of records we've already pushed to the cloud,
@@ -19910,6 +19922,7 @@ const useCloudSync = (userId: string | null, store: any) => {
 
         stamp();
         setState("idle");
+        setInitialPullComplete(true);
       } catch (err) {
         console.warn("[bbp] initial sync failed", err);
         setState("error");
@@ -20151,7 +20164,15 @@ const useCloudSync = (userId: string | null, store: any) => {
     };
   }, [userId]);
 
-  return { state, lastOk, pendingCount };
+  // Safe to trust the displayed (local) data when: there's nothing to
+  // sync (no user / not premium → offline-only account), the first
+  // cloud pull has finished, or the network is unavailable (offline /
+  // error) so the local cache is the best we have. Only the brief
+  // initial-pull window returns false.
+  const cloudReady =
+    !userId || !store?.premium || initialPullComplete || state === "offline" || state === "error";
+
+  return { state, lastOk, pendingCount, cloudReady };
 };
 
 const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
@@ -34617,6 +34638,7 @@ export default function App() {
               notifBadgeCount={notifications.unreadCount}
               openCommunication={openCommunication}
               syncState={auth.mode === "authed" ? sync.state : undefined}
+              cloudReady={sync.cloudReady}
               openAnalytics={() => {
                 if (!store.premium) { requestUpgrade("analytics"); return; }
                 setSecondary("analytics");
