@@ -494,6 +494,39 @@ export const weekClientRows = (
     .sort((a, b) => b.visitCount - a.visitCount || a.clientName.localeCompare(b.clientName));
 };
 
+// Distinct billable clients booked within a calendar-prefix window
+// ("YYYY-MM" for a month, "YYYY" for a year), with visit count + ticket
+// spend. Same shape + grouping as weekClientRows so the KPI tile and its
+// detail sheet can never disagree (the tile is just rows.length).
+export const clientRowsForPrefix = (
+  appointments: AppointmentLike[] | null | undefined,
+  datePrefix: string,
+): WeekClientRow[] => {
+  const list = (appointments || [])
+    .filter(isBillable)
+    .filter(a => (a.date || "").startsWith(datePrefix))
+    .sort((a, b) => ((a.date || "") + (a.time || "")).localeCompare((b.date || "") + (b.time || "")));
+  const byClient = new Map<string, WeekClientRow>();
+  for (const a of list) {
+    const id = a.clientId || "_unknown";
+    const cur = byClient.get(id) || {
+      clientId: id,
+      clientName: a.clientName || "Walk-in",
+      visitCount: 0,
+      totalSpend: 0,
+      appointments: [],
+    };
+    cur.visitCount += 1;
+    cur.totalSpend += ticketTotal(a);
+    cur.appointments.push(a);
+    if (a.clientName && cur.clientName !== a.clientName) cur.clientName = a.clientName;
+    byClient.set(id, cur);
+  }
+  return Array.from(byClient.values())
+    .map(r => ({ ...r, totalSpend: round2(r.totalSpend) }))
+    .sort((a, b) => b.visitCount - a.visitCount || a.clientName.localeCompare(b.clientName));
+};
+
 export type AvgTicketBreakdown = {
   appointments: AppointmentLike[];
   total: number;
