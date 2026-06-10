@@ -176,6 +176,7 @@ import {
   colorForAppointment,
   computeDayStatus,
 } from "./lib/calendar";
+import { useIsNativePlatform } from "./lib/platform";
 import {
   type Service,
   type ServiceInput,
@@ -9407,6 +9408,9 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     appointments, reminderSettings, receipts, upsertReceipt, deleteReceipt,
   } = store;
   const [form, setForm] = useState<EntityRecord>({});
+  // Native shell vs web/PWA — drives the in-person payment copy now and
+  // will gate the in-app Tap to Pay button once the plugin lands.
+  const isNative = useIsNativePlatform();
   const [showNewClient, setShowNewClient] = useState(false);
   const [newClientName, setNewClientName] = useState("");
   // After save, if the appointment was just transitioned to
@@ -11497,6 +11501,36 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             );
           })()}
         </Card>
+        )}
+
+        {/* IN-PERSON PAYMENT — how to collect at the chair today, plus a
+            forward-looking note. The seam (paymentMethod "tap_to_pay")
+            is already in place, so the in-app Tap to Pay flow drops in
+            here later without a data change. Shown only while a balance
+            is actually owed. */}
+        {isAppointment && form.id && balanceDue > 0 && form.paymentStatus !== "paid" && (
+          <Card className="p-4" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+            <div className="flex items-center gap-2 mb-2">
+              <DollarSign size={16} style={{ color: C.gold }} />
+              <span className="font-semibold text-sm" style={{ color: C.espresso }}>In-person payment</span>
+              <Pill tone="gold">Tap to Pay soon</Pill>
+            </div>
+            <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+              {isNative
+                ? "Tap to Pay on iPhone is coming to this app — accept cards on your phone, no reader needed. Until then, collect in person two ways:"
+                : "Tap to Pay on iPhone is coming to the Braid Boss Pro app — accept cards on your phone, no reader needed. Until then, collect in person two ways:"}
+            </p>
+            <ul className="mt-2 space-y-2" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              <li className="text-[12px] flex items-start gap-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
+                <span><strong>Send the balance payment link</strong> above — your client taps to pay and it reconciles here automatically.</span>
+              </li>
+              <li className="text-[12px] flex items-start gap-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
+                <span>Tap the card in the <strong>Stripe Dashboard app</strong>, then hit <em>Checkout</em> here and set the method to <strong>Tap to Pay</strong> so your books stay accurate.</span>
+              </li>
+            </ul>
+          </Card>
         )}
 
         {/* SEND NOTIFICATION modal — styled choice for book / update /
@@ -18754,6 +18788,7 @@ const PAYMENT_METHODS = [
   { value: "zelle", label: "Zelle" },
   { value: "venmo", label: "Venmo" },
   { value: "card", label: "Card" },
+  { value: "tap_to_pay", label: "Tap to Pay" },
   { value: "apple_pay", label: "Apple Pay" },
   { value: "other", label: "Other" },
 ];
@@ -29631,6 +29666,25 @@ const PlanToggle = ({
 //   • No subscription → "Start your 14-day free trial" CTA.
 // Grandfathered lifetime/founding members never reach this card — they
 // get the "Lifetime access active" card instead.
+// App Store compliance: inside the native iOS/Android shell we must not
+// sell the subscription via a non-Apple flow. We hide the purchase CTA
+// and show this neutral, non-actionable notice instead — the app still
+// unlocks automatically for accounts whose subscription is active. The
+// subscription is sold on the web (braidbosspro.app), which keeps Apple
+// out of the cut entirely. (Plain text on purpose: no buy button, no
+// tappable checkout link.)
+const NativePlanNotice = () => (
+  <div style={{ padding: 14, borderRadius: 14, background: C.ivory, border: `1px solid ${C.hairline}` }}>
+    <p style={{ fontSize: 13, fontWeight: 700, color: C.espresso }}>
+      Manage your membership on the web
+    </p>
+    <p style={{ fontSize: 12, color: C.coffee, marginTop: 4, lineHeight: 1.5 }}>
+      Start your free trial or manage your Braid Boss Pro plan at braidbosspro.app.
+      Your subscription unlocks the app automatically once it&rsquo;s active.
+    </p>
+  </div>
+);
+
 const SubscriptionStatusCard = ({
   userId,
   membership,
@@ -29641,6 +29695,7 @@ const SubscriptionStatusCard = ({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [plan, setPlan] = useState<SubscriptionPlan>("monthly");
+  const isNative = useIsNativePlatform();
 
   const fmtDate = (iso: string | null): string | null => {
     if (!iso) return null;
@@ -29734,26 +29789,32 @@ const SubscriptionStatusCard = ({
       <p className="text-[11px] mb-3" style={{ color: C.muted }}>
         Every feature unlocked — unlimited clients, reminders, marketing, storefront, and more. No contracts. Cancel anytime.
       </p>
-      <PlanToggle plan={plan} onChange={setPlan} />
-      <button
-        type="button"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true); setErr(null);
-          const r = await startSubscription(userId, plan);
-          setBusy(false);
-          if (!r.ok) setErr("Couldn't start checkout. Try again in a moment.");
-        }}
-        className="w-full rounded-2xl py-3 text-[14px] font-semibold active:scale-[0.99] transition disabled:opacity-60"
-        style={{
-          background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
-          color: C.paper, border: `1px solid ${C.goldDeep}`,
-          boxShadow: "0 8px 20px -10px rgba(91, 33, 182, 0.6)",
-        }}
-      >
-        {busy ? "Starting…" : `Start ${SUBSCRIPTION_TRIAL_DAYS}-day free trial`}
-      </button>
-      {err && <p className="text-[11px] mt-2 text-center" style={{ color: C.danger }}>{err}</p>}
+      {isNative ? (
+        <NativePlanNotice />
+      ) : (
+        <>
+          <PlanToggle plan={plan} onChange={setPlan} />
+          <button
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true); setErr(null);
+              const r = await startSubscription(userId, plan);
+              setBusy(false);
+              if (!r.ok) setErr("Couldn't start checkout. Try again in a moment.");
+            }}
+            className="w-full rounded-2xl py-3 text-[14px] font-semibold active:scale-[0.99] transition disabled:opacity-60"
+            style={{
+              background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`,
+              color: C.paper, border: `1px solid ${C.goldDeep}`,
+              boxShadow: "0 8px 20px -10px rgba(91, 33, 182, 0.6)",
+            }}
+          >
+            {busy ? "Starting…" : `Start ${SUBSCRIPTION_TRIAL_DAYS}-day free trial`}
+          </button>
+          {err && <p className="text-[11px] mt-2 text-center" style={{ color: C.danger }}>{err}</p>}
+        </>
+      )}
     </Card>
   );
 };
@@ -29775,6 +29836,7 @@ const UpgradeSheet = ({
   const [subBusy, setSubBusy] = useState(false);
   const [subError, setSubError] = useState<string | null>(null);
   const [subPlan, setSubPlan] = useState<SubscriptionPlan>("monthly");
+  const isNative = useIsNativePlatform();
 
   return (
     <Sheet open={open} onClose={onClose} title="Braid Boss Pro">
@@ -29877,6 +29939,8 @@ const UpgradeSheet = ({
                 Your unlock binds to your account so it follows you everywhere.
               </p>
             </>
+          ) : isNative ? (
+            <NativePlanNotice />
           ) : (
             <>
               <PlanToggle plan={subPlan} onChange={setSubPlan} />
