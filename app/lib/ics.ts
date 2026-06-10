@@ -6,7 +6,10 @@
 // right behaviour for an in-salon appointment whose hours don't shift
 // with the client's location.
 
-import { downloadIcs as nativeDownloadIcs } from "./native-download";
+import {
+  downloadIcs as nativeDownloadIcs,
+  addEventToCalendar as nativeAddEventToCalendar,
+} from "./native-download";
 
 export type IcsAppointment = {
   id: string;
@@ -145,6 +148,14 @@ export const buildVCalendar = (appts: IcsAppointment[], business?: { businessNam
 export const downloadIcs = (filename: string, body: string): void => {
   if (typeof window === "undefined") return;
   void nativeDownloadIcs(filename, body);
+};
+
+// "Add to calendar" for a single event. On the iOS shell this opens the
+// system "Add to Calendar" prompt (via /api/ics) instead of the generic
+// share sheet; on web it downloads the .ics as before. SSR-safe (no-op).
+export const addToCalendar = (filename: string, body: string): void => {
+  if (typeof window === "undefined") return;
+  void nativeAddEventToCalendar(filename, body);
 };
 
 export const sanitizeFilename = (s: string): string =>

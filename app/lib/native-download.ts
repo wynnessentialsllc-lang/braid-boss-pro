@@ -196,6 +196,40 @@ export const downloadIcs = (filename: string, ics: string): Promise<DownloadResu
     shareTitle: filename,
   });
 
+// Add a single event to the user's calendar.
+//
+// Web: download the .ics — the OS hands it to the calendar app (the
+// existing behaviour). Native (iOS shell): open the event through the
+// in-app browser at /api/ics, where iOS shows its real "Add to Calendar"
+// prompt. We deliberately do NOT use the share sheet here (that only
+// offers AirDrop / Save to Files, never the calendar). Falls back to the
+// share-sheet download if the browser open fails.
+export const addEventToCalendar = async (
+  filename: string,
+  ics: string,
+): Promise<DownloadResult> => {
+  if (!isNative()) {
+    return downloadOnWeb(filename, "text/calendar;charset=utf-8", ics);
+  }
+  try {
+    if (typeof window === "undefined") return { ok: false, error: "no window" };
+    const { Browser } = await import("@capacitor/browser");
+    // utf-8 → base64url (matches the /api/ics decoder).
+    const b64url = btoa(unescape(encodeURIComponent(ics)))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    const name = encodeURIComponent(filename.replace(/\.ics$/i, ""));
+    const url = `${window.location.origin}/api/ics?name=${name}&data=${b64url}`;
+    await Browser.open({ url });
+    return { ok: true, via: "native" };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    warn("calendar open failed, falling back to share:", msg);
+    return downloadOnNative(filename, "text/calendar;charset=utf-8", ics, filename);
+  }
+};
+
 export const downloadPdfBlob = (filename: string, blob: Blob): Promise<DownloadResult> =>
   downloadFile({
     filename,
