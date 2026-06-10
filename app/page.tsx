@@ -8403,15 +8403,6 @@ const DayCalendarView = ({
           );
         })}
       </div>
-
-      {/* Empty-day affordance — the grid above still shows the open
-          working hours; this is an inline add (not a second floating
-          button; the FAB remains the primary add). */}
-      {placedAppts.length === 0 && !allDayBlock && (
-        <div className="flex justify-center pt-1">
-          <Button variant="outline" icon={<Plus size={16} />} onClick={onAdd}>Add appointment</Button>
-        </div>
-      )}
     </div>
   );
 };
