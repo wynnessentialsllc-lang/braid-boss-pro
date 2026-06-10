@@ -4914,7 +4914,17 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
     // Sun–Sat week (not appointments Sun→today), matching the detail
     // sheet that uses weekClientRows.
     const weekClients = weekClientRows(appointments, today).length;
-    return { weekRevenue, weekAppts: weekClients, pendingBalance, monthProfit: calculateProfit(monthIncome, monthExpense) };
+    // Distinct clients booked this month / this year (non-cancelled real
+    // appointments). Falls back to client name when an appointment has no
+    // clientId, so a named walk-in still counts once.
+    const realAppts = appointments.filter((a: any) => a && (!a.kind || a.kind === "appointment") && !isCanceledAppointment(a));
+    const monthPrefix = today.slice(0, 7);
+    const yearPrefix = today.slice(0, 4);
+    const distinctClients = (pred: (a: any) => boolean) =>
+      new Set(realAppts.filter(pred).map((a: any) => a.clientId || a.clientName).filter(Boolean)).size;
+    const monthClients = distinctClients((a: any) => (a.date || "").startsWith(monthPrefix));
+    const yearClients = distinctClients((a: any) => (a.date || "").startsWith(yearPrefix));
+    return { weekRevenue, weekAppts: weekClients, monthClients, yearClients, pendingBalance, monthProfit: calculateProfit(monthIncome, monthExpense) };
   }, [appointments, transactions, today]);
   // Pending balance rows for the dashboard list, projected from the
   // canonical `pendingBalanceAppts` (which is what the dedupe sets use)
@@ -5121,11 +5131,12 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
         <div>
           <SectionTitle>More stats</SectionTitle>
           <div className="grid grid-cols-2 gap-2.5">
-            <KpiCard label="Week clients" value={stats.weekAppts} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("weekClients")} compact riseDelay={0} />
+            <KpiCard label="Month clients" value={stats.monthClients} icon={<Users size={16} />} tone="primary" onClick={() => setActive("clients")} compact riseDelay={0} />
             <KpiCard label="Avg ticket (30d)" value={money(revenueStats.averageTicket30d)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => openKpi("avgTicket")} compact riseDelay={40} />
             <KpiCard label="Month expected" value={money(revenueStats.monthExpected)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "primary" : "neutral"} onClick={() => openKpi("monthExpected")} compact riseDelay={80} />
             <KpiCard label="Total earned" value={money(revenueStats.monthEarned)} icon={<TrendingUp size={16} />} tone={revenueStats.monthEarned > 0 ? "success" : "neutral"} onClick={() => openKpi("monthEarned")} compact riseDelay={120} />
             <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={money(revenueStats.yearMade)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => goToMoney("all")} compact riseDelay={160} />
+            <KpiCard label={`${new Date().getFullYear()} clients`} value={stats.yearClients} icon={<Users size={16} />} tone="primary" onClick={() => setActive("clients")} compact riseDelay={200} />
           </div>
         </div>
 
