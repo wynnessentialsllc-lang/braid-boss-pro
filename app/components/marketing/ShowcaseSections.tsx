@@ -273,32 +273,14 @@ const BLOCK = {
   sky: { bg: "rgba(56,189,248,0.16)", bar: "#38BDF8", text: "#1E6E97" },
 } as const;
 
-const calendarColumns: Array<{ braider: string; appts: Appt[] }> = [
-  {
-    braider: "Imani",
-    appts: [
-      { name: "Natalie Brooks", service: "Boho Knotless", top: 0, height: 120, tint: "lilac" },
-      { name: "Sophie Turner", service: "Blowout & Trim", top: 128, height: 56, tint: "sky" },
-      { name: "Emma Wilson", service: "Consultation", top: 190, height: 78, tint: "peach" },
-    ],
-  },
-  {
-    braider: "Destiny",
-    appts: [
-      { name: "Rachel Kim", service: "Color + Box Braids", top: 36, height: 104, tint: "lilac" },
-      { name: "Jessica Lee", service: "Cut & Style", top: 150, height: 60, tint: "rose" },
-      { name: "Amanda White", service: "Soft Locs", top: 220, height: 70, tint: "mint" },
-    ],
-  },
-  {
-    braider: "Gigi",
-    appts: [
-      { name: "Peyton Sherman", service: "Base Touch-Up", top: 0, height: 70, tint: "lilac" },
-      { name: "Diana Park", service: "Passion Twists", top: 80, height: 96, tint: "lilac" },
-      { name: "Chloe Martin", service: "Knotless — Long", top: 186, height: 54, tint: "sky" },
-      { name: "Beth Cooper", service: "Cut & Style", top: 248, height: 56, tint: "rose" },
-    ],
-  },
+// Single-stylist day — Braid Boss Pro is a one-chair app, so the
+// mockup shows the owner's own day in one column (mirrors the real
+// app's day view), not multiple braiders.
+const dayAppts: Appt[] = [
+  { name: "Natalie Brooks", service: "Boho Knotless", top: 4, height: 100, tint: "lilac" },
+  { name: "Rachel Kim", service: "Color + Box Braids", top: 110, height: 74, tint: "rose" },
+  { name: "Amanda White", service: "Soft Locs", top: 190, height: 56, tint: "mint" },
+  { name: "Diana Park", service: "Passion Twists", top: 252, height: 56, tint: "sky" },
 ];
 
 const times = ["8 AM", "9 AM", "10 AM", "11 AM", "12 PM", "1 PM"];
@@ -338,58 +320,52 @@ const CalendarMock = () => (
       </div>
     </div>
 
-    {/* braider header row */}
-    <div style={{ display: "grid", gridTemplateColumns: "44px repeat(3, 1fr)", borderBottom: `1px solid ${C.hairline}` }}>
+    {/* day label row */}
+    <div style={{ display: "grid", gridTemplateColumns: "44px 1fr", borderBottom: `1px solid ${C.hairline}` }}>
       <div />
-      {calendarColumns.map((col) => (
-        <div key={col.braider} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", justifyContent: "center" }}>
-          <span style={{ width: 24, height: 24, borderRadius: 999, background: GRADIENTS.primary, color: "#fff", display: "grid", placeItems: "center", fontSize: 11, fontWeight: 800 }}>
-            {col.braider[0]}
-          </span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>{col.braider}</span>
-        </div>
-      ))}
+      <div style={{ padding: "10px 14px" }}>
+        <span style={{ fontSize: 13, fontWeight: 800, color: C.ink }}>My day</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: C.muted, marginLeft: 8 }}>4 appointments</span>
+      </div>
     </div>
 
-    {/* grid body */}
-    <div style={{ display: "grid", gridTemplateColumns: "44px repeat(3, 1fr)", position: "relative" }}>
+    {/* grid body — single column */}
+    <div style={{ display: "grid", gridTemplateColumns: "44px 1fr", position: "relative" }}>
       {/* time gutter */}
       <div>
         {times.map((t) => (
           <div key={t} style={{ height: 52, fontSize: 10.5, color: C.mutedSoft, padding: "4px 6px", textAlign: "right" }}>{t}</div>
         ))}
       </div>
-      {/* columns */}
-      {calendarColumns.map((col, ci) => (
-        <div key={col.braider} style={{ position: "relative", borderLeft: `1px solid ${C.hairline}` }}>
-          {times.map((t, ti) => (
-            <div key={t} style={{ height: 52, borderBottom: `1px solid ${C.hairline}`, background: ti % 2 ? "#FFFFFF" : "#FCFBFE" }} />
-          ))}
-          {col.appts.map((a) => {
-            const b = BLOCK[a.tint];
-            return (
-              <div
-                key={a.name + ci}
-                style={{
-                  position: "absolute",
-                  left: 6,
-                  right: 6,
-                  top: a.top + 4,
-                  height: a.height,
-                  background: b.bg,
-                  borderLeft: `3px solid ${b.bar}`,
-                  borderRadius: 9,
-                  padding: "7px 9px",
-                  overflow: "hidden",
-                }}
-              >
-                <p style={{ margin: 0, fontWeight: 700, fontSize: 12, color: b.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</p>
-                <p style={{ margin: "1px 0 0", fontSize: 10.5, color: b.text, opacity: 0.78 }}>{a.service}</p>
-              </div>
-            );
-          })}
-        </div>
-      ))}
+      {/* the day's single column */}
+      <div style={{ position: "relative", borderLeft: `1px solid ${C.hairline}` }}>
+        {times.map((t, ti) => (
+          <div key={t} style={{ height: 52, borderBottom: `1px solid ${C.hairline}`, background: ti % 2 ? "#FFFFFF" : "#FCFBFE" }} />
+        ))}
+        {dayAppts.map((a) => {
+          const b = BLOCK[a.tint];
+          return (
+            <div
+              key={a.name}
+              style={{
+                position: "absolute",
+                left: 8,
+                right: 10,
+                top: a.top + 4,
+                height: a.height,
+                background: b.bg,
+                borderLeft: `3px solid ${b.bar}`,
+                borderRadius: 10,
+                padding: "8px 11px",
+                overflow: "hidden",
+              }}
+            >
+              <p style={{ margin: 0, fontWeight: 700, fontSize: 12.5, color: b.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</p>
+              <p style={{ margin: "2px 0 0", fontSize: 11, color: b.text, opacity: 0.78 }}>{a.service}</p>
+            </div>
+          );
+        })}
+      </div>
     </div>
   </div>
 );
