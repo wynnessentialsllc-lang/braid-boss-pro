@@ -8056,6 +8056,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
           <DayCalendarView
             appts={apptsForSelectedDay}
             dayStatus={dayStatus}
+            dayAvailability={dayAvailability}
             colorMode={prefs.colorMode}
             today={today}
             business={business}
@@ -8137,10 +8138,11 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
 // ---- Day Calendar -----------------------------------------------------
 
 const DayCalendarView = ({
-  appts, dayStatus, colorMode, today, business, onTap, onAdd, onSwipeDay,
+  appts, dayStatus, dayAvailability, colorMode, today, business, onTap, onAdd, onSwipeDay,
 }: {
   appts: any[];
   dayStatus: { status: string; label: string };
+  dayAvailability?: { windows?: { start: string; end: string }[]; open?: boolean };
   colorMode: ColorMode;
   today: string;
   business: any;
@@ -8148,11 +8150,17 @@ const DayCalendarView = ({
   onAdd: () => void;
   onSwipeDay?: (direction: 1 | -1) => void;
 }) => {
-  // Compact duration label, e.g. "4h", "4h 30m", "45m".
-  const durLabel = (hrs: number) => {
-    const m = Math.round((Number(hrs) || 1) * 60);
-    const h = Math.floor(m / 60), mm = m % 60;
-    return h > 0 ? (mm > 0 ? `${h}h ${mm}m` : `${h}h`) : `${mm}m`;
+  // Start/end minutes-from-midnight for an appointment, using its time
+  // + duration. 30-min floor so very short bookings stay tappable.
+  const apptMinutes = (a: any) => {
+    const [hh, mm] = (a?.time || "10:00").split(":").map(Number);
+    const s = (hh || 0) * 60 + (mm || 0);
+    const dur = Math.max(30, (Number(a?.durationHours) || 1) * 60);
+    return { s, e: s + dur };
+  };
+  const minutesToLabel = (mins: number) => {
+    const h = Math.floor(mins / 60) % 24, m = mins % 60;
+    return fmtTime(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
   };
 
   // Horizontal swipe to step a day at a time. Mirrors the week-strip
@@ -8177,9 +8185,58 @@ const DayCalendarView = ({
     onSwipeDay(dx < 0 ? 1 : -1);
   };
 
-  const sortedAppts = useMemo(() => {
-    const mins = (a: any) => { const [hh, mm] = (a?.time || "10:00").split(":").map(Number); return (hh || 0) * 60 + (mm || 0); };
-    return [...appts].sort((a, b) => mins(a) - mins(b));
+  // Timeline window = the stylist's working hours for the day, expanded
+  // to fit any appointment that runs outside them. Falls back to 9 AM–6 PM
+  // when no hours are configured — so the FULL day grid is always visible
+  // (even on an off day, or with a single booking).
+  const { startHour, endHour } = useMemo(() => {
+    let startMin = 24 * 60, endMin = 0;
+    for (const w of (dayAvailability?.windows || [])) {
+      const [sh, sm] = String(w.start).split(":").map(Number);
+      const [eh, em] = String(w.end).split(":").map(Number);
+      startMin = Math.min(startMin, (sh || 0) * 60 + (sm || 0));
+      endMin = Math.max(endMin, (eh || 0) * 60 + (em || 0));
+    }
+    for (const a of appts) {
+      if (!a?.time || a?.isAllDay) continue;
+      const { s, e } = apptMinutes(a);
+      startMin = Math.min(startMin, s);
+      endMin = Math.max(endMin, e);
+    }
+    if (startMin >= endMin) { startMin = 9 * 60; endMin = 18 * 60; }
+    const sh = Math.max(0, Math.floor(startMin / 60));
+    const eh = Math.min(24, Math.ceil(endMin / 60));
+    return { startHour: sh, endHour: Math.max(sh + 1, eh) };
+  }, [dayAvailability, appts]);
+
+  const HOURS = useMemo(
+    () => Array.from({ length: endHour - startHour + 1 }, (_, i) => startHour + i),
+    [startHour, endHour],
+  );
+  const formatHourLabel = (h: number) => `${((h + 11) % 12) + 1} ${h >= 12 ? "PM" : "AM"}`;
+
+  // Greedy column-packing so overlapping appointments render side-by-side
+  // instead of stacking. Excludes the all-day block (drawn as an overlay).
+  const placedAppts = useMemo(() => {
+    type Placed = { appt: any; startMin: number; endMin: number; col: number; clusterCols: number };
+    const sorted = [...appts]
+      .filter(a => a && !a.isAllDay)
+      .map(a => ({ appt: a, ...apptMinutes(a) }))
+      .sort((a, b) => a.s - b.s || a.e - b.e);
+    const out: Placed[] = [];
+    type Cluster = { end: number; cols: number[]; idx: number[] };
+    let cluster: Cluster | null = null;
+    const clusters: Cluster[] = [];
+    for (const item of sorted) {
+      if (!cluster || item.s >= cluster.end) { cluster = { end: item.e, cols: [], idx: [] }; clusters.push(cluster); }
+      else cluster.end = Math.max(cluster.end, item.e);
+      let col = cluster.cols.findIndex(end => end <= item.s);
+      if (col === -1) { col = cluster.cols.length; cluster.cols.push(item.e); } else cluster.cols[col] = item.e;
+      out.push({ appt: item.appt, startMin: item.s, endMin: item.e, col, clusterCols: 0 });
+      cluster.idx.push(out.length - 1);
+    }
+    for (const c of clusters) { const k = c.cols.length; for (const i of c.idx) out[i].clusterCols = k; }
+    return out;
   }, [appts]);
 
   // Daily business summary — derived from the day's billable bookings.
@@ -8267,60 +8324,92 @@ const DayCalendarView = ({
         </Card>
       )}
 
-      {/* COMPACT APPOINTMENT CARDS — time-anchored, fixed compact height,
-          colour-coded by service category, with a payment-status chip. */}
-      {appts.length === 0 ? (
-        <EmptyState
-          icon={<Calendar size={28} style={{ color: C.gold }} />}
-          title="No bookings yet."
-          body="Your appointments, deposits, and balances will appear here."
-          cta={<Button variant="primary" icon={<Plus size={18} />} onClick={onAdd}>Add appointment</Button>}
-        />
-      ) : (
-        <div className="space-y-2">
-          {sortedAppts.map(a => {
-            if (allDayBlock && a?.id === allDayBlock.id) return null;
-            const kind = a?.kind || "appointment";
-            const isPersonalBlock = kind === "personal";
-            const isBlockedBlock = kind === "blocked";
-            const isAppt = !isPersonalBlock && !isBlockedBlock;
-            const cancelled = isCanceledStatus(a?.status);
-            const color = (isPersonalBlock || isBlockedBlock)
-              ? { background: isBlockedBlock ? "rgba(21,17,26,0.06)" : "rgba(111,100,119,0.08)", accent: isBlockedBlock ? C.muted : C.caramel, foreground: C.coffee }
-              : colorForAppointment(a, "service", today);
-            const total = Number(a?.totalPrice) || 0;
-            const discount = Number(a?.discountAmount) || 0;
-            const net = Math.max(0, total - discount);
-            const deposit = getDepositCollectedAmount(a);
-            const balance = Math.max(0, net - deposit);
-            const ps = paymentStatusOf(a, today);
-            const titleLine = isBlockedBlock ? (a.eventTitle || "Unavailable") : isPersonalBlock ? (a.eventTitle || "Personal event") : (a.clientName || "Open slot");
-            const serviceLine = isBlockedBlock ? "Unavailable" : isPersonalBlock ? "Personal" : (a.style || "Service");
-            return (
-              <button type="button" key={a.id} onClick={() => onTap(a)} className="w-full text-left flex items-stretch gap-2.5 active:scale-[0.99] transition" style={{ opacity: cancelled ? 0.55 : 1 }}>
-                <div className="shrink-0 text-right pt-1.5" style={{ width: 52 }}>
-                  <p style={{ fontSize: 12.5, fontWeight: 700, color: C.espresso, lineHeight: 1.1 }}>{a?.time ? fmtTime(a.time) : "—"}</p>
-                  {isAppt && <p style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{durLabel(a?.durationHours)}</p>}
-                </div>
-                <div className="flex-1 min-w-0 rounded-2xl px-3 py-2.5" style={{ background: color.background, border: `1px solid ${C.hairline}`, borderLeft: `4px solid ${color.accent}` }}>
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-[14px] font-semibold leading-tight truncate min-w-0" style={{ color: C.espresso }}>{titleLine}</p>
-                    {isAppt && (cancelled
-                      ? <Pill tone="danger">Cancelled</Pill>
-                      : <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>)}
-                  </div>
-                  <div className="flex items-center justify-between gap-2 mt-0.5">
-                    <p className="text-[11.5px] truncate min-w-0" style={{ color: C.coffee, opacity: 0.9 }}>{serviceLine}</p>
-                    {isAppt && net > 0 && (
-                      <p className="text-[11.5px] font-semibold shrink-0" style={{ color: balance > 0 ? C.warning : C.success }}>
-                        {balance > 0 ? `${fmtMoney(balance, business?.currency)} due` : fmtMoney(net, business?.currency)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </button>
-            );
-          })}
+      {/* FULL-DAY TIMELINE — working-hours grid with proportional,
+          duration-blocking cards. Always shown (even on an off day or
+          with a single booking) so empty gaps stay visible. */}
+      <div
+        className="relative"
+        style={{ height: (endHour - startHour) * HOUR_PX + 8, background: C.paper, border: `1px solid ${C.hairline}`, borderRadius: 16, overflow: "hidden" }}
+      >
+        {HOURS.map((h, idx) => (
+          <div key={h} className="absolute left-0 right-0 flex items-start" style={{ top: idx * HOUR_PX, height: HOUR_PX, borderTop: idx === 0 ? "none" : `1px dashed ${C.hairline}` }}>
+            <span className="text-[10px] font-semibold tracking-widest pl-3 pt-1" style={{ color: C.muted, width: 56, letterSpacing: "0.08em" }}>{formatHourLabel(h)}</span>
+          </div>
+        ))}
+
+        {/* Whole-day off: muted overlay BEHIND the cards — the timeline
+            stays visible and every card stays tappable. */}
+        {allDayBlock && (
+          <div aria-hidden className="absolute inset-0" style={{ background: "rgba(21,17,26,0.05)", pointerEvents: "none" }} />
+        )}
+
+        {placedAppts.map(p => {
+          const a = p.appt;
+          if (allDayBlock && a?.id === allDayBlock.id) return null;
+          if (p.startMin >= endHour * 60) return null;
+          const dayStartMin = startHour * 60;
+          const top = Math.max(0, ((p.startMin - dayStartMin) / 60) * HOUR_PX);
+          const rawHeight = ((p.endMin - p.startMin) / 60) * HOUR_PX;
+          const maxHeight = (endHour - startHour) * HOUR_PX - top;
+          const height = Math.max(30, Math.min(rawHeight, maxHeight));
+          const cols = p.clusterCols || 1;
+          const isSplit = cols > 1;
+          const gap = 4;
+          const leftStyle = isSplit
+            ? `calc(60px + (100% - 68px) * ${p.col / cols} + ${p.col === 0 ? 0 : gap / 2}px)`
+            : "60px";
+          const widthStyle = isSplit ? `calc((100% - 68px) * ${1 / cols} - ${gap}px)` : undefined;
+          const rightStyle = isSplit ? undefined : 8;
+
+          const kind = a?.kind || "appointment";
+          const isPersonalBlock = kind === "personal";
+          const isBlockedBlock = kind === "blocked";
+          const isAppt = !isPersonalBlock && !isBlockedBlock;
+          const cancelled = isCanceledStatus(a?.status);
+          const color = (isPersonalBlock || isBlockedBlock)
+            ? { background: isBlockedBlock ? "rgba(21,17,26,0.06)" : "rgba(111,100,119,0.08)", accent: isBlockedBlock ? C.muted : C.caramel }
+            : colorForAppointment(a, "service", today);
+          const total = Number(a?.totalPrice) || 0;
+          const discount = Number(a?.discountAmount) || 0;
+          const net = Math.max(0, total - discount);
+          const deposit = getDepositCollectedAmount(a);
+          const balance = Math.max(0, net - deposit);
+          const ps = paymentStatusOf(a, today);
+          const timeRange = `${minutesToLabel(p.startMin)} – ${minutesToLabel(p.endMin)}`;
+          const titleLine = isBlockedBlock ? (a.eventTitle || "Unavailable") : isPersonalBlock ? (a.eventTitle || "Personal event") : (a.clientName || "Open slot");
+          const serviceLine = isBlockedBlock ? "Unavailable" : isPersonalBlock ? "Personal" : (a.style || "Service");
+          return (
+            <button
+              type="button"
+              key={a.id}
+              onClick={() => onTap(a)}
+              className="absolute text-left active:scale-[0.99] transition overflow-hidden"
+              style={{ top: top + 2, left: leftStyle, right: rightStyle, width: widthStyle, height: height - 4, padding: "6px 9px", borderRadius: 12, background: color.background, border: `1px solid ${C.hairline}`, borderLeft: `4px solid ${color.accent}`, borderStyle: isBlockedBlock ? "dashed" : "solid", opacity: cancelled ? 0.55 : 1 }}
+            >
+              <div className="flex items-start justify-between gap-1.5">
+                <p className="text-[12.5px] font-semibold leading-tight truncate min-w-0" style={{ color: C.espresso }}>{titleLine}</p>
+                {isAppt && height >= 42 && (cancelled
+                  ? <Pill tone="danger">Cancelled</Pill>
+                  : <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>)}
+              </div>
+              {height >= 34 && <p className="text-[11px] truncate" style={{ color: C.coffee, opacity: 0.9, marginTop: 1 }}>{serviceLine}</p>}
+              {height >= 56 && <p className="text-[10.5px] truncate" style={{ color: C.muted, marginTop: 1 }}>{timeRange}</p>}
+              {height >= 74 && isAppt && net > 0 && (
+                <p className="text-[11px] font-semibold" style={{ color: balance > 0 ? C.warning : C.success, marginTop: 2 }}>
+                  {balance > 0 ? `${fmtMoney(balance, business?.currency)} due` : fmtMoney(net, business?.currency)}
+                </p>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Empty-day affordance — the grid above still shows the open
+          working hours; this is an inline add (not a second floating
+          button; the FAB remains the primary add). */}
+      {placedAppts.length === 0 && !allDayBlock && (
+        <div className="flex justify-center pt-1">
+          <Button variant="outline" icon={<Plus size={16} />} onClick={onAdd}>Add appointment</Button>
         </div>
       )}
     </div>
