@@ -12907,6 +12907,33 @@ const ClientProfileSheet = ({
   // doesn't change the hook count.
   const [tab, setTab] = useState<"upcoming" | "previous">("upcoming");
 
+  // Menu / detail navigation inside the sheet. `null` shows the menu;
+  // a key (e.g. "appointments") shows that section's blocks. Reset to
+  // the menu whenever the sheet closes so reopening a client starts
+  // fresh at the overview menu rather than mid-detail.
+  const [section, setSection] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) setSection(null);
+  }, [open]);
+  // Also reset when switching to a different client.
+  useEffect(() => {
+    setSection(null);
+  }, [client?.id]);
+
+  // Menu rows + their display names, used for the menu list and to
+  // title the sheet / back row when inside a detail view.
+  const SECTION_LABELS: Record<string, string> = {
+    overview: "Overview",
+    appointments: "Appointments",
+    money: "Money",
+    loyalty: "Loyalty & Packages",
+    details: "Client Details",
+    contact: "Contact & Reminders",
+    tags: "Tags",
+    photos: "Photos & Files",
+    activity: "Activity",
+  };
+
   if (!client) return null;
 
   const ApptRow = ({ a }: { a: any }) => {
@@ -12987,7 +13014,7 @@ const ClientProfileSheet = ({
     <Sheet
       open={open}
       onClose={onClose}
-      title={client?.name || "Client"}
+      title={section ? (SECTION_LABELS[section] || client?.name || "Client") : (client?.name || "Client")}
       rightAction={
         <button
           type="button"
@@ -13003,38 +13030,135 @@ const ClientProfileSheet = ({
       }
     >
       <div className="space-y-5 pb-2">
-        {/* CLIENT HEADER — avatar + name + VIP badge, matching the
-            "Every client's story" features-page card. */}
+        {/* CLIENT HEADER — always-visible overview card (avatar + name +
+            badges + quick-stats strip). Shown in both the menu and the
+            detail views so the client's identity stays anchored. */}
         <div
-          className="flex items-center gap-3 rounded-2xl p-3.5"
+          className="rounded-2xl p-3.5 space-y-3"
           style={{ background: C.paper, border: `1px solid ${C.hairline}`, boxShadow: "0 10px 28px -18px rgba(21,17,26,0.45)" }}
         >
-          <div
-            className="rounded-full flex items-center justify-center shrink-0"
-            style={{
-              width: 46, height: 46,
-              background: `linear-gradient(135deg, ${C.brandPrimary}, ${C.brandPrimaryDeep})`,
-              color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 17, fontWeight: 600,
-            }}
-          >
-            {initials(client?.name)}
-          </div>
-          <p className="flex-1 min-w-0 truncate" style={{ fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 600, color: C.espresso }}>
-            {client?.name || "Client"}
-          </p>
-          {isVip && (
-            <span
-              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-extrabold shrink-0"
-              style={{ background: "rgba(124,58,237,0.10)", color: C.brandPrimary, letterSpacing: "0.04em" }}
+          <div className="flex items-center gap-3">
+            <div
+              className="rounded-full flex items-center justify-center shrink-0"
+              style={{
+                width: 46, height: 46,
+                background: `linear-gradient(135deg, ${C.brandPrimary}, ${C.brandPrimaryDeep})`,
+                color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 17, fontWeight: 600,
+              }}
             >
-              <Crown size={12} /> VIP
-            </span>
+              {initials(client?.name)}
+            </div>
+            <p className="flex-1 min-w-0 truncate" style={{ fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 600, color: C.espresso }}>
+              {client?.name || "Client"}
+            </p>
+            {isVip && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-extrabold shrink-0"
+                style={{ background: "rgba(124,58,237,0.10)", color: C.brandPrimary, letterSpacing: "0.04em" }}
+              >
+                <Crown size={12} /> VIP
+              </span>
+            )}
+          </div>
+
+          {/* Status badges — derived from existing values, no new data. */}
+          {(completed.length === 0 || completed.length >= 2
+            || (client?.scalpSensitivity && client.scalpSensitivity !== "None")) && (
+            <div className="flex flex-wrap gap-1.5">
+              {completed.length === 0 && <Pill tone="neutral">New Client</Pill>}
+              {completed.length >= 2 && <Pill tone="success">Repeat Client</Pill>}
+              {client?.scalpSensitivity && client.scalpSensitivity !== "None" && (
+                <Pill tone="warning">Sensitive Scalp</Pill>
+              )}
+            </div>
           )}
+
+          {/* Quick-stats strip. */}
+          <div
+            className="flex items-stretch rounded-xl overflow-hidden"
+            style={{ border: `1px solid ${C.hairline}`, background: C.ivory }}
+          >
+            {[
+              { label: "Appointments", value: String(completed.length) },
+              { label: "Lifetime", value: fmtMoney(lifetimeSpend, currency) },
+              { label: "Last visit", value: lastVisit ? fmtDate(lastVisit) : "—" },
+              ...((noShowCount + cancellationCount) > 0
+                ? [{ label: "No-shows/Cancels", value: `${noShowCount}/${cancellationCount}` }]
+                : []),
+            ].map((s, i) => (
+              <div
+                key={s.label}
+                className="flex-1 px-2 py-2 text-center min-w-0"
+                style={{ borderLeft: i === 0 ? undefined : `1px solid ${C.hairline}` }}
+              >
+                <p className="truncate" style={{ fontFamily: FONT_DISPLAY, fontSize: 14, fontWeight: 600, color: C.espresso, lineHeight: 1.1 }}>
+                  {s.value}
+                </p>
+                <p className="mt-0.5 text-[9px] uppercase tracking-widest font-bold truncate" style={{ color: C.muted, letterSpacing: "0.08em" }}>
+                  {s.label}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
+
+        {/* MENU — vertical list of section rows, shown when no detail
+            view is open. Tapping a row switches into that detail view. */}
+        {section === null && (
+          <div className="rounded-2xl p-1" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+            {([
+              { key: "overview", icon: <Users size={16} />, title: "Overview", sub: "Client since, lifetime spend, visits, no-shows & cancellations" },
+              { key: "appointments", icon: <Calendar size={16} />, title: "Appointments", sub: "Upcoming, previous, rebook & booking history" },
+              { key: "money", icon: <DollarSign size={16} />, title: "Money", sub: "Transactions, deposits, credits & payment details" },
+              { key: "loyalty", icon: <Award size={16} />, title: "Loyalty & Packages", sub: "Points, rewards, prepaid visits & packages" },
+              { key: "details", icon: <ScrollText size={16} />, title: "Client Details", sub: "Hair notes, allergies, birthday, referrals & preferences" },
+              { key: "contact", icon: <MessageSquare size={16} />, title: "Contact & Reminders", sub: "Phone, email, reminders & marketing status" },
+              { key: "tags", icon: <Star size={16} />, title: "Tags", sub: "VIP, new client, sensitive scalp & custom tags" },
+              { key: "photos", icon: <Camera size={16} />, title: "Photos & Files", sub: "Inspiration, before/after & scalp references" },
+              { key: "activity", icon: <Clock size={16} />, title: "Activity", sub: "Recent appointments, payments & updates" },
+            ] as { key: string; icon: React.ReactNode; title: string; sub: string }[]).map(r => (
+              <ApptActionRow
+                key={r.key}
+                icon={r.icon}
+                iconColor={C.brandPrimary}
+                chip="rgba(124,58,237,0.10)"
+                title={r.title}
+                sub={r.sub}
+                chevron
+                onClick={() => setSection(r.key)}
+              />
+            ))}
+            <ApptActionRow
+              icon={<Edit3 size={16} />}
+              iconColor={C.goldDeep}
+              chip={C.ivory}
+              title="Edit Profile"
+              sub="Update client information"
+              chevron
+              onClick={onEdit}
+            />
+          </div>
+        )}
+
+        {/* BACK ROW — returns to the menu from any detail view. */}
+        {section !== null && (
+          <button
+            type="button"
+            onClick={() => setSection(null)}
+            className="w-full flex items-center gap-2 px-2.5 py-2.5 rounded-xl active:scale-[0.99] transition text-left"
+            style={{ background: C.paper, border: `1px solid ${C.hairline}` }}
+          >
+            <ChevronLeft size={18} style={{ color: C.brandPrimary }} />
+            <span className="font-semibold" style={{ fontSize: 13.5, color: C.espresso }}>
+              {SECTION_LABELS[section] || "Back"}
+            </span>
+          </button>
+        )}
 
         {/* SUMMARY STATS — client-info card. A single Vagaro-style
             grid that puts the whole relationship (tenure, visits,
             money, reliability) on one glanceable surface. */}
+        {section === "overview" && (
         <div className="space-y-3">
           <Card className="p-0 overflow-hidden">
             <div className="grid grid-cols-3">
@@ -13085,12 +13209,13 @@ const ClientProfileSheet = ({
             )}
           </Card>
         </div>
+        )}
 
         {/* Retention & rebooking — the same rich card the edit screen
             shows (retention score, avg spend, most-booked style, the
             rebook-reminder nudge). Restored to the read-only profile so
             this info no longer lives only behind the Edit button. */}
-        {client?.id && (
+        {section === "overview" && client?.id && (
           <ClientRetentionCard
             clientId={String(client.id)}
             clientName={client.name}
@@ -13106,6 +13231,7 @@ const ClientProfileSheet = ({
             allergies, family, birthday, referred-by and notes, always
             visible (with a "Not set" placeholder) so none of it lives
             only behind the Edit button. */}
+        {section === "details" && (
         <Section
           title="Client details"
           action={
@@ -13158,9 +13284,10 @@ const ClientProfileSheet = ({
             <Detail label="Notes" value={client?.notes || undefined} />
           </Card>
         </Section>
+        )}
 
         {/* Loyalty — renders only when the program is enabled. */}
-        {client?.id && (
+        {section === "loyalty" && client?.id && (
           <ClientLoyaltyCard
             store={store}
             clientId={String(client.id)}
@@ -13171,7 +13298,7 @@ const ClientProfileSheet = ({
         {/* Account credit — same card as the editor so the balance,
             history and "Add credit" are all available straight from the
             profile, not only the edit screen. */}
-        {client?.id && (
+        {section === "money" && client?.id && (
           <ClientCreditCard
             userId={store.userId || null}
             client={{ id: String(client.id), name: client.name, email: client.email }}
@@ -13181,11 +13308,11 @@ const ClientProfileSheet = ({
         )}
 
         {/* Prepaid packages — sell / redeem / view. */}
-        {client?.id && <ClientPackagesCard store={store} client={client} />}
+        {section === "loyalty" && client?.id && <ClientPackagesCard store={store} client={client} />}
 
         {/* INSIGHTS — pure derivation from existing appointments.
             Hidden for brand-new clients with nothing to summarize. */}
-        {(insights.insights.length > 0 || lastBookedHint) && (
+        {section === "overview" && (insights.insights.length > 0 || lastBookedHint) && (
           <Card className="p-4" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
             <div className="flex items-center gap-2 mb-2">
               <Sparkles size={14} style={{ color: C.goldDeep }} />
@@ -13221,7 +13348,7 @@ const ClientProfileSheet = ({
             on the profile so they can be referred back to on any visit.
             Prefers the answers stamped on the client record; falls back
             to the most recent appointment that carried answers. */}
-        {(() => {
+        {section === "details" && (() => {
           let entries = intakeAnswerEntries(client);
           let when: string | null =
             typeof (client as any)?.intakeUpdatedAt === "string" ? (client as any).intakeUpdatedAt : null;
@@ -13261,6 +13388,7 @@ const ClientProfileSheet = ({
         })()}
 
         {/* CONTACT */}
+        {section === "contact" && (
         <Section
           title="Contact"
           action={
@@ -13303,8 +13431,10 @@ const ClientProfileSheet = ({
             </div>
           </Card>
         </Section>
+        )}
 
         {/* TAGS / GROUPS */}
+        {section === "tags" && (
         <Section title="Tags">
           <div className="flex flex-wrap gap-2">
             {TAG_PRESETS.map(t => {
@@ -13327,8 +13457,10 @@ const ClientProfileSheet = ({
             })}
           </div>
         </Section>
+        )}
 
         {/* APPOINTMENT NOTIFICATIONS */}
+        {section === "contact" && (
         <Section title="Appointment notifications">
           <Card className="p-3.5">
             <div className="flex flex-wrap gap-2">
@@ -13356,11 +13488,13 @@ const ClientProfileSheet = ({
             </p>
           </Card>
         </Section>
+        )}
 
-        {/* FILES & MARKETING — the client-detail fields now live in the
-            "Client details" section near the top; this keeps the photos
-            summary and the marketing-email status. */}
-        <Section title="Files & marketing">
+        {/* MARKETING STATUS — split out of the old "Files & marketing"
+            section; the marketing-email subscription status lives under
+            Contact & Reminders. Inner JSX unchanged. */}
+        {section === "contact" && (
+        <Section title="Marketing">
           <Card className="p-3.5 space-y-3">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Marketing emails</p>
@@ -13370,6 +13504,16 @@ const ClientProfileSheet = ({
                   : "Unsubscribed — transactional emails only"}
               </p>
             </div>
+          </Card>
+        </Section>
+        )}
+
+        {/* PHOTOS & FILES — split out of the old "Files & marketing"
+            section; the photos summary lives under its own Photos &
+            Files view. Inner JSX unchanged. */}
+        {section === "photos" && (
+        <Section title="Files & marketing">
+          <Card className="p-3.5 space-y-3">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Photos</p>
               {cPhotos.length === 0 ? (
@@ -13384,8 +13528,10 @@ const ClientProfileSheet = ({
             </div>
           </Card>
         </Section>
+        )}
 
         {/* PAYMENT ON FILE */}
+        {section === "money" && (
         <Section title="Payment on file">
           <Card className="p-3.5 flex items-center justify-between" style={{ background: C.paper }}>
             <div>
@@ -13402,8 +13548,10 @@ const ClientProfileSheet = ({
             </button>
           </Card>
         </Section>
+        )}
 
         {/* TRANSACTIONS */}
+        {section === "money" && (
         <Section title="Transactions">
           {completed.length === 0 ? (
             <Card className="p-4 text-center">
@@ -13438,8 +13586,10 @@ const ClientProfileSheet = ({
             </Card>
           )}
         </Section>
+        )}
 
         {/* APPOINTMENTS — Upcoming / Previous tabs */}
+        {section === "appointments" && (
         <Section
           title="Appointments"
           action={
@@ -13508,8 +13658,10 @@ const ClientProfileSheet = ({
             )
           )}
         </Section>
+        )}
 
         {/* ACTIVITY TIMELINE */}
+        {section === "activity" && (
         <Section title="Activity">
           {activity.length === 0 ? (
             <Card className="p-4 text-center">
@@ -13550,6 +13702,7 @@ const ClientProfileSheet = ({
             </Card>
           )}
         </Section>
+        )}
 
         <div className="grid grid-cols-2 gap-3 pt-2">
           <Button variant="outline" onClick={onClose}>Close</Button>
