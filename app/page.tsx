@@ -29,6 +29,7 @@ import {
 import {
   buildVCalendar,
   downloadIcs,
+  addToCalendar,
   sanitizeFilename,
   type IcsAppointment,
 } from "./lib/ics";
@@ -11752,7 +11753,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             onClick={() => {
               const ics = buildVCalendar([form as IcsAppointment], { businessName: form.eventTitle || business?.businessName, currency: business?.currency });
               const fname = sanitizeFilename(`appt-${form.eventTitle || form.clientName || "event"}-${form.date}`) + ".ics";
-              downloadIcs(fname, ics);
+              addToCalendar(fname, ics);
             }}>
             Add to calendar
           </Button>
