@@ -474,6 +474,7 @@ import {
 import {
   Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon, MapPin, Gift,
   Plus, X, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Search, Copy, Check, Trash2, Edit3,
+  Crown, ArrowLeftRight,
   FileText, DollarSign, Clock, Phone, Mail, AlertCircle, Sparkles,
   ArrowUpRight, ArrowDownRight, Save, RefreshCw, Download, Upload, Bell, BellOff,
   CalendarPlus, UserPlus, Coffee, Lock, Receipt, ScrollText, Image as ImageIcon, Camera,
@@ -9411,6 +9412,32 @@ const CancelledWaitlistNotify = ({
   );
 };
 
+// Compact appointment action row — coloured icon chip + title +
+// subtitle, optional chevron — styled to match the "all from your
+// chair" features-page menu we advertise. Keeps the full action set.
+const ApptActionRow = ({
+  icon, iconColor, chip, title, sub, onClick, chevron, danger,
+}: {
+  icon: React.ReactNode; iconColor: string; chip: string;
+  title: string; sub?: string; onClick: () => void;
+  chevron?: boolean; danger?: boolean;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="w-full flex items-center gap-3 px-2.5 py-2.5 rounded-xl active:scale-[0.99] transition text-left"
+  >
+    <span className="grid place-items-center shrink-0" style={{ width: 32, height: 32, borderRadius: 9, background: chip, color: iconColor }}>
+      {icon}
+    </span>
+    <span className="flex-1 min-w-0">
+      <span className="block font-semibold" style={{ fontSize: 13.5, color: danger ? C.danger : C.espresso }}>{title}</span>
+      {sub && <span className="block truncate" style={{ fontSize: 11.5, color: C.muted }}>{sub}</span>}
+    </span>
+    {chevron && <ChevronRight size={16} style={{ color: C.mutedSoft }} />}
+  </button>
+);
+
 const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCommunication, openReceipt }: { open: any; appt: any; store: any; onClose: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void; openReceipt?: (rcp: ReceiptRecord) => void }) => {
   const {
     upsertAppointment, deleteAppointment, clients, upsertClient, business,
@@ -11740,41 +11767,65 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             {balanceDue > 0 ? `Checkout · ${fmtMoney(balanceDue, business?.currency)}` : "Checkout"}
           </button>
         )}
-        {isAppointment && form.id && form.clientId && (
-          <Button variant="outline" icon={<CalendarPlus size={16} />} onClick={handleRebook} fullWidth>
-            Rebook next visit
-          </Button>
-        )}
-        {isAppointment && form.id && (
-          <div className="grid grid-cols-2 gap-3">
-            <Button variant="outline" icon={<RefreshCw size={16} />} onClick={openQuickReschedule}>Reschedule</Button>
-            <Button variant="outline" icon={<Copy size={16} />} onClick={handleDuplicate}>Duplicate</Button>
-          </div>
-        )}
-        {isAppointment && form.id && (
-          <Button variant="dark" icon={<TimerIcon size={18} />} onClick={handleStartTimer} fullWidth>Start chair timer</Button>
+        {/* Action menu — icon-chip rows matching the "all from your
+            chair" features-page mockup. Same actions as before. */}
+        {form.id && (
+          <Card className="p-1.5">
+            {isAppointment && form.clientId && (
+              <ApptActionRow
+                icon={<RefreshCw size={16} />} iconColor="#16A34A" chip="rgba(34,197,94,0.16)"
+                title="Rebook next visit" sub="Book their next install"
+                onClick={handleRebook} chevron
+              />
+            )}
+            {isAppointment && (
+              <ApptActionRow
+                icon={<ArrowLeftRight size={16} />} iconColor="#EA6A2E" chip="rgba(255,122,69,0.16)"
+                title="Move" sub="Reschedule to a different time"
+                onClick={openQuickReschedule} chevron
+              />
+            )}
+            {isAppointment && (
+              <ApptActionRow
+                icon={<Copy size={16} />} iconColor="#7C3AED" chip="rgba(124,58,237,0.12)"
+                title="Duplicate" sub="Copy to a new booking"
+                onClick={handleDuplicate} chevron
+              />
+            )}
+            {isAppointment && (
+              <ApptActionRow
+                icon={<TimerIcon size={16} />} iconColor={C.espresso} chip="rgba(21,17,26,0.08)"
+                title="Start chair timer" sub="Track time in the chair"
+                onClick={handleStartTimer} chevron
+              />
+            )}
+            {isAppointment && openCommunication && (
+              <ApptActionRow
+                icon={<MessageSquare size={16} />} iconColor="#6366F1" chip="rgba(99,102,241,0.16)"
+                title="Send message" sub="Text or email this client"
+                onClick={() => openCommunication({
+                  appointment: form,
+                  client: clients.find((c: any) => c.id === form.clientId),
+                })}
+                chevron
+              />
+            )}
+            {form.date && (
+              <ApptActionRow
+                icon={<CalendarPlus size={16} />} iconColor="#B7791F" chip="rgba(251,191,36,0.18)"
+                title="Add to calendar" sub="Add to your phone calendar"
+                onClick={() => {
+                  const ics = buildVCalendar([form as IcsAppointment], { businessName: form.eventTitle || business?.businessName, currency: business?.currency });
+                  const fname = sanitizeFilename(`appt-${form.eventTitle || form.clientName || "event"}-${form.date}`) + ".ics";
+                  addToCalendar(fname, ics);
+                }}
+                chevron
+              />
+            )}
+          </Card>
         )}
         {isAppointment && form.id && (
           <AppointmentCommHistory appointmentId={form.id} commLog={store.commLog || []} />
-        )}
-        {isAppointment && form.id && openCommunication && (
-          <Button variant="outline" icon={<MessageSquare size={16} />} fullWidth
-            onClick={() => openCommunication({
-              appointment: form,
-              client: clients.find((c: any) => c.id === form.clientId),
-            })}>
-            Send message to client
-          </Button>
-        )}
-        {form.id && form.date && (
-          <Button variant="outline" icon={<CalendarPlus size={16} />} fullWidth
-            onClick={() => {
-              const ics = buildVCalendar([form as IcsAppointment], { businessName: form.eventTitle || business?.businessName, currency: business?.currency });
-              const fname = sanitizeFilename(`appt-${form.eventTitle || form.clientName || "event"}-${form.date}`) + ".ics";
-              addToCalendar(fname, ics);
-            }}>
-            Add to calendar
-          </Button>
         )}
 
         <div className="grid grid-cols-2 gap-3 pt-2">
@@ -11791,17 +11842,28 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           </Button>
         </div>
         {form.id && (
-          <Button variant="danger" icon={<Trash2 size={16} />} onClick={handleDelete} fullWidth>
-            {isPersonal ? "Delete this event" : isBlocked ? "Remove blocked time" : "Cancel appointment"}
-          </Button>
-        )}
-        {form.id && isAppointment && (
-          <Button variant="outline" icon={<Trash2 size={16} />} onClick={handleHardDelete} fullWidth>
-            Delete permanently
-          </Button>
-        )}
-        {form.seriesId && (
-          <Button variant="danger" onClick={handleDeleteSeries} fullWidth>Cancel entire series</Button>
+          <Card className="p-1.5">
+            <ApptActionRow
+              icon={<Trash2 size={16} />} iconColor={C.danger} chip="rgba(255,77,109,0.14)"
+              title={isPersonal ? "Delete this event" : isBlocked ? "Remove blocked time" : "Cancel appointment"}
+              sub={isPersonal || isBlocked ? undefined : "Keeps it in your books as cancelled"}
+              onClick={handleDelete} danger
+            />
+            {isAppointment && (
+              <ApptActionRow
+                icon={<Trash2 size={16} />} iconColor={C.danger} chip="rgba(255,77,109,0.14)"
+                title="Delete permanently" sub="Remove from history and reports"
+                onClick={handleHardDelete} danger
+              />
+            )}
+            {form.seriesId && (
+              <ApptActionRow
+                icon={<RefreshCw size={16} />} iconColor={C.danger} chip="rgba(255,77,109,0.14)"
+                title="Cancel entire series" sub="Cancel all future occurrences"
+                onClick={handleDeleteSeries} danger
+              />
+            )}
+          </Card>
         )}
       </div>
       <QuickRescheduleSheet
@@ -12772,6 +12834,11 @@ const ClientProfileSheet = ({
   const tags: string[] = Array.isArray(client?.tags) ? client.tags : [];
   const commPref: string = client?.commPreference || "email";
 
+  // VIP = explicitly tagged, or earned by value (matches the retention
+  // engine's threshold: real spend across 3+ completed visits). Drives
+  // the badge on the profile header, like the features-page mockup.
+  const isVip = tags.includes("VIP") || (lifetimeSpend >= 800 && completed.length >= 3);
+
   const toggleTag = async (label: string) => {
     if (!client?.id) return;
     const next = tags.includes(label)
@@ -12917,6 +12984,35 @@ const ClientProfileSheet = ({
       }
     >
       <div className="space-y-5 pb-2">
+        {/* CLIENT HEADER — avatar + name + VIP badge, matching the
+            "Every client's story" features-page card. */}
+        <div
+          className="flex items-center gap-3 rounded-2xl p-3.5"
+          style={{ background: C.paper, border: `1px solid ${C.hairline}`, boxShadow: "0 10px 28px -18px rgba(21,17,26,0.45)" }}
+        >
+          <div
+            className="rounded-full flex items-center justify-center shrink-0"
+            style={{
+              width: 46, height: 46,
+              background: `linear-gradient(135deg, ${C.brandPrimary}, ${C.brandPrimaryDeep})`,
+              color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 17, fontWeight: 600,
+            }}
+          >
+            {initials(client?.name)}
+          </div>
+          <p className="flex-1 min-w-0 truncate" style={{ fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 600, color: C.espresso }}>
+            {client?.name || "Client"}
+          </p>
+          {isVip && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-extrabold shrink-0"
+              style={{ background: "rgba(124,58,237,0.10)", color: C.brandPrimary, letterSpacing: "0.04em" }}
+            >
+              <Crown size={12} /> VIP
+            </span>
+          )}
+        </div>
+
         {/* SUMMARY STATS — client-info card. A single Vagaro-style
             grid that puts the whole relationship (tenure, visits,
             money, reliability) on one glanceable surface. */}
