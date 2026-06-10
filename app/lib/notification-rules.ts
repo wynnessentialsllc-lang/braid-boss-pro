@@ -149,44 +149,43 @@ export const getBalanceDueNotifications = (
   prefs: NotificationPreferences,
 ): NotificationRule[] => {
   if (!prefs.balanceReminders) return [];
-  const out: NotificationRule[] = [];
-  for (const a of safeArr(appointments)) {
-    if (!a?.id) continue;
-    if (isCanceledAppointment(a) || a.paymentStatus === "paid") continue;
-    const balance = num(a.balanceDue);
-    if (balance <= 0) continue;
-    const apptDate = a.date || "";
-    const isToday = apptDate === todayIso;
-    const isPast = apptDate && apptDate < todayIso;
-    const clientName = a.clientName || "Client";
+  // One consolidated "who's on the books today + what they owe" alert,
+  // instead of a separate pop-up per appointment (and per overdue
+  // balance). Lists today's scheduled clients with their outstanding
+  // balance so the stylist sees the day at a glance in a single notice.
+  const todays = safeArr(appointments)
+    .filter(a =>
+      a?.id
+      && (!a.kind || a.kind === "appointment")
+      && !isCanceledAppointment(a)
+      && a.status !== "no_show"
+      && (a.date || "") === todayIso,
+    )
+    .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+  if (todays.length === 0) return [];
 
-    if (isToday) {
-      out.push({
-        id: `balance_today:${a.id}`,
-        kind: "balance_today",
-        category: "balance",
-        priority: "high",
-        title: `Balance due today · ${clientName}`,
-        body: `$${balance.toFixed(2)} due at today's appointment.`,
-        appointmentId: a.id,
-        clientId: a.clientId,
-        action: { label: "Mark paid", target: `appointment:${a.id}` },
-      });
-    } else if (isPast) {
-      out.push({
-        id: `balance_overdue:${a.id}`,
-        kind: "balance_overdue",
-        category: "balance",
-        priority: "high",
-        title: `Balance overdue · ${clientName}`,
-        body: `$${balance.toFixed(2)} unpaid since ${apptDate}.`,
-        appointmentId: a.id,
-        clientId: a.clientId,
-        action: { label: "Mark paid", target: `appointment:${a.id}` },
-      });
-    }
-  }
-  return out;
+  let totalDue = 0;
+  const parts = todays.map(a => {
+    const balance = Math.max(0, num(a.balanceDue));
+    totalDue += balance;
+    const name = a.clientName || "Client";
+    return balance > 0 ? `${name} · $${balance.toFixed(2)} due` : `${name} · paid`;
+  });
+  const MAX = 5;
+  const shown = parts.slice(0, MAX);
+  const extra = parts.length - shown.length;
+  const body = shown.join(" · ") + (extra > 0 ? ` · +${extra} more` : "");
+  const count = todays.length;
+
+  return [{
+    id: `today_clients:${todayIso}`,
+    kind: "today_clients",
+    category: "balance",
+    priority: totalDue > 0 ? "high" : "medium",
+    title: `${count} ${count === 1 ? "client" : "clients"} today${totalDue > 0 ? ` · $${totalDue.toFixed(2)} to collect` : ""}`,
+    body,
+    action: { label: "View schedule", target: "tab:schedule" },
+  }];
 };
 
 export const getRetentionNotifications = (
@@ -274,6 +273,11 @@ export const getBusinessInsightNotifications = (
   const todays = safeArr(state.appointments)
     .filter(a => a?.date === today && !isCanceledAppointment(a));
 
+  // Quiet-day nudge only. The "X appointments today" and the aggregate
+  // "$X in pending balances" notices were removed — today's schedule and
+  // what each client owes now come through one consolidated alert (see
+  // getBalanceDueNotifications), so the app no longer fires several
+  // balance pop-ups on open.
   if (todays.length === 0) {
     out.push({
       id: `insight_no_appts_today:${today}`,
@@ -283,31 +287,6 @@ export const getBusinessInsightNotifications = (
       title: "Quiet day on the calendar",
       body: "No appointments today — a good window to follow up with inactive clients or post fresh photos.",
       action: { label: "View clients", target: "tab:clients" },
-    });
-  } else if (todays.length >= 4) {
-    out.push({
-      id: `insight_full_day:${today}`,
-      kind: "business_full_day",
-      category: "business",
-      priority: "medium",
-      title: `${todays.length} appointments today`,
-      body: "Heavy day ahead. Hydrate, snack between heads, and check your prep list.",
-      action: { label: "View schedule", target: "tab:schedule" },
-    });
-  }
-
-  const pendingTotal = safeArr(state.appointments)
-    .filter(a => !isCanceledAppointment(a) && a?.paymentStatus !== "paid")
-    .reduce((s, a) => s + num(a.balanceDue), 0);
-  if (pendingTotal > 0) {
-    out.push({
-      id: `insight_pending_total:${today}`,
-      kind: "business_pending_total",
-      category: "business",
-      priority: pendingTotal > 200 ? "medium" : "low",
-      title: `$${pendingTotal.toFixed(2)} in pending balances`,
-      body: "Outstanding money across active appointments. Tap to review.",
-      action: { label: "View pending", target: "tab:schedule" },
     });
   }
 
