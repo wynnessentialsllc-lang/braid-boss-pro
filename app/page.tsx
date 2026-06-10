@@ -3357,43 +3357,6 @@ const DashboardHero = ({
         >
           {ownerName ? <>Welcome back, <em style={{ color: "#FFFFFF", fontStyle: "normal", textDecoration: "underline", textDecorationColor: "rgba(255, 255, 255, 0.55)", textUnderlineOffset: 4 }}>{ownerName}</em>.</> : "Welcome back."}
         </h1>
-
-        {/* Tiny ribbon of two live numbers to anchor the card with
-            real signal — today's revenue and the week's appointment
-            count. Both are read-only; tapping the parent KPI cards
-            below already routes the user to the deep view. */}
-        <div className="mt-4 flex items-stretch gap-2">
-          <div
-            className="flex-1 rounded-2xl px-3 py-2.5"
-            style={{
-              background: "rgba(255, 255, 255, 0.18)",
-              border: "1px solid rgba(255, 255, 255, 0.30)",
-              backdropFilter: "blur(4px)",
-            }}
-          >
-            <p className="text-[9px] uppercase tracking-widest font-bold" style={{ color: "rgba(255, 255, 255, 0.90)", letterSpacing: "0.16em" }}>
-              Today
-            </p>
-            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: "#FFFFFF", lineHeight: 1 }}>
-              {cloudReady ? fmtMoney(todayRevenue, currency) : "—"}
-            </p>
-          </div>
-          <div
-            className="flex-1 rounded-2xl px-3 py-2.5"
-            style={{
-              background: "rgba(255, 255, 255, 0.18)",
-              border: "1px solid rgba(255, 255, 255, 0.30)",
-              backdropFilter: "blur(4px)",
-            }}
-          >
-            <p className="text-[9px] uppercase tracking-widest font-bold" style={{ color: "rgba(255, 255, 255, 0.90)", letterSpacing: "0.16em" }}>
-              Week
-            </p>
-            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: "#FFFFFF", lineHeight: 1 }}>
-              {weekAppts} {weekAppts === 1 ? "client" : "clients"}
-            </p>
-          </div>
-        </div>
       </div>
       <style>{`
         @keyframes bbpHeroShimmer { 0%, 100% { transform: rotate(0deg) scale(1); } 50% { transform: rotate(120deg) scale(1.05); } }
@@ -5076,6 +5039,28 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
           cloudReady={cloudReady}
         />
 
+        {/* TODAY'S CHAIR — moved up to sit right under the welcome card,
+            so "who's in the chair today" is the first thing you see
+            (replaces the redundant Today/Week pills that duplicated the
+            KPIs below). */}
+        <div>
+          <SectionTitle action={
+            <button type="button" onClick={() => setActive("schedule")} className="text-xs font-semibold flex items-center gap-1" style={{ color: C.goldDeep }}>
+              View all <ChevronRight size={14} />
+            </button>
+          }>Today&apos;s chair</SectionTitle>
+          {todayAppts.length === 0 ? (
+            <Card className="p-5 text-center">
+              <p className="italic mb-1" style={{ fontFamily: FONT_DISPLAY, color: C.gold, fontSize: 16 }}>a quiet morning</p>
+              <p className="text-sm" style={{ color: C.muted }}>No appointments today. Time to plan, prep, or post.</p>
+            </Card>
+          ) : (
+            <div className="space-y-2.5">
+              {todayAppts.map(a => <AppointmentRow key={a.id} appt={a} business={business} compact recurringSeries={recurringSeries} />)}
+            </div>
+          )}
+        </div>
+
         {/* Hierarchy: money-critical cards get a dedicated headline
             row (today / week revenue, deposits this week, pending
             balance). Pending Balance is `emphasized` so it lifts
@@ -5256,25 +5241,6 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
           openQuickAppt={openQuickAppt}
           onViewAll={() => setActive("rebooking")}
         />
-
-
-        <div>
-          <SectionTitle action={
-            <button type="button" onClick={() => setActive("schedule")} className="text-xs font-semibold flex items-center gap-1" style={{ color: C.goldDeep }}>
-              View all <ChevronRight size={14} />
-            </button>
-          }>Today&apos;s chair</SectionTitle>
-          {todayAppts.length === 0 ? (
-            <Card className="p-5 text-center">
-              <p className="italic mb-1" style={{ fontFamily: FONT_DISPLAY, color: C.gold, fontSize: 16 }}>a quiet morning</p>
-              <p className="text-sm" style={{ color: C.muted }}>No appointments today. Time to plan, prep, or post.</p>
-            </Card>
-          ) : (
-            <div className="space-y-2.5">
-              {todayAppts.map(a => <AppointmentRow key={a.id} appt={a} business={business} compact recurringSeries={recurringSeries} />)}
-            </div>
-          )}
-        </div>
 
         {upcomingAppts.length > 0 && (
           <div>
