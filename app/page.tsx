@@ -2911,6 +2911,9 @@ const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: {
             {appt.clientName || "Unnamed client"}
           </p>
           <p className="text-sm truncate mt-0.5" style={{ color: C.coffee }}>{appt.style || "Style not set"}</p>
+          {appt.dependentName && (
+            <p className="text-[12px] font-semibold truncate mt-0.5" style={{ color: C.brandPrimary }}>For {appt.dependentName}</p>
+          )}
           <p className="text-xs mt-1.5 flex items-center gap-3" style={{ color: C.muted }}>
             <span className="flex items-center gap-1"><Calendar size={11} />{fmtDate(appt.date)}</span>
             {appt.time && <span className="flex items-center gap-1"><Clock size={11} />{fmtTime(appt.time)}</span>}
@@ -8377,7 +8380,7 @@ const DayCalendarView = ({
           const ps = paymentStatusOf(a, today);
           const timeRange = `${minutesToLabel(p.startMin)} – ${minutesToLabel(p.endMin)}`;
           const titleLine = isBlockedBlock ? (a.eventTitle || "Unavailable") : isPersonalBlock ? (a.eventTitle || "Personal event") : (a.clientName || "Open slot");
-          const serviceLine = isBlockedBlock ? "Unavailable" : isPersonalBlock ? "Personal" : (a.style || "Service");
+          const serviceLine = isBlockedBlock ? "Unavailable" : isPersonalBlock ? "Personal" : `${a.style || "Service"}${a.dependentName ? ` · for ${a.dependentName}` : ""}`;
           return (
             <button
               type="button"
@@ -8486,7 +8489,7 @@ const WeekCalendarView = ({
                       ? `${fmtTime(a.time)} · Off`
                       : isPersonalBlock
                         ? `${fmtTime(a.time)} · Personal`
-                        : `${fmtTime(a.time)} · ${a.style || "Service"}`;
+                        : `${fmtTime(a.time)} · ${a.style || "Service"}${a.dependentName ? ` · for ${a.dependentName}` : ""}`;
                   return (
                     <button
                       type="button"
