@@ -4,5 +4,12 @@
 <dict>
 	<key>aps-environment</key>
 	<string>development</string>
+	<!-- Tap to Pay on iPhone (ProximityReader). Granted to Wynn
+	     Essentials, LLC — Apple Case-ID 20421391 — with the development
+	     distribution restriction (registered test devices only). This key
+	     must match the entitlement enabled on the App ID / provisioning
+	     profile or the build will fail to sign. -->
+	<key>com.apple.developer.proximity-reader.payment.acceptance</key>
+	<true/>
 </dict>
 </plist>

@@ -30,6 +30,10 @@
 	<string>Braid Boss Pro needs access to your photos so you can add client style photos and product images.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Braid Boss Pro needs camera access so you can take client style photos and product images.</string>
+	<!-- Required by the Stripe Terminal SDK for Tap to Pay on iPhone — the
+	     SDK refuses to accept payments without location access. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Braid Boss Pro uses your location to accept Tap to Pay card payments, as required by Apple and Stripe.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

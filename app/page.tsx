@@ -178,6 +178,7 @@ import {
   computeDayStatus,
 } from "./lib/calendar";
 import { useIsNativePlatform } from "./lib/platform";
+import { tapToPaySupported, collectTapToPay } from "./lib/taptopay";
 import {
   type Service,
   type ServiceInput,
@@ -9397,9 +9398,23 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     appointments, reminderSettings, receipts, upsertReceipt, deleteReceipt,
   } = store;
   const [form, setForm] = useState<EntityRecord>({});
-  // Native shell vs web/PWA — drives the in-person payment copy now and
-  // will gate the in-app Tap to Pay button once the plugin lands.
+  // Native shell vs web/PWA — drives the in-person payment copy and gates
+  // the in-app Tap to Pay button. ttpSupported is the real on-device check
+  // (native plugin present + device/entitlement capable); it stays false
+  // on web/PWA and on native builds without the Tap to Pay plugin, so the
+  // card falls back to the manual copy.
   const isNative = useIsNativePlatform();
+  const [ttpSupported, setTtpSupported] = useState(false);
+  const [ttpBusy, setTtpBusy] = useState(false);
+  const [ttpMsg, setTtpMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  useEffect(() => {
+    if (!isNative) { setTtpSupported(false); return; }
+    let alive = true;
+    tapToPaySupported()
+      .then((ok) => { if (alive) setTtpSupported(ok); })
+      .catch(() => { if (alive) setTtpSupported(false); });
+    return () => { alive = false; };
+  }, [isNative]);
   const [showNewClient, setShowNewClient] = useState(false);
   const [newClientName, setNewClientName] = useState("");
   // After save, if the appointment was just transitioned to
@@ -11524,23 +11539,88 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             <div className="flex items-center gap-2 mb-2">
               <DollarSign size={16} style={{ color: C.gold }} />
               <span className="font-semibold text-sm" style={{ color: C.espresso }}>In-person payment</span>
-              <Pill tone="gold">Tap to Pay soon</Pill>
+              <Pill tone="gold">{isNative && ttpSupported ? "Tap to Pay" : "Tap to Pay soon"}</Pill>
             </div>
-            <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
-              {isNative
-                ? "Tap to Pay on iPhone is coming to this app — accept cards on your phone, no reader needed. Until then, collect in person two ways:"
-                : "Tap to Pay on iPhone is coming to the Braid Boss Pro app — accept cards on your phone, no reader needed. Until then, collect in person two ways:"}
-            </p>
-            <ul className="mt-2 space-y-2" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-              <li className="text-[12px] flex items-start gap-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
-                <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
-                <span><strong>Send the balance payment link</strong> above — your client taps to pay and it reconciles here automatically.</span>
-              </li>
-              <li className="text-[12px] flex items-start gap-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
-                <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
-                <span>Tap the card in the <strong>Stripe Dashboard app</strong>, then hit <em>Checkout</em> here and set the method to <strong>Tap to Pay</strong> so your books stay accurate.</span>
-              </li>
-            </ul>
+            {isNative && ttpSupported ? (
+              // Live Tap to Pay on iPhone. Charges the balance on the
+              // stylist's connected account via the native Stripe Terminal
+              // reader, then mirrors the manual "Mark balance paid" state
+              // (method = tap_to_pay, PI id in notes) so the save persists
+              // it the same way. Nothing is written until they tap Save.
+              <>
+                <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                  Accept the card right on your iPhone — hold the client&apos;s card or phone near the top of yours. No reader needed.
+                </p>
+                <Button
+                  variant="primary"
+                  fullWidth
+                  className="mt-3"
+                  disabled={ttpBusy}
+                  icon={<DollarSign size={16} />}
+                  onClick={async () => {
+                    if (ttpBusy) return;
+                    setTtpMsg(null);
+                    setTtpBusy(true);
+                    try {
+                      const res = await collectTapToPay({
+                        amountCents: Math.round(balanceDue * 100),
+                        appointmentId: form.id,
+                        clientName: form.clientName || undefined,
+                        currency: (business?.currency || "USD").toLowerCase(),
+                        description: `${form.style || "Appointment"}${form.clientName ? ` — ${form.clientName}` : ""}`,
+                      });
+                      if (res.ok) {
+                        const netTotal = Math.max(0, parseMoney(form.totalPrice) - parseMoney(form.discountAmount));
+                        const creditUsed = Math.max(0, parseMoney(form.creditApplied));
+                        const apptDate = form.date || todayISO();
+                        const isPastOrToday = apptDate <= todayISO();
+                        setForm({
+                          ...form,
+                          depositPaid: Math.max(0, netTotal - creditUsed),
+                          paymentStatus: "paid",
+                          paymentMethod: "tap_to_pay",
+                          paymentDate: form.paymentDate || todayISO(),
+                          paymentNotes: [form.paymentNotes, `Tap to Pay · ${res.paymentIntentId}`].filter(Boolean).join(" · "),
+                          status: isPastOrToday && !isCanceledAppointment(form) && form.status !== "no_show" ? "completed" : form.status,
+                        });
+                        setTtpMsg({ kind: "ok", text: `Charged ${fmtMoney(balanceDue, business.currency)}. Tap Save to keep it.` });
+                      } else if (!res.canceled) {
+                        setTtpMsg({ kind: "error", text: res.error });
+                      }
+                    } catch {
+                      setTtpMsg({ kind: "error", text: "Tap to Pay didn't go through. Try again." });
+                    } finally {
+                      setTtpBusy(false);
+                    }
+                  }}
+                >
+                  {ttpBusy ? "Starting Tap to Pay…" : `Tap to Pay ${fmtMoney(balanceDue, business.currency)}`}
+                </Button>
+                {ttpMsg && (
+                  <p className="text-[12px] mt-2" style={{ color: ttpMsg.kind === "ok" ? C.success : C.danger, lineHeight: 1.4 }}>
+                    {ttpMsg.text}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                  {isNative
+                    ? "Tap to Pay on iPhone is coming to this app — accept cards on your phone, no reader needed. Until then, collect in person two ways:"
+                    : "Tap to Pay on iPhone is coming to the Braid Boss Pro app — accept cards on your phone, no reader needed. Until then, collect in person two ways:"}
+                </p>
+                <ul className="mt-2 space-y-2" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                  <li className="text-[12px] flex items-start gap-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                    <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
+                    <span><strong>Send the balance payment link</strong> above — your client taps to pay and it reconciles here automatically.</span>
+                  </li>
+                  <li className="text-[12px] flex items-start gap-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                    <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
+                    <span>Tap the card in the <strong>Stripe Dashboard app</strong>, then hit <em>Checkout</em> here and set the method to <strong>Tap to Pay</strong> so your books stay accurate.</span>
+                  </li>
+                </ul>
+              </>
+            )}
           </Card>
         )}
 
