@@ -10673,26 +10673,39 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           </Field>
         )}
 
-        {/* Booking for — when the selected client has family members on
-            file, choose whether this appointment is for them or for one
-            of their dependents (kids). The client stays the contact +
-            payer; dependentName just records who the style is for. */}
+        {/* Booking for — record whether this appointment is for the
+            client or one of their family members (kids/dependents). Shows
+            whenever a saved client is selected; a family member can be
+            added inline (e.g. "Carol — mom"), which also saves them to the
+            client's profile. The client stays the contact + payer;
+            dependentName just records who the style is for. */}
         {isAppointment && (() => {
           const selected = clients.find((c: any) => c.id === form.clientId);
+          if (!selected) return null;
           const deps: any[] = Array.isArray(selected?.dependents) ? selected.dependents : [];
-          if (deps.length === 0) return null;
           return (
             <Field label="Booking for" hint="Who this appointment is for. Billing + reminders still go to the client.">
               <Select
                 value={form.dependentId || ""}
-                onChange={(e: any) => {
-                  const id = e.target.value || null;
+                onChange={async (e: any) => {
+                  const val = e.target.value;
+                  if (val === "__add__") {
+                    const name = (window.prompt("Family member's name (e.g. Carol — mom)") || "").trim();
+                    if (name) {
+                      const newDep = { id: `dep-${uid()}`, name, note: "" };
+                      await upsertClient({ ...selected, dependents: [...deps, newDep] });
+                      setForm({ ...form, dependentId: newDep.id, dependentName: newDep.name });
+                    }
+                    return;
+                  }
+                  const id = val || null;
                   const dep = deps.find((d) => String(d.id) === String(id));
                   setForm({ ...form, dependentId: id, dependentName: dep ? dep.name : null });
                 }}
                 options={[
                   { value: "", label: `${selected?.name || "Client"} (the client)` },
                   ...deps.map((d) => ({ value: d.id, label: d.name || "Family member" })),
+                  { value: "__add__", label: "＋ Add family member…" },
                 ]}
               />
             </Field>
