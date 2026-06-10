@@ -1,15 +1,14 @@
 import type { NextConfig } from "next";
 
-// BBP_NATIVE=1 builds for the iOS Capacitor static bundle: no
-// server-rendered routes, /book/[slug] excluded, source maps emitted
-// (they ship inside the local app, not to the public web). Without
-// the env var, builds behave exactly as before this change — Vercel
-// auto-deploys keep full SSR + no public source maps.
-const isNative = process.env.BBP_NATIVE === "1";
-
-// Security headers for the SSR web build only. `output: "export"`
-// (native) can't emit response headers, so these are scoped to the
-// Vercel deploy where they're actually served.
+// The app is one SSR build (Vercel). The native iOS/Android shell does
+// NOT ship a static export — it loads the live site via Capacitor
+// `server.url` (see capacitor.config.ts) and falls back to a tiny
+// offline page (native-fallback/). So there's no `output: "export"`
+// mode anymore: a full static export was never viable here (dynamic
+// SSR routes + /api/* can't be exported), and loading the live site
+// makes it unnecessary.
+//
+// Security headers below are served by the Vercel deploy.
 //
 // CSP notes — kept deliberately permissive on script/style so it does
 // NOT break the app, while still closing the high-value holes:
@@ -56,17 +55,10 @@ const SECURITY_HEADERS = [
   },
 ];
 
-const nextConfig: NextConfig = isNative
-  ? {
-      output: "export",
-      trailingSlash: true,
-      images: { unoptimized: true },
-      productionBrowserSourceMaps: true,
-    }
-  : {
-      async headers() {
-        return [{ source: "/:path*", headers: SECURITY_HEADERS }];
-      },
-    };
+const nextConfig: NextConfig = {
+  async headers() {
+    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
+  },
+};
 
 export default nextConfig;
