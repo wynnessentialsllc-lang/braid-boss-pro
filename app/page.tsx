@@ -11973,7 +11973,7 @@ const DEFAULT_CUSTOMER_FILTERS: CustomerFilters = {
 const filtersAreActive = (f: CustomerFilters) =>
   f.lastVisited !== "any" || f.frequency !== "any";
 
-const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, savePhoto, deletePhoto: deletePhotoProp, openClientId, clearOpenClientId, openAppointmentRecord }: { store: any; openClientPhotos?: any; openCommunication?: (ctx: CommContext) => void; openQuickAppt?: (prefill?: any) => void; savePhoto?: (p: any) => Promise<any>; deletePhoto?: (id: string) => Promise<void>; openClientId?: string | null; clearOpenClientId?: () => void; openAppointmentRecord?: (a: any) => void }) => {
+const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, savePhoto, deletePhoto: deletePhotoProp, openClientId, clearOpenClientId, openAppointmentRecord, cloudReady = true }: { store: any; openClientPhotos?: any; openCommunication?: (ctx: CommContext) => void; openQuickAppt?: (prefill?: any) => void; savePhoto?: (p: any) => Promise<any>; deletePhoto?: (id: string) => Promise<void>; openClientId?: string | null; clearOpenClientId?: () => void; openAppointmentRecord?: (a: any) => void; cloudReady?: boolean }) => {
   void openClientPhotos;
   const { clients, appointments, photos, business } = store;
   const [search, setSearch] = useState("");
@@ -12094,8 +12094,9 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
             Customers
           </h1>
           <p className="text-[12px] mt-1" style={{ color: C.muted }}>
-            {clients.length} {clients.length === 1 ? "person" : "people"}
-            {filtered.length !== clients.length ? ` · ${filtered.length} shown` : ""}
+            {!cloudReady
+              ? "Loading your book…"
+              : `${clients.length} ${clients.length === 1 ? "person" : "people"}${filtered.length !== clients.length ? ` · ${filtered.length} shown` : ""}`}
           </p>
         </div>
         <div className="relative">
@@ -12168,7 +12169,21 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
 
       {/* LIST */}
       <div className="px-5 space-y-2">
-        {filtered.length === 0 ? (
+        {!cloudReady ? (
+          // First cloud pull in flight — show skeleton rows instead of
+          // the partial local cache (which can be just the few clients
+          // with cached appointments before the full book syncs). Avoids
+          // the "3 people → 100 people" flash on cold open.
+          [0, 1, 2, 3, 4, 5].map(i => (
+            <div key={i} className="rounded-2xl flex items-center gap-3.5 animate-pulse" style={{ background: C.paper, border: `1px solid ${C.hairline}`, padding: "14px 16px" }}>
+              <div style={{ width: 52, height: 52, borderRadius: 999, background: C.ivory, flexShrink: 0 }} />
+              <div className="flex-1 min-w-0">
+                <div style={{ height: 12, width: "55%", borderRadius: 6, background: C.ivory }} />
+                <div style={{ height: 10, width: "32%", borderRadius: 6, background: C.ivory, marginTop: 8 }} />
+              </div>
+            </div>
+          ))
+        ) : filtered.length === 0 ? (
           clients.length === 0 ? (
             <EmptyState
               icon={<Users size={28} style={{ color: C.gold }} />}
@@ -34687,7 +34702,7 @@ export default function App() {
               openAvailability={() => setSecondary("availability")} />
           )}
           {active === "clients" && (
-            <Clients store={store} openCommunication={openCommunication} openQuickAppt={openQuickAppt} savePhoto={handleSavePhoto} deletePhoto={handleDeletePhoto} openClientId={clientToOpenId} clearOpenClientId={() => setClientToOpenId(null)} openAppointmentRecord={(a) => { setActive("schedule"); setApptPrefill(a); }} />
+            <Clients store={store} openCommunication={openCommunication} openQuickAppt={openQuickAppt} savePhoto={handleSavePhoto} deletePhoto={handleDeletePhoto} openClientId={clientToOpenId} clearOpenClientId={() => setClientToOpenId(null)} openAppointmentRecord={(a) => { setActive("schedule"); setApptPrefill(a); }} cloudReady={sync.cloudReady} />
           )}
           {active === "money" && (
             <Money store={store}
