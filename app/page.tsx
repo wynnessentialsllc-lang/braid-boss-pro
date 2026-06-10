@@ -12971,6 +12971,22 @@ const ClientProfileSheet = ({
           </Card>
         </div>
 
+        {/* Retention & rebooking — the same rich card the edit screen
+            shows (retention score, avg spend, most-booked style, the
+            rebook-reminder nudge). Restored to the read-only profile so
+            this info no longer lives only behind the Edit button. */}
+        {client?.id && (
+          <ClientRetentionCard
+            clientId={String(client.id)}
+            clientName={client.name}
+            appointments={allAppts}
+            today={today}
+            business={business}
+            openCommunication={onMessage}
+            onDuplicate={onBookAppointment}
+          />
+        )}
+
         {/* Loyalty — renders only when the program is enabled. */}
         {client?.id && (
           <ClientLoyaltyCard
