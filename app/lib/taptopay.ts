@@ -16,9 +16,37 @@
 
 import { getSupabase } from "./supabase";
 
+// Stages the native side reports while it gets the reader ready and runs
+// the charge, so the UI can show a configuration progress / status
+// indicator (an App Review requirement). `updating` carries a 0–1 progress
+// while the reader installs its first-run software.
+export type TapToPayStage =
+  | "preparing"
+  | "connecting"
+  | "updating"
+  | "ready"
+  | "presenting"
+  | "processing";
+
+export type TapToPayStatus = { stage: TapToPayStage; progress?: number; message?: string };
+
+// Human-readable copy for each stage — shared by the checkout progress
+// indicator so wording stays consistent.
+export const TAP_TO_PAY_STAGE_LABEL: Record<TapToPayStage, string> = {
+  preparing: "Preparing Tap to Pay…",
+  connecting: "Connecting the reader…",
+  updating: "Updating the reader…",
+  ready: "Ready — present the card",
+  presenting: "Hold the card near the top of your iPhone",
+  processing: "Processing the payment…",
+};
+
+type PluginListenerHandle = { remove: () => Promise<void> | void };
+
 // Native plugin surface. Kept tiny: JS hands the SDK everything it needs
 // (a connection token, a Terminal location, and the PaymentIntent client
-// secret) and the plugin drives the on-device reader UI.
+// secret) and the plugin drives the on-device reader UI, emitting
+// "tapToPayStatus" events along the way.
 type TapToPayPlugin = {
   isSupported(): Promise<{ supported: boolean; reason?: string }>;
   collectPayment(opts: {
@@ -27,6 +55,10 @@ type TapToPayPlugin = {
     clientSecret: string;
     amountLabel?: string;
   }): Promise<{ status: string; paymentIntentId?: string }>;
+  addListener(
+    eventName: "tapToPayStatus",
+    listener: (status: TapToPayStatus) => void,
+  ): Promise<PluginListenerHandle> | PluginListenerHandle;
 };
 
 const getPlugin = (): TapToPayPlugin | null => {
@@ -69,10 +101,26 @@ export const collectTapToPay = async (args: {
   clientName?: string;
   currency?: string;
   description?: string;
+  // Called as the reader is prepared and the charge runs, so the caller
+  // can render a configuration progress / status indicator.
+  onStatus?: (status: TapToPayStatus) => void;
 }): Promise<TapToPayResult> => {
   const plugin = getPlugin();
   if (!plugin) return { ok: false, error: "Tap to Pay isn't available on this device." };
 
+  // Subscribe to native status events for the duration of the charge.
+  let listener: PluginListenerHandle | null = null;
+  if (args.onStatus) {
+    try {
+      const handle = await plugin.addListener("tapToPayStatus", args.onStatus);
+      listener = handle as PluginListenerHandle;
+    } catch {
+      listener = null;
+    }
+  }
+  const cleanup = () => { try { void listener?.remove(); } catch { /* noop */ } };
+
+  try {
   let token = "";
   try {
     const { data: sess } = await getSupabase().auth.getSession();
@@ -148,5 +196,8 @@ export const collectTapToPay = async (args: {
   } catch (e: any) {
     const msg = String(e?.message || e || "Tap to Pay failed.");
     return { ok: false, error: msg, canceled: /cancel/i.test(msg) };
+  }
+  } finally {
+    cleanup();
   }
 };

@@ -71,6 +71,15 @@ public class TapToPayPlugin: CAPPlugin, DiscoveryDelegate, TapToPayReaderDelegat
         configureTerminal()
     }
 
+    // Emit a configuration/charge status event the web layer renders as a
+    // progress indicator (App Review requirement). Listeners are attached
+    // from JS via addListener("tapToPayStatus", ...).
+    private func emitStatus(_ stage: String, progress: Float? = nil) {
+        var payload: [String: Any] = ["stage": stage]
+        if let progress = progress { payload["progress"] = progress }
+        notifyListeners("tapToPayStatus", data: payload)
+    }
+
     // Terminal.setTokenProvider must be called once, before the first
     // Terminal.shared access.
     private func configureTerminal() {
@@ -126,6 +135,7 @@ public class TapToPayPlugin: CAPPlugin, DiscoveryDelegate, TapToPayReaderDelegat
                 return
             }
 
+            self.emitStatus("preparing")
             do {
                 let config = try TapToPayDiscoveryConfigurationBuilder().build()
                 self.discoverCancelable = Terminal.shared.discoverReaders(config, delegate: self) { error in
@@ -147,6 +157,7 @@ public class TapToPayPlugin: CAPPlugin, DiscoveryDelegate, TapToPayReaderDelegat
               let reader = readers.first,
               let locationId = pendingLocationId else { return }
         connecting = true
+        emitStatus("connecting")
 
         do {
             let connectionConfig = try TapToPayConnectionConfigurationBuilder(locationId: locationId)
@@ -176,6 +187,7 @@ public class TapToPayPlugin: CAPPlugin, DiscoveryDelegate, TapToPayReaderDelegat
             finish(error: "Missing payment details.")
             return
         }
+        emitStatus("ready")
 
         Terminal.shared.retrievePaymentIntent(clientSecret: clientSecret) { [weak self] intent, error in
             guard let self = self else { return }
@@ -188,6 +200,7 @@ public class TapToPayPlugin: CAPPlugin, DiscoveryDelegate, TapToPayReaderDelegat
                 return
             }
 
+            self.emitStatus("presenting")
             self.collectCancelable = Terminal.shared.collectPaymentMethod(intent) { collected, collectError in
                 if let collectError = collectError {
                     let nsError = collectError as NSError
@@ -200,6 +213,7 @@ public class TapToPayPlugin: CAPPlugin, DiscoveryDelegate, TapToPayReaderDelegat
                     return
                 }
 
+                self.emitStatus("processing")
                 Terminal.shared.confirmPaymentIntent(collected) { confirmed, confirmError in
                     if let confirmError = confirmError {
                         self.finish(error: "The card was declined: \(confirmError.localizedDescription)")
@@ -245,9 +259,13 @@ public class TapToPayPlugin: CAPPlugin, DiscoveryDelegate, TapToPayReaderDelegat
     // these are best-effort no-ops. Confirm the exact signatures against
     // your pinned SDK version if the build complains.
 
-    public func tapToPayReader(_ reader: Reader, didStartInstallingUpdate update: ReaderSoftwareUpdate, cancelable: Cancelable?) {}
+    public func tapToPayReader(_ reader: Reader, didStartInstallingUpdate update: ReaderSoftwareUpdate, cancelable: Cancelable?) {
+        emitStatus("updating", progress: 0)
+    }
 
-    public func tapToPayReader(_ reader: Reader, didReportReaderSoftwareUpdateProgress progress: Float) {}
+    public func tapToPayReader(_ reader: Reader, didReportReaderSoftwareUpdateProgress progress: Float) {
+        emitStatus("updating", progress: progress)
+    }
 
     public func tapToPayReader(_ reader: Reader, didFinishInstallingUpdate update: ReaderSoftwareUpdate?, error: Error?) {}
 }

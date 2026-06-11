@@ -177,8 +177,8 @@ import {
   colorForAppointment,
   computeDayStatus,
 } from "./lib/calendar";
-import { useIsNativePlatform } from "./lib/platform";
-import { tapToPaySupported, collectTapToPay } from "./lib/taptopay";
+import { useIsNativePlatform, isNativePlatform } from "./lib/platform";
+import { tapToPaySupported, collectTapToPay, TAP_TO_PAY_STAGE_LABEL, type TapToPayStatus } from "./lib/taptopay";
 import {
   type Service,
   type ServiceInput,
@@ -1225,6 +1225,11 @@ const DEFAULT_BUSINESS = {
   businessName: "Braid Boss Pro", ownerName: "",
   hourlyRate: 50, overheadPerHour: 8, profitMargin: 25,
   defaultTravelFee: 0, currency: "USD",
+  // Merchant opt-in for in-app Tap to Pay on iPhone. Off until the
+  // stylist enables it under Settings → Payments → Tap to Pay; the
+  // checkout button is gated on this so the entitlement is only exercised
+  // when the merchant has knowingly turned it on.
+  tapToPayEnabled: false,
 };
 
 const DEFAULT_REMINDER_SETTINGS = {
@@ -9407,8 +9412,16 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   const [ttpSupported, setTtpSupported] = useState(false);
   const [ttpBusy, setTtpBusy] = useState(false);
   const [ttpMsg, setTtpMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  // Reader configuration / charge progress (drives the status indicator)
+  // and a latch that reveals the post-payment digital receipt options.
+  const [ttpStatus, setTtpStatus] = useState<TapToPayStatus | null>(null);
+  const [ttpPaid, setTtpPaid] = useState(false);
   useEffect(() => {
-    if (!isNative) { setTtpSupported(false); return; }
+    if (!isNative) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- platform-driven sync, intentional
+      setTtpSupported(false);
+      return;
+    }
     let alive = true;
     tapToPaySupported()
       .then((ok) => { if (alive) setTtpSupported(ok); })
@@ -11539,9 +11552,9 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             <div className="flex items-center gap-2 mb-2">
               <DollarSign size={16} style={{ color: C.gold }} />
               <span className="font-semibold text-sm" style={{ color: C.espresso }}>In-person payment</span>
-              <Pill tone="gold">{isNative && ttpSupported ? "Tap to Pay" : "Tap to Pay soon"}</Pill>
+              <Pill tone="gold">{isNative && ttpSupported && business?.tapToPayEnabled ? "Tap to Pay" : "Tap to Pay soon"}</Pill>
             </div>
-            {isNative && ttpSupported ? (
+            {isNative && ttpSupported && business?.tapToPayEnabled ? (
               // Live Tap to Pay on iPhone. Charges the balance on the
               // stylist's connected account via the native Stripe Terminal
               // reader, then mirrors the manual "Mark balance paid" state
@@ -11560,6 +11573,8 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                   onClick={async () => {
                     if (ttpBusy) return;
                     setTtpMsg(null);
+                    setTtpPaid(false);
+                    setTtpStatus(null);
                     setTtpBusy(true);
                     try {
                       const res = await collectTapToPay({
@@ -11568,6 +11583,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                         clientName: form.clientName || undefined,
                         currency: (business?.currency || "USD").toLowerCase(),
                         description: `${form.style || "Appointment"}${form.clientName ? ` — ${form.clientName}` : ""}`,
+                        onStatus: (s) => setTtpStatus(s),
                       });
                       if (res.ok) {
                         const netTotal = Math.max(0, parseMoney(form.totalPrice) - parseMoney(form.discountAmount));
@@ -11584,6 +11600,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                           status: isPastOrToday && !isCanceledAppointment(form) && form.status !== "no_show" ? "completed" : form.status,
                         });
                         setTtpMsg({ kind: "ok", text: `Charged ${fmtMoney(balanceDue, business.currency)}. Tap Save to keep it.` });
+                        setTtpPaid(true);
                       } else if (!res.canceled) {
                         setTtpMsg({ kind: "error", text: res.error });
                       }
@@ -11591,21 +11608,68 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                       setTtpMsg({ kind: "error", text: "Tap to Pay didn't go through. Try again." });
                     } finally {
                       setTtpBusy(false);
+                      setTtpStatus(null);
                     }
                   }}
                 >
                   {ttpBusy ? "Starting Tap to Pay…" : `Tap to Pay ${fmtMoney(balanceDue, business.currency)}`}
                 </Button>
+
+                {/* Configuration / charge progress — App Review requires a
+                    clear status indicator while the reader is prepared. */}
+                {ttpBusy && ttpStatus && (
+                  <div className="mt-2" aria-live="polite">
+                    <div className="flex items-center gap-2">
+                      <RefreshCw size={13} className="animate-spin" style={{ color: C.gold }} />
+                      <span className="text-[12px]" style={{ color: C.coffee }}>
+                        {TAP_TO_PAY_STAGE_LABEL[ttpStatus.stage]}
+                      </span>
+                    </div>
+                    {ttpStatus.stage === "updating" && typeof ttpStatus.progress === "number" && (
+                      <div className="mt-1.5 h-1.5 w-full rounded-full overflow-hidden" style={{ background: C.hairline }}>
+                        <div className="h-full rounded-full" style={{ width: `${Math.round((ttpStatus.progress || 0) * 100)}%`, background: C.gold, transition: "width 200ms ease" }} />
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {ttpMsg && (
                   <p className="text-[12px] mt-2" style={{ color: ttpMsg.kind === "ok" ? C.success : C.danger, lineHeight: 1.4 }}>
                     {ttpMsg.text}
                   </p>
                 )}
+
+                {/* Post-payment: offer the client a digital receipt. Reuses
+                    the receipt builder + ReceiptSheet (share / text / email
+                    / PDF), so the customer can always get a receipt. */}
+                {ttpPaid && openReceipt && (
+                  <div className="mt-3 rounded-xl p-3" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                    <p className="text-[12px] font-semibold" style={{ color: C.espresso }}>Give your client a receipt?</p>
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <Button
+                        variant="outline"
+                        icon={<Receipt size={14} />}
+                        onClick={async () => {
+                          const clientName = clients.find((c: any) => c.id === form.clientId)?.name || form.clientName || "Client";
+                          const rcp = buildReceiptFromAppointment({ ...form, paymentMethod: "tap_to_pay", paymentStatus: "paid" }, "receipt", receipts || [], `rcp_${uid()}`, clientName);
+                          const saved = await upsertReceipt(rcp);
+                          setTtpPaid(false);
+                          openReceipt(saved as ReceiptRecord);
+                        }}
+                      >
+                        Send receipt
+                      </Button>
+                      <Button variant="ghost" onClick={() => setTtpPaid(false)}>No receipt</Button>
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
               <>
                 <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
-                  {isNative
+                  {isNative && ttpSupported && !business?.tapToPayEnabled
+                    ? "Tap to Pay on iPhone is available on this device — turn it on in Settings → Payments → Tap to Pay to charge cards right here. Until then, collect in person two ways:"
+                    : isNative
                     ? "Tap to Pay on iPhone is coming to this app — accept cards on your phone, no reader needed. Until then, collect in person two ways:"
                     : "Tap to Pay on iPhone is coming to the Braid Boss Pro app — accept cards on your phone, no reader needed. Until then, collect in person two ways:"}
                 </p>
@@ -17143,7 +17207,7 @@ const SupportCenterScreen = ({
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openStyleRequests, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openSupport }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openStyleRequests?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openSupport?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openStyleRequests, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openSupport, openTapToPay }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openStyleRequests?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openSupport?: () => void; openTapToPay?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -17153,6 +17217,8 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
     stripeConnect.profile,
     stripeConnect.loading,
   );
+  // Tap to Pay row is iPhone-app-only — hidden on web/PWA where it can't run.
+  const settingsIsNative = useIsNativePlatform();
   // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
   useEffect(() => { trackEvent("settings_view", { category: "feature" }); }, []);
   const [b, setB] = useState(store.business);
@@ -18030,6 +18096,36 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                 <ChevronRight size={18} style={{ color: C.muted }} />
               </div>
             </Card>
+
+            {settingsIsNative && openTapToPay && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openTapToPay}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
+                      }}
+                    >
+                      <DollarSign size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold" style={{ color: C.espresso }}>Tap to Pay</p>
+                        <Pill tone={store.business?.tapToPayEnabled ? "success" : "neutral"}>
+                          {store.business?.tapToPayEnabled ? "On" : "Off"}
+                        </Pill>
+                      </div>
+                      <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
+                        Accept cards on your iPhone — no reader needed
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
 
             {openDiscounts && (<>
             <SectionTitle>Studio offers</SectionTitle>
@@ -34326,6 +34422,187 @@ const CampaignComposerSheet = ({
   );
 };
 
+// localStorage flag — has the merchant seen the one-time Tap to Pay
+// awareness splash? Mirrors the intro-seen pattern.
+const TAP_TO_PAY_AWARE_KEY = "bbp-ttp-aware-v1";
+
+// A single readiness row in the Tap to Pay status card. Module-level so
+// it isn't recreated on every TapToPayScreen render.
+const TtpStatusRow = ({ ok, pending, title, sub }: { ok: boolean; pending?: boolean; title: string; sub?: string }) => (
+  <div className="flex items-start gap-3 py-2">
+    {ok
+      ? <CheckCircle2 size={18} style={{ color: C.success, flexShrink: 0, marginTop: 1 }} />
+      : pending
+      ? <AlertCircle size={18} style={{ color: C.warning, flexShrink: 0, marginTop: 1 }} />
+      : <XCircle size={18} style={{ color: C.danger, flexShrink: 0, marginTop: 1 }} />}
+    <div className="flex-1 min-w-0">
+      <p className="text-sm font-semibold" style={{ color: C.espresso }}>{title}</p>
+      {sub && <p className="text-[12px]" style={{ color: C.muted, lineHeight: 1.45 }}>{sub}</p>}
+    </div>
+  </div>
+);
+
+// Settings → Payments → Tap to Pay. Awareness, enablement toggle, live
+// readiness status, merchant education, and an App Review demo note. This
+// is the home for everything Apple's checklist expects an entitlement app
+// to surface; the in-checkout button is gated on the toggle saved here.
+const TapToPayScreen = ({ store, onBack, openStripe }: { store: any; onBack: () => void; openStripe: () => void }) => {
+  const isNative = useIsNativePlatform();
+  const [supported, setSupported] = useState<boolean | null>(null);
+  const [showHow, setShowHow] = useState(false);
+  const stripeConnect = useStripeConnect(store?.userId || null);
+  const chargesEnabled = !!stripeConnect.profile?.stripe_connect_charges_enabled;
+  const enabled = !!store.business?.tapToPayEnabled;
+  const deviceReady = isNative && supported === true;
+
+  useEffect(() => {
+    let alive = true;
+    if (!isNative) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- platform-driven sync, intentional
+      setSupported(false);
+      return;
+    }
+    tapToPaySupported()
+      .then((ok) => { if (alive) setSupported(ok); })
+      .catch(() => { if (alive) setSupported(false); });
+    return () => { alive = false; };
+  }, [isNative]);
+
+  const setEnabled = (next: boolean) => {
+    void store.setBusiness({ ...store.business, tapToPayEnabled: next });
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header title="Tap to Pay" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
+      <div className="px-5 pt-2 space-y-5">
+        {/* Awareness hero */}
+        <Card className="p-4" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          <div className="flex items-center gap-2 mb-1">
+            <div aria-hidden style={{ width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center", background: GRADIENTS.primary, color: "#FFFFFF" }}>
+              <DollarSign size={16} />
+            </div>
+            <span className="font-semibold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY, fontSize: 19 }}>Tap to Pay on iPhone</span>
+          </div>
+          <p className="text-[12.5px]" style={{ color: C.coffee, lineHeight: 1.55 }}>
+            Accept contactless cards, Apple&nbsp;Pay, and digital wallets right on your iPhone — no extra reader or dongle. Charges run through your own Stripe account and reconcile to the appointment automatically.
+          </p>
+        </Card>
+
+        <SectionTitle>Enable</SectionTitle>
+        <Card className="p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Accept Tap to Pay in this app</p>
+              <p className="text-[12px]" style={{ color: C.muted, lineHeight: 1.45 }}>
+                Shows a Tap to Pay button at checkout when a balance is due.
+              </p>
+            </div>
+            <Toggle checked={enabled} onChange={setEnabled} />
+          </div>
+          {!isNative && (
+            <p className="text-[12px] mt-3" style={{ color: C.warning, lineHeight: 1.45 }}>
+              Tap to Pay works only in the Braid Boss Pro iPhone app. Install it from the App Store to charge cards in person.
+            </p>
+          )}
+          {enabled && isNative && supported === false && (
+            <p className="text-[12px] mt-3" style={{ color: C.warning, lineHeight: 1.45 }}>
+              This iPhone can&apos;t run Tap to Pay (it needs an iPhone&nbsp;XS or later on a recent iOS). The button stays hidden until you&apos;re on a supported device.
+            </p>
+          )}
+          {enabled && !chargesEnabled && (
+            <p className="text-[12px] mt-3" style={{ color: C.warning, lineHeight: 1.45 }}>
+              Connect your Stripe account so charges have somewhere to land.
+            </p>
+          )}
+        </Card>
+
+        <SectionTitle>Status</SectionTitle>
+        <Card className="p-4">
+          <TtpStatusRow
+            ok={deviceReady}
+            pending={supported === null}
+            title="iPhone & iOS"
+            sub={!isNative ? "Open the iPhone app to use Tap to Pay." : supported === null ? "Checking this device…" : supported ? "This iPhone supports Tap to Pay." : "Needs an iPhone XS or later on a recent iOS."}
+          />
+          <TtpStatusRow
+            ok={chargesEnabled}
+            pending={stripeConnect.loading}
+            title="Stripe payments"
+            sub={chargesEnabled ? "Connected — card payments enabled." : "Connect your Stripe account to take card payments."}
+          />
+          <TtpStatusRow ok title="Apple entitlement" sub="Tap to Pay on iPhone is granted for this app." />
+        </Card>
+        {!chargesEnabled && (
+          <Button variant="outline" fullWidth icon={<ChevronRight size={14} />} onClick={openStripe}>
+            Set up Stripe payments
+          </Button>
+        )}
+
+        <SectionTitle>How it works</SectionTitle>
+        <Card className="p-4 active:scale-[0.99]" onClick={() => setShowHow((v) => !v)}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <HelpCircle size={16} style={{ color: C.gold }} />
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Taking a Tap to Pay payment</p>
+            </div>
+            {showHow ? <ChevronUp size={18} style={{ color: C.muted }} /> : <ChevronDown size={18} style={{ color: C.muted }} />}
+          </div>
+          {showHow && (
+            <ol className="mt-3 space-y-2" style={{ listStyle: "none", padding: 0, margin: 0, counterReset: "ttp" }}>
+              {[
+                "Open an appointment that has a balance due.",
+                "Tap “Tap to Pay $…” under In-person payment.",
+                "The first time, accept Apple’s Terms of Service when prompted.",
+                "Hold the client’s card, phone, or watch near the top of your iPhone.",
+                "When it succeeds, offer a digital receipt, then tap Save.",
+              ].map((step, i) => (
+                <li key={i} className="flex items-start gap-2 text-[12.5px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                  <span aria-hidden style={{ flexShrink: 0, width: 18, height: 18, borderRadius: 999, background: C.ivory, border: `1px solid ${C.hairline}`, color: C.coffee, fontSize: 11, fontWeight: 700, display: "grid", placeItems: "center" }}>{i + 1}</span>
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
+
+        <SectionTitle>For App Review</SectionTitle>
+        <Card className="p-4">
+          <p className="text-[12px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+            To demo Tap to Pay: sign in as a stylist with Stripe connected, enable the toggle above, open an appointment with a balance, and tap “Tap to Pay $…”. The system sheet and the on-screen status indicator (Preparing → Ready → Processing) show the full flow; a successful charge then offers a digital receipt.
+          </p>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// One-time awareness splash shown to supported iPhones that haven't turned
+// Tap to Pay on yet. Points the merchant straight to the setup screen.
+const TapToPayAwareness = ({ onSetup, onDismiss }: { onSetup: () => void; onDismiss: () => void }) => (
+  <div
+    onClick={onDismiss}
+    style={{ position: "fixed", inset: 0, zIndex: 95, background: "rgba(21,17,26,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{ width: "100%", maxWidth: 420, background: C.cream, borderRadius: 22, padding: 22, boxShadow: "0 20px 60px -20px rgba(21,17,26,0.5)" }}
+    >
+      <div aria-hidden style={{ width: 48, height: 48, borderRadius: 999, display: "grid", placeItems: "center", background: GRADIENTS.primary, color: "#FFFFFF", margin: "0 auto 12px" }}>
+        <DollarSign size={22} />
+      </div>
+      <h2 style={{ fontFamily: FONT_DISPLAY, fontSize: 24, fontWeight: 600, color: C.espresso, textAlign: "center", margin: 0 }}>Tap to Pay on iPhone is here</h2>
+      <p className="text-[13px] mt-2" style={{ color: C.coffee, textAlign: "center", lineHeight: 1.55 }}>
+        Accept cards, Apple&nbsp;Pay, and digital wallets right on your iPhone — no extra reader. Set it up once and charge clients at the chair.
+      </p>
+      <div className="mt-4 grid gap-2">
+        <Button variant="primary" fullWidth onClick={onSetup}>Set up Tap to Pay</Button>
+        <Button variant="ghost" fullWidth onClick={onDismiss}>Maybe later</Button>
+      </div>
+    </div>
+  </div>
+);
+
 export default function App() {
   const auth = useAuth();
   // First-launch welcome screen — gates AuthGate until the user
@@ -34530,6 +34807,24 @@ export default function App() {
   const [moneyPeriod, setMoneyPeriod] = useState<string | null>(null);
   const goToMoney = (p: string) => { setMoneyPeriod(p); setActive("money"); };
   const [secondary, setSecondary] = useState<string | null>(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
+
+  // One-time Tap to Pay awareness splash. Shows once on a supported iPhone
+  // that hasn't enabled Tap to Pay yet, then never again (flag persisted).
+  const [ttpAwareOpen, setTtpAwareOpen] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !isNativePlatform()) return;
+    if (store.business?.tapToPayEnabled) return;
+    try { if (window.localStorage.getItem(TAP_TO_PAY_AWARE_KEY) === "1") return; } catch { return; }
+    let alive = true;
+    tapToPaySupported()
+      .then((ok) => { if (alive && ok) setTtpAwareOpen(true); })
+      .catch(() => { /* off-device / unsupported — never show */ });
+    return () => { alive = false; };
+  }, [store.business?.tapToPayEnabled]);
+  const markTtpAwareSeen = () => {
+    try { window.localStorage.setItem(TAP_TO_PAY_AWARE_KEY, "1"); } catch { /* private mode */ }
+    setTtpAwareOpen(false);
+  };
 
   // Persist the current screen so a page refresh / pull-to-refresh stays
   // put instead of dumping back to Home. `active` is the bottom-nav tab
@@ -34819,6 +35114,13 @@ export default function App() {
     <Frame withTabBar={secondary === null}>
       <GlobalStyle />
 
+      {ttpAwareOpen && (
+        <TapToPayAwareness
+          onSetup={() => { markTtpAwareSeen(); setSecondary("tapToPay"); }}
+          onDismiss={markTtpAwareSeen}
+        />
+      )}
+
       {secondary === null && (
         <>
           {active === "dashboard" && (
@@ -34870,6 +35172,7 @@ export default function App() {
               openReviews={() => setSecondary("reviews")}
               openProducts={() => setSecondary("products")}
               openSupport={() => setSecondary("support")}
+              openTapToPay={() => setSecondary("tapToPay")}
             />
           )}
           {active === "calculator" && (
@@ -34916,9 +35219,16 @@ export default function App() {
         </>
       )}
 
+      {secondary === "tapToPay" && (
+        <TapToPayScreen
+          store={store}
+          onBack={() => setSecondary("settings")}
+          openStripe={() => { if (typeof window !== "undefined") window.location.assign("/settings/payments"); }}
+        />
+      )}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openStyleRequests={() => setSecondary("styleRequests")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openStyleRequests={() => setSecondary("styleRequests")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} openTapToPay={() => setSecondary("tapToPay")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} openSocialTemplates={() => setSecondary("socialTemplates")} />}
       {secondary === "socialTemplates" && <SocialTemplatesScreen store={store} onBack={() => setSecondary("marketing")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}

@@ -18,4 +18,6 @@
 CAP_PLUGIN(TapToPayPlugin, "TapToPay",
     CAP_PLUGIN_METHOD(isSupported, CAPPluginReturnPromise);
     CAP_PLUGIN_METHOD(collectPayment, CAPPluginReturnPromise);
+    CAP_PLUGIN_METHOD(addListener, CAPPluginReturnCallback);
+    CAP_PLUGIN_METHOD(removeAllListeners, CAPPluginReturnPromise);
 )
