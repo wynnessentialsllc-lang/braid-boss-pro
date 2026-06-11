@@ -117,13 +117,20 @@ export const getAppointmentReminderNotifications = (
     if (isCanceledAppointment(a) || a.status === "completed" || a.status === "no_show") continue;
     // Don't remind about an unconfirmed booking whose deposit is unpaid.
     if (isAwaitingDeposit(a)) continue;
+    // Personal / blocked time (kind !== "appointment") isn't a client
+    // booking, and a row with no client name produces a vague
+    // "your client" pop-up. Skip both so every reminder names a real
+    // client — mirrors the kind filter in getBalanceDueNotifications.
+    if (a.kind && a.kind !== "appointment") continue;
+    const clientName =
+      typeof a.clientName === "string" ? a.clientName.trim() : "";
+    if (!clientName) continue;
     const startIso = cleanIso(a.date, a.time);
     const startMs = isoToMs(startIso);
     if (!isFinite_(startMs)) continue;
     const delta = startMs - nowMs;
     if (delta < 0) continue; // already happened
 
-    const clientName = a.clientName || "your client";
     const style = a.style || "the appointment";
     const at = fmtClock(a.date, a.time);
     const on = fmtDateNumeric(a.date);
