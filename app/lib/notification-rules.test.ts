@@ -60,3 +60,18 @@ describe("getAppointmentReminderNotifications — deposit gating", () => {
     expect(out).toHaveLength(1);
   });
 });
+
+describe("getAppointmentReminderNotifications — date formatting", () => {
+  it("renders the 48h reminder date as numeric M/D/YYYY, not ISO", () => {
+    // 2 days out from NOW (2026-06-07T09:00) lands in the appt_48h window.
+    const out = getAppointmentReminderNotifications(
+      [baseAppt({ date: "2026-06-09", time: "09:00" })],
+      NOW,
+      DEFAULT_NOTIFICATION_PREFERENCES,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe("appt_48h");
+    expect(out[0].body).toBe("Boho Knotless Bob on 6/9/2026 at 9 AM.");
+    expect(out[0].body).not.toContain("2026-06-09");
+  });
+});
