@@ -71,6 +71,18 @@ const isoToMs = (iso: string | null | undefined): number => {
   const t = new Date(iso).getTime();
   return isFinite_(t) ? t : NaN;
 };
+// Numeric M/D/YYYY date for notification copy, e.g. "2026-06-13" → "6/13/2026".
+// Renders the stored wall-clock date as-is (no timezone shift) so the
+// pop-up matches what the stylist booked.
+const fmtDateNumeric = (date: string): string => {
+  if (!date) return "";
+  const [y, m, d] = date.split("-").map(Number);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+    return date;
+  }
+  return `${m}/${d}/${y}`;
+};
+
 // 12-hour clock for in-app notification copy. Drops ":00" on the
 // hour so "10:00" reads as "10 AM" — matches the canonical fmtTime
 // helper in app/page.tsx.
@@ -114,6 +126,7 @@ export const getAppointmentReminderNotifications = (
     const clientName = a.clientName || "your client";
     const style = a.style || "the appointment";
     const at = fmtClock(a.date, a.time);
+    const on = fmtDateNumeric(a.date);
 
     const push = (kind: string, title: string, body: string, priority: NotificationPriority = "medium") => {
       out.push({
@@ -131,7 +144,7 @@ export const getAppointmentReminderNotifications = (
     };
 
     if (delta <= FORTY_EIGHT_H && delta > TWENTY_FOUR_H) {
-      push("appt_48h", `${clientName} in 2 days`, `${style} on ${a.date} at ${at}.`);
+      push("appt_48h", `${clientName} in 2 days`, `${style} on ${on} at ${at}.`);
     } else if (delta <= TWENTY_FOUR_H && delta > SAME_DAY_WINDOW) {
       push("appt_24h", `${clientName} tomorrow`, `${style} at ${at}.`, "high");
     } else if (delta <= SAME_DAY_WINDOW && delta > TWO_H) {
