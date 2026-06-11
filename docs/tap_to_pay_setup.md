@@ -100,7 +100,33 @@ No new database columns or migrations are required.
 
 ---
 
-## 5. App Review notes
+## 5. App Review Requirements Checklist (v1.6) — audit
+
+The in-app UX added for the publishing entitlement, mapped to the checklist
+themes Apple reviews:
+
+| Requirement | Where it lives | Notes |
+| --- | --- | --- |
+| **Awareness splash/banner** | `TapToPayAwareness` (one-time splash) | Shown once on a supported iPhone that hasn't enabled Tap to Pay; persisted via `bbp-ttp-aware-v1`. "Set up Tap to Pay" → settings; "Maybe later" dismisses. |
+| **Settings → Payments → Tap to Pay enablement** | `TapToPayScreen` (`secondary === "tapToPay"`), reached from Settings → Payments → **Tap to Pay** row | Merchant opt-in toggle persisted on `business.tapToPayEnabled`; the checkout button is gated on it. |
+| **Merchant education accessible later** | "How it works" expander in `TapToPayScreen` | Always reachable from Settings; step-by-step accept-a-payment guide. |
+| **Configuration progress/status indicator** | Native `tapToPayStatus` events → progress UI in the appointment checkout card | Stages: Preparing → Connecting → Updating (with progress bar) → Ready → Present card → Processing. |
+| **Readiness status** | Status card in `TapToPayScreen` | Live checks: device/iOS support, Stripe payments connected, Apple entitlement granted. |
+| **Post-payment digital receipt options** | "Give your client a receipt?" prompt after a successful charge | Reuses the receipt builder + `ReceiptSheet` (text / email / share / PDF), or "No receipt". |
+| **App Review video-ready flows** | Demo note in `TapToPayScreen` + the on-screen status indicator | Every state is reachable and demonstrable; see the demo script below. |
+
+### Demo script (for the App Review video / notes)
+1. Sign in as a stylist with Stripe connected.
+2. Settings → Payments → **Tap to Pay** → toggle **on** (status card shows green checks).
+3. Open an appointment with a balance due → **In-person payment** card shows the **Tap to Pay $…** button.
+4. Tap it → status indicator runs (Preparing → Ready), the system Tap to Pay sheet appears (accept the Terms of Service the first time).
+5. Present a test card → success toast, then the **digital receipt** prompt; choose text/email or skip; tap **Save**.
+
+These behaviors degrade safely: on web/PWA and on native builds without the
+plugin, the enablement row is hidden / the toggle has no effect and the
+checkout falls back to the existing manual copy.
+
+## 6. App Review notes
 
 - Tap to Pay on iPhone apps are reviewed against Apple's **Tap to Pay on
   iPhone App Requirements** and the **App Review Requirements Checklist**
