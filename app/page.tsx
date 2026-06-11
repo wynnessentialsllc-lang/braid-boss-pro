@@ -34755,11 +34755,20 @@ export default function App() {
   // this device (PWA web fallback) — the rules still surface in the
   // bell via buildNotifications. iOS native push will plug into the
   // same pipeline once we wrap with Capacitor.
+  const schedulerRunningRef = useRef(false);
   useEffect(() => {
     if (auth.mode !== "authed" || !auth.userId) return;
     let cancelled = false;
     let timer: any = null;
     const run = async () => {
+      // Re-entrancy guard. Opening the app churns store.appointments /
+      // store.clients (the sync rewrites them), which retriggers this
+      // effect while a previous pass is still awaiting dispatch. Two
+      // overlapping passes both read the same pre-dispatch delivery
+      // history and each fire the same reminder — the duplicate pop-ups.
+      // Bail if a pass is already in flight.
+      if (schedulerRunningRef.current) return;
+      schedulerRunningRef.current = true;
       try {
         const cap = await detectPushCapability();
         if (cap !== "subscribed") return; // no surface to deliver to
@@ -34788,11 +34797,18 @@ export default function App() {
         let nextHistory = history;
         for (const r of deliverable.slice(0, 10)) {
           const result = await dispatchPush(auth.userId!, r);
-          if (result.ok) nextHistory = { ...nextHistory, [r.id]: new Date().toISOString() };
+          if (result.ok) {
+            nextHistory = { ...nextHistory, [r.id]: new Date().toISOString() };
+            // Persist after every successful send so a re-run (or a
+            // crash mid-loop) never re-dispatches an already-delivered
+            // reminder — the history is the dedup source of truth.
+            saveDeliveredHistory(nextHistory);
+          }
         }
-        if (deliverable.length > 0) saveDeliveredHistory(nextHistory);
       } catch (err) {
         console.warn("[bbp] scheduler failed", err);
+      } finally {
+        schedulerRunningRef.current = false;
       }
     };
     run();
