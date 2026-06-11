@@ -27,6 +27,73 @@ export const saveDeliveredHistory = (history: Record<string, string>) => {
   catch { /* quota */ }
 };
 
+// Durable, cross-device dedup ledger. localStorage alone is wiped by iOS
+// after the PWA sits idle (ITP storage eviction), which makes already-seen
+// reminders re-fire on the next open. notification_reminder_deliveries is
+// the authoritative record; we merge it with the local cache so a reminder
+// seen once stays suppressed across restarts and across devices.
+const DELIVERY_TABLE = "notification_reminder_deliveries";
+// Only the recent window matters: appointment reminders key off a future
+// date and the retention/business re-fire windows are <= 12h, so rows older
+// than this are dead weight. We both read within it and prune past it.
+const DELIVERY_WINDOW_DAYS = 45;
+
+// Load the merged (server ∪ local) delivery history for a user. Falls back
+// to the local cache on any error so a network blip can't unleash a flood
+// of re-fired reminders. Re-seeds localStorage from the server so a later
+// offline open still dedupes, and opportunistically prunes stale rows.
+export const loadDeliveredHistoryRemote = async (
+  userId: string,
+): Promise<Record<string, string>> => {
+  const local = loadDeliveredHistory();
+  if (!userId) return local;
+  try {
+    const since = new Date(
+      Date.now() - DELIVERY_WINDOW_DAYS * 86400_000,
+    ).toISOString();
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from(DELIVERY_TABLE)
+      .select("rule_id, delivered_at")
+      .eq("user_id", userId)
+      .gte("delivered_at", since);
+    if (error || !data) return local;
+    const merged: Record<string, string> = { ...local };
+    for (const row of data as { rule_id: string; delivered_at: string }[]) {
+      if (row?.rule_id) merged[row.rule_id] = row.delivered_at;
+    }
+    saveDeliveredHistory(merged);
+    // Best-effort prune of rows past the window; never blocks the result.
+    void supabase
+      .from(DELIVERY_TABLE)
+      .delete()
+      .eq("user_id", userId)
+      .lt("delivered_at", since)
+      .then(() => {}, () => {});
+    return merged;
+  } catch {
+    return local;
+  }
+};
+
+// Record a single successful dispatch in the durable ledger. Best-effort:
+// the local cache (saved by the caller) still holds it if this write fails.
+export const recordDeliveryRemote = async (
+  userId: string,
+  ruleId: string,
+  deliveredAtIso: string,
+): Promise<void> => {
+  if (!userId || !ruleId) return;
+  try {
+    await getSupabase()
+      .from(DELIVERY_TABLE)
+      .upsert(
+        { user_id: userId, rule_id: ruleId, delivered_at: deliveredAtIso },
+        { onConflict: "user_id,rule_id" },
+      );
+  } catch { /* local cache is the fallback */ }
+};
+
 // supabase-js wraps Edge Function failures in three error classes:
 //  - FunctionsFetchError ("Failed to send a request to the Edge
 //    Function") — network / function crashed on import / CORS.

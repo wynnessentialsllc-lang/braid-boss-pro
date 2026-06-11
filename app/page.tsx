@@ -462,7 +462,8 @@ import {
 import {
   dispatchPush,
   dropInactiveAppointmentRules,
-  loadDeliveredHistory,
+  loadDeliveredHistoryRemote,
+  recordDeliveryRemote,
   saveDeliveredHistory,
   sendTestPush,
 } from "./lib/push-dispatch";
@@ -18845,12 +18846,22 @@ const buildNotifications = (store: any): NotifItem[] => {
 
 const DISMISSED_NOTIF_KEY = "dismissedNotifIds";
 const READ_NOTIF_KEY = "readNotifIds";
+// "Remind me later" memory: { notifId: wakeIso }. An item stays hidden
+// from the bell until now >= wakeIso, then reappears (still unread).
+const SNOOZED_NOTIF_KEY = "snoozedNotifIds";
+// How long "Later" hides a notification before it resurfaces.
+const SNOOZE_HOURS = 3;
 
 // Shared notification state so the dashboard badge and the notifications
 // sheet always agree, including across reloads.
 const useNotifications = (store: any) => {
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [read, setRead] = useState<string[]>([]);
+  // id → ISO wake time. Snoozed items are filtered out until their wake
+  // time passes. A periodic "now" tick re-evaluates so a snooze that
+  // expires while the app is open resurfaces the item on its own.
+  const [snoozed, setSnoozed] = useState<Record<string, string>>({});
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
   const [hydrated, setHydrated] = useState(false);
   // Cloud-side communication notifications mirrored from the
   // notification_queue (see migration 20260808). One bell row per
@@ -18861,9 +18872,10 @@ const useNotifications = (store: any) => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [rawDismissed, rawRead] = await Promise.all([
+      const [rawDismissed, rawRead, rawSnoozed] = await Promise.all([
         safeStorage.get(DISMISSED_NOTIF_KEY),
         safeStorage.get(READ_NOTIF_KEY),
+        safeStorage.get(SNOOZED_NOTIF_KEY),
       ]);
       const parseList = (raw: string | null): string[] => {
         const parsed = safeParse<unknown>(raw, []);
@@ -18872,9 +18884,30 @@ const useNotifications = (store: any) => {
       if (cancelled) return;
       setDismissed(parseList(rawDismissed));
       setRead(parseList(rawRead));
+      // Drop already-expired snoozes on load so the map stays small.
+      const parsedSnoozed = safeParse<Record<string, string>>(rawSnoozed, {});
+      const nowMs = Date.now();
+      const liveSnoozed: Record<string, string> = {};
+      if (parsedSnoozed && typeof parsedSnoozed === "object") {
+        for (const [id, wake] of Object.entries(parsedSnoozed)) {
+          if (typeof wake === "string" && new Date(wake).getTime() > nowMs) {
+            liveSnoozed[id] = wake;
+          }
+        }
+      }
+      setSnoozed(liveSnoozed);
       setHydrated(true);
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  // Re-evaluate snooze expiry on a slow tick so a notification that was
+  // snoozed earlier in the session reappears without needing a reload.
+  useEffect(() => {
+    const t = window.setInterval(() => setNowTick(Date.now()), 60_000);
+    const onFocus = () => setNowTick(Date.now());
+    window.addEventListener("focus", onFocus);
+    return () => { window.clearInterval(t); window.removeEventListener("focus", onFocus); };
   }, []);
 
   // Pull the stylist's "email sent" records from the cloud
@@ -19043,7 +19076,17 @@ const useNotifications = (store: any) => {
     [store.reminders, store.appointments, store.clients, store.business,
      store.approvalsApi?.requests, persistedItems],
   );
-  const items = useMemo(() => allItems.filter(n => !dismissed.includes(n.id)), [allItems, dismissed]);
+  const items = useMemo(() => {
+    const dismissedSet = new Set(dismissed);
+    return allItems.filter(n => {
+      if (dismissedSet.has(n.id)) return false;
+      const wake = snoozed[n.id];
+      // Hidden only while the snooze is still in the future; once it
+      // lapses the item flows back into the list.
+      if (wake && new Date(wake).getTime() > nowTick) return false;
+      return true;
+    });
+  }, [allItems, dismissed, snoozed, nowTick]);
   // Badge counts EVERY unread notification, including communication
   // rows (emails sent on the stylist's behalf, failed reminders, etc.).
   // The bell is opened via markAllRead, so the count is effectively
@@ -19115,6 +19158,21 @@ const useNotifications = (store: any) => {
     void cloudDismiss([id]);
   }, [dismissed, cloudDismiss]);
 
+  // "Remind me later" — hide the item for SNOOZE_HOURS, then let it
+  // resurface (still unread). Local-only; a snooze is short-lived and
+  // device-specific, so it doesn't need the cloud round-trip dismiss uses.
+  const snooze = useCallback((id: string, hours: number = SNOOZE_HOURS) => {
+    const wake = new Date(Date.now() + hours * 3600_000).toISOString();
+    const next = { ...snoozed, [id]: wake };
+    setSnoozed(next);
+    void safeStorage.set(SNOOZED_NOTIF_KEY, next);
+    // Clear any read flag so that when the item resurfaces it badges
+    // again — the whole point of "remind me later" is a fresh nudge.
+    if (read.includes(id)) {
+      persist(READ_NOTIF_KEY, read.filter(r => r !== id), setRead);
+    }
+  }, [snoozed, read]);
+
   const clearAll = useCallback(() => {
     if (items.length === 0) return;
     const ids = items.map(n => n.id);
@@ -19137,7 +19195,7 @@ const useNotifications = (store: any) => {
 
   const readIds = useMemo(() => new Set(read), [read]);
 
-  return { hydrated, items, unreadCount, dismiss, clearAll, markAllRead, markRead, readIds };
+  return { hydrated, items, unreadCount, dismiss, snooze, clearAll, markAllRead, markRead, readIds };
 };
 
 // ---- Notification action router ----------------------------------------
@@ -19555,12 +19613,13 @@ const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: 
   );
 };
 
-const NotificationsSheet = ({ open, onClose, items, unreadCount, dismiss, clearAll, markAllRead, onTap, readIds }: {
+const NotificationsSheet = ({ open, onClose, items, unreadCount, dismiss, snooze, clearAll, markAllRead, onTap, readIds }: {
   open: boolean;
   onClose: () => void;
   items: NotifItem[];
   unreadCount: number;
   dismiss: (id: string) => void;
+  snooze: (id: string) => void;
   clearAll: () => void;
   markAllRead: () => void;
   onTap: (n: NotifItem) => void;
@@ -19654,15 +19713,33 @@ const NotificationsSheet = ({ open, onClose, items, unreadCount, dismiss, clearA
                       <ChevronRight size={16} style={{ color: C.muted, marginTop: 6, flexShrink: 0 }} />
                     )}
                   </button>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); dismiss(n.id); }}
-                    aria-label="Dismiss notification"
-                    className="p-3 shrink-0 rounded-full active:scale-[0.92] transition"
-                    style={{ color: C.danger, background: "transparent", border: 0, alignSelf: "flex-start", margin: 4 }}
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  <div className="flex flex-col items-center shrink-0 self-stretch justify-center" style={{ paddingRight: 4 }}>
+                    {/* Remind me later — hides the item for a few hours,
+                        then it resurfaces (and re-badges). Info-only
+                        communication rows can't usefully snooze. */}
+                    {n.category !== "communication_status" && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); snooze(n.id); }}
+                        aria-label="Remind me later"
+                        title="Remind me later"
+                        className="p-2.5 rounded-full active:scale-[0.92] transition"
+                        style={{ color: C.coffee, background: "transparent", border: 0 }}
+                      >
+                        <Clock size={16} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); dismiss(n.id); }}
+                      aria-label="Dismiss notification"
+                      title="Dismiss"
+                      className="p-2.5 rounded-full active:scale-[0.92] transition"
+                      style={{ color: C.danger, background: "transparent", border: 0 }}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </Card>
               );
             })}
@@ -34779,15 +34856,19 @@ export default function App() {
           .eq("user_id", auth.userId)
           .maybeSingle();
         const prefs = ((settingsRow?.data as any)?.notification_preferences) || DEFAULT_NOTIFICATION_PREFERENCES;
+        // Durable dedup memory: merge the server ledger with the local
+        // cache so a reminder seen once stays suppressed even after iOS
+        // wipes localStorage during a long idle period (the cause of the
+        // re-appearing pop-ups).
+        const history = await loadDeliveredHistoryRemote(auth.userId!);
         const rules = runNotificationRules({
           clients: store.clients,
           appointments: store.appointments,
           todayIso: todayISO(),
           nowMs: Date.now(),
           preferences: prefs,
-          deliveredHistory: loadDeliveredHistory(),
+          deliveredHistory: history,
         });
-        const history = loadDeliveredHistory();
         const { toSend } = splitDeliverable(rules, history, new Date());
         // Authoritative re-check against the DB so a cancellation made
         // off-device (another device, client self-service link) can't
@@ -34798,11 +34879,14 @@ export default function App() {
         for (const r of deliverable.slice(0, 10)) {
           const result = await dispatchPush(auth.userId!, r);
           if (result.ok) {
-            nextHistory = { ...nextHistory, [r.id]: new Date().toISOString() };
+            const iso = new Date().toISOString();
+            nextHistory = { ...nextHistory, [r.id]: iso };
             // Persist after every successful send so a re-run (or a
             // crash mid-loop) never re-dispatches an already-delivered
-            // reminder — the history is the dedup source of truth.
+            // reminder — the history is the dedup source of truth. Local
+            // cache for speed/offline; server ledger for durability.
             saveDeliveredHistory(nextHistory);
+            await recordDeliveryRemote(auth.userId!, r.id, iso);
           }
         }
       } catch (err) {
@@ -35469,6 +35553,7 @@ export default function App() {
         items={notifications.items}
         unreadCount={notifications.unreadCount}
         dismiss={notifications.dismiss}
+        snooze={notifications.snooze}
         clearAll={notifications.clearAll}
         markAllRead={notifications.markAllRead}
         onTap={handleNotificationTap}
