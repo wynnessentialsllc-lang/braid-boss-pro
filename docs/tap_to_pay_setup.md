@@ -40,10 +40,15 @@ on any native build without the plugin, so the UI falls back to the existing
   no address on file, the token route returns a clear error asking the
   stylist to add their business address in Stripe.
 - The merchant's **connected account** must have **Tap to Pay / card_present
-  Terminal capability** active. Enable Terminal for the platform in the
-  Stripe Dashboard if it isn't already.
+  Terminal capability** active. The **"Enable / check Tap to Pay"** button in
+  `/settings/payments` requests the `card_present` capability and provisions
+  a Terminal Location via `POST /api/stripe-connect/terminal/enable`, and
+  reports ready / pending / inactive — it doubles as the probe for whether a
+  Stripe support ticket is needed.
 
-No new database columns or migrations are required.
+Apply migration `supabase/migrations/20261023000000_terminal_location.sql`
+(adds `profiles.stripe_terminal_location_id`) so the provisioned Terminal
+Location id is cached and reused instead of re-created each charge.
 
 ---
 
