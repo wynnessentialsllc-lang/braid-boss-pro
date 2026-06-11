@@ -61,7 +61,12 @@ const addressFromAccount = (acct: any): Record<string, string> | null => {
 const ensureLocation = async (
   secret: string,
   acctId: string,
+  cachedId?: string | null,
 ): Promise<{ id: string } | { error: string }> => {
+  // Reuse the location we provisioned earlier (cached on the profile) so
+  // we don't list/create on every charge.
+  if (cachedId) return { id: cachedId };
+
   const headers = {
     Authorization: `Bearer ${secret}`,
     "Stripe-Version": STRIPE_VERSION,
@@ -157,17 +162,22 @@ export async function POST(req: Request) {
 
   const { data: profile } = await admin
     .from("profiles")
-    .select("stripe_connect_account_id")
+    .select("stripe_connect_account_id, stripe_terminal_location_id")
     .eq("id", user.id)
     .maybeSingle();
   const acctId = profile?.stripe_connect_account_id || null;
   if (!acctId) {
     return fail(409, "Connect your Stripe account before using Tap to Pay.");
   }
+  const cachedLocationId = profile?.stripe_terminal_location_id || null;
 
-  // Terminal location (find-or-create) for the reader to register against.
-  const loc = await ensureLocation(stripeSecret, acctId);
+  // Terminal location (cached → find-or-create) for the reader to register
+  // against. Persist a freshly-created one so the next charge reuses it.
+  const loc = await ensureLocation(stripeSecret, acctId, cachedLocationId);
   if ("error" in loc) return fail(422, loc.error);
+  if (loc.id !== cachedLocationId) {
+    await admin.from("profiles").update({ stripe_terminal_location_id: loc.id }).eq("id", user.id);
+  }
 
   // Connection token on the connected account.
   let secret: string | null = null;
