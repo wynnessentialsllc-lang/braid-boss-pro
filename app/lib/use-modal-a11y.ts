@@ -9,7 +9,7 @@
 // behavior — onEscape and lockScroll are opt-out so a component that
 // already handles those (e.g. CartDrawer) can take just the focus trap.
 
-import { useEffect, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 const FOCUSABLE = [
   "a[href]",
@@ -34,6 +34,22 @@ export function useModalA11y(
 ) {
   const { onEscape = true, lockScroll = true } = opts;
 
+  // Read the close callback and the escape flag through refs so this effect's
+  // identity doesn't change when a caller passes a fresh `onClose` on every
+  // render. Many sheets hold their editing state in the PARENT screen, so a
+  // keystroke re-renders the screen and hands `<Sheet>` a new inline
+  // `onClose`. If that were a dependency, the whole effect would tear down and
+  // re-run on every keystroke — toggling the body scroll-lock and restoring
+  // focus mid-type, which makes the page jump/scroll (badly so on iOS
+  // WKWebView). Keying the effect to `[open]` alone runs the trap + scroll
+  // lock exactly once per open, while these refs keep the latest callbacks.
+  const onCloseRef = useRef(onClose);
+  const onEscapeRef = useRef(onEscape);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+    onEscapeRef.current = onEscape;
+  });
+
   useEffect(() => {
     if (!open) return;
     const previouslyFocused =
@@ -51,9 +67,9 @@ export function useModalA11y(
     });
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (onEscape && e.key === "Escape") {
+      if (onEscapeRef.current && e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -95,5 +111,5 @@ export function useModalA11y(
         previouslyFocused.focus({ preventScroll: true });
       }
     };
-  }, [open, onClose, containerRef, onEscape, lockScroll]);
+  }, [open, containerRef, lockScroll]);
 }
