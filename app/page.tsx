@@ -31605,29 +31605,65 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                 placeholder="Helps preserve braids overnight."
               />
             </Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Price">
-                <MoneyInput
-                  value={editing.price ?? ""}
-                  // Store the raw cleaned string from MoneyInput in
-                  // state and let the hook coerce on save. parseMoney()
-                  // on every keystroke collapses "25." to 25 and
-                  // strips trailing zeros, so the stylist couldn't
-                  // enter prices like $25.99 — once the dot was typed
-                  // the input snapped back to the integer. The DB
-                  // column is numeric(10,2); the useProducts.upsert
-                  // path already calls Number(draft.price) and
-                  // validates finite + >= 0.
-                  onChange={(v) => setEditing({ ...editing, price: v === "" ? null : (v as any) })}
-                />
-              </Field>
-              <Field label="Compare-at" hint="Original price; shown as strikethrough.">
-                <MoneyInput
-                  value={editing.compare_at_price ?? ""}
-                  onChange={(v) => setEditing({ ...editing, compare_at_price: v === "" ? null : (v as any) })}
-                />
-              </Field>
-            </div>
+            {/* Sale model: the storefront shows a struck-through price +
+                "Sale" badge whenever compare_at_price > price. We surface
+                that as a friendly "On sale" toggle instead of the raw
+                compare-at field. While on sale, `price` is what customers
+                pay and `compare_at_price` holds the regular price; off
+                sale, compare_at_price is cleared. onSale ⇔ a regular price
+                is parked in compare_at_price. */}
+            {(() => {
+              const onSale = editing.compare_at_price != null;
+              const regularPrice = onSale ? editing.compare_at_price : editing.price;
+              return (
+                <>
+                  <Field label="Price">
+                    <MoneyInput
+                      value={regularPrice ?? ""}
+                      // Store the raw cleaned string from MoneyInput in
+                      // state and let the hook coerce on save. parseMoney()
+                      // on every keystroke collapses "25." to 25 and
+                      // strips trailing zeros, so the stylist couldn't
+                      // enter prices like $25.99 — once the dot was typed
+                      // the input snapped back to the integer. The DB
+                      // column is numeric(10,2); the useProducts.upsert
+                      // path already calls Number(draft.price) and
+                      // validates finite + >= 0.
+                      onChange={(v) => setEditing(onSale
+                        ? { ...editing, compare_at_price: v === "" ? null : (v as any) }
+                        : { ...editing, price: v === "" ? null : (v as any) })}
+                    />
+                  </Field>
+                  <Card className="p-3.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold" style={{ color: C.espresso }}>On sale</p>
+                        <p className="text-[11px]" style={{ color: C.muted }}>Shows the regular price struck through with a “Sale” badge on your storefront.</p>
+                      </div>
+                      <Toggle
+                        checked={onSale}
+                        onChange={(v: boolean) => setEditing(v
+                          // Turn on: park the current price as the regular
+                          // (compare-at) price. price stays put as the
+                          // starting sale price until it's lowered below.
+                          ? { ...editing, compare_at_price: editing.price }
+                          // Turn off: restore the regular price and clear
+                          // the sale.
+                          : { ...editing, price: regularPrice, compare_at_price: null })}
+                      />
+                    </div>
+                  </Card>
+                  {onSale && (
+                    <Field label="Sale price" hint="What customers pay — set it below the regular price.">
+                      <MoneyInput
+                        value={editing.price ?? ""}
+                        onChange={(v) => setEditing({ ...editing, price: v === "" ? null : (v as any) })}
+                      />
+                    </Field>
+                  )}
+                </>
+              );
+            })()}
             <Field label="Inventory" hint="Leave blank to skip stock tracking.">
               <Input
                 type="number" inputMode="numeric" step="1" min="0"
