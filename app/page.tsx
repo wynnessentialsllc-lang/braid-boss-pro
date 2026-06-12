@@ -1943,6 +1943,23 @@ const useStorage = () => {
     setReminders(prev => prev.filter(r => !(r.appointmentId === appointmentId && r.status === "pending")));
   }, []);
 
+  // Permanently deleting an appointment drops its row from the cloud via the
+  // push-sync diff, but the booking_request that materialized it stays behind
+  // — still approved, appointment_id pointing at the now-gone row — and keeps
+  // generating client reminders. Retire it on the server so the data stays
+  // consistent. Best-effort and idempotent: no-op when there's no linked
+  // booking (stylist-created appointment) or no active session.
+  const retireBookingForAppt = useCallback(async (appointmentId) => {
+    if (!appointmentId) return;
+    try {
+      await getSupabase().rpc("retire_booking_for_deleted_appointment", {
+        appt_id_in: appointmentId,
+      });
+    } catch (e) {
+      if (typeof console !== "undefined") console.warn("[bbp] retireBookingForAppt failed", e);
+    }
+  }, []);
+
   const bulkInsertAppointments = useCallback(async (list) => {
     for (const a of list) await safeStorage.set(`appointments:${a.id}`, a);
     setAppointments(prev => [...prev, ...list]);
@@ -2031,7 +2048,7 @@ const useStorage = () => {
     reminderTemplates, upsertReminderTemplate, deleteReminderTemplate,
     reminders, upsertReminder, deleteReminder,
     scheduleRemindersForAppointment, sendReminderNow,
-    bulkInsertReminders, cancelRemindersForAppt,
+    bulkInsertReminders, cancelRemindersForAppt, retireBookingForAppt,
     clients, upsertClient, deleteClient, clientById,
     appointments, upsertAppointment, deleteAppointment, bulkInsertAppointments,
     quotes, upsertQuote, deleteQuote,
@@ -10358,6 +10375,9 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       "Permanently delete this appointment? This removes it from your schedule, history, and reports. This cannot be undone.",
     )) return;
     await store.cancelRemindersForAppt(form.id);
+    // Retire the linked booking first so the cloud delete that follows
+    // doesn't leave an orphaned, still-"approved" booking behind.
+    await store.retireBookingForAppt(form.id);
     await deleteAppointment(form.id);
     onClose();
   };
@@ -23878,6 +23898,7 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
     setPurging(true);
     try {
       for (const a of cancelled) {
+        await store.retireBookingForAppt(a.id);
         await store.deleteAppointment(a.id);
       }
     } finally {
