@@ -504,11 +504,17 @@ export async function POST(req: Request) {
     form.set("discounts[0][coupon]", String(coupon.id));
   }
 
-  // Stripe Tax (automatic by buyer address). Each taxable amount needs a
-  // tax_behavior; we collect a billing address when there's no shipping
-  // address (e.g. pickup) so Stripe can locate the buyer. Keys are tracked
-  // so we can strip them and retry if the connected account hasn't finished
-  // Stripe Tax setup — a misconfigured shop should still be able to sell.
+  // Stripe Tax (automatic by buyer address). Automatic tax REQUIRES a tax
+  // code on every taxable amount (or an account default), so we tag each line
+  // with the general tangible-goods code and shipping with the shipping code —
+  // without these Stripe rejects the session and we'd silently fall back to no
+  // tax. tax_behavior is exclusive (added on top). We collect a billing
+  // address when there's no shipping address (e.g. pickup) so Stripe can
+  // locate the buyer. Keys are tracked so we can strip them and retry if the
+  // connected account hasn't finished Stripe Tax setup — a misconfigured shop
+  // should still be able to sell.
+  const TAX_CODE_GOODS = "txcd_99999999"; // General - Tangible Goods
+  const TAX_CODE_SHIPPING = "txcd_92010001"; // Shipping
   const taxKeys: string[] = [];
   if (taxEnabled) {
     const addTaxKey = (k: string, v: string) => {
@@ -517,9 +523,13 @@ export async function POST(req: Request) {
     };
     addTaxKey("automatic_tax[enabled]", "true");
     if (!collectShippingAddress) addTaxKey("billing_address_collection", "required");
-    resolved.forEach((_, i) => addTaxKey(`line_items[${i}][price_data][tax_behavior]`, "exclusive"));
+    resolved.forEach((_, i) => {
+      addTaxKey(`line_items[${i}][price_data][tax_behavior]`, "exclusive");
+      addTaxKey(`line_items[${i}][price_data][product_data][tax_code]`, TAX_CODE_GOODS);
+    });
     if (collectShippingAddress) {
       addTaxKey("shipping_options[0][shipping_rate_data][tax_behavior]", "exclusive");
+      addTaxKey("shipping_options[0][shipping_rate_data][tax_code]", TAX_CODE_SHIPPING);
     }
   }
 
@@ -538,8 +548,17 @@ export async function POST(req: Request) {
 
   let stripeRes = await postSession();
   // Graceful tax fallback: if the session was rejected and tax was applied,
-  // drop the tax params and retry once so the sale still goes through.
+  // drop the tax params and retry once so the sale still goes through. We log
+  // Stripe's reason first — a silent strip is how tax can "disappear" when the
+  // connected account's Stripe Tax isn't fully set up.
   if (!stripeRes.ok && taxKeys.length > 0) {
+    const why = await stripeRes
+      .clone()
+      .text()
+      .catch(() => "");
+    console.warn(
+      `[product-checkout] tax params rejected for ${stylistAccountId}; retrying without tax: ${why.slice(0, 300)}`,
+    );
     for (const k of taxKeys) form.delete(k);
     stripeRes = await postSession();
   }
