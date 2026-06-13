@@ -32530,6 +32530,7 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
   const [deliveryFee, setDeliveryFee] = useState<string>("");
   const [shippingFlatRate, setShippingFlatRate] = useState<string>("");
   const [shippingFreeThreshold, setShippingFreeThreshold] = useState<string>("");
+  const [taxEnabled, setTaxEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
@@ -32560,6 +32561,7 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
         setDeliveryFee(data.delivery_fee == null ? "" : String(data.delivery_fee));
         setShippingFlatRate(data.shipping_flat_rate == null ? "" : String(data.shipping_flat_rate));
         setShippingFreeThreshold(data.shipping_free_threshold == null ? "" : String(data.shipping_free_threshold));
+        setTaxEnabled(!!data.tax_enabled);
       }
       setLoading(false);
     })();
@@ -32588,6 +32590,7 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
       delivery_fee: deliveryFee.trim() === "" ? null : Math.max(0, Number(deliveryFee) || 0),
       shipping_flat_rate: shippingFlatRate.trim() === "" ? null : Math.max(0, Number(shippingFlatRate) || 0),
       shipping_free_threshold: shippingFreeThreshold.trim() === "" ? null : Math.max(0, Number(shippingFreeThreshold) || 0),
+      tax_enabled: taxEnabled,
       updated_at: new Date().toISOString(),
     };
     const { error: err } = await getSupabase().from("shop_settings").upsert(payload, { onConflict: "user_id" });
@@ -32648,6 +32651,19 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
                     <MoneyInput value={shippingFreeThreshold} onChange={(v) => setShippingFreeThreshold(v)} placeholder="—" />
                   </Field>
                 </div>
+              )}
+              <div style={{ borderTop: `1px solid ${C.hairline}` }} />
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Collect sales tax</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Stripe calculates tax by the buyer's address.</p>
+                </div>
+                <Toggle checked={taxEnabled} onChange={(v: boolean) => setTaxEnabled(v)} />
+              </div>
+              {taxEnabled && (
+                <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5, background: "rgba(251,191,36,0.10)", borderRadius: 10, padding: "8px 10px" }}>
+                  Turn on <strong>Stripe Tax</strong> in your Stripe dashboard (Settings → Tax) and add your registrations first. Until then, orders check out without tax — your sales are never blocked.
+                </p>
               )}
             </Card>
             <Card className="p-3.5 space-y-3">

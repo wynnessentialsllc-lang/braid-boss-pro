@@ -302,13 +302,16 @@ export async function POST(req: Request) {
   const { data: shopCfg } = await admin
     .from("shop_settings")
     .select(
-      "pickup_enabled, delivery_enabled, shipping_enabled, shipping_mode, shipping_flat_rate, shipping_free_threshold, delivery_fee",
+      "pickup_enabled, delivery_enabled, shipping_enabled, shipping_mode, shipping_flat_rate, shipping_free_threshold, delivery_fee, tax_enabled",
     )
     .eq("user_id", stylistUserId)
     .maybeSingle();
   const anyFulfillmentEnabled = !!(
     shopCfg && (shopCfg.pickup_enabled || shopCfg.delivery_enabled || shopCfg.shipping_enabled)
   );
+  // Stripe Tax (automatic, by buyer address). Opt-in; applied below with a
+  // graceful fallback so it can never block a sale.
+  const taxEnabled = !!(shopCfg && (shopCfg as any).tax_enabled);
   const toCents = (v: unknown): number => {
     const n = Number(v);
     return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : 0;
@@ -501,17 +504,45 @@ export async function POST(req: Request) {
     form.set("discounts[0][coupon]", String(coupon.id));
   }
 
-  const stripeRes = await fetch(`${STRIPE_API}/checkout/sessions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${stripeSecret}`,
-      "Stripe-Version": "2024-06-20",
-      "Stripe-Account": stylistAccountId,
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body: form.toString(),
-    cache: "no-store",
-  });
+  // Stripe Tax (automatic by buyer address). Each taxable amount needs a
+  // tax_behavior; we collect a billing address when there's no shipping
+  // address (e.g. pickup) so Stripe can locate the buyer. Keys are tracked
+  // so we can strip them and retry if the connected account hasn't finished
+  // Stripe Tax setup — a misconfigured shop should still be able to sell.
+  const taxKeys: string[] = [];
+  if (taxEnabled) {
+    const addTaxKey = (k: string, v: string) => {
+      form.set(k, v);
+      taxKeys.push(k);
+    };
+    addTaxKey("automatic_tax[enabled]", "true");
+    if (!collectShippingAddress) addTaxKey("billing_address_collection", "required");
+    resolved.forEach((_, i) => addTaxKey(`line_items[${i}][price_data][tax_behavior]`, "exclusive"));
+    if (collectShippingAddress) {
+      addTaxKey("shipping_options[0][shipping_rate_data][tax_behavior]", "exclusive");
+    }
+  }
+
+  const postSession = () =>
+    fetch(`${STRIPE_API}/checkout/sessions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${stripeSecret}`,
+        "Stripe-Version": "2024-06-20",
+        "Stripe-Account": stylistAccountId,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: form.toString(),
+      cache: "no-store",
+    });
+
+  let stripeRes = await postSession();
+  // Graceful tax fallback: if the session was rejected and tax was applied,
+  // drop the tax params and retry once so the sale still goes through.
+  if (!stripeRes.ok && taxKeys.length > 0) {
+    for (const k of taxKeys) form.delete(k);
+    stripeRes = await postSession();
+  }
   if (!stripeRes.ok) {
     const text = await stripeRes.text().catch(() => "");
     await admin

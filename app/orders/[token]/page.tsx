@@ -82,6 +82,7 @@ type OrderRow = {
   subtotal: number | null;
   shipping_cost: number | null;
   fulfillment_method: string | null;
+  tax_amount: number | null;
 };
 
 const STATUS_LABEL: Record<string, { label: string; tone: string }> = {
@@ -339,6 +340,14 @@ export default function OrderTrackingPage() {
                     : fmtMoney(Number(order.shipping_cost || 0), order.currency)}
                 </span>
               </div>
+              {order.tax_amount != null && Number(order.tax_amount) > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 13, color: C.muted }}>Tax</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>
+                    {fmtMoney(Number(order.tax_amount || 0), order.currency)}
+                  </span>
+                </div>
+              )}
             </div>
           )}
           <div
