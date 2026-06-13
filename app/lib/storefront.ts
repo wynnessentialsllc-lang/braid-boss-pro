@@ -428,6 +428,8 @@ export type Product = {
   // When true (and is_gift_card), the storefront shows an "Other
   // amount" input so the buyer can choose any amount in range.
   gift_card_allow_custom: boolean;
+  // Shipping weight in ounces — used to quote live carrier (Shippo) rates.
+  weight_oz: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -443,6 +445,7 @@ export type ProductInput = Pick<
   | "reorder_after_weeks"
   | "is_gift_card"
   | "gift_card_allow_custom"
+  | "weight_oz"
 >;
 
 // URL-friendly slug from a free-form title. Mirrors the DB
@@ -546,6 +549,7 @@ export const useProducts = (userId: string | null): {
       reorder_after_weeks:    has("reorder_after_weeks")    ? draft.reorder_after_weeks!   : (existing as any).reorder_after_weeks ?? null,
       is_gift_card:           has("is_gift_card")           ? draft.is_gift_card!           : (existing as any).is_gift_card ?? false,
       gift_card_allow_custom: has("gift_card_allow_custom") ? draft.gift_card_allow_custom! : (existing as any).gift_card_allow_custom ?? false,
+      weight_oz:              has("weight_oz")              ? draft.weight_oz!              : (existing as any).weight_oz ?? null,
     };
   };
 
@@ -631,6 +635,14 @@ export const useProducts = (userId: string | null): {
       // Custom amount only meaningful for gift cards; force off
       // otherwise so a stale flag can't linger on a normal product.
       gift_card_allow_custom: !!draft.is_gift_card && !!draft.gift_card_allow_custom,
+      // Shipping weight (oz) for live carrier rates. Empty / 0 / non-number
+      // => null (no weight set).
+      weight_oz: (() => {
+        const raw = (draft as any).weight_oz;
+        if (raw == null || raw === "") return null;
+        const n = Number(raw);
+        return Number.isFinite(n) && n > 0 ? n : null;
+      })(),
     };
     const supabase = getSupabase();
     const { data, error: err } = draft.id

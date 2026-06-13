@@ -31359,6 +31359,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
     reorder_after_weeks: number | null;
     is_gift_card: boolean;
     gift_card_allow_custom: boolean;
+    weight_oz: number | null;
   }>;
   const [editing, setEditing] = useState<Draft | null>(null);
   // Raw textarea content for the variants list. Decoupled from
@@ -31512,6 +31513,7 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                 reorder_after_weeks: (p as any).reorder_after_weeks ?? null,
                 is_gift_card: !!(p as any).is_gift_card,
                 gift_card_allow_custom: !!(p as any).gift_card_allow_custom,
+                weight_oz: (p as any).weight_oz ?? null,
               });
               // Seed the textarea with the existing variant names so
               // editing keeps them visible; new picks tack on as the
@@ -31671,6 +31673,19 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                 onChange={e => setEditing({
                   ...editing,
                   inventory_count: e.target.value === "" ? null : Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                })}
+                placeholder="—"
+              />
+            </Field>
+            {/* Shipping weight for live carrier (Shippo) rates. Only used when
+                the shop's shipping mode is 'carrier'; harmless otherwise. */}
+            <Field label="Shipping weight (oz)" hint="For live carrier rates.">
+              <Input
+                type="number" inputMode="decimal" step="0.1" min="0"
+                value={(editing as any).weight_oz == null ? "" : String((editing as any).weight_oz)}
+                onChange={e => setEditing({
+                  ...editing,
+                  weight_oz: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0),
                 })}
                 placeholder="—"
               />
@@ -32707,6 +32722,12 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
   const [deliveryRadius, setDeliveryRadius] = useState<string>("");
   const [shippingFlatRate, setShippingFlatRate] = useState<string>("");
   const [shippingFreeThreshold, setShippingFreeThreshold] = useState<string>("");
+  // Shipping mode: 'flat' = stylist's own rate; 'carrier' = live Shippo rates.
+  const [shippingMode, setShippingMode] = useState<"flat" | "carrier">("flat");
+  const [shippoToken, setShippoToken] = useState("");
+  const [parcelL, setParcelL] = useState("");
+  const [parcelW, setParcelW] = useState("");
+  const [parcelH, setParcelH] = useState("");
   const [taxEnabled, setTaxEnabled] = useState(false);
   const [taxSettingsActive, setTaxSettingsActive] = useState(false);
   const [taxRegisteredStates, setTaxRegisteredStates] = useState<string[]>([]);
@@ -32745,6 +32766,11 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
         setDeliveryRadius(data.delivery_radius_miles == null ? "" : String(data.delivery_radius_miles));
         setShippingFlatRate(data.shipping_flat_rate == null ? "" : String(data.shipping_flat_rate));
         setShippingFreeThreshold(data.shipping_free_threshold == null ? "" : String(data.shipping_free_threshold));
+        setShippingMode(data.shipping_mode === "carrier" ? "carrier" : "flat");
+        setShippoToken(data.shippo_api_token || "");
+        setParcelL(data.ship_parcel_length_in == null ? "" : String(data.ship_parcel_length_in));
+        setParcelW(data.ship_parcel_width_in == null ? "" : String(data.ship_parcel_width_in));
+        setParcelH(data.ship_parcel_height_in == null ? "" : String(data.ship_parcel_height_in));
         setTaxEnabled(!!data.tax_enabled);
         setTaxSettingsActive(!!data.tax_settings_active);
         setTaxRegisteredStates(Array.isArray(data.tax_registered_states) ? data.tax_registered_states.map(String) : []);
@@ -32788,6 +32814,11 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
       delivery_origin_lng: null,
       shipping_flat_rate: shippingFlatRate.trim() === "" ? null : Math.max(0, Number(shippingFlatRate) || 0),
       shipping_free_threshold: shippingFreeThreshold.trim() === "" ? null : Math.max(0, Number(shippingFreeThreshold) || 0),
+      shipping_mode: shippingMode,
+      shippo_api_token: shippoToken.trim() || null,
+      ship_parcel_length_in: parcelL.trim() === "" ? null : Math.max(0, Number(parcelL) || 0),
+      ship_parcel_width_in: parcelW.trim() === "" ? null : Math.max(0, Number(parcelW) || 0),
+      ship_parcel_height_in: parcelH.trim() === "" ? null : Math.max(0, Number(parcelH) || 0),
       updated_at: new Date().toISOString(),
     };
     const { error: err } = await getSupabase().from("shop_settings").upsert(payload, { onConflict: "user_id" });
@@ -32855,14 +32886,58 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
                 <Toggle checked={shippingEnabled} onChange={(v: boolean) => setShippingEnabled(v)} />
               </div>
               {shippingEnabled && (
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Flat rate">
-                    <MoneyInput value={shippingFlatRate} onChange={(v) => setShippingFlatRate(v)} placeholder="0.00" />
-                  </Field>
-                  <Field label="Free over" hint="Optional">
-                    <MoneyInput value={shippingFreeThreshold} onChange={(v) => setShippingFreeThreshold(v)} placeholder="—" />
-                  </Field>
-                </div>
+                <>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {([
+                      { v: "flat", label: "Flat rate" },
+                      { v: "carrier", label: "Live rates" },
+                    ] as const).map((o) => {
+                      const on = shippingMode === o.v;
+                      return (
+                        <button
+                          key={o.v}
+                          type="button"
+                          onClick={() => setShippingMode(o.v)}
+                          className="px-2 py-2 rounded-xl text-[12px] font-semibold active:scale-[0.97] transition"
+                          style={{
+                            background: on ? C.gold : C.cream,
+                            color: on ? "#fff" : C.coffee,
+                            border: `1px solid ${on ? C.gold : C.hairline}`,
+                          }}
+                        >
+                          {o.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {shippingMode === "flat" ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="Flat rate">
+                        <MoneyInput value={shippingFlatRate} onChange={(v) => setShippingFlatRate(v)} placeholder="0.00" />
+                      </Field>
+                      <Field label="Free over" hint="Optional">
+                        <MoneyInput value={shippingFreeThreshold} onChange={(v) => setShippingFreeThreshold(v)} placeholder="—" />
+                      </Field>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <Field label="Shippo API token" hint="goshippo.com → Settings → API">
+                        <Input value={shippoToken} onChange={(e) => setShippoToken(e.target.value)} placeholder="shippo_live_… / shippo_test_…" />
+                      </Field>
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Default package (inches)</p>
+                        <div className="grid grid-cols-3 gap-2 mt-1">
+                          <Input value={parcelL} onChange={(e) => setParcelL(e.target.value.replace(/[^0-9.]/g, "").slice(0, 6))} inputMode="decimal" placeholder="Length" />
+                          <Input value={parcelW} onChange={(e) => setParcelW(e.target.value.replace(/[^0-9.]/g, "").slice(0, 6))} inputMode="decimal" placeholder="Width" />
+                          <Input value={parcelH} onChange={(e) => setParcelH(e.target.value.replace(/[^0-9.]/g, "").slice(0, 6))} inputMode="decimal" placeholder="Height" />
+                        </div>
+                      </div>
+                      <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.45 }}>
+                        Buyers see live USPS/UPS rates at checkout based on their address and the total weight. Set a <strong>shipping weight</strong> on each product. (Checkout rate-shopping ships in the next update.)
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
             </Card>
 
