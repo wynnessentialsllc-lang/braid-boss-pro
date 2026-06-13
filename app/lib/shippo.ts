@@ -35,6 +35,12 @@ export type ShippoAddress = {
   state?: string | null;
   zip: string;
   country: string;
+  // Shippo requires a non-empty email on the from address when buying a
+  // label (it's how carriers deliver tracking notifications). We include
+  // it on both addresses at quote time so the same shipment object can be
+  // promoted to a transaction in phase 3b without re-creation.
+  email?: string | null;
+  phone?: string | null;
 };
 
 export type NormalizedRate = {
@@ -113,6 +119,8 @@ export async function fetchShipmentRates(opts: {
       state: opts.from.state || "",
       zip: opts.from.zip,
       country: opts.from.country || "US",
+      email: opts.from.email || "",
+      phone: opts.from.phone || "",
     },
     address_to: {
       name: opts.to.name || "Customer",
@@ -122,6 +130,8 @@ export async function fetchShipmentRates(opts: {
       state: opts.to.state || "",
       zip: opts.to.zip,
       country: opts.to.country || "US",
+      email: opts.to.email || "",
+      phone: opts.to.phone || "",
     },
     parcels: [
       {

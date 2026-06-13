@@ -159,6 +159,33 @@ export async function POST(req: Request) {
     totalWeightOz += p.weight_oz * item.quantity;
   }
 
+  // Pull the stylist's email + phone for the shipment's address_from. Shippo
+  // requires both on transactions (label purchase) so carriers can deliver
+  // tracking notifications; setting them at quote time lets the same shipment
+  // object be promoted to a transaction in phase 3b without re-creation.
+  // auth.users is the canonical email; booking_links holds the public phone.
+  let fromEmail = "";
+  let fromPhone = "";
+  try {
+    const { data } = await admin.auth.admin.getUserById(userId);
+    fromEmail = String(data?.user?.email || "").trim();
+  } catch {
+    /* non-fatal — Shippo's email requirement only bites at label purchase */
+  }
+  try {
+    const { data: bl } = await admin
+      .from("booking_links")
+      .select("phone")
+      .eq("user_id", userId)
+      .eq("active", true)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    fromPhone = String((bl as any)?.phone || "").trim();
+  } catch {
+    /* non-fatal */
+  }
+
   let rates: NormalizedRate[];
   try {
     rates = await fetchShipmentRates({
@@ -171,6 +198,8 @@ export async function POST(req: Request) {
         state: shop.pickup_state || "",
         zip: fromZip,
         country: "US",
+        email: fromEmail,
+        phone: fromPhone,
       },
       to: {
         name: "Customer",
