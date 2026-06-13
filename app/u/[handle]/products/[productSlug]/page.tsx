@@ -193,6 +193,11 @@ export default function ProductDetailPage() {
 
   const deliveryLimited = !!(ful && fulMethod === "delivery" && Number(ful.delivery_radius_miles) > 0);
   const deliveryBlocked = deliveryLimited && deliveryCheck.status !== "ok";
+  // Carrier-mode shipping can't be priced on the product page — the buyer
+  // needs to pick a Shippo rate at the cart (which collects their ZIP). Buy
+  // Now would 400 ("Pick a shipping option"), so we route it through the
+  // cart instead.
+  const carrierShipping = !!(ful && fulMethod === "shipping" && ful.shipping_mode === "carrier");
 
   const runDeliveryCheck = async (zip: string) => {
     if (zip.trim().length < 5) return;
@@ -624,16 +629,24 @@ export default function ProductDetailPage() {
                 const label =
                   m === "shipping" ? "Shipping" : m === "delivery" ? "Local delivery" : "Pickup";
                 const sub = Number(effPrice ?? product.price ?? 0);
+                // In carrier (live-rates) mode the real shipping fee comes from
+                // Shippo at the cart; the product page can't price it
+                // accurately without the buyer's address. Surface "Live rates"
+                // so we don't lie with a stale flat-rate number.
+                const carrierShippingRow =
+                  m === "shipping" && ful.shipping_mode === "carrier";
                 const fee =
                   m === "pickup"
                     ? 0
                     : m === "delivery"
                       ? Math.max(0, Number(ful.delivery_fee) || 0)
-                      : (() => {
-                          const thr = Number(ful.shipping_free_threshold);
-                          if (Number.isFinite(thr) && thr > 0 && sub >= thr) return 0;
-                          return Math.max(0, Number(ful.shipping_flat_rate) || 0);
-                        })();
+                      : carrierShippingRow
+                        ? 0
+                        : (() => {
+                            const thr = Number(ful.shipping_free_threshold);
+                            if (Number.isFinite(thr) && thr > 0 && sub >= thr) return 0;
+                            return Math.max(0, Number(ful.shipping_flat_rate) || 0);
+                          })();
                 return (
                   <button
                     key={m}
@@ -668,9 +681,9 @@ export default function ProductDetailPage() {
                     </span>
                     <span
                       className="text-[13px] font-bold"
-                      style={{ color: fee === 0 ? C.brandPrimary : C.brandText }}
+                      style={{ color: carrierShippingRow ? C.brandPrimary : fee === 0 ? C.brandPrimary : C.brandText }}
                     >
-                      {fee === 0 ? "Free" : fmtMoney(fee)}
+                      {carrierShippingRow ? "Live rates" : fee === 0 ? "Free" : fmtMoney(fee)}
                     </span>
                   </button>
                 );
@@ -776,7 +789,32 @@ export default function ProductDetailPage() {
         </button>
         <button
           type="button"
-          onClick={startCheckout}
+          onClick={() => {
+            // Carrier-mode shipping → buyer must pick a Shippo rate in the
+            // cart. Add the item, open the drawer; the cart's rate picker
+            // takes it from there.
+            if (carrierShipping && !soldOut && !needsVariantPick && !customMode && product) {
+              const variant = product.variants.find((v) => v.id === selectedVariantId);
+              addItem(
+                {
+                  product_id: product.id,
+                  product_slug: product.slug,
+                  title: product.title,
+                  image_url: effImage,
+                  unit_amount: Number(effPrice ?? product.price ?? 0),
+                  inventory_count: effStock,
+                  variant_id: variant?.id || null,
+                  variant_label: variant ? product.variant_label : null,
+                  variant_name: variant?.name || null,
+                  requires_shipping: product.requires_shipping,
+                },
+                handle,
+              );
+              openCart();
+              return;
+            }
+            startCheckout();
+          }}
           disabled={soldOut || buyState === "loading" || needsVariantPick || (customMode && !customAmountValid) || deliveryBlocked}
           className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-bold uppercase tracking-widest transition active:scale-[0.98]"
           style={{
@@ -799,6 +837,8 @@ export default function ProductDetailPage() {
             ? "Opening checkout…"
             : product.external_checkout_url
             ? "Buy at external shop"
+            : carrierShipping
+            ? "Pick shipping rate"
             : "Buy now"}
         </button>
         {buyError && (
