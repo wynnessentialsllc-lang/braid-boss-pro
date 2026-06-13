@@ -17,6 +17,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { checkDeliveryRadius } from "../../lib/delivery-distance";
+import { fetchRateById, type NormalizedRate } from "../../lib/shippo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,6 +71,7 @@ export async function POST(req: Request) {
     gift_card_code?: string | null;
     fulfillment_method?: string | null;
     delivery_zip?: string | null;
+    shipping_rate_id?: string | null;
     items?: Array<{ product_slug?: string; quantity?: number; variant_id?: string | null; custom_amount?: number | null }>;
   };
   try {
@@ -88,6 +90,10 @@ export async function POST(req: Request) {
     return m === "shipping" || m === "delivery" || m === "pickup" ? m : null;
   })();
   const deliveryZip = String(body?.delivery_zip || "").trim();
+  // Buyer's picked Shippo rate id (live-carrier shipping mode). The checkout
+  // re-fetches the rate from Shippo to confirm the amount before charging,
+  // so a tampered id can't undercut the real shipping fee.
+  const shippingRateId = String(body?.shipping_rate_id || "").trim();
 
   // Normalize to a uniform list of {product_slug, quantity, variant_id,
   // custom_amount}. Legacy single-item payloads are wrapped to length 1.
@@ -305,7 +311,7 @@ export async function POST(req: Request) {
   const { data: shopCfg } = await admin
     .from("shop_settings")
     .select(
-      "pickup_enabled, delivery_enabled, shipping_enabled, shipping_mode, shipping_flat_rate, shipping_free_threshold, delivery_fee, tax_enabled",
+      "pickup_enabled, delivery_enabled, shipping_enabled, shipping_mode, shipping_flat_rate, shipping_free_threshold, delivery_fee, tax_enabled, shippo_api_token",
     )
     .eq("user_id", stylistUserId)
     .maybeSingle();
@@ -324,6 +330,9 @@ export async function POST(req: Request) {
   let shippingLabel = "";
   let shippingFeeCents = 0;
   let collectShippingAddress = requiresShipping; // legacy default
+  // Carrier-rate metadata persisted on the order so the order page can show
+  // the picked service and phase 3b (label purchase) can reuse the rate id.
+  let carrierRate: NormalizedRate | null = null;
 
   if (anyFulfillmentEnabled && shopCfg) {
     const enabled: Record<string, boolean> = {
@@ -353,13 +362,37 @@ export async function POST(req: Request) {
       collectShippingAddress = true;
       shippingLabel = shippingFeeCents > 0 ? "Local delivery" : "Local delivery (free)";
     } else if (method === "shipping") {
-      // Flat-rate today; 'carrier' mode (live rates) is a future phase.
-      const threshold = Number(shopCfg.shipping_free_threshold);
-      const qualifiesFree =
-        Number.isFinite(threshold) && threshold > 0 && subtotalDollars >= threshold;
-      shippingFeeCents = qualifiesFree ? 0 : toCents(shopCfg.shipping_flat_rate);
       collectShippingAddress = true;
-      shippingLabel = shippingFeeCents > 0 ? "Shipping" : "Free shipping";
+      if (shopCfg.shipping_mode === "carrier") {
+        // Live carrier rates: the buyer picked a Shippo rate at the cart;
+        // we re-fetch it here to confirm the amount (Shippo rates expire,
+        // and we can't trust a client-supplied amount). A missing /
+        // expired id is a clean error asking the buyer to re-shop.
+        if (!shippingRateId) {
+          return fail(400, "Pick a shipping option before checking out.");
+        }
+        const token = String((shopCfg as any).shippo_api_token || "").trim();
+        if (!token) {
+          return fail(409, "This shop hasn't finished Shippo setup.");
+        }
+        const rate = await fetchRateById(token, shippingRateId);
+        if (!rate) {
+          return fail(
+            409,
+            "That shipping option expired. Re-fetch shipping rates and try again.",
+          );
+        }
+        carrierRate = rate;
+        shippingFeeCents = rate.amount_cents;
+        shippingLabel = `${rate.carrier} ${rate.service}`;
+      } else {
+        // Flat rate: a free-over threshold can zero out an otherwise-paid rate.
+        const threshold = Number(shopCfg.shipping_free_threshold);
+        const qualifiesFree =
+          Number.isFinite(threshold) && threshold > 0 && subtotalDollars >= threshold;
+        shippingFeeCents = qualifiesFree ? 0 : toCents(shopCfg.shipping_flat_rate);
+        shippingLabel = shippingFeeCents > 0 ? "Shipping" : "Free shipping";
+      }
     }
   }
 
@@ -417,6 +450,10 @@ export async function POST(req: Request) {
       line_items: lineItemsJson,
       gift_card_id: giftCardId,
       gift_card_redeemed_amount: redeemCents > 0 ? (redeemCents / 100).toFixed(2) : null,
+      shipping_rate_id: carrierRate?.id ?? null,
+      shipping_carrier: carrierRate?.carrier ?? null,
+      shipping_service: carrierRate?.service ?? null,
+      shipping_estimated_days: carrierRate?.estimated_days ?? null,
       metadata: { handle, item_count: resolved.length, fulfillment_method: fulfillmentMethod },
     })
     .select("id, customer_token")
