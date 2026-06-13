@@ -32503,6 +32503,182 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
   );
 };
 
+// US states + DC, for the sales-tax registration picker.
+const US_STATES: Array<{ code: string; name: string }> = [
+  { code: "AL", name: "Alabama" }, { code: "AK", name: "Alaska" }, { code: "AZ", name: "Arizona" },
+  { code: "AR", name: "Arkansas" }, { code: "CA", name: "California" }, { code: "CO", name: "Colorado" },
+  { code: "CT", name: "Connecticut" }, { code: "DE", name: "Delaware" }, { code: "DC", name: "District of Columbia" },
+  { code: "FL", name: "Florida" }, { code: "GA", name: "Georgia" }, { code: "HI", name: "Hawaii" },
+  { code: "ID", name: "Idaho" }, { code: "IL", name: "Illinois" }, { code: "IN", name: "Indiana" },
+  { code: "IA", name: "Iowa" }, { code: "KS", name: "Kansas" }, { code: "KY", name: "Kentucky" },
+  { code: "LA", name: "Louisiana" }, { code: "ME", name: "Maine" }, { code: "MD", name: "Maryland" },
+  { code: "MA", name: "Massachusetts" }, { code: "MI", name: "Michigan" }, { code: "MN", name: "Minnesota" },
+  { code: "MS", name: "Mississippi" }, { code: "MO", name: "Missouri" }, { code: "MT", name: "Montana" },
+  { code: "NE", name: "Nebraska" }, { code: "NV", name: "Nevada" }, { code: "NH", name: "New Hampshire" },
+  { code: "NJ", name: "New Jersey" }, { code: "NM", name: "New Mexico" }, { code: "NY", name: "New York" },
+  { code: "NC", name: "North Carolina" }, { code: "ND", name: "North Dakota" }, { code: "OH", name: "Ohio" },
+  { code: "OK", name: "Oklahoma" }, { code: "OR", name: "Oregon" }, { code: "PA", name: "Pennsylvania" },
+  { code: "RI", name: "Rhode Island" }, { code: "SC", name: "South Carolina" }, { code: "SD", name: "South Dakota" },
+  { code: "TN", name: "Tennessee" }, { code: "TX", name: "Texas" }, { code: "UT", name: "Utah" },
+  { code: "VT", name: "Vermont" }, { code: "VA", name: "Virginia" }, { code: "WA", name: "Washington" },
+  { code: "WV", name: "West Virginia" }, { code: "WI", name: "Wisconsin" }, { code: "WY", name: "Wyoming" },
+];
+
+// ============================================================
+//  TAX SETUP WIZARD — activates Stripe Tax on the connected
+//  account: legal acknowledgement → business address → states.
+// ============================================================
+const TaxSetupWizard = ({
+  userId,
+  initialAddress,
+  initialStates,
+  homeState,
+  onClose,
+  onComplete,
+}: {
+  userId: string | null;
+  initialAddress: { line1: string; line2: string; city: string; state: string; postal_code: string };
+  initialStates: string[];
+  homeState: string;
+  onClose: () => void;
+  onComplete: (states: string[]) => void;
+}) => {
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [line1, setLine1] = useState(initialAddress.line1 || "");
+  const [line2, setLine2] = useState(initialAddress.line2 || "");
+  const [city, setCity] = useState(initialAddress.city || "");
+  const [stateCode, setStateCode] = useState((initialAddress.state || "").toUpperCase());
+  const [postal, setPostal] = useState(initialAddress.postal_code || "");
+  // Pre-seed registered states with whatever's on file, plus the home
+  // state, so the common single-state stylist is one tap from done.
+  const [states, setStates] = useState<string[]>(() => {
+    const seed = new Set<string>(initialStates.map((s) => s.toUpperCase()));
+    if (homeState) seed.add(homeState.toUpperCase());
+    return Array.from(seed);
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const toggleState = (code: string) =>
+    setStates((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
+
+  const canSubmit =
+    acknowledged && line1.trim() && city.trim() && stateCode.trim() && postal.trim() && states.length > 0 && !busy;
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const { data: sess } = await getSupabase().auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) {
+        setErr("Sign in required.");
+        setBusy(false);
+        return;
+      }
+      const res = await fetch("/api/stripe-tax", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          access_token: token,
+          acknowledge: true,
+          business_address: { line1: line1.trim(), line2: line2.trim(), city: city.trim(), state: stateCode.trim().toUpperCase(), postal_code: postal.trim() },
+          states,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body?.ok) {
+        setErr(body?.error || "Couldn't set up tax. Try again in a moment.");
+        setBusy(false);
+        return;
+      }
+      onComplete(Array.isArray(body.states) ? body.states.map(String) : states);
+    } catch (e: any) {
+      setErr(e?.message || "Network error. Try again.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet open onClose={onClose} title="Set up sales tax">
+      <div className="space-y-4 pb-4">
+        {/* Legal acknowledgement */}
+        <Card className="p-3.5" style={{ background: "rgba(251,191,36,0.08)", border: `1px solid ${C.hairline}` }}>
+          <p className="text-[12px] font-semibold mb-1.5" style={{ color: C.espresso }}>Before you enable tax</p>
+          <p className="text-[11px]" style={{ color: C.coffee, lineHeight: 1.55 }}>
+            You&apos;re responsible for charging sales tax only where you&apos;re legally registered to collect it.
+            Stripe Tax registers your business in each state you select and calculates tax by the buyer&apos;s
+            address. Stripe charges a per-transaction fee where tax is calculated. This isn&apos;t tax advice —
+            consult a tax professional about where you&apos;re required to register. Only select states where you
+            already hold a valid sales-tax registration.
+          </p>
+          <label className="flex items-start gap-2 mt-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(e) => setAcknowledged(e.target.checked)}
+              style={{ marginTop: 2, width: 16, height: 16, accentColor: C.gold }}
+            />
+            <span className="text-[12px] font-medium" style={{ color: C.espresso }}>
+              I confirm I&apos;m registered to collect sales tax in the states I select and accept Stripe Tax&apos;s fees.
+            </span>
+          </label>
+        </Card>
+
+        {/* Business / head-office address */}
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>Business address</p>
+          <div className="space-y-2">
+            <Input value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Street address" />
+            <Input value={line2} onChange={(e) => setLine2(e.target.value)} placeholder="Unit / suite (optional)" />
+            <div className="grid grid-cols-3 gap-2">
+              <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" />
+              <Input value={stateCode} onChange={(e) => setStateCode(e.target.value.toUpperCase().slice(0, 2))} placeholder="State" />
+              <Input value={postal} onChange={(e) => setPostal(e.target.value.replace(/[^0-9-]/g, "").slice(0, 10))} inputMode="numeric" placeholder="ZIP" />
+            </div>
+          </div>
+        </div>
+
+        {/* Registered states */}
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: C.muted, letterSpacing: "0.14em" }}>States you collect in</p>
+          <p className="text-[11px] mb-2" style={{ color: C.muted }}>Your home state is pre-selected. Add any others you&apos;re registered in.</p>
+          <div className="flex flex-wrap gap-1.5">
+            {US_STATES.map((s) => {
+              const on = states.includes(s.code);
+              return (
+                <button
+                  key={s.code}
+                  type="button"
+                  onClick={() => toggleState(s.code)}
+                  className="px-2.5 py-1.5 rounded-lg text-[12px] font-semibold transition active:scale-[0.97]"
+                  style={{
+                    background: on ? C.gold : C.cream,
+                    color: on ? "#fff" : C.coffee,
+                    border: `1px solid ${on ? C.gold : C.hairline}`,
+                  }}
+                  title={s.name}
+                >
+                  {s.code}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {err && <p className="text-[12px] font-semibold" style={{ color: C.danger }}>{err}</p>}
+        <Button variant="primary" fullWidth onClick={submit} disabled={!canSubmit}>
+          {busy ? "Setting up…" : "Enable sales tax"}
+        </Button>
+        <p className="text-[10px] text-center" style={{ color: C.muted }}>
+          Powered by Stripe Tax. You can turn collection off anytime.
+        </p>
+      </div>
+    </Sheet>
+  );
+};
+
 // ============================================================
 //  SHIPPING SETTINGS — Shop sub-screen (Phase 2)
 // ============================================================
@@ -32531,6 +32707,12 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
   const [shippingFlatRate, setShippingFlatRate] = useState<string>("");
   const [shippingFreeThreshold, setShippingFreeThreshold] = useState<string>("");
   const [taxEnabled, setTaxEnabled] = useState(false);
+  const [taxSettingsActive, setTaxSettingsActive] = useState(false);
+  const [taxRegisteredStates, setTaxRegisteredStates] = useState<string[]>([]);
+  const [taxBusiness, setTaxBusiness] = useState<{ line1: string; line2: string; city: string; state: string; postal_code: string }>(
+    { line1: "", line2: "", city: "", state: "", postal_code: "" },
+  );
+  const [taxWizardOpen, setTaxWizardOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
@@ -32562,6 +32744,15 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
         setShippingFlatRate(data.shipping_flat_rate == null ? "" : String(data.shipping_flat_rate));
         setShippingFreeThreshold(data.shipping_free_threshold == null ? "" : String(data.shipping_free_threshold));
         setTaxEnabled(!!data.tax_enabled);
+        setTaxSettingsActive(!!data.tax_settings_active);
+        setTaxRegisteredStates(Array.isArray(data.tax_registered_states) ? data.tax_registered_states.map(String) : []);
+        setTaxBusiness({
+          line1: data.tax_business_line1 || "",
+          line2: data.tax_business_line2 || "",
+          city: data.tax_business_city || "",
+          state: data.tax_business_state || "",
+          postal_code: data.tax_business_postal_code || "",
+        });
       }
       setLoading(false);
     })();
@@ -32590,7 +32781,6 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
       delivery_fee: deliveryFee.trim() === "" ? null : Math.max(0, Number(deliveryFee) || 0),
       shipping_flat_rate: shippingFlatRate.trim() === "" ? null : Math.max(0, Number(shippingFlatRate) || 0),
       shipping_free_threshold: shippingFreeThreshold.trim() === "" ? null : Math.max(0, Number(shippingFreeThreshold) || 0),
-      tax_enabled: taxEnabled,
       updated_at: new Date().toISOString(),
     };
     const { error: err } = await getSupabase().from("shop_settings").upsert(payload, { onConflict: "user_id" });
@@ -32652,18 +32842,56 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
                   </Field>
                 </div>
               )}
-              <div style={{ borderTop: `1px solid ${C.hairline}` }} />
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Collect sales tax</p>
-                  <p className="text-[11px]" style={{ color: C.muted }}>Stripe calculates tax by the buyer's address.</p>
-                </div>
-                <Toggle checked={taxEnabled} onChange={(v: boolean) => setTaxEnabled(v)} />
+            </Card>
+
+            <Card className="p-3.5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Sales tax</p>
+                {taxSettingsActive && (
+                  <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full" style={{ color: C.success, background: "rgba(34,160,90,0.10)", letterSpacing: "0.08em" }}>
+                    Set up
+                  </span>
+                )}
               </div>
-              {taxEnabled && (
-                <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5, background: "rgba(251,191,36,0.10)", borderRadius: 10, padding: "8px 10px" }}>
-                  Turn on <strong>Stripe Tax</strong> in your Stripe dashboard (Settings → Tax) and add your registrations first. Until then, orders check out without tax — your sales are never blocked.
-                </p>
+              {!taxSettingsActive ? (
+                <>
+                  <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+                    Collect sales tax at checkout, calculated automatically by the buyer&apos;s address. We&apos;ll register your business with Stripe Tax for the states you select.
+                  </p>
+                  <Button variant="primary" fullWidth onClick={() => setTaxWizardOpen(true)} icon={<Sparkles size={15} />}>
+                    Set up sales tax
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Collect at checkout</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        Registered: {taxRegisteredStates.length > 0 ? taxRegisteredStates.join(", ") : "—"}
+                      </p>
+                    </div>
+                    <Toggle
+                      checked={taxEnabled}
+                      onChange={async (v: boolean) => {
+                        setTaxEnabled(v);
+                        if (!userId) return;
+                        await getSupabase()
+                          .from("shop_settings")
+                          .update({ tax_enabled: v, updated_at: new Date().toISOString() })
+                          .eq("user_id", userId);
+                      }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTaxWizardOpen(true)}
+                    className="text-[12px] font-semibold"
+                    style={{ color: C.coffee }}
+                  >
+                    Edit business address / states
+                  </button>
+                </>
               )}
             </Card>
             <Card className="p-3.5 space-y-3">
@@ -32712,6 +32940,25 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
           </>
         )}
       </div>
+      {taxWizardOpen && (
+        <TaxSetupWizard
+          userId={userId}
+          initialAddress={
+            taxBusiness.line1
+              ? taxBusiness
+              : { line1: pickupLine1, line2: pickupLine2, city: pickupCity, state: pickupState, postal_code: pickupPostalCode }
+          }
+          initialStates={taxRegisteredStates}
+          homeState={taxBusiness.state || pickupState}
+          onClose={() => setTaxWizardOpen(false)}
+          onComplete={(states) => {
+            setTaxSettingsActive(true);
+            setTaxEnabled(true);
+            setTaxRegisteredStates(states);
+            setTaxWizardOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 };
