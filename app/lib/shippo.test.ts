@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { normalizeRate, sortAndCapRates, type NormalizedRate } from "./shippo";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { buyLabel, normalizeRate, sortAndCapRates, type NormalizedRate } from "./shippo";
 
 const make = (over: Partial<NormalizedRate> = {}): NormalizedRate => ({
   id: over.id ?? `r_${Math.random().toString(36).slice(2, 8)}`,
@@ -85,5 +85,67 @@ describe("sortAndCapRates", () => {
       make({ id: "b", amount_cents: 500, estimated_days: 3 }),
     ]);
     expect(sorted.map((r) => r.id)).toEqual(["b", "a"]);
+  });
+});
+
+describe("buyLabel", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns the parsed label on SUCCESS", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        object_id: "txn_1",
+        status: "SUCCESS",
+        tracking_number: "9400111111111111111111",
+        tracking_url_provider: "https://tools.usps.com/track?9400…",
+        label_url: "https://shippo-delivery.s3.amazonaws.com/lbl.pdf",
+        eta: "2026-06-18T00:00:00Z",
+      }),
+    });
+    const label = await buyLabel("tok", "r1");
+    expect(label).toEqual({
+      transaction_id: "txn_1",
+      tracking_number: "9400111111111111111111",
+      tracking_url: "https://tools.usps.com/track?9400…",
+      label_url: "https://shippo-delivery.s3.amazonaws.com/lbl.pdf",
+      eta: "2026-06-18T00:00:00Z",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("/transactions/");
+    expect((init.headers as any).Authorization).toBe("ShippoToken tok");
+    expect(JSON.parse(init.body)).toMatchObject({
+      rate: "r1",
+      label_file_type: "PDF",
+      async: false,
+    });
+  });
+
+  it("throws the first Shippo message on ERROR status", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status: "ERROR",
+        messages: [{ text: "Rate is no longer valid." }],
+      }),
+    });
+    await expect(buyLabel("tok", "r1")).rejects.toThrow("Rate is no longer valid.");
+  });
+
+  it("throws on non-2xx HTTP", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      text: async () => "Unauthorized",
+    });
+    await expect(buyLabel("bad", "r1")).rejects.toThrow(/Shippo 401/);
   });
 });
