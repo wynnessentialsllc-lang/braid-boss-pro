@@ -31360,6 +31360,8 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
     is_gift_card: boolean;
     gift_card_allow_custom: boolean;
     weight_oz: number | null;
+    requires_signature: boolean;
+    insurance_amount: number | null;
   }>;
   const [editing, setEditing] = useState<Draft | null>(null);
   // Raw textarea content for the variants list. Decoupled from
@@ -31514,6 +31516,8 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                 is_gift_card: !!(p as any).is_gift_card,
                 gift_card_allow_custom: !!(p as any).gift_card_allow_custom,
                 weight_oz: (p as any).weight_oz ?? null,
+                requires_signature: !!(p as any).requires_signature,
+                insurance_amount: (p as any).insurance_amount ?? null,
               });
               // Seed the textarea with the existing variant names so
               // editing keeps them visible; new picks tack on as the
@@ -31687,6 +31691,32 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                   ...editing,
                   weight_oz: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0),
                 })}
+                placeholder="—"
+              />
+            </Field>
+            {/* Carrier extras: signature on delivery + declared insured value.
+                Both are folded into the rate at quote time — Shippo charges
+                them as part of the shipping line, so toggling them mid-cart
+                forces a re-quote (handled in CartDrawer's stale check). */}
+            <Field label="Require signature on delivery" hint="Asks the carrier to require any-adult signature.">
+              <label className="flex items-center gap-2 cursor-pointer" style={{ padding: "8px 0" }}>
+                <input
+                  type="checkbox"
+                  checked={!!(editing as any).requires_signature}
+                  onChange={e => setEditing({ ...editing, requires_signature: e.target.checked } as any)}
+                  style={{ width: 18, height: 18 }}
+                />
+                <span className="text-[13px]" style={{ color: C.coffee }}>Required</span>
+              </label>
+            </Field>
+            <Field label="Declared insured value ($)" hint="Optional. Adds parcel insurance via the carrier.">
+              <Input
+                type="number" inputMode="decimal" step="1" min="0"
+                value={(editing as any).insurance_amount == null ? "" : String((editing as any).insurance_amount)}
+                onChange={e => setEditing({
+                  ...editing,
+                  insurance_amount: e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0),
+                } as any)}
                 placeholder="—"
               />
             </Field>
@@ -32803,6 +32833,40 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
   // Shipping mode: 'flat' = stylist's own rate; 'carrier' = live Shippo rates.
   const [shippingMode, setShippingMode] = useState<"flat" | "carrier">("flat");
   const [shippoToken, setShippoToken] = useState("");
+  // Shippo token test ("Test connection" button). Calls /api/shippo-test
+  // which validates against goshippo.com → /carrier_accounts and returns
+  // the active carriers + mode (test/live) so the stylist sees concretely
+  // what's wired up before a buyer ever hits the cart.
+  const [shippoTestState, setShippoTestState] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "ok"; mode: "test" | "live"; carriers: { name: string; carrier: string }[] }
+    | { status: "error"; message: string }
+  >({ status: "idle" });
+  const runShippoTest = async () => {
+    setShippoTestState({ status: "loading" });
+    try {
+      const { data: sess } = await getSupabase().auth.getSession();
+      const jwt = sess.session?.access_token || "";
+      if (!jwt) {
+        setShippoTestState({ status: "error", message: "Sign in expired — refresh and try again." });
+        return;
+      }
+      const res = await fetch("/api/shippo-test", {
+        method: "POST",
+        headers: { "content-type": "application/json", Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ token: shippoToken.trim() || null }),
+      });
+      const b = await res.json().catch(() => ({}));
+      if (!res.ok || !b?.ok) {
+        setShippoTestState({ status: "error", message: b?.error || "Couldn't reach Shippo." });
+        return;
+      }
+      setShippoTestState({ status: "ok", mode: b.mode, carriers: b.carriers || [] });
+    } catch (e: any) {
+      setShippoTestState({ status: "error", message: e?.message || "Network error." });
+    }
+  };
   const [parcelL, setParcelL] = useState("");
   const [parcelW, setParcelW] = useState("");
   const [parcelH, setParcelH] = useState("");
@@ -33000,8 +33064,38 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
                   ) : (
                     <div className="space-y-3">
                       <Field label="Shippo API token" hint="goshippo.com → Settings → API">
-                        <Input value={shippoToken} onChange={(e) => setShippoToken(e.target.value)} placeholder="shippo_live_… / shippo_test_…" />
+                        <Input value={shippoToken} onChange={(e) => { setShippoToken(e.target.value); setShippoTestState({ status: "idle" }); }} placeholder="shippo_live_… / shippo_test_…" />
                       </Field>
+                      <div className="space-y-1.5">
+                        <button
+                          type="button"
+                          onClick={runShippoTest}
+                          disabled={shippoTestState.status === "loading" || !shippoToken.trim()}
+                          className="px-3 py-2 rounded-xl text-[12px] font-semibold active:scale-[0.97] transition"
+                          style={{
+                            background: C.cream,
+                            color: C.coffee,
+                            border: `1px solid ${C.hairline}`,
+                            opacity: shippoTestState.status === "loading" || !shippoToken.trim() ? 0.6 : 1,
+                            cursor: shippoTestState.status === "loading" || !shippoToken.trim() ? "not-allowed" : "pointer",
+                          }}
+                        >
+                          {shippoTestState.status === "loading" ? "Testing…" : "Test connection"}
+                        </button>
+                        {shippoTestState.status === "ok" && (
+                          <p className="text-[11px]" style={{ color: C.success, lineHeight: 1.45 }}>
+                            ✓ Connected ({shippoTestState.mode} mode).{" "}
+                            {shippoTestState.carriers.length > 0
+                              ? `Will quote: ${shippoTestState.carriers.map((c) => c.name).join(", ")}.`
+                              : "No carriers activated yet — enable USPS / UPS / FedEx in your Shippo dashboard."}
+                          </p>
+                        )}
+                        {shippoTestState.status === "error" && (
+                          <p className="text-[11px]" style={{ color: C.danger, lineHeight: 1.45 }}>
+                            {shippoTestState.message}
+                          </p>
+                        )}
+                      </div>
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Default package (inches)</p>
                         <div className="grid grid-cols-3 gap-2 mt-1">

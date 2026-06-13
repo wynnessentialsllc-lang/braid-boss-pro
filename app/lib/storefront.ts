@@ -430,6 +430,11 @@ export type Product = {
   gift_card_allow_custom: boolean;
   // Shipping weight in ounces — used to quote live carrier (Shippo) rates.
   weight_oz: number | null;
+  // Carrier extras folded into the rate at quote time. require_signature
+  // turns on STANDARD signature_confirmation; insurance_amount declares
+  // the parcel value (and is multiplied by quantity when summed).
+  requires_signature: boolean;
+  insurance_amount: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -446,6 +451,8 @@ export type ProductInput = Pick<
   | "is_gift_card"
   | "gift_card_allow_custom"
   | "weight_oz"
+  | "requires_signature"
+  | "insurance_amount"
 >;
 
 // URL-friendly slug from a free-form title. Mirrors the DB
@@ -550,6 +557,8 @@ export const useProducts = (userId: string | null): {
       is_gift_card:           has("is_gift_card")           ? draft.is_gift_card!           : (existing as any).is_gift_card ?? false,
       gift_card_allow_custom: has("gift_card_allow_custom") ? draft.gift_card_allow_custom! : (existing as any).gift_card_allow_custom ?? false,
       weight_oz:              has("weight_oz")              ? draft.weight_oz!              : (existing as any).weight_oz ?? null,
+      requires_signature:     has("requires_signature")     ? draft.requires_signature!     : (existing as any).requires_signature ?? false,
+      insurance_amount:       has("insurance_amount")       ? draft.insurance_amount!       : (existing as any).insurance_amount ?? null,
     };
   };
 
@@ -639,6 +648,16 @@ export const useProducts = (userId: string | null): {
       // => null (no weight set).
       weight_oz: (() => {
         const raw = (draft as any).weight_oz;
+        if (raw == null || raw === "") return null;
+        const n = Number(raw);
+        return Number.isFinite(n) && n > 0 ? n : null;
+      })(),
+      // Carrier extras. requires_signature is a hard boolean so a stale
+      // null falls back to false on insert; insurance_amount mirrors
+      // weight_oz's empty-→-null normalization.
+      requires_signature: !!(draft as any).requires_signature,
+      insurance_amount: (() => {
+        const raw = (draft as any).insurance_amount;
         if (raw == null || raw === "") return null;
         const n = Number(raw);
         return Number.isFinite(n) && n > 0 ? n : null;

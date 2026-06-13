@@ -136,20 +136,37 @@ export async function POST(req: Request) {
   const slugs = Array.from(new Set(inputItems.map((i) => i.slug)));
   const { data: products, error: prodErr } = await admin
     .from("products")
-    .select("slug, weight_oz, active, title")
+    .select("slug, weight_oz, active, title, requires_signature, insurance_amount")
     .eq("user_id", userId)
     .in("slug", slugs);
   if (prodErr) return fail(500, prodErr.message);
-  const bySlug = new Map<string, { weight_oz: number | null; active: boolean; title: string }>();
+  const bySlug = new Map<
+    string,
+    {
+      weight_oz: number | null;
+      active: boolean;
+      title: string;
+      requires_signature: boolean;
+      insurance_amount: number | null;
+    }
+  >();
   for (const p of products || []) {
     bySlug.set(String((p as any).slug), {
       weight_oz: (p as any).weight_oz == null ? null : Number((p as any).weight_oz),
       active: !!(p as any).active,
       title: String((p as any).title || ""),
+      requires_signature: !!(p as any).requires_signature,
+      insurance_amount:
+        (p as any).insurance_amount == null ? null : Number((p as any).insurance_amount),
     });
   }
 
   let totalWeightOz = 0;
+  // Per-shipment extras aggregate across the cart: any signature-required
+  // product turns on signature_confirmation for the whole shipment; insured
+  // values sum (× quantity) into the parcel's declared value.
+  let needsSignature = false;
+  let insuranceTotal = 0;
   for (const item of inputItems) {
     const p = bySlug.get(item.slug);
     if (!p || !p.active) return fail(404, `Product not found: ${item.slug}`);
@@ -157,6 +174,10 @@ export async function POST(req: Request) {
       return fail(409, `'${p.title || item.slug}' is missing a shipping weight.`);
     }
     totalWeightOz += p.weight_oz * item.quantity;
+    if (p.requires_signature) needsSignature = true;
+    if (p.insurance_amount != null && p.insurance_amount > 0) {
+      insuranceTotal += p.insurance_amount * item.quantity;
+    }
   }
 
   // Pull the stylist's email + phone for the shipment's address_from. Shippo
@@ -217,6 +238,10 @@ export async function POST(req: Request) {
         width: parcelW,
         height: parcelH,
         weight_oz: totalWeightOz,
+      },
+      extras: {
+        signature_confirmation: needsSignature ? "STANDARD" : null,
+        insurance_amount: insuranceTotal > 0 ? insuranceTotal : null,
       },
     });
   } catch (e: any) {

@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { buyLabel, normalizeRate, sortAndCapRates, type NormalizedRate } from "./shippo";
+import {
+  buyLabel,
+  fetchShipmentRates,
+  listCarrierAccounts,
+  normalizeRate,
+  sortAndCapRates,
+  type NormalizedRate,
+} from "./shippo";
 
 const make = (over: Partial<NormalizedRate> = {}): NormalizedRate => ({
   id: over.id ?? `r_${Math.random().toString(36).slice(2, 8)}`,
@@ -147,5 +154,106 @@ describe("buyLabel", () => {
       text: async () => "Unauthorized",
     });
     await expect(buyLabel("bad", "r1")).rejects.toThrow(/Shippo 401/);
+  });
+});
+
+describe("fetchShipmentRates extras", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ rates: [] }) });
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const baseOpts = {
+    token: "t",
+    from: { zip: "94117", country: "US" },
+    to: { zip: "20500", country: "US" },
+    parcel: { length: 10, width: 8, height: 4, weight_oz: 16 },
+  };
+
+  it("omits the extra block when no extras are requested", async () => {
+    await fetchShipmentRates(baseOpts);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.extra).toBeUndefined();
+  });
+
+  it("includes signature_confirmation=STANDARD when requested", async () => {
+    await fetchShipmentRates({
+      ...baseOpts,
+      extras: { signature_confirmation: "STANDARD" },
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.extra.signature_confirmation).toBe("STANDARD");
+  });
+
+  it("includes insurance block with capped amount", async () => {
+    await fetchShipmentRates({
+      ...baseOpts,
+      extras: { insurance_amount: 250.5 },
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.extra.insurance).toEqual({
+      amount: "250.50",
+      currency: "USD",
+      content: "Retail goods",
+    });
+  });
+
+  it("caps insurance at $5000", async () => {
+    await fetchShipmentRates({
+      ...baseOpts,
+      extras: { insurance_amount: 25_000 },
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.extra.insurance.amount).toBe("5000.00");
+  });
+
+  it("skips insurance when amount is 0 or negative", async () => {
+    await fetchShipmentRates({ ...baseOpts, extras: { insurance_amount: 0 } });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.extra).toBeUndefined();
+  });
+});
+
+describe("listCarrierAccounts", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns only active carriers", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        results: [
+          { carrier: "usps", carrier_name: "USPS", active: true, test: false },
+          { carrier: "fedex", carrier_name: "FedEx", active: false, test: false },
+          { carrier: "ups", carrier_name: "UPS", active: true, test: true },
+        ],
+      }),
+    });
+    const out = await listCarrierAccounts("t");
+    expect(out).toEqual([
+      { name: "USPS", carrier: "usps", test: false },
+      { name: "UPS", carrier: "ups", test: true },
+    ]);
+  });
+
+  it("throws a clean message on 401", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401 });
+    await expect(listCarrierAccounts("bad")).rejects.toThrow(/rejected the token/);
+  });
+
+  it("throws on 5xx", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 500 });
+    await expect(listCarrierAccounts("t")).rejects.toThrow(/Shippo 500/);
   });
 });

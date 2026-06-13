@@ -27,6 +27,20 @@ export type ShippoParcel = {
   weight_oz: number;
 };
 
+// Per-shipment extras the cart can ask for. Both map to fees on the rate,
+// so we have to include them at quote time (adding them at label purchase
+// is too late — Shippo charges what the rate already encoded).
+//   • signature_confirmation — STANDARD = adult or anyone with ID at the
+//     door. Sufficient for chargeback protection on most retail goods.
+//   • insurance — declared parcel value Shippo passes to the carrier. We
+//     hard-cap at $5k to keep an oversized declared value from blowing
+//     up a quote; carriers reject above that on most service levels.
+export type ShippoExtras = {
+  signature_confirmation?: "STANDARD" | null;
+  insurance_amount?: number | null;
+};
+const MAX_INSURANCE_USD = 5000;
+
 export type ShippoAddress = {
   name?: string | null;
   street1?: string | null;
@@ -108,8 +122,25 @@ export async function fetchShipmentRates(opts: {
   from: ShippoAddress;
   to: ShippoAddress;
   parcel: ShippoParcel;
+  extras?: ShippoExtras;
 }): Promise<NormalizedRate[]> {
   const weight = Math.max(MIN_WEIGHT_OZ, Math.round(opts.parcel.weight_oz * 100) / 100);
+  // Build the optional extra block. Skipped entirely when neither extra is
+  // requested so the request stays minimal for the common case (no
+  // signature, no declared value).
+  const extra: Record<string, unknown> = {};
+  if (opts.extras?.signature_confirmation === "STANDARD") {
+    extra.signature_confirmation = "STANDARD";
+  }
+  const insAmt = Number(opts.extras?.insurance_amount);
+  if (Number.isFinite(insAmt) && insAmt > 0) {
+    const capped = Math.min(insAmt, MAX_INSURANCE_USD);
+    extra.insurance = {
+      amount: capped.toFixed(2),
+      currency: "USD",
+      content: "Retail goods",
+    };
+  }
   const body = {
     address_from: {
       name: opts.from.name || "Shop",
@@ -144,6 +175,7 @@ export async function fetchShipmentRates(opts: {
       },
     ],
     async: false,
+    ...(Object.keys(extra).length > 0 ? { extra } : {}),
   };
 
   const res = await fetch(`${SHIPPO_API}/shipments/`, {
@@ -218,6 +250,36 @@ export async function buyLabel(
     label_url: String(data?.label_url || ""),
     eta: data?.eta ? String(data.eta) : null,
   };
+}
+
+// GET /carrier_accounts — used by the Settings "Test connection" button to
+// confirm the stylist's token is valid and tell them which carriers will
+// quote. Returns the human-readable carrier names of every active account,
+// or throws on auth failure / network error so the caller can map the
+// error to a clear UI message.
+export async function listCarrierAccounts(
+  token: string,
+): Promise<{ name: string; carrier: string; test: boolean }[]> {
+  const res = await fetch(`${SHIPPO_API}/carrier_accounts/?results=100`, {
+    method: "GET",
+    headers: headers(token),
+    cache: "no-store",
+  });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error("Shippo rejected the token. Double-check it on goshippo.com → Settings → API.");
+  }
+  if (!res.ok) {
+    throw new Error(`Shippo ${res.status}.`);
+  }
+  const data: any = await res.json();
+  const rows = Array.isArray(data?.results) ? data.results : [];
+  return rows
+    .filter((r: any) => r && r.active)
+    .map((r: any) => ({
+      name: String(r.carrier_name || r.carrier || "").trim() || "Carrier",
+      carrier: String(r.carrier || "").trim(),
+      test: !!r.test,
+    }));
 }
 
 // GET /rates/{id} — re-fetch the rate the buyer picked so the checkout
