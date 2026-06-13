@@ -16,6 +16,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { checkDeliveryRadius } from "../../lib/delivery-distance";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,6 +69,7 @@ export async function POST(req: Request) {
     custom_amount?: number | null;
     gift_card_code?: string | null;
     fulfillment_method?: string | null;
+    delivery_zip?: string | null;
     items?: Array<{ product_slug?: string; quantity?: number; variant_id?: string | null; custom_amount?: number | null }>;
   };
   try {
@@ -85,6 +87,7 @@ export async function POST(req: Request) {
     const m = String(body?.fulfillment_method || "").trim().toLowerCase();
     return m === "shipping" || m === "delivery" || m === "pickup" ? m : null;
   })();
+  const deliveryZip = String(body?.delivery_zip || "").trim();
 
   // Normalize to a uniform list of {product_slug, quantity, variant_id,
   // custom_amount}. Legacy single-item payloads are wrapped to length 1.
@@ -357,6 +360,26 @@ export async function POST(req: Request) {
       shippingFeeCents = qualifiesFree ? 0 : toCents(shopCfg.shipping_flat_rate);
       collectShippingAddress = true;
       shippingLabel = shippingFeeCents > 0 ? "Shipping" : "Free shipping";
+    }
+  }
+
+  // Local-delivery radius gate (authoritative). When the shop caps delivery
+  // distance, the buyer's ZIP must be inside it — this can't be bypassed by
+  // skipping the storefront preview check. A geocode failure never blocks the
+  // sale (the buyer just isn't held to the radius on that attempt).
+  if (fulfillmentMethod === "delivery") {
+    try {
+      const chk = await checkDeliveryRadius(admin, process.env.MAPBOX_TOKEN || "", stylistUserId, deliveryZip);
+      if (chk.configured && !chk.within) {
+        return fail(
+          409,
+          chk.reason === "bad_zip" || chk.reason === "no_origin"
+            ? "Enter a valid ZIP code for local delivery."
+            : `That ZIP is outside the local delivery area (within ${chk.radius} miles). Choose pickup or shipping instead.`,
+        );
+      }
+    } catch {
+      /* geocode/transient failure — don't block the sale */
     }
   }
 

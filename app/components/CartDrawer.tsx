@@ -18,6 +18,7 @@ type ShopFulfillment = {
   shipping_flat_rate: number | null;
   shipping_free_threshold: number | null;
   delivery_fee: number | null;
+  delivery_radius_miles: number | null;
 };
 
 const C = {
@@ -135,6 +136,41 @@ export const CartDrawer = () => {
   // shop hasn't configured any, so checkout behaves exactly as before.
   const [ful, setFul] = useState<ShopFulfillment | null>(null);
   const [method, setMethod] = useState<FulfillmentMethod | null>(null);
+  // Local-delivery radius check.
+  const [deliveryZip, setDeliveryZip] = useState("");
+  const [deliveryCheck, setDeliveryCheck] = useState<
+    { status: "idle" | "checking" | "ok" | "out" | "error"; miles?: number; radius?: number }
+  >({ status: "idle" });
+
+  const deliveryLimited = !!(ful && method === "delivery" && Number(ful.delivery_radius_miles) > 0);
+
+  const runDeliveryCheck = async (zip: string) => {
+    if (!cart.handle || zip.trim().length < 5) return;
+    setDeliveryCheck({ status: "checking" });
+    try {
+      const res = await fetch("/api/delivery-check", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ handle: cart.handle, zip: zip.trim() }),
+      });
+      const b = await res.json().catch(() => ({}));
+      if (!res.ok || !b?.ok) {
+        setDeliveryCheck({ status: "error" });
+        return;
+      }
+      if (b.limited === false || b.within) {
+        setDeliveryCheck({ status: "ok", miles: b.miles, radius: b.radius });
+      } else {
+        setDeliveryCheck({ status: "out", miles: b.miles, radius: b.radius });
+      }
+    } catch {
+      setDeliveryCheck({ status: "error" });
+    }
+  };
+
+  // Block checkout when delivery is radius-limited and the ZIP isn't confirmed
+  // in-area. Other methods are unaffected.
+  const deliveryBlocked = deliveryLimited && deliveryCheck.status !== "ok";
 
   // Load the shop's fulfillment config when the drawer opens. Anon RPC —
   // exposes only the non-sensitive shipping/delivery/pickup config.
@@ -210,6 +246,11 @@ export const CartDrawer = () => {
       return;
     }
     if (cart.items.length === 0) return;
+    if (deliveryBlocked) {
+      setCheckoutState("error");
+      setCheckoutError("Enter a ZIP within the local delivery area, or choose another option.");
+      return;
+    }
     setCheckoutState("loading");
     setCheckoutError(null);
     try {
@@ -225,6 +266,7 @@ export const CartDrawer = () => {
           })),
           gift_card_code: giftCardCode.trim() || null,
           fulfillment_method: ful ? method : null,
+          delivery_zip: method === "delivery" ? deliveryZip.trim() || null : null,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -447,6 +489,51 @@ export const CartDrawer = () => {
                       </button>
                     );
                   })}
+                {deliveryLimited && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={deliveryZip}
+                      onChange={(e) => {
+                        const z = e.target.value.replace(/[^0-9]/g, "").slice(0, 5);
+                        setDeliveryZip(z);
+                        setDeliveryCheck({ status: "idle" });
+                      }}
+                      onBlur={() => runDeliveryCheck(deliveryZip)}
+                      placeholder="Delivery ZIP code"
+                      style={{
+                        width: "100%",
+                        padding: "11px 14px",
+                        borderRadius: 12,
+                        border: `1px solid ${
+                          deliveryCheck.status === "out" ? C.brandError : C.brandBorder
+                        }`,
+                        background: "#FFFFFF",
+                        color: C.ink,
+                        fontSize: 13,
+                        outline: "none",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    {deliveryCheck.status === "checking" && (
+                      <span style={{ fontSize: 11, color: C.muted }}>Checking your area…</span>
+                    )}
+                    {deliveryCheck.status === "ok" && deliveryCheck.miles != null && (
+                      <span style={{ fontSize: 11, color: C.brandPrimary, fontWeight: 600 }}>
+                        ✓ In delivery area ({deliveryCheck.miles} mi)
+                      </span>
+                    )}
+                    {deliveryCheck.status === "out" && (
+                      <span style={{ fontSize: 11, color: C.brandError, fontWeight: 600 }}>
+                        Outside delivery area{deliveryCheck.radius ? ` (within ${deliveryCheck.radius} mi)` : ""} — choose pickup or shipping.
+                      </span>
+                    )}
+                    {deliveryCheck.status === "error" && (
+                      <span style={{ fontSize: 11, color: C.muted }}>Couldn&apos;t check that ZIP — try again.</span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
             <div
@@ -490,7 +577,7 @@ export const CartDrawer = () => {
             <button
               type="button"
               onClick={startCheckout}
-              disabled={checkoutState === "loading"}
+              disabled={checkoutState === "loading" || deliveryBlocked}
               style={{
                 marginTop: 6,
                 width: "100%",
@@ -504,11 +591,15 @@ export const CartDrawer = () => {
                 letterSpacing: "0.12em",
                 textTransform: "uppercase",
                 boxShadow: SHADOWS.primaryGlow,
-                cursor: checkoutState === "loading" ? "wait" : "pointer",
-                opacity: checkoutState === "loading" ? 0.7 : 1,
+                cursor: checkoutState === "loading" ? "wait" : deliveryBlocked ? "not-allowed" : "pointer",
+                opacity: checkoutState === "loading" || deliveryBlocked ? 0.6 : 1,
               }}
             >
-              {checkoutState === "loading" ? "Opening checkout…" : "Checkout"}
+              {checkoutState === "loading"
+                ? "Opening checkout…"
+                : deliveryBlocked
+                  ? "Confirm delivery ZIP"
+                  : "Checkout"}
             </button>
             {checkoutError && (
               <p style={{ fontSize: 12, color: C.brandError, marginTop: 4, textAlign: "center" }}>

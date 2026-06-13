@@ -785,6 +785,7 @@ export type ShopFulfillment = {
   shipping_free_threshold: number | null;
   delivery_fee: number | null;
   pickup_instructions: string | null;
+  delivery_radius_miles: number | null;
 };
 
 const numOrNull = (v: unknown): number | null => {
@@ -811,6 +812,7 @@ export const fetchShopFulfillment = async (
     shipping_free_threshold: numOrNull(row.shipping_free_threshold),
     delivery_fee: numOrNull(row.delivery_fee),
     pickup_instructions: row.pickup_instructions ?? null,
+    delivery_radius_miles: numOrNull(row.delivery_radius_miles),
   };
   if (!cfg.pickup_enabled && !cfg.delivery_enabled && !cfg.shipping_enabled) return null;
   return cfg;
