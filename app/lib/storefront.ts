@@ -773,6 +773,49 @@ export const fetchPublicProduct = async (
   return { ok: true, product };
 };
 
+// Shop fulfillment config (shipping / delivery / pickup), surfaced to the
+// storefront so the buyer can pick a method + see its fee before checkout.
+// Returns null when the shop hasn't enabled any method (legacy checkout).
+export type ShopFulfillment = {
+  pickup_enabled: boolean;
+  delivery_enabled: boolean;
+  shipping_enabled: boolean;
+  shipping_mode: string;
+  shipping_flat_rate: number | null;
+  shipping_free_threshold: number | null;
+  delivery_fee: number | null;
+  pickup_instructions: string | null;
+};
+
+const numOrNull = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+export const fetchShopFulfillment = async (
+  slug: string,
+): Promise<ShopFulfillment | null> => {
+  if (!slug) return null;
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("public_get_shop_fulfillment", { slug_in: slug });
+  if (error) return null;
+  const row = (Array.isArray(data) ? data[0] : data) as any;
+  if (!row) return null;
+  const cfg: ShopFulfillment = {
+    pickup_enabled: !!row.pickup_enabled,
+    delivery_enabled: !!row.delivery_enabled,
+    shipping_enabled: !!row.shipping_enabled,
+    shipping_mode: String(row.shipping_mode || "flat"),
+    shipping_flat_rate: numOrNull(row.shipping_flat_rate),
+    shipping_free_threshold: numOrNull(row.shipping_free_threshold),
+    delivery_fee: numOrNull(row.delivery_fee),
+    pickup_instructions: row.pickup_instructions ?? null,
+  };
+  if (!cfg.pickup_enabled && !cfg.delivery_enabled && !cfg.shipping_enabled) return null;
+  return cfg;
+};
+
 // ============================================================
 // PHASE 5 — Service → product recommendations
 // ============================================================
