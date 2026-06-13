@@ -32106,6 +32106,10 @@ type OrderRow = {
   // alongside paid_at to tell real pending-payment orders apart from
   // abandoned-cart pre-inserts.
   stripe_payment_intent: string | null;
+  // Soft-archive timestamp for abandoned-cart rows. Archived rows are
+  // hidden from the Abandoned tab but recoverable from the Archived
+  // tab. Set by archive_product_order / bulk_archive_product_orders.
+  archived_at: string | null;
   created_at: string;
 };
 
@@ -32195,17 +32199,43 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
   // never converts (Stripe expires sessions after ~24h). Surfacing
   // these as "pending orders to ship" is a footgun — every stylist
   // who used the storefront has these noise rows.
+  // An abandoned-cart row is the universe of "never paid" pre-inserts. The
+  // server-side delete guard uses the same predicate (pending + no paid_at +
+  // no payment_intent); we additionally require no customer_email here so a
+  // row Stripe captured an email for — even unpaid — still surfaces as a
+  // real order (the stylist may want to follow up manually).
   const isAbandoned = (o: OrderRow): boolean =>
     o.status === "pending" &&
     !o.paid_at &&
     !o.stripe_payment_intent &&
     !o.customer_email;
 
-  const realOrders = useMemo(() => filtered.filter(o => !isAbandoned(o)), [filtered]);
-  const abandoned = useMemo(() => filtered.filter(o => isAbandoned(o)), [filtered]);
+  const realOrders = useMemo(() => filtered.filter(o => !isAbandoned(o) && !o.archived_at), [filtered]);
+  // Abandoned tab shows only un-archived rows; archived rows live in their
+  // own tab so a stylist can recover one if they archived by mistake.
+  const abandoned = useMemo(() => filtered.filter(o => isAbandoned(o) && !o.archived_at), [filtered]);
+  const archived = useMemo(() => filtered.filter(o => isAbandoned(o) && !!o.archived_at), [filtered]);
 
-  const [tab, setTab] = useState<"orders" | "abandoned">("orders");
-  const visible = tab === "abandoned" ? abandoned : realOrders;
+  const [tab, setTab] = useState<"orders" | "abandoned" | "archived">("orders");
+  const visible = tab === "abandoned" ? abandoned : tab === "archived" ? archived : realOrders;
+
+  // Multi-select for bulk actions on the Abandoned / Archived tabs. Lives
+  // outside the row map so the toolbar can read it. Cleared when the tab
+  // changes — a selection from one tab applies to a different visible
+  // list and would be confusing.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  useEffect(() => { setSelectedIds(new Set()); }, [tab]);
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const selectAllVisible = () => setSelectedIds(new Set(visible.map((o) => o.id)));
+  const clearSelection = () => setSelectedIds(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const openDetail = (o: OrderRow) => {
     setOpenOrder(o);
@@ -32349,6 +32379,124 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
       return err ? { ok: false, err: err.message } : { ok: true };
     });
 
+  // Archive the open abandoned cart. Distinct from markCanceled because
+  // mark_order_canceled flips fulfillment_status only — the isAbandoned
+  // filter is keyed on status/paid_at/payment_intent/email so a canceled
+  // abandoned row stayed in the Abandoned tab forever (the visible bug
+  // the user reported). Archiving stamps archived_at so the row hides
+  // from Abandoned and surfaces in Archived. Closes the open sheet on
+  // success since the row is no longer in the current tab.
+  const archiveOpenAbandoned = () =>
+    runAction(async () => {
+      if (!openOrder) return { ok: false };
+      const { error: err } = await getSupabase().rpc("archive_product_order", {
+        order_id_in: openOrder.id,
+      });
+      if (err) return { ok: false, err: err.message };
+      setOpenOrder(null);
+      return { ok: true };
+    });
+
+  // Recover an archived abandoned cart back into the Abandoned tab. Same
+  // shape as archive — closes the open sheet on success.
+  const unarchiveOpen = () =>
+    runAction(async () => {
+      if (!openOrder) return { ok: false };
+      const { error: err } = await getSupabase().rpc("unarchive_product_order", {
+        order_id_in: openOrder.id,
+      });
+      if (err) return { ok: false, err: err.message };
+      setOpenOrder(null);
+      return { ok: true };
+    });
+
+  // Delete the open abandoned cart row permanently. Server-side guard
+  // (delete_abandoned_product_orders) only deletes rows that match the
+  // never-paid predicate, so even a forged id can't wipe a real order.
+  const deleteOpen = () =>
+    runAction(async () => {
+      if (!openOrder) return { ok: false };
+      if (!confirm("Permanently delete this abandoned cart? This can't be undone.")) {
+        return { ok: false, err: "" };
+      }
+      const { data, error: err } = await getSupabase().rpc("delete_abandoned_product_orders", {
+        order_ids: [openOrder.id],
+      });
+      if (err) return { ok: false, err: err.message };
+      if (Number(data) === 0) {
+        return { ok: false, err: "Couldn't delete — this row isn't an abandoned cart." };
+      }
+      setOpenOrder(null);
+      return { ok: true };
+    });
+
+  // Bulk actions for the Abandoned / Archived tabs. Each operates on the
+  // current selection set; the toolbar disables the button when nothing is
+  // selected. Refresh after every bulk op so the visible counts + tabs
+  // re-derive from the new server state.
+  const runBulk = async (label: string, action: () => Promise<{ ok: boolean; count?: number; err?: string }>) => {
+    setBulkBusy(true);
+    const r = await action();
+    setBulkBusy(false);
+    if (!r.ok) {
+      alert(r.err || `Couldn't ${label.toLowerCase()}.`);
+      return;
+    }
+    clearSelection();
+    await refresh();
+  };
+
+  const bulkArchive = () => {
+    if (selectedIds.size === 0) return;
+    runBulk("Archive selected", async () => {
+      const { data, error: err } = await getSupabase().rpc("bulk_archive_product_orders", {
+        order_ids: Array.from(selectedIds),
+      });
+      return err ? { ok: false, err: err.message } : { ok: true, count: Number(data) };
+    });
+  };
+
+  const bulkUnarchive = () => {
+    if (selectedIds.size === 0) return;
+    runBulk("Unarchive selected", async () => {
+      const { data, error: err } = await getSupabase().rpc("bulk_unarchive_product_orders", {
+        order_ids: Array.from(selectedIds),
+      });
+      return err ? { ok: false, err: err.message } : { ok: true, count: Number(data) };
+    });
+  };
+
+  const bulkDelete = () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Permanently delete ${selectedIds.size} abandoned cart${selectedIds.size === 1 ? "" : "s"}? This can't be undone.`)) {
+      return;
+    }
+    runBulk("Delete selected", async () => {
+      const { data, error: err } = await getSupabase().rpc("delete_abandoned_product_orders", {
+        order_ids: Array.from(selectedIds),
+      });
+      return err ? { ok: false, err: err.message } : { ok: true, count: Number(data) };
+    });
+  };
+
+  // "Delete all abandoned" — wipes every abandoned-cart row owned by the
+  // caller (both the Abandoned and Archived tabs, since both are
+  // abandoned-cart rows). order_ids: null is the explicit "all" signal the
+  // server-side RPC understands.
+  const deleteAllAbandoned = () => {
+    const total = abandoned.length + archived.length;
+    if (total === 0) return;
+    if (!confirm(`Permanently delete ALL ${total} abandoned cart${total === 1 ? "" : "s"} (including archived)? This can't be undone.`)) {
+      return;
+    }
+    runBulk("Delete all abandoned", async () => {
+      const { data, error: err } = await getSupabase().rpc("delete_abandoned_product_orders", {
+        order_ids: null,
+      });
+      return err ? { ok: false, err: err.message } : { ok: true, count: Number(data) };
+    });
+  };
+
   // Buy + print the prepaid Shippo label for a carrier-shipped order. The
   // server bills the stylist's Shippo account, stamps the order shipped,
   // emails the buyer the tracking, and returns the label PDF URL — which we
@@ -32390,15 +32538,17 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
           placeholder="Search by customer, email, order ref, or product"
         />
 
-        {/* Tabs — only show the Abandoned tab when there's at least
-            one row in it, so a fresh stylist with zero abandoned
-            carts isn't shown a confusing empty section. */}
-        {(abandoned.length > 0 || tab === "abandoned") && (
-          <div className="flex gap-2">
+        {/* Tabs — only show the Abandoned / Archived tabs when there's
+            at least one row in them (or the user is currently looking at
+            an empty one), so a fresh stylist with zero junk rows isn't
+            shown two confusing empty sections. */}
+        {(abandoned.length > 0 || archived.length > 0 || tab !== "orders") && (
+          <div className="flex gap-2 flex-wrap">
             {([
-              { key: "orders" as const,    label: `Orders${realOrders.length ? ` · ${realOrders.length}` : ""}` },
-              { key: "abandoned" as const, label: `Abandoned${abandoned.length ? ` · ${abandoned.length}` : ""}` },
-            ]).map(t => (
+              { key: "orders" as const,    label: `Orders${realOrders.length ? ` · ${realOrders.length}` : ""}`, show: true },
+              { key: "abandoned" as const, label: `Abandoned${abandoned.length ? ` · ${abandoned.length}` : ""}`, show: abandoned.length > 0 || tab === "abandoned" },
+              { key: "archived" as const,  label: `Archived${archived.length ? ` · ${archived.length}` : ""}`,    show: archived.length > 0 || tab === "archived" },
+            ]).filter(t => t.show).map(t => (
               <button
                 type="button"
                 key={t.key}
@@ -32417,6 +32567,102 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
           </div>
         )}
 
+        {/* Bulk-action toolbar — only on the Abandoned / Archived tabs.
+            Selection-aware: greyed-out actions when nothing's picked,
+            with a one-tap "Select all" shortcut. Bottom row holds the
+            destructive owner-only "Delete all abandoned" button, kept
+            visually distinct so a tap-then-confirm flow is the only
+            path to it. */}
+        {(tab === "abandoned" || tab === "archived") && visible.length > 0 && (
+          <Card className="p-2.5 space-y-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-[11px] font-semibold" style={{ color: C.muted, letterSpacing: "0.04em" }}>
+                {selectedIds.size === 0
+                  ? `${visible.length} ${tab === "abandoned" ? "abandoned" : "archived"}`
+                  : `${selectedIds.size} selected`}
+              </p>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={selectedIds.size === visible.length ? clearSelection : selectAllVisible}
+                  className="px-2.5 py-1 rounded-full text-[10px] font-semibold transition"
+                  style={{ background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}`, letterSpacing: "0.04em" }}
+                >
+                  {selectedIds.size === visible.length ? "Clear" : "Select all"}
+                </button>
+              </div>
+            </div>
+            <div className="flex gap-1.5 flex-wrap">
+              {tab === "abandoned" && (
+                <button
+                  type="button"
+                  onClick={bulkArchive}
+                  disabled={bulkBusy || selectedIds.size === 0}
+                  className="px-2.5 py-1.5 rounded-full text-[11px] font-semibold transition"
+                  style={{
+                    background: selectedIds.size === 0 ? "transparent" : C.cream,
+                    color: selectedIds.size === 0 ? C.mutedSoft : C.coffee,
+                    border: `1px solid ${C.hairline}`,
+                    cursor: selectedIds.size === 0 ? "not-allowed" : "pointer",
+                    opacity: bulkBusy ? 0.6 : 1,
+                  }}
+                >
+                  Archive selected
+                </button>
+              )}
+              {tab === "archived" && (
+                <button
+                  type="button"
+                  onClick={bulkUnarchive}
+                  disabled={bulkBusy || selectedIds.size === 0}
+                  className="px-2.5 py-1.5 rounded-full text-[11px] font-semibold transition"
+                  style={{
+                    background: selectedIds.size === 0 ? "transparent" : C.cream,
+                    color: selectedIds.size === 0 ? C.mutedSoft : C.coffee,
+                    border: `1px solid ${C.hairline}`,
+                    cursor: selectedIds.size === 0 ? "not-allowed" : "pointer",
+                    opacity: bulkBusy ? 0.6 : 1,
+                  }}
+                >
+                  Unarchive selected
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={bulkDelete}
+                disabled={bulkBusy || selectedIds.size === 0}
+                className="px-2.5 py-1.5 rounded-full text-[11px] font-semibold transition"
+                style={{
+                  background: selectedIds.size === 0 ? "transparent" : "rgba(220,38,38,0.08)",
+                  color: selectedIds.size === 0 ? C.mutedSoft : C.danger,
+                  border: `1px solid ${selectedIds.size === 0 ? C.hairline : "rgba(220,38,38,0.30)"}`,
+                  cursor: selectedIds.size === 0 ? "not-allowed" : "pointer",
+                  opacity: bulkBusy ? 0.6 : 1,
+                }}
+              >
+                Delete selected
+              </button>
+            </div>
+            {(abandoned.length + archived.length) > 0 && (
+              <button
+                type="button"
+                onClick={deleteAllAbandoned}
+                disabled={bulkBusy}
+                className="w-full px-2.5 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition"
+                style={{
+                  background: "transparent",
+                  color: C.danger,
+                  border: `1px dashed ${C.danger}`,
+                  letterSpacing: "0.14em",
+                  opacity: bulkBusy ? 0.6 : 1,
+                }}
+              >
+                Delete all abandoned ({abandoned.length + archived.length})
+              </button>
+            )}
+          </Card>
+        )}
+
         {error && (
           <Card className="p-3" style={{ border: `1px solid ${C.danger}` }}>
             <p className="text-[12px]" style={{ color: C.danger }}>{error}</p>
@@ -32429,11 +32675,17 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
         ) : visible.length === 0 ? (
           <Card className="p-6 text-center">
             <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso }}>
-              {tab === "abandoned" ? "No abandoned carts" : "No orders yet"}
+              {tab === "abandoned"
+                ? "No abandoned carts"
+                : tab === "archived"
+                ? "No archived carts"
+                : "No orders yet"}
             </p>
             <p className="text-[12px] mt-2" style={{ color: C.muted }}>
               {tab === "abandoned"
                 ? "Cart sessions that started checkout but never paid will show up here."
+                : tab === "archived"
+                ? "Archived abandoned carts live here. Use the toolbar to recover or delete them."
                 : "Customer orders from your storefront will appear here."}
             </p>
           </Card>
@@ -32442,9 +32694,32 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
             const s = displayStatus(o);
             const tone = ORDER_TONE[s] || "neutral";
             const itemCount = (o.line_items || []).reduce((acc: number, i: any) => acc + (Number(i?.quantity) || 1), 0);
+            // Multi-select is only meaningful on the abandoned-cart tabs.
+            const selectable = tab === "abandoned" || tab === "archived";
+            const selected = selectable && selectedIds.has(o.id);
             return (
-              <Card key={o.id} className="p-3.5 active:scale-[0.99] cursor-pointer" onClick={() => openDetail(o)}>
+              <Card
+                key={o.id}
+                className="p-3.5 active:scale-[0.99] cursor-pointer"
+                onClick={() => openDetail(o)}
+                style={selected ? { border: `1.5px solid ${C.brandPrimary}`, background: "rgba(124,58,237,0.04)" } : undefined}
+              >
                 <div className="flex items-start justify-between gap-3">
+                  {selectable && (
+                    <label
+                      className="flex items-center pt-1"
+                      onClick={(e) => { e.stopPropagation(); toggleSelect(o.id); }}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => {}}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ width: 18, height: 18, accentColor: C.brandPrimary, cursor: "pointer" }}
+                      />
+                    </label>
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                       <Pill tone={tone}>{ORDER_LABEL[s] || s}</Pill>
@@ -32470,12 +32745,19 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
           const s = displayStatus(openOrder);
           const tone = ORDER_TONE[s] || "neutral";
           const isFinal = s === "canceled" || s === "refunded";
+          // Abandoned-cart actions live in a separate flow from real orders.
+          // Cancel/Mark shipped/etc are all no-ops on a row that never had a
+          // PaymentIntent — the stylist wants Archive or Delete instead.
+          const openIsAbandoned = isAbandoned(openOrder);
+          const openIsArchived = !!openOrder.archived_at;
           return (
             <div className="space-y-3 pb-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <Pill tone={tone}>{ORDER_LABEL[s] || s}</Pill>
-                {openOrder.shipping_required && <Pill tone="neutral">Ships</Pill>}
-                {!openOrder.shipping_required && <Pill tone="neutral">Pickup</Pill>}
+                {openIsAbandoned && <Pill tone="neutral">Abandoned</Pill>}
+                {openIsArchived && <Pill tone="neutral">Archived</Pill>}
+                {!openIsAbandoned && openOrder.shipping_required && <Pill tone="neutral">Ships</Pill>}
+                {!openIsAbandoned && !openOrder.shipping_required && <Pill tone="neutral">Pickup</Pill>}
               </div>
               <Card className="p-3.5">
                 <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Customer</p>
@@ -32602,7 +32884,33 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
                   </div>
                 </div>
               )}
-              {openOrder.status !== "canceled" && !isFinal && (
+              {/* Abandoned-cart actions replace the Cancel button. A "cancel"
+                  RPC on an unpaid pre-insert only flips fulfillment_status,
+                  leaving the row in the Abandoned tab forever (the bug the
+                  user reported). Archive moves it to the Archived tab;
+                  Delete wipes it permanently via the server-side
+                  abandoned-only delete guard. */}
+              {openIsAbandoned && !openIsArchived && (
+                <div className="grid grid-cols-2 gap-2">
+                  <Button variant="outline" onClick={archiveOpenAbandoned}>
+                    {actionBusy ? "…" : "Archive abandoned cart"}
+                  </Button>
+                  <Button variant="outline" onClick={deleteOpen}>
+                    {actionBusy ? "…" : "Delete permanently"}
+                  </Button>
+                </div>
+              )}
+              {openIsAbandoned && openIsArchived && (
+                <div className="grid grid-cols-2 gap-2">
+                  <Button variant="outline" onClick={unarchiveOpen}>
+                    {actionBusy ? "…" : "Unarchive"}
+                  </Button>
+                  <Button variant="outline" onClick={deleteOpen}>
+                    {actionBusy ? "…" : "Delete permanently"}
+                  </Button>
+                </div>
+              )}
+              {!openIsAbandoned && openOrder.status !== "canceled" && !isFinal && (
                 <Button variant="outline" fullWidth onClick={markCanceled}>
                   {actionBusy ? "…" : "Cancel order"}
                 </Button>
