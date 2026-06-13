@@ -658,7 +658,7 @@ export default function ProductDetailPage() {
                       background: selected ? "rgba(124,58,237,0.06)" : "#FFFFFF",
                     }}
                   >
-                    <span className="flex items-center gap-2.5">
+                    <span className="flex items-center gap-2.5 min-w-0">
                       <span
                         aria-hidden
                         style={{
@@ -675,15 +675,22 @@ export default function ProductDetailPage() {
                           <span style={{ width: 9, height: 9, borderRadius: 999, background: C.brandPrimary }} />
                         )}
                       </span>
-                      <span className="text-[14px] font-bold" style={{ color: C.brandText }}>
-                        {label}
+                      <span className="flex flex-col min-w-0">
+                        <span className="text-[14px] font-bold" style={{ color: C.brandText }}>
+                          {label}
+                        </span>
+                        {carrierShippingRow && (
+                          <span className="text-[11px]" style={{ color: C.muted, lineHeight: 1.3 }}>
+                            Rates are calculated based on your delivery address.
+                          </span>
+                        )}
                       </span>
                     </span>
                     <span
                       className="text-[13px] font-bold"
                       style={{ color: carrierShippingRow ? C.brandPrimary : fee === 0 ? C.brandPrimary : C.brandText }}
                     >
-                      {carrierShippingRow ? "Live rates" : fee === 0 ? "Free" : fmtMoney(fee)}
+                      {carrierShippingRow ? "Real-time rates" : fee === 0 ? "Free" : fmtMoney(fee)}
                     </span>
                   </button>
                 );
@@ -838,7 +845,7 @@ export default function ProductDetailPage() {
             : product.external_checkout_url
             ? "Buy at external shop"
             : carrierShipping
-            ? "Pick shipping rate"
+            ? "Get shipping options"
             : "Buy now"}
         </button>
         {buyError && (

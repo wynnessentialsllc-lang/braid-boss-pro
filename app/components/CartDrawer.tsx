@@ -347,7 +347,7 @@ export const CartDrawer = () => {
     }
     if (carrierBlocked) {
       setCheckoutState("error");
-      setCheckoutError("Pick a shipping option before continuing.");
+      setCheckoutError("Choose a shipping option before continuing.");
       return;
     }
     setCheckoutState("loading");
@@ -552,7 +552,7 @@ export const CartDrawer = () => {
                                 return Math.max(0, Number(ful.shipping_flat_rate) || 0);
                               })();
                     const feeLabel = carrierShippingRow
-                      ? "Live rates"
+                      ? "Real-time rates"
                       : fee === 0
                         ? "Free"
                         : fmt(fee);
@@ -575,7 +575,7 @@ export const CartDrawer = () => {
                           textAlign: "left",
                         }}
                       >
-                        <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                           <span
                             aria-hidden
                             style={{
@@ -585,13 +585,21 @@ export const CartDrawer = () => {
                               border: `2px solid ${selected ? C.brandPrimary : C.mutedSoft}`,
                               display: "grid",
                               placeItems: "center",
+                              flexShrink: 0,
                             }}
                           >
                             {selected && (
                               <span style={{ width: 9, height: 9, borderRadius: 999, background: C.brandPrimary }} />
                             )}
                           </span>
-                          <span style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>{label}</span>
+                          <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                            <span style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>{label}</span>
+                            {carrierShippingRow && (
+                              <span style={{ fontSize: 11, color: C.muted, lineHeight: 1.3 }}>
+                                Rates are calculated based on your delivery address.
+                              </span>
+                            )}
+                          </span>
                         </span>
                         <span style={{ fontSize: 13, fontWeight: 700, color: fee === 0 ? C.brandPrimary : C.ink }}>
                           {feeLabel}
@@ -679,7 +687,7 @@ export const CartDrawer = () => {
                             .toUpperCase();
                           setShipState(s);
                         }}
-                        placeholder="ST"
+                        placeholder="State"
                         style={{
                           flex: 1,
                           padding: "11px 14px",
@@ -713,7 +721,7 @@ export const CartDrawer = () => {
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {rateState.status === "loading" ? "Loading…" : "Get rates"}
+                        {rateState.status === "loading" ? "Loading…" : "Get shipping options"}
                       </button>
                     </div>
                     {rateState.status === "error" && (
@@ -723,7 +731,7 @@ export const CartDrawer = () => {
                     )}
                     {rateState.status === "ok" && rateStale && (
                       <span style={{ fontSize: 11, color: C.brandWarning, fontWeight: 600 }}>
-                        Cart changed — re-fetch rates.
+                        Cart changed — get shipping options again.
                       </span>
                     )}
                     {rateState.status === "ok" && !rateStale && (
@@ -771,7 +779,7 @@ export const CartDrawer = () => {
                     )}
                     {rateState.status === "idle" && (
                       <span style={{ fontSize: 11, color: C.muted }}>
-                        Enter your ZIP to see live USPS / UPS rates.
+                        Enter your ZIP code to see available shipping options.
                       </span>
                     )}
                   </div>
@@ -848,8 +856,10 @@ export const CartDrawer = () => {
                 : deliveryBlocked
                   ? "Confirm delivery ZIP"
                   : carrierBlocked
-                    ? "Pick a shipping rate"
-                    : "Checkout"}
+                    ? "Get shipping options"
+                    : carrierShipping
+                      ? "Continue to checkout"
+                      : "Checkout"}
             </button>
             {checkoutError && (
               <p style={{ fontSize: 12, color: C.brandError, marginTop: 4, textAlign: "center" }}>
