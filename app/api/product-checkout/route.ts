@@ -373,9 +373,7 @@ export async function POST(req: Request) {
       if (chk.configured && !chk.within) {
         return fail(
           409,
-          chk.reason === "bad_zip" || chk.reason === "no_origin"
-            ? "Enter a valid ZIP code for local delivery."
-            : `That ZIP is outside the local delivery area (within ${chk.radius} miles). Choose pickup or shipping instead.`,
+          `That ZIP is outside the local delivery area (within ${chk.radius} miles). Choose pickup or shipping instead.`,
         );
       }
     } catch {

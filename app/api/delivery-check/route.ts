@@ -55,7 +55,8 @@ export async function POST(req: Request) {
   try {
     const result = await checkDeliveryRadius(admin, mapboxToken, userId, zip);
     if (!result.configured) {
-      // Delivery isn't radius-limited (or no geocoder) — treat as allowed.
+      // Not radius-limited, or we couldn't geocode — treat as allowed so a
+      // real buyer is never wrongly blocked.
       return NextResponse.json({ ok: true, within: true, limited: false });
     }
     return NextResponse.json({
@@ -64,7 +65,6 @@ export async function POST(req: Request) {
       within: result.within,
       miles: result.miles,
       radius: result.radius,
-      reason: result.reason || null,
     });
   } catch {
     // Geocode/transient failure shouldn't hard-block the buyer here; the
