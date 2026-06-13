@@ -67,6 +67,7 @@ export async function POST(req: Request) {
     variant_id?: string | null;
     custom_amount?: number | null;
     gift_card_code?: string | null;
+    fulfillment_method?: string | null;
     items?: Array<{ product_slug?: string; quantity?: number; variant_id?: string | null; custom_amount?: number | null }>;
   };
   try {
@@ -77,6 +78,13 @@ export async function POST(req: Request) {
   const handle = (body?.handle || "").trim().replace(/^@/, "");
   if (!handle) return fail(400, "Missing stylist handle.");
   const giftCardCode = String(body?.gift_card_code || "").trim().toUpperCase();
+  // Buyer's chosen fulfillment method (shipping | delivery | pickup). Only
+  // honored when the shop has the matching method enabled; otherwise the
+  // order falls back to the legacy address-iff-requires_shipping behavior.
+  const requestedFulfillment = (() => {
+    const m = String(body?.fulfillment_method || "").trim().toLowerCase();
+    return m === "shipping" || m === "delivery" || m === "pickup" ? m : null;
+  })();
 
   // Normalize to a uniform list of {product_slug, quantity, variant_id,
   // custom_amount}. Legacy single-item payloads are wrapped to length 1.
@@ -285,6 +293,78 @@ export async function POST(req: Request) {
   // subtotal — Stripe rejects an application fee above the charge.
   const applicationFeeCents = feeBps > 0 ? Math.floor((chargeableCents * feeBps) / 10_000) : 0;
 
+  // ---- Fulfillment: shipping / delivery / pickup ------------------
+  // Load the shop's opt-in fulfillment config. When nothing is enabled we
+  // preserve the legacy behavior (collect an address iff a product requires
+  // shipping, no fee). When at least one method is enabled, the buyer's
+  // chosen method drives address collection and a Stripe shipping_options
+  // line that carries the fee (or $0 for pickup / free shipping).
+  const { data: shopCfg } = await admin
+    .from("shop_settings")
+    .select(
+      "pickup_enabled, delivery_enabled, shipping_enabled, shipping_mode, shipping_flat_rate, shipping_free_threshold, delivery_fee, tax_enabled",
+    )
+    .eq("user_id", stylistUserId)
+    .maybeSingle();
+  const anyFulfillmentEnabled = !!(
+    shopCfg && (shopCfg.pickup_enabled || shopCfg.delivery_enabled || shopCfg.shipping_enabled)
+  );
+  // Stripe Tax (automatic, by buyer address). Opt-in; applied below with a
+  // graceful fallback so it can never block a sale.
+  const taxEnabled = !!(shopCfg && (shopCfg as any).tax_enabled);
+  const toCents = (v: unknown): number => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : 0;
+  };
+
+  let fulfillmentMethod: string | null = null;
+  let shippingLabel = "";
+  let shippingFeeCents = 0;
+  let collectShippingAddress = requiresShipping; // legacy default
+
+  if (anyFulfillmentEnabled && shopCfg) {
+    const enabled: Record<string, boolean> = {
+      shipping: !!shopCfg.shipping_enabled,
+      delivery: !!shopCfg.delivery_enabled,
+      pickup: !!shopCfg.pickup_enabled,
+    };
+    // Resolve the method: honor the buyer's choice when it's enabled,
+    // otherwise fall back to the single enabled method, else the first
+    // enabled in priority order. Reject an explicit-but-disabled choice.
+    let method = requestedFulfillment;
+    if (method && !enabled[method]) {
+      return fail(400, "That fulfillment option isn't available for this shop.");
+    }
+    if (!method) {
+      const order = (["shipping", "delivery", "pickup"] as const).filter((m) => enabled[m]);
+      method = order.length === 1 ? order[0] : order[0] || null;
+    }
+    fulfillmentMethod = method;
+
+    if (method === "pickup") {
+      shippingFeeCents = 0;
+      collectShippingAddress = false;
+      shippingLabel = "Pickup";
+    } else if (method === "delivery") {
+      shippingFeeCents = toCents(shopCfg.delivery_fee);
+      collectShippingAddress = true;
+      shippingLabel = shippingFeeCents > 0 ? "Local delivery" : "Local delivery (free)";
+    } else if (method === "shipping") {
+      // Flat-rate today; 'carrier' mode (live rates) is a future phase.
+      const threshold = Number(shopCfg.shipping_free_threshold);
+      const qualifiesFree =
+        Number.isFinite(threshold) && threshold > 0 && subtotalDollars >= threshold;
+      shippingFeeCents = qualifiesFree ? 0 : toCents(shopCfg.shipping_flat_rate);
+      collectShippingAddress = true;
+      shippingLabel = shippingFeeCents > 0 ? "Shipping" : "Free shipping";
+    }
+  }
+
+  // Grand-total order value (merch + shipping), pre gift-card. amount_total
+  // historically held the merch subtotal; including shipping keeps the
+  // stored total aligned with what Stripe charges.
+  const orderTotalDollars = (subtotalCents + shippingFeeCents) / 100;
+
   // Pre-insert the order row. customer_token auto-fills from the
   // column default. line_items captures the resolved cart shape so
   // the webhook + tracking page can read it without re-resolving.
@@ -306,14 +386,17 @@ export async function POST(req: Request) {
     .insert({
       user_id: stylistUserId,
       stripe_account_id: stylistAccountId,
-      amount_total: subtotalDollars.toFixed(2),
+      amount_total: orderTotalDollars.toFixed(2),
+      subtotal: subtotalDollars.toFixed(2),
+      shipping_cost: (shippingFeeCents / 100).toFixed(2),
+      fulfillment_method: fulfillmentMethod,
       application_fee: applicationFeeCents > 0 ? (applicationFeeCents / 100).toFixed(2) : null,
       currency: "usd",
-      shipping_required: requiresShipping,
+      shipping_required: collectShippingAddress,
       line_items: lineItemsJson,
       gift_card_id: giftCardId,
       gift_card_redeemed_amount: redeemCents > 0 ? (redeemCents / 100).toFixed(2) : null,
-      metadata: { handle, item_count: resolved.length },
+      metadata: { handle, item_count: resolved.length, fulfillment_method: fulfillmentMethod },
     })
     .select("id, customer_token")
     .maybeSingle();
@@ -351,9 +434,23 @@ export async function POST(req: Request) {
     `${baseUrl}/orders/${encodeURIComponent(order.customer_token)}?session_id={CHECKOUT_SESSION_ID}`,
   );
   form.set("cancel_url", `${baseUrl}/@${encodeURIComponent(handle)}/shop?cancelled=1`);
-  if (requiresShipping) {
+  if (collectShippingAddress) {
     form.set("shipping_address_collection[allowed_countries][]", "US");
     form.set("phone_number_collection[enabled]", "true");
+    // A single fixed-amount shipping rate carrying the resolved fee. Stripe
+    // shows it on the Checkout page and folds it into the total. Free
+    // shipping / free delivery surface as a $0 rate with a clear name.
+    form.set("shipping_options[0][shipping_rate_data][type]", "fixed_amount");
+    form.set("shipping_options[0][shipping_rate_data][fixed_amount][amount]", String(shippingFeeCents));
+    form.set("shipping_options[0][shipping_rate_data][fixed_amount][currency]", "usd");
+    form.set(
+      "shipping_options[0][shipping_rate_data][display_name]",
+      shippingLabel || "Shipping",
+    );
+  } else if (fulfillmentMethod === "pickup") {
+    // Pickup needs no address and costs nothing; record the choice so the
+    // confirmation + order page can show "Pickup" instead of a shipping line.
+    form.set("metadata[fulfillment_method]", "pickup");
   }
   form.set("metadata[product_order_id]", String(order.id));
   form.set("metadata[stylist_user_id]", String(stylistUserId));
@@ -407,17 +504,45 @@ export async function POST(req: Request) {
     form.set("discounts[0][coupon]", String(coupon.id));
   }
 
-  const stripeRes = await fetch(`${STRIPE_API}/checkout/sessions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${stripeSecret}`,
-      "Stripe-Version": "2024-06-20",
-      "Stripe-Account": stylistAccountId,
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body: form.toString(),
-    cache: "no-store",
-  });
+  // Stripe Tax (automatic by buyer address). Each taxable amount needs a
+  // tax_behavior; we collect a billing address when there's no shipping
+  // address (e.g. pickup) so Stripe can locate the buyer. Keys are tracked
+  // so we can strip them and retry if the connected account hasn't finished
+  // Stripe Tax setup — a misconfigured shop should still be able to sell.
+  const taxKeys: string[] = [];
+  if (taxEnabled) {
+    const addTaxKey = (k: string, v: string) => {
+      form.set(k, v);
+      taxKeys.push(k);
+    };
+    addTaxKey("automatic_tax[enabled]", "true");
+    if (!collectShippingAddress) addTaxKey("billing_address_collection", "required");
+    resolved.forEach((_, i) => addTaxKey(`line_items[${i}][price_data][tax_behavior]`, "exclusive"));
+    if (collectShippingAddress) {
+      addTaxKey("shipping_options[0][shipping_rate_data][tax_behavior]", "exclusive");
+    }
+  }
+
+  const postSession = () =>
+    fetch(`${STRIPE_API}/checkout/sessions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${stripeSecret}`,
+        "Stripe-Version": "2024-06-20",
+        "Stripe-Account": stylistAccountId,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: form.toString(),
+      cache: "no-store",
+    });
+
+  let stripeRes = await postSession();
+  // Graceful tax fallback: if the session was rejected and tax was applied,
+  // drop the tax params and retry once so the sale still goes through.
+  if (!stripeRes.ok && taxKeys.length > 0) {
+    for (const k of taxKeys) form.delete(k);
+    stripeRes = await postSession();
+  }
   if (!stripeRes.ok) {
     const text = await stripeRes.text().catch(() => "");
     await admin

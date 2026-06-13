@@ -33,10 +33,14 @@ import {
 import {
   fetchPublicProduct,
   fetchPublicProducts,
+  fetchShopFulfillment,
   PRODUCT_CATEGORY_LABEL,
   type PublicProduct,
   type PublicProductDetail,
+  type ShopFulfillment,
 } from "../../../../lib/storefront";
+
+type FulfillmentMethod = "shipping" | "delivery" | "pickup";
 
 export default function ProductDetailPage() {
   const params = useParams();
@@ -71,6 +75,10 @@ export default function ProductDetailPage() {
   // Checkout button state
   const [buyState, setBuyState] = useState<"idle" | "loading" | "error">("idle");
   const [buyError, setBuyError] = useState<string | null>(null);
+  // Shop fulfillment config + the buyer's choice. Null = shop hasn't enabled
+  // any method, so Buy Now behaves exactly as before.
+  const [ful, setFul] = useState<ShopFulfillment | null>(null);
+  const [fulMethod, setFulMethod] = useState<FulfillmentMethod | null>(null);
   // Selected variant id — null when the product has no variants
   // (legacy or single-option), or when none has been picked yet.
   // The Buy button stays disabled until a pick is made for any
@@ -159,6 +167,17 @@ export default function ProductDetailPage() {
               .slice(0, 4),
           );
         }
+        // Fulfillment options for the Buy Now flow. Gift cards never ship,
+        // so they skip the selector entirely.
+        if (!r.product.is_gift_card) {
+          const cfg = await fetchShopFulfillment(profileState.profile.slug);
+          if (!cancelled && cfg) {
+            setFul(cfg);
+            setFulMethod(
+              cfg.shipping_enabled ? "shipping" : cfg.delivery_enabled ? "delivery" : "pickup",
+            );
+          }
+        }
       }
       setLoading(false);
     })();
@@ -215,6 +234,9 @@ export default function ProductDetailPage() {
           // Gift-card buyer-chosen amount. The checkout API validates
           // it against the $10-$200 range for gift-card products.
           custom_amount: customMode ? customAmountNum : null,
+          // Chosen shipping / delivery / pickup method (null when the shop
+          // hasn't enabled any — server then uses legacy behavior).
+          fulfillment_method: ful ? fulMethod : null,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -538,6 +560,91 @@ export default function ProductDetailPage() {
           {customMode && customAmountValid && (
             <p className="text-[11px] mt-2" style={{ color: C.muted }}>
               Tap Buy now for a ${customAmountNum} gift card — custom amounts check out directly, not via cart.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* Fulfillment picker — only when the shop enabled methods and this
+          isn't an external-link or gift-card product. Feeds Buy Now; the
+          cart has its own copy of this selector. */}
+      {ful && !product.external_checkout_url && !customMode && (
+        <section className="mt-5">
+          <p
+            className="text-[11px] font-bold uppercase tracking-widest mb-2"
+            style={{ color: C.muted, letterSpacing: "0.12em" }}
+          >
+            Delivery method
+          </p>
+          <div className="space-y-2">
+            {(["shipping", "delivery", "pickup"] as const)
+              .filter((m) =>
+                m === "shipping"
+                  ? ful.shipping_enabled
+                  : m === "delivery"
+                    ? ful.delivery_enabled
+                    : ful.pickup_enabled,
+              )
+              .map((m) => {
+                const selected = fulMethod === m;
+                const label =
+                  m === "shipping" ? "Shipping" : m === "delivery" ? "Local delivery" : "Pickup";
+                const sub = Number(effPrice ?? product.price ?? 0);
+                const fee =
+                  m === "pickup"
+                    ? 0
+                    : m === "delivery"
+                      ? Math.max(0, Number(ful.delivery_fee) || 0)
+                      : (() => {
+                          const thr = Number(ful.shipping_free_threshold);
+                          if (Number.isFinite(thr) && thr > 0 && sub >= thr) return 0;
+                          return Math.max(0, Number(ful.shipping_flat_rate) || 0);
+                        })();
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setFulMethod(m)}
+                    className="w-full flex items-center justify-between gap-3 rounded-xl px-3.5 py-3 transition active:scale-[0.99]"
+                    style={{
+                      border: `1.5px solid ${selected ? C.brandPrimary : C.brandBorder}`,
+                      background: selected ? "rgba(124,58,237,0.06)" : "#FFFFFF",
+                    }}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <span
+                        aria-hidden
+                        style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: 999,
+                          border: `2px solid ${selected ? C.brandPrimary : C.mutedSoft}`,
+                          display: "grid",
+                          placeItems: "center",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {selected && (
+                          <span style={{ width: 9, height: 9, borderRadius: 999, background: C.brandPrimary }} />
+                        )}
+                      </span>
+                      <span className="text-[14px] font-bold" style={{ color: C.brandText }}>
+                        {label}
+                      </span>
+                    </span>
+                    <span
+                      className="text-[13px] font-bold"
+                      style={{ color: fee === 0 ? C.brandPrimary : C.brandText }}
+                    >
+                      {fee === 0 ? "Free" : fmtMoney(fee)}
+                    </span>
+                  </button>
+                );
+              })}
+          </div>
+          {fulMethod === "pickup" && ful.pickup_instructions && (
+            <p className="text-[11px] mt-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+              {ful.pickup_instructions}
             </p>
           )}
         </section>

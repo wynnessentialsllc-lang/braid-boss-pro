@@ -79,6 +79,10 @@ type OrderRow = {
   stylist_business_name: string | null;
   stylist_logo_url: string | null;
   stylist_handle: string | null;
+  subtotal: number | null;
+  shipping_cost: number | null;
+  fulfillment_method: string | null;
+  tax_amount: number | null;
 };
 
 const STATUS_LABEL: Record<string, { label: string; tone: string }> = {
@@ -308,6 +312,44 @@ export default function OrderTrackingPage() {
               </li>
             ))}
           </ul>
+          {order.subtotal != null && order.fulfillment_method && (
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6, padding: "0 16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 13, color: C.muted }}>Subtotal</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>
+                  {fmtMoney(Number(order.subtotal || 0), order.currency)}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 13, color: C.muted }}>
+                  {order.fulfillment_method === "pickup"
+                    ? "Pickup"
+                    : order.fulfillment_method === "delivery"
+                      ? "Local delivery"
+                      : "Shipping"}
+                </span>
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: Number(order.shipping_cost || 0) === 0 ? C.brandSuccess : C.ink,
+                  }}
+                >
+                  {Number(order.shipping_cost || 0) === 0
+                    ? "Free"
+                    : fmtMoney(Number(order.shipping_cost || 0), order.currency)}
+                </span>
+              </div>
+              {order.tax_amount != null && Number(order.tax_amount) > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 13, color: C.muted }}>Tax</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>
+                    {fmtMoney(Number(order.tax_amount || 0), order.currency)}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
           <div
             style={{
               marginTop: 14,

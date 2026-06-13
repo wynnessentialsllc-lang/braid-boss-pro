@@ -175,6 +175,11 @@ export async function POST(req: Request) {
     (typeof session?.customer_details?.name === "string" && session.customer_details.name) ||
     null;
   const shippingAddress = session?.shipping_details?.address || session?.customer_details?.address || null;
+  // Sales tax Stripe Tax computed at checkout (cents → decimal).
+  const taxAmount =
+    typeof session?.total_details?.amount_tax === "number"
+      ? Number((session.total_details.amount_tax / 100).toFixed(2))
+      : null;
 
   const { data: marked, error: rpcErr } = await admin.rpc("mark_product_order_paid", {
     session_id_in: sessionId || null,
@@ -183,6 +188,7 @@ export async function POST(req: Request) {
     customer_email_in: customerEmail,
     customer_name_in: customerName,
     shipping_address_in: shippingAddress,
+    tax_amount_in: taxAmount,
   });
   if (rpcErr) {
     return NextResponse.json({ error: rpcErr.message }, { status: 500 });

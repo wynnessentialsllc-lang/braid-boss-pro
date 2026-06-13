@@ -32522,6 +32522,15 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
   const [turnaroundMin, setTurnaroundMin] = useState<string>("");
   const [turnaroundMax, setTurnaroundMax] = useState<string>("");
   const [defaultCarrier, setDefaultCarrier] = useState("");
+  // Checkout fulfillment config (phase 1): which methods buyers can pick and
+  // their fees. All off by default → checkout behaves as before.
+  const [pickupEnabled, setPickupEnabled] = useState(false);
+  const [deliveryEnabled, setDeliveryEnabled] = useState(false);
+  const [shippingEnabled, setShippingEnabled] = useState(false);
+  const [deliveryFee, setDeliveryFee] = useState<string>("");
+  const [shippingFlatRate, setShippingFlatRate] = useState<string>("");
+  const [shippingFreeThreshold, setShippingFreeThreshold] = useState<string>("");
+  const [taxEnabled, setTaxEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
@@ -32546,6 +32555,13 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
         setTurnaroundMin(data.turnaround_days_min == null ? "" : String(data.turnaround_days_min));
         setTurnaroundMax(data.turnaround_days_max == null ? "" : String(data.turnaround_days_max));
         setDefaultCarrier(data.default_carrier || "");
+        setPickupEnabled(!!data.pickup_enabled);
+        setDeliveryEnabled(!!data.delivery_enabled);
+        setShippingEnabled(!!data.shipping_enabled);
+        setDeliveryFee(data.delivery_fee == null ? "" : String(data.delivery_fee));
+        setShippingFlatRate(data.shipping_flat_rate == null ? "" : String(data.shipping_flat_rate));
+        setShippingFreeThreshold(data.shipping_free_threshold == null ? "" : String(data.shipping_free_threshold));
+        setTaxEnabled(!!data.tax_enabled);
       }
       setLoading(false);
     })();
@@ -32568,6 +32584,13 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
       turnaround_days_min: turnaroundMin.trim() === "" ? null : Math.max(0, Math.floor(Number(turnaroundMin) || 0)),
       turnaround_days_max: turnaroundMax.trim() === "" ? null : Math.max(0, Math.floor(Number(turnaroundMax) || 0)),
       default_carrier: defaultCarrier.trim() || null,
+      pickup_enabled: pickupEnabled,
+      delivery_enabled: deliveryEnabled,
+      shipping_enabled: shippingEnabled,
+      delivery_fee: deliveryFee.trim() === "" ? null : Math.max(0, Number(deliveryFee) || 0),
+      shipping_flat_rate: shippingFlatRate.trim() === "" ? null : Math.max(0, Number(shippingFlatRate) || 0),
+      shipping_free_threshold: shippingFreeThreshold.trim() === "" ? null : Math.max(0, Number(shippingFreeThreshold) || 0),
+      tax_enabled: taxEnabled,
       updated_at: new Date().toISOString(),
     };
     const { error: err } = await getSupabase().from("shop_settings").upsert(payload, { onConflict: "user_id" });
@@ -32584,6 +32607,65 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
           <Card className="p-6 text-center"><p className="text-[13px]" style={{ color: C.muted }}>Loading…</p></Card>
         ) : (
           <>
+            <Card className="p-3.5 space-y-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Checkout options</p>
+                <p className="text-[11px] mt-1" style={{ color: C.muted, lineHeight: 1.5 }}>
+                  Choose how shoppers receive orders. Turn these on and buyers pick one at checkout. All off = checkout works as before.
+                </p>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Pickup</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Free. Customers collect from your pickup address.</p>
+                </div>
+                <Toggle checked={pickupEnabled} onChange={(v: boolean) => setPickupEnabled(v)} />
+              </div>
+              <div style={{ borderTop: `1px solid ${C.hairline}` }} />
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Local delivery</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>You drop off. Add an optional flat fee.</p>
+                </div>
+                <Toggle checked={deliveryEnabled} onChange={(v: boolean) => setDeliveryEnabled(v)} />
+              </div>
+              {deliveryEnabled && (
+                <Field label="Delivery fee" hint="Leave blank for free delivery.">
+                  <MoneyInput value={deliveryFee} onChange={(v) => setDeliveryFee(v)} placeholder="0.00" />
+                </Field>
+              )}
+              <div style={{ borderTop: `1px solid ${C.hairline}` }} />
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Shipping</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Flat rate, with optional free shipping over a threshold.</p>
+                </div>
+                <Toggle checked={shippingEnabled} onChange={(v: boolean) => setShippingEnabled(v)} />
+              </div>
+              {shippingEnabled && (
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Flat rate">
+                    <MoneyInput value={shippingFlatRate} onChange={(v) => setShippingFlatRate(v)} placeholder="0.00" />
+                  </Field>
+                  <Field label="Free over" hint="Optional">
+                    <MoneyInput value={shippingFreeThreshold} onChange={(v) => setShippingFreeThreshold(v)} placeholder="—" />
+                  </Field>
+                </div>
+              )}
+              <div style={{ borderTop: `1px solid ${C.hairline}` }} />
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Collect sales tax</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Stripe calculates tax by the buyer's address.</p>
+                </div>
+                <Toggle checked={taxEnabled} onChange={(v: boolean) => setTaxEnabled(v)} />
+              </div>
+              {taxEnabled && (
+                <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5, background: "rgba(251,191,36,0.10)", borderRadius: 10, padding: "8px 10px" }}>
+                  Turn on <strong>Stripe Tax</strong> in your Stripe dashboard (Settings → Tax) and add your registrations first. Until then, orders check out without tax — your sales are never blocked.
+                </p>
+              )}
+            </Card>
             <Card className="p-3.5 space-y-3">
               <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Pickup address</p>
               <Field label="Street address">

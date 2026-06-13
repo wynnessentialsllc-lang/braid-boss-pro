@@ -8,6 +8,17 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCart, type CartItem } from "../lib/cart";
 import { useModalA11y } from "../lib/use-modal-a11y";
+import { getSupabase } from "../lib/supabase";
+
+type FulfillmentMethod = "shipping" | "delivery" | "pickup";
+type ShopFulfillment = {
+  pickup_enabled: boolean;
+  delivery_enabled: boolean;
+  shipping_enabled: boolean;
+  shipping_flat_rate: number | null;
+  shipping_free_threshold: number | null;
+  delivery_fee: number | null;
+};
 
 const C = {
   cream: "#FFFFFF",
@@ -120,6 +131,50 @@ export const CartDrawer = () => {
   // Optional gift card code applied at checkout. The checkout API
   // validates it server-side and returns an error if it's invalid.
   const [giftCardCode, setGiftCardCode] = useState("");
+  // The shop's enabled fulfillment methods + the buyer's choice. Null = the
+  // shop hasn't configured any, so checkout behaves exactly as before.
+  const [ful, setFul] = useState<ShopFulfillment | null>(null);
+  const [method, setMethod] = useState<FulfillmentMethod | null>(null);
+
+  // Load the shop's fulfillment config when the drawer opens. Anon RPC —
+  // exposes only the non-sensitive shipping/delivery/pickup config.
+  useEffect(() => {
+    if (!isOpen || !cart.handle) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await getSupabase().rpc("public_get_shop_fulfillment", {
+          slug_in: cart.handle,
+        });
+        const row = (Array.isArray(data) ? data[0] : data) as ShopFulfillment | undefined;
+        if (cancelled) return;
+        if (row && (row.pickup_enabled || row.delivery_enabled || row.shipping_enabled)) {
+          setFul(row);
+          setMethod((m) =>
+            m ?? (row.shipping_enabled ? "shipping" : row.delivery_enabled ? "delivery" : "pickup"),
+          );
+        } else {
+          setFul(null);
+        }
+      } catch {
+        /* ignore — falls back to legacy checkout */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, cart.handle]);
+
+  // Resolved fee for the selected method (mirrors the server's math so the
+  // buyer sees the same number Stripe will charge).
+  const shippingFee = (() => {
+    if (!ful || !method) return 0;
+    if (method === "pickup") return 0;
+    if (method === "delivery") return Math.max(0, Number(ful.delivery_fee) || 0);
+    const thr = Number(ful.shipping_free_threshold);
+    if (Number.isFinite(thr) && thr > 0 && subtotal >= thr) return 0;
+    return Math.max(0, Number(ful.shipping_flat_rate) || 0);
+  })();
 
   // Lock body scroll while the drawer is open so iOS Safari doesn't
   // bounce the page under the sheet.
@@ -169,6 +224,7 @@ export const CartDrawer = () => {
             variant_id: i.variant_id,
           })),
           gift_card_code: giftCardCode.trim() || null,
+          fulfillment_method: ful ? method : null,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -312,6 +368,87 @@ export const CartDrawer = () => {
               gap: 10,
             }}
           >
+            {ful && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: C.muted,
+                    fontWeight: 700,
+                    letterSpacing: "0.10em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  How would you like your order?
+                </span>
+                {(["shipping", "delivery", "pickup"] as const)
+                  .filter((m) =>
+                    m === "shipping"
+                      ? ful.shipping_enabled
+                      : m === "delivery"
+                        ? ful.delivery_enabled
+                        : ful.pickup_enabled,
+                  )
+                  .map((m) => {
+                    const selected = method === m;
+                    const label =
+                      m === "shipping" ? "Shipping" : m === "delivery" ? "Local delivery" : "Pickup";
+                    const fee =
+                      m === "pickup"
+                        ? 0
+                        : m === "delivery"
+                          ? Math.max(0, Number(ful.delivery_fee) || 0)
+                          : (() => {
+                              const thr = Number(ful.shipping_free_threshold);
+                              if (Number.isFinite(thr) && thr > 0 && subtotal >= thr) return 0;
+                              return Math.max(0, Number(ful.shipping_flat_rate) || 0);
+                            })();
+                    const feeLabel = fee === 0 ? "Free" : fmt(fee);
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setMethod(m)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 10,
+                          width: "100%",
+                          padding: "12px 14px",
+                          borderRadius: 12,
+                          border: `1.5px solid ${selected ? C.brandPrimary : C.brandBorder}`,
+                          background: selected ? "rgba(124,58,237,0.06)" : "#FFFFFF",
+                          cursor: "pointer",
+                          textAlign: "left",
+                        }}
+                      >
+                        <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span
+                            aria-hidden
+                            style={{
+                              width: 18,
+                              height: 18,
+                              borderRadius: 999,
+                              border: `2px solid ${selected ? C.brandPrimary : C.mutedSoft}`,
+                              display: "grid",
+                              placeItems: "center",
+                            }}
+                          >
+                            {selected && (
+                              <span style={{ width: 9, height: 9, borderRadius: 999, background: C.brandPrimary }} />
+                            )}
+                          </span>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>{label}</span>
+                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: fee === 0 ? C.brandPrimary : C.ink }}>
+                          {feeLabel}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
+            )}
             <div
               style={{
                 display: "flex",
@@ -319,13 +456,15 @@ export const CartDrawer = () => {
                 alignItems: "baseline",
               }}
             >
-              <span style={{ fontSize: 13, color: C.muted, fontWeight: 600 }}>Subtotal</span>
+              <span style={{ fontSize: 13, color: C.muted, fontWeight: 600 }}>
+                {ful ? "Total" : "Subtotal"}
+              </span>
               <span style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 700, color: C.ink }}>
-                {fmt(subtotal)}
+                {fmt(subtotal + shippingFee)}
               </span>
             </div>
             <p style={{ fontSize: 11, color: C.muted, margin: 0 }}>
-              Taxes + shipping calculated at checkout.
+              {ful ? "Tax calculated at checkout." : "Taxes + shipping calculated at checkout."}
             </p>
             <input
               type="text"
