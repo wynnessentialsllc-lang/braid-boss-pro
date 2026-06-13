@@ -526,7 +526,8 @@ export const CartDrawer = () => {
                     )}
                     {deliveryCheck.status === "out" && (
                       <span style={{ fontSize: 11, color: C.brandError, fontWeight: 600 }}>
-                        Outside delivery area{deliveryCheck.radius ? ` (within ${deliveryCheck.radius} mi)` : ""} — choose pickup or shipping.
+                        {deliveryCheck.miles != null ? `~${deliveryCheck.miles} mi away — ` : ""}outside the
+                        {deliveryCheck.radius ? ` ${deliveryCheck.radius} mi` : ""} delivery area. Choose pickup or shipping.
                       </span>
                     )}
                     {deliveryCheck.status === "error" && (
