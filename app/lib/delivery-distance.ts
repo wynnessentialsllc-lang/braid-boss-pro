@@ -1,10 +1,17 @@
 // Local-delivery radius check (server-only).
 //
 // Resolves whether a buyer ZIP falls within a shop's max delivery radius,
-// reusing the mobile-service distance math + the Mapbox geocoder. The shop's
-// geocoded origin is cached on shop_settings so we don't re-geocode the shop
-// address on every request. Used by both /api/delivery-check (buyer UI
-// preview) and the checkout route (authoritative gate).
+// reusing the mobile-service distance math + the Mapbox geocoder. Distance is
+// ZIP-centroid to ZIP-centroid: that's the granularity the buyer provides, and
+// ZIP geocoding is far more reliable than resolving a full street address
+// (which often returns nothing). The shop origin is geocoded once and cached
+// on shop_settings.
+//
+// Fail-open: if we can't geocode either point (no token, Mapbox miss, etc.) we
+// return { configured: false } so the caller treats delivery as allowed rather
+// than wrongly rejecting a real buyer. Only a successfully-computed distance
+// beyond the radius blocks. Used by /api/delivery-check (buyer preview) and the
+// checkout route (authoritative gate).
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { geocodeAddress } from "./mapbox-geocode";
@@ -12,7 +19,7 @@ import { haversineMiles, isInServiceArea, normalizeZip } from "./mobile-service"
 
 export type DeliveryCheck =
   | { configured: false }
-  | { configured: true; within: boolean; miles: number; radius: number; reason?: string };
+  | { configured: true; within: boolean; miles: number; radius: number };
 
 export async function checkDeliveryRadius(
   admin: SupabaseClient,
@@ -29,29 +36,30 @@ export async function checkDeliveryRadius(
     .maybeSingle();
 
   const radius = Number((s as any)?.delivery_radius_miles);
-  // No delivery, no radius, or no Mapbox token → nothing to enforce.
+  // No delivery, no radius, or no geocoder → nothing to enforce (allow).
   if (!s || !(s as any).delivery_enabled || !Number.isFinite(radius) || radius <= 0 || !mapboxToken) {
     return { configured: false };
   }
+  const row = s as any;
 
-  // Resolve the origin coords, geocoding + caching the shop address on first use.
-  let originLat = Number((s as any).delivery_origin_lat);
-  let originLng = Number((s as any).delivery_origin_lng);
+  // Resolve the origin, geocoding + caching on first use. Prefer the pickup
+  // ZIP (reliable); fall back to the full street address only if there's no ZIP.
+  let originLat = Number(row.delivery_origin_lat);
+  let originLng = Number(row.delivery_origin_lng);
   if (!Number.isFinite(originLat) || !Number.isFinite(originLng)) {
-    const originAddr = [
-      (s as any).pickup_address_line1,
-      (s as any).pickup_city,
-      (s as any).pickup_state,
-      (s as any).pickup_postal_code,
-    ]
+    const originZip = normalizeZip(row.pickup_postal_code);
+    const fullAddr = [row.pickup_address_line1, row.pickup_city, row.pickup_state, row.pickup_postal_code]
       .filter(Boolean)
       .join(", ");
-    if (!originAddr) return { configured: true, within: false, miles: 0, radius, reason: "no_origin" };
-    const originHit = await geocodeAddress(mapboxToken, originAddr, {
-      city: (s as any).pickup_city,
-      state: (s as any).pickup_state,
-    });
-    if (!originHit) return { configured: true, within: false, miles: 0, radius, reason: "no_origin" };
+    const originHit = originZip
+      ? await geocodeAddress(mapboxToken, originZip, { state: row.pickup_state })
+      : fullAddr
+        ? await geocodeAddress(mapboxToken, fullAddr, { city: row.pickup_city, state: row.pickup_state })
+        : null;
+    if (!originHit) {
+      console.warn(`[delivery] origin geocode failed for ${userId} (zip=${originZip || "none"})`);
+      return { configured: false };
+    }
     originLat = originHit.lat;
     originLng = originHit.lng;
     await admin
@@ -65,15 +73,18 @@ export async function checkDeliveryRadius(
   }
 
   const zip = normalizeZip(buyerZipRaw);
-  if (!zip) return { configured: true, within: false, miles: 0, radius, reason: "bad_zip" };
-
+  if (!zip) return { configured: false };
   const buyerHit = await geocodeAddress(mapboxToken, zip, {
-    state: (s as any).pickup_state,
+    state: row.pickup_state,
     proximity: { lat: originLat, lng: originLng },
   });
-  if (!buyerHit) return { configured: true, within: false, miles: 0, radius, reason: "bad_zip" };
+  if (!buyerHit) {
+    console.warn(`[delivery] buyer ZIP geocode failed for ${userId} (zip=${zip})`);
+    return { configured: false };
+  }
 
   const miles = haversineMiles({ lat: originLat, lng: originLng }, { lat: buyerHit.lat, lng: buyerHit.lng });
-  const area = isInServiceArea({ radius_miles: radius, blocked_zips: [] }, miles, zip);
+  // Small buffer so a centroid sitting just past the line isn't a false reject.
+  const area = isInServiceArea({ radius_miles: radius + 0.5, blocked_zips: [] }, miles, zip);
   return { configured: true, within: area.ok, miles: Math.round(miles * 10) / 10, radius };
 }
