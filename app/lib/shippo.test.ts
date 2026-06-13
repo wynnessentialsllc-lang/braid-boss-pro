@@ -3,7 +3,9 @@ import {
   buyLabel,
   fetchShipmentRates,
   listCarrierAccounts,
+  listWebhooks,
   normalizeRate,
+  registerTrackingWebhook,
   sortAndCapRates,
   type NormalizedRate,
 } from "./shippo";
@@ -255,5 +257,87 @@ describe("listCarrierAccounts", () => {
   it("throws on 5xx", async () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 500 });
     await expect(listCarrierAccounts("t")).rejects.toThrow(/Shippo 500/);
+  });
+});
+
+describe("listWebhooks", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns normalized webhooks", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        results: [
+          { object_id: "w1", url: "https://a/", event: "track_updated", active: true },
+          { object_id: "w2", url: "https://b/", event: "transaction_created", active: false },
+          { url: "https://c/" }, // missing id — dropped
+        ],
+      }),
+    });
+    const out = await listWebhooks("t");
+    expect(out).toEqual([
+      { id: "w1", url: "https://a/", event: "track_updated", active: true },
+      { id: "w2", url: "https://b/", event: "transaction_created", active: false },
+    ]);
+  });
+
+  it("throws a clean message on 401", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401 });
+    await expect(listWebhooks("bad")).rejects.toThrow(/rejected the token/);
+  });
+});
+
+describe("registerTrackingWebhook", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("POSTs a track_updated webhook and returns it normalized", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        object_id: "w_new",
+        url: "https://app.example/api/shippo-webhook?secret=abc",
+        event: "track_updated",
+        active: true,
+      }),
+    });
+    const hook = await registerTrackingWebhook(
+      "t",
+      "https://app.example/api/shippo-webhook?secret=abc",
+    );
+    expect(hook).toEqual({
+      id: "w_new",
+      url: "https://app.example/api/shippo-webhook?secret=abc",
+      event: "track_updated",
+      active: true,
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.event).toBe("track_updated");
+    expect(body.active).toBe(true);
+    expect(body.url).toContain("/api/shippo-webhook?secret=");
+  });
+
+  it("throws on a Shippo error", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () => "url already registered",
+    });
+    await expect(
+      registerTrackingWebhook("t", "https://x/api/shippo-webhook?secret=y"),
+    ).rejects.toThrow(/Shippo 400/);
   });
 });
