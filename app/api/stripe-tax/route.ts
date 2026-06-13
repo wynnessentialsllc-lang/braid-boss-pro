@@ -145,9 +145,11 @@ export async function POST(req: Request) {
   }
 
   try {
-    // 1) Activate tax settings (head-office address + default behavior).
+    // 1) Activate tax settings (head-office address + default behavior +
+    // a fallback product tax code so automatic tax always has a code to use).
     const settingsForm = new URLSearchParams();
     settingsForm.set("defaults[tax_behavior]", "exclusive");
+    settingsForm.set("defaults[tax_code]", "txcd_99999999"); // General - Tangible Goods
     settingsForm.set("head_office[address][line1]", line1);
     if (line2) settingsForm.set("head_office[address][line2]", line2);
     settingsForm.set("head_office[address][city]", city);

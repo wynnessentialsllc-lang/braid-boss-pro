@@ -79,6 +79,10 @@ export default function ProductDetailPage() {
   // any method, so Buy Now behaves exactly as before.
   const [ful, setFul] = useState<ShopFulfillment | null>(null);
   const [fulMethod, setFulMethod] = useState<FulfillmentMethod | null>(null);
+  const [deliveryZip, setDeliveryZip] = useState("");
+  const [deliveryCheck, setDeliveryCheck] = useState<
+    { status: "idle" | "checking" | "ok" | "out" | "error"; miles?: number; radius?: number }
+  >({ status: "idle" });
   // Selected variant id — null when the product has no variants
   // (legacy or single-option), or when none has been picked yet.
   // The Buy button stays disabled until a pick is made for any
@@ -187,10 +191,39 @@ export default function ProductDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileState.status, productSlug]);
 
+  const deliveryLimited = !!(ful && fulMethod === "delivery" && Number(ful.delivery_radius_miles) > 0);
+  const deliveryBlocked = deliveryLimited && deliveryCheck.status !== "ok";
+
+  const runDeliveryCheck = async (zip: string) => {
+    if (zip.trim().length < 5) return;
+    setDeliveryCheck({ status: "checking" });
+    try {
+      const res = await fetch("/api/delivery-check", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ handle, zip: zip.trim() }),
+      });
+      const b = await res.json().catch(() => ({}));
+      if (!res.ok || !b?.ok) {
+        setDeliveryCheck({ status: "error" });
+        return;
+      }
+      if (b.limited === false || b.within) setDeliveryCheck({ status: "ok", miles: b.miles, radius: b.radius });
+      else setDeliveryCheck({ status: "out", miles: b.miles, radius: b.radius });
+    } catch {
+      setDeliveryCheck({ status: "error" });
+    }
+  };
+
   const startCheckout = async () => {
     if (!product) return;
     if (buyState === "loading") return;
     if (soldOut) return;
+    if (deliveryBlocked) {
+      setBuyState("error");
+      setBuyError("Enter a ZIP within the local delivery area, or choose another option.");
+      return;
+    }
     if (needsVariantPick) {
       // Defensive — the Buy button is already disabled when this
       // guard is true, but a keyboard user could still fire onClick.
@@ -237,6 +270,7 @@ export default function ProductDetailPage() {
           // Chosen shipping / delivery / pickup method (null when the shop
           // hasn't enabled any — server then uses legacy behavior).
           fulfillment_method: ful ? fulMethod : null,
+          delivery_zip: fulMethod === "delivery" ? deliveryZip.trim() || null : null,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -647,6 +681,43 @@ export default function ProductDetailPage() {
               {ful.pickup_instructions}
             </p>
           )}
+          {deliveryLimited && (
+            <div className="mt-2.5">
+              <input
+                type="text"
+                inputMode="numeric"
+                value={deliveryZip}
+                onChange={(e) => {
+                  setDeliveryZip(e.target.value.replace(/[^0-9]/g, "").slice(0, 5));
+                  setDeliveryCheck({ status: "idle" });
+                }}
+                onBlur={() => runDeliveryCheck(deliveryZip)}
+                placeholder="Delivery ZIP code"
+                className="w-full rounded-xl px-3.5 py-3 text-[14px] outline-none"
+                style={{
+                  background: "#fff",
+                  border: `1px solid ${deliveryCheck.status === "out" ? C.brandError : C.brandBorder}`,
+                  color: C.brandText,
+                }}
+              />
+              {deliveryCheck.status === "checking" && (
+                <p className="text-[11px] mt-1" style={{ color: C.muted }}>Checking your area…</p>
+              )}
+              {deliveryCheck.status === "ok" && deliveryCheck.miles != null && (
+                <p className="text-[11px] mt-1 font-semibold" style={{ color: C.brandPrimary }}>
+                  ✓ In delivery area ({deliveryCheck.miles} mi)
+                </p>
+              )}
+              {deliveryCheck.status === "out" && (
+                <p className="text-[11px] mt-1 font-semibold" style={{ color: C.brandError }}>
+                  Outside delivery area{deliveryCheck.radius ? ` (within ${deliveryCheck.radius} mi)` : ""} — choose pickup or shipping.
+                </p>
+              )}
+              {deliveryCheck.status === "error" && (
+                <p className="text-[11px] mt-1" style={{ color: C.muted }}>Couldn&apos;t check that ZIP — try again.</p>
+              )}
+            </div>
+          )}
         </section>
       )}
 
@@ -705,7 +776,7 @@ export default function ProductDetailPage() {
         <button
           type="button"
           onClick={startCheckout}
-          disabled={soldOut || buyState === "loading" || needsVariantPick || (customMode && !customAmountValid)}
+          disabled={soldOut || buyState === "loading" || needsVariantPick || (customMode && !customAmountValid) || deliveryBlocked}
           className="w-full rounded-2xl px-4 py-3.5 text-[14px] font-bold uppercase tracking-widest transition active:scale-[0.98]"
           style={{
             background: (soldOut || needsVariantPick) ? C.brandBorder : GRADIENTS.primary,
@@ -721,6 +792,8 @@ export default function ProductDetailPage() {
             ? "Sold out"
             : needsVariantPick
             ? `Pick ${product.variant_label?.toLowerCase() || "option"}`
+            : deliveryBlocked
+            ? "Confirm delivery ZIP"
             : buyState === "loading"
             ? "Opening checkout…"
             : product.external_checkout_url

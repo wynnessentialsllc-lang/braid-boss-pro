@@ -32704,6 +32704,7 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
   const [deliveryEnabled, setDeliveryEnabled] = useState(false);
   const [shippingEnabled, setShippingEnabled] = useState(false);
   const [deliveryFee, setDeliveryFee] = useState<string>("");
+  const [deliveryRadius, setDeliveryRadius] = useState<string>("");
   const [shippingFlatRate, setShippingFlatRate] = useState<string>("");
   const [shippingFreeThreshold, setShippingFreeThreshold] = useState<string>("");
   const [taxEnabled, setTaxEnabled] = useState(false);
@@ -32741,6 +32742,7 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
         setDeliveryEnabled(!!data.delivery_enabled);
         setShippingEnabled(!!data.shipping_enabled);
         setDeliveryFee(data.delivery_fee == null ? "" : String(data.delivery_fee));
+        setDeliveryRadius(data.delivery_radius_miles == null ? "" : String(data.delivery_radius_miles));
         setShippingFlatRate(data.shipping_flat_rate == null ? "" : String(data.shipping_flat_rate));
         setShippingFreeThreshold(data.shipping_free_threshold == null ? "" : String(data.shipping_free_threshold));
         setTaxEnabled(!!data.tax_enabled);
@@ -32779,6 +32781,11 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
       delivery_enabled: deliveryEnabled,
       shipping_enabled: shippingEnabled,
       delivery_fee: deliveryFee.trim() === "" ? null : Math.max(0, Number(deliveryFee) || 0),
+      delivery_radius_miles: deliveryRadius.trim() === "" ? null : Math.max(0, Number(deliveryRadius) || 0),
+      // Reset the cached geocoded origin so it re-resolves from the (possibly
+      // updated) pickup address on the next delivery check.
+      delivery_origin_lat: null,
+      delivery_origin_lng: null,
       shipping_flat_rate: shippingFlatRate.trim() === "" ? null : Math.max(0, Number(shippingFlatRate) || 0),
       shipping_free_threshold: shippingFreeThreshold.trim() === "" ? null : Math.max(0, Number(shippingFreeThreshold) || 0),
       updated_at: new Date().toISOString(),
@@ -32820,9 +32827,24 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
                 <Toggle checked={deliveryEnabled} onChange={(v: boolean) => setDeliveryEnabled(v)} />
               </div>
               {deliveryEnabled && (
-                <Field label="Delivery fee" hint="Leave blank for free delivery.">
-                  <MoneyInput value={deliveryFee} onChange={(v) => setDeliveryFee(v)} placeholder="0.00" />
-                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Delivery fee" hint="Blank = free">
+                    <MoneyInput value={deliveryFee} onChange={(v) => setDeliveryFee(v)} placeholder="0.00" />
+                  </Field>
+                  <Field label="Radius (miles)" hint="Blank = no limit">
+                    <Input
+                      value={deliveryRadius}
+                      onChange={(e) => setDeliveryRadius(e.target.value.replace(/[^0-9.]/g, "").slice(0, 5))}
+                      inputMode="decimal"
+                      placeholder="15"
+                    />
+                  </Field>
+                </div>
+              )}
+              {deliveryEnabled && (
+                <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.45 }}>
+                  Buyers enter their ZIP at checkout; delivery is offered only within the radius of your pickup address.
+                </p>
               )}
               <div style={{ borderTop: `1px solid ${C.hairline}` }} />
               <div className="flex items-center justify-between gap-3">
