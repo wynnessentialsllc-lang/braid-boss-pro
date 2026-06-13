@@ -32840,10 +32840,25 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
   const [shippoTestState, setShippoTestState] = useState<
     | { status: "idle" }
     | { status: "loading" }
-    | { status: "ok"; mode: "test" | "live"; carriers: { name: string; carrier: string }[] }
+    | {
+        status: "ok";
+        mode: "test" | "live";
+        carriers: { name: string; carrier: string }[];
+        webhook_active: boolean;
+      }
     | { status: "error"; message: string }
   >({ status: "idle" });
-  const runShippoTest = async () => {
+  // Webhook auto-register state. Separate so the user can re-register without
+  // re-running the carrier-list check, and so a webhook failure doesn't read
+  // like the token is bad.
+  const [webhookState, setWebhookState] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "ok"; already: boolean; url: string }
+    | { status: "error"; message: string }
+  >({ status: "idle" });
+
+  const runShippoTest = async (opts?: { thenRegister?: boolean }) => {
     setShippoTestState({ status: "loading" });
     try {
       const { data: sess } = await getSupabase().auth.getSession();
@@ -32862,9 +32877,46 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
         setShippoTestState({ status: "error", message: b?.error || "Couldn't reach Shippo." });
         return;
       }
-      setShippoTestState({ status: "ok", mode: b.mode, carriers: b.carriers || [] });
+      setShippoTestState({
+        status: "ok",
+        mode: b.mode,
+        carriers: b.carriers || [],
+        webhook_active: !!b.webhook_active,
+      });
+      // Auto-register the webhook if asked and it's not already active.
+      // Keeps onboarding to one tap: paste token → Test connection.
+      if (opts?.thenRegister && !b.webhook_active) {
+        await registerShippoWebhook();
+      } else if (b.webhook_active) {
+        setWebhookState({ status: "ok", already: true, url: String(b.webhook_url || "") });
+      }
     } catch (e: any) {
       setShippoTestState({ status: "error", message: e?.message || "Network error." });
+    }
+  };
+
+  const registerShippoWebhook = async () => {
+    setWebhookState({ status: "loading" });
+    try {
+      const { data: sess } = await getSupabase().auth.getSession();
+      const jwt = sess.session?.access_token || "";
+      if (!jwt) {
+        setWebhookState({ status: "error", message: "Sign in expired — refresh and try again." });
+        return;
+      }
+      const res = await fetch("/api/shippo-setup", {
+        method: "POST",
+        headers: { "content-type": "application/json", Authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ token: shippoToken.trim() || null }),
+      });
+      const b = await res.json().catch(() => ({}));
+      if (!res.ok || !b?.ok) {
+        setWebhookState({ status: "error", message: b?.error || "Couldn't register the webhook." });
+        return;
+      }
+      setWebhookState({ status: "ok", already: !!b.already, url: String(b.url || "") });
+    } catch (e: any) {
+      setWebhookState({ status: "error", message: e?.message || "Network error." });
     }
   };
   const [parcelL, setParcelL] = useState("");
@@ -33064,23 +33116,27 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
                   ) : (
                     <div className="space-y-3">
                       <Field label="Shippo API token" hint="goshippo.com → Settings → API">
-                        <Input value={shippoToken} onChange={(e) => { setShippoToken(e.target.value); setShippoTestState({ status: "idle" }); }} placeholder="shippo_live_… / shippo_test_…" />
+                        <Input value={shippoToken} onChange={(e) => { setShippoToken(e.target.value); setShippoTestState({ status: "idle" }); setWebhookState({ status: "idle" }); }} placeholder="shippo_live_… / shippo_test_…" />
                       </Field>
                       <div className="space-y-1.5">
                         <button
                           type="button"
-                          onClick={runShippoTest}
-                          disabled={shippoTestState.status === "loading" || !shippoToken.trim()}
+                          onClick={() => runShippoTest({ thenRegister: true })}
+                          disabled={shippoTestState.status === "loading" || webhookState.status === "loading" || !shippoToken.trim()}
                           className="px-3 py-2 rounded-xl text-[12px] font-semibold active:scale-[0.97] transition"
                           style={{
                             background: C.cream,
                             color: C.coffee,
                             border: `1px solid ${C.hairline}`,
-                            opacity: shippoTestState.status === "loading" || !shippoToken.trim() ? 0.6 : 1,
-                            cursor: shippoTestState.status === "loading" || !shippoToken.trim() ? "not-allowed" : "pointer",
+                            opacity: shippoTestState.status === "loading" || webhookState.status === "loading" || !shippoToken.trim() ? 0.6 : 1,
+                            cursor: shippoTestState.status === "loading" || webhookState.status === "loading" || !shippoToken.trim() ? "not-allowed" : "pointer",
                           }}
                         >
-                          {shippoTestState.status === "loading" ? "Testing…" : "Test connection"}
+                          {shippoTestState.status === "loading"
+                            ? "Testing…"
+                            : webhookState.status === "loading"
+                              ? "Registering webhook…"
+                              : "Test connection"}
                         </button>
                         {shippoTestState.status === "ok" && (
                           <p className="text-[11px]" style={{ color: C.success, lineHeight: 1.45 }}>
@@ -33093,6 +33149,30 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
                         {shippoTestState.status === "error" && (
                           <p className="text-[11px]" style={{ color: C.danger, lineHeight: 1.45 }}>
                             {shippoTestState.message}
+                          </p>
+                        )}
+                        {/* Webhook status line. Surfaces three states: registered (active
+                            + we matched our URL on Shippo's side), needs-register
+                            (token works but no matching hook yet — happens on first
+                            connect or after the platform URL changes), or error. A
+                            "Register again" link lets the stylist retry without
+                            re-running the carrier check. */}
+                        {webhookState.status === "ok" && (
+                          <p className="text-[11px]" style={{ color: C.success, lineHeight: 1.45 }}>
+                            ✓ Delivery webhook {webhookState.already ? "already registered" : "registered"}. Orders will flip to Delivered automatically.
+                          </p>
+                        )}
+                        {webhookState.status === "error" && shippoTestState.status === "ok" && (
+                          <p className="text-[11px]" style={{ color: C.danger, lineHeight: 1.45 }}>
+                            Webhook didn’t register: {webhookState.message}{" "}
+                            <button type="button" onClick={registerShippoWebhook} className="underline" style={{ color: C.danger, fontWeight: 600 }}>
+                              Try again
+                            </button>
+                          </p>
+                        )}
+                        {webhookState.status === "loading" && (
+                          <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.45 }}>
+                            Registering delivery webhook…
                           </p>
                         )}
                       </div>

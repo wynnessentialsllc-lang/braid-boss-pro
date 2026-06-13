@@ -282,6 +282,79 @@ export async function listCarrierAccounts(
     }));
 }
 
+// Webhook management. Each stylist registers a `track_updated` webhook
+// against their own Shippo account so we can flip orders to delivered as
+// carriers post status updates. The webhook URL embeds our
+// SHIPPO_WEBHOOK_SECRET as a query param so the receiving route can reject
+// arbitrary callers (the Shippo HMAC signature header is a future hardening).
+
+export type ShippoWebhook = {
+  id: string;
+  url: string;
+  event: string;
+  active: boolean;
+};
+
+const normalizeWebhook = (raw: any): ShippoWebhook | null => {
+  const id = raw?.object_id ? String(raw.object_id) : "";
+  const url = raw?.url ? String(raw.url) : "";
+  const event = raw?.event ? String(raw.event) : "";
+  if (!id || !url || !event) return null;
+  return { id, url, event, active: !!raw.active };
+};
+
+// GET /webhooks/?results=100 — list every webhook on the stylist's account.
+// We walk one page (100 webhooks is way more than any stylist will have)
+// and return them normalized; the caller filters by url/event.
+export async function listWebhooks(token: string): Promise<ShippoWebhook[]> {
+  const res = await fetch(`${SHIPPO_API}/webhooks/?results=100`, {
+    method: "GET",
+    headers: headers(token),
+    cache: "no-store",
+  });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error("Shippo rejected the token.");
+  }
+  if (!res.ok) {
+    throw new Error(`Shippo ${res.status}.`);
+  }
+  const data: any = await res.json();
+  const rows = Array.isArray(data?.results) ? data.results : [];
+  return rows
+    .map(normalizeWebhook)
+    .filter((w: ShippoWebhook | null): w is ShippoWebhook => w !== null);
+}
+
+// POST /webhooks/ — register a track_updated webhook pointed at our
+// receiver. Idempotency is the caller's job (listWebhooks → skip if a
+// matching one already exists) because Shippo will happily create a
+// duplicate webhook with the same URL.
+export async function registerTrackingWebhook(
+  token: string,
+  url: string,
+): Promise<ShippoWebhook> {
+  const body = {
+    url,
+    event: "track_updated",
+    active: true,
+    is_test: url.includes("shippo_test_") ? true : undefined,
+  };
+  const res = await fetch(`${SHIPPO_API}/webhooks/`, {
+    method: "POST",
+    headers: headers(token),
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Shippo ${res.status}: ${text.slice(0, 200)}`);
+  }
+  const data: any = await res.json();
+  const hook = normalizeWebhook(data);
+  if (!hook) throw new Error("Shippo returned an unusable webhook response.");
+  return hook;
+}
+
 // GET /rates/{id} — re-fetch the rate the buyer picked so the checkout
 // endpoint can confirm the amount before charging. Returns null when the
 // id is unknown / expired (Shippo rates expire after ~7 days) so the

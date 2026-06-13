@@ -17,7 +17,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { listCarrierAccounts } from "../../lib/shippo";
+import { listCarrierAccounts, listWebhooks } from "../../lib/shippo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,6 +84,27 @@ export async function POST(req: Request) {
     return fail(auth ? 401 : 502, msg || "Couldn't reach Shippo.");
   }
 
+  // Best-effort webhook status check. We compute the URL the platform would
+  // register and look for an active track_updated hook with that exact URL.
+  // Wrapped in try/catch so a webhook-secret misconfig (or a transient
+  // Shippo blip) doesn't fail the carrier check the user actually asked for.
+  let webhookActive = false;
+  let webhookUrl: string | null = null;
+  try {
+    const secret = process.env.SHIPPO_WEBHOOK_SECRET?.trim() || "";
+    if (secret) {
+      const origin =
+        process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || new URL(req.url).origin;
+      webhookUrl = `${origin}/api/shippo-webhook?secret=${encodeURIComponent(secret)}`;
+      const hooks = await listWebhooks(token);
+      webhookActive = hooks.some(
+        (w) => w.event === "track_updated" && w.url === webhookUrl && w.active,
+      );
+    }
+  } catch (e: any) {
+    console.warn(`[shippo-test] webhook check failed: ${e?.message || e}`);
+  }
+
   return NextResponse.json({
     ok: true,
     // Distinguish test-mode tokens so the stylist isn't surprised when a
@@ -93,5 +114,7 @@ export async function POST(req: Request) {
     // truth for the UI.
     mode: token.startsWith("shippo_test_") ? "test" : "live",
     carriers,
+    webhook_active: webhookActive,
+    webhook_url: webhookUrl,
   });
 }
