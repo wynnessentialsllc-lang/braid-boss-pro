@@ -15,10 +15,23 @@ type ShopFulfillment = {
   pickup_enabled: boolean;
   delivery_enabled: boolean;
   shipping_enabled: boolean;
+  shipping_mode: string;
   shipping_flat_rate: number | null;
   shipping_free_threshold: number | null;
   delivery_fee: number | null;
   delivery_radius_miles: number | null;
+};
+
+// One live carrier rate returned by /api/shipping-rates. Mirrors NormalizedRate
+// from app/lib/shippo.ts; duplicated here so the client bundle doesn't pull
+// the server-only Shippo module.
+type CarrierRate = {
+  id: string;
+  carrier: string;
+  service: string;
+  amount_cents: number;
+  currency: string;
+  estimated_days: number | null;
 };
 
 const C = {
@@ -142,7 +155,34 @@ export const CartDrawer = () => {
     { status: "idle" | "checking" | "ok" | "out" | "error"; miles?: number; radius?: number }
   >({ status: "idle" });
 
+  // Live carrier shipping (Shippo) — buyer enters a ZIP + state, we fetch
+  // rates from the stylist's Shippo account, the buyer picks one. The picked
+  // rate id flows to checkout, where it's re-fetched + charged.
+  const [shipZip, setShipZip] = useState("");
+  const [shipState, setShipState] = useState("");
+  // The cart snapshot the most-recent rate quote was for; if the live cart
+  // has drifted (quantity bump, item add/remove) we treat the quote as stale.
+  const [rateState, setRateState] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "ok"; rates: CarrierRate[]; snapshot: string }
+    | { status: "error"; message: string }
+  >({ status: "idle" });
+  const [pickedRateId, setPickedRateId] = useState<string | null>(null);
+
+  // Fingerprint of inputs that affect carrier rates (cart contents + method).
+  // Derived so React Compiler is happy — no effect-driven setState dance.
+  const rateSnapshot = `${method ?? ""}:${cart.items
+    .map((i) => `${i.product_slug}@${i.variant_id ?? ""}x${i.quantity}`)
+    .join("|")}`;
+  const rateStale = rateState.status === "ok" && rateState.snapshot !== rateSnapshot;
+
   const deliveryLimited = !!(ful && method === "delivery" && Number(ful.delivery_radius_miles) > 0);
+  const carrierShipping = !!(ful && method === "shipping" && ful.shipping_mode === "carrier");
+  const pickedRate =
+    rateState.status === "ok" && !rateStale
+      ? rateState.rates.find((r) => r.id === pickedRateId) || null
+      : null;
 
   const runDeliveryCheck = async (zip: string) => {
     if (!cart.handle || zip.trim().length < 5) return;
@@ -171,6 +211,54 @@ export const CartDrawer = () => {
   // Block checkout when delivery is radius-limited and the ZIP isn't confirmed
   // in-area. Other methods are unaffected.
   const deliveryBlocked = deliveryLimited && deliveryCheck.status !== "ok";
+  // Block carrier-shipping checkout until the buyer has picked a rate. The
+  // server rejects a carrier-mode checkout without a rate id, so this is
+  // primarily a UX guard so the button text explains what's missing.
+  const carrierBlocked = carrierShipping && (!pickedRate || rateStale);
+
+  const fetchCarrierRates = async () => {
+    if (!cart.handle) return;
+    const zip = shipZip.trim();
+    if (!/^\d{5}$/.test(zip)) {
+      setRateState({ status: "error", message: "Enter a 5-digit ZIP." });
+      return;
+    }
+    setRateState({ status: "loading" });
+    setPickedRateId(null);
+    try {
+      const res = await fetch("/api/shipping-rates", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          handle: cart.handle,
+          items: cart.items.map((i) => ({
+            product_slug: i.product_slug,
+            quantity: i.quantity,
+            variant_id: i.variant_id,
+          })),
+          ship_to: { zip, state: shipState.trim().toUpperCase() || null, country: "US" },
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !Array.isArray(body?.rates) || body.rates.length === 0) {
+        setRateState({
+          status: "error",
+          message: body?.error || "Couldn't fetch rates. Try again.",
+        });
+        return;
+      }
+      setRateState({
+        status: "ok",
+        rates: body.rates as CarrierRate[],
+        snapshot: rateSnapshot,
+      });
+      // Auto-select the cheapest rate (already sorted) so the buyer doesn't
+      // have to tap before they see a Total they trust.
+      setPickedRateId(body.rates[0].id);
+    } catch (e: any) {
+      setRateState({ status: "error", message: e?.message || "Network error." });
+    }
+  };
 
   // Load the shop's fulfillment config when the drawer opens. Anon RPC —
   // exposes only the non-sensitive shipping/delivery/pickup config.
@@ -207,6 +295,12 @@ export const CartDrawer = () => {
     if (!ful || !method) return 0;
     if (method === "pickup") return 0;
     if (method === "delivery") return Math.max(0, Number(ful.delivery_fee) || 0);
+    if (ful.shipping_mode === "carrier") {
+      // Live carrier rate: the buyer's pick drives the total. Until they pick,
+      // the total shows merch only — the rate panel + "Pick a rate" CTA make
+      // it clear shipping is still owed.
+      return pickedRate ? pickedRate.amount_cents / 100 : 0;
+    }
     const thr = Number(ful.shipping_free_threshold);
     if (Number.isFinite(thr) && thr > 0 && subtotal >= thr) return 0;
     return Math.max(0, Number(ful.shipping_flat_rate) || 0);
@@ -251,6 +345,11 @@ export const CartDrawer = () => {
       setCheckoutError("Enter a ZIP within the local delivery area, or choose another option.");
       return;
     }
+    if (carrierBlocked) {
+      setCheckoutState("error");
+      setCheckoutError("Pick a shipping option before continuing.");
+      return;
+    }
     setCheckoutState("loading");
     setCheckoutError(null);
     try {
@@ -267,6 +366,7 @@ export const CartDrawer = () => {
           gift_card_code: giftCardCode.trim() || null,
           fulfillment_method: ful ? method : null,
           delivery_zip: method === "delivery" ? deliveryZip.trim() || null : null,
+          shipping_rate_id: carrierShipping ? pickedRateId : null,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -435,17 +535,27 @@ export const CartDrawer = () => {
                     const selected = method === m;
                     const label =
                       m === "shipping" ? "Shipping" : m === "delivery" ? "Local delivery" : "Pickup";
+                    // For live-rate shipping the row never shows a flat $ — the
+                    // real number comes from the rate picker below.
+                    const carrierShippingRow =
+                      m === "shipping" && ful.shipping_mode === "carrier";
                     const fee =
                       m === "pickup"
                         ? 0
                         : m === "delivery"
                           ? Math.max(0, Number(ful.delivery_fee) || 0)
-                          : (() => {
-                              const thr = Number(ful.shipping_free_threshold);
-                              if (Number.isFinite(thr) && thr > 0 && subtotal >= thr) return 0;
-                              return Math.max(0, Number(ful.shipping_flat_rate) || 0);
-                            })();
-                    const feeLabel = fee === 0 ? "Free" : fmt(fee);
+                          : carrierShippingRow
+                            ? 0
+                            : (() => {
+                                const thr = Number(ful.shipping_free_threshold);
+                                if (Number.isFinite(thr) && thr > 0 && subtotal >= thr) return 0;
+                                return Math.max(0, Number(ful.shipping_flat_rate) || 0);
+                              })();
+                    const feeLabel = carrierShippingRow
+                      ? "Live rates"
+                      : fee === 0
+                        ? "Free"
+                        : fmt(fee);
                     return (
                       <button
                         key={m}
@@ -535,6 +645,137 @@ export const CartDrawer = () => {
                     )}
                   </div>
                 )}
+                {carrierShipping && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={shipZip}
+                        onChange={(e) => {
+                          const z = e.target.value.replace(/[^0-9]/g, "").slice(0, 5);
+                          setShipZip(z);
+                        }}
+                        placeholder="ZIP code"
+                        style={{
+                          flex: 2,
+                          padding: "11px 14px",
+                          borderRadius: 12,
+                          border: `1px solid ${C.brandBorder}`,
+                          background: "#FFFFFF",
+                          color: C.ink,
+                          fontSize: 13,
+                          outline: "none",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                      <input
+                        type="text"
+                        value={shipState}
+                        onChange={(e) => {
+                          const s = e.target.value
+                            .replace(/[^a-zA-Z]/g, "")
+                            .slice(0, 2)
+                            .toUpperCase();
+                          setShipState(s);
+                        }}
+                        placeholder="ST"
+                        style={{
+                          flex: 1,
+                          padding: "11px 14px",
+                          borderRadius: 12,
+                          border: `1px solid ${C.brandBorder}`,
+                          background: "#FFFFFF",
+                          color: C.ink,
+                          fontSize: 13,
+                          outline: "none",
+                          boxSizing: "border-box",
+                          textTransform: "uppercase",
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={fetchCarrierRates}
+                        disabled={rateState.status === "loading" || shipZip.length !== 5}
+                        style={{
+                          padding: "11px 14px",
+                          borderRadius: 12,
+                          border: `1px solid ${C.brandPrimary}`,
+                          background: rateState.status === "loading" ? "rgba(124,58,237,0.05)" : "#FFFFFF",
+                          color: C.brandPrimary,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor:
+                            rateState.status === "loading" || shipZip.length !== 5
+                              ? "not-allowed"
+                              : "pointer",
+                          letterSpacing: "0.04em",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {rateState.status === "loading" ? "Loading…" : "Get rates"}
+                      </button>
+                    </div>
+                    {rateState.status === "error" && (
+                      <span style={{ fontSize: 11, color: C.brandError, fontWeight: 600 }}>
+                        {rateState.message}
+                      </span>
+                    )}
+                    {rateState.status === "ok" && rateStale && (
+                      <span style={{ fontSize: 11, color: C.brandWarning, fontWeight: 600 }}>
+                        Cart changed — re-fetch rates.
+                      </span>
+                    )}
+                    {rateState.status === "ok" && !rateStale && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {rateState.rates.map((r) => {
+                          const selected = pickedRateId === r.id;
+                          return (
+                            <button
+                              key={r.id}
+                              type="button"
+                              onClick={() => setPickedRateId(r.id)}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: 10,
+                                width: "100%",
+                                padding: "10px 12px",
+                                borderRadius: 10,
+                                border: `1.5px solid ${selected ? C.brandPrimary : C.brandBorder}`,
+                                background: selected ? "rgba(124,58,237,0.06)" : "#FFFFFF",
+                                cursor: "pointer",
+                                textAlign: "left",
+                              }}
+                            >
+                              <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                                <span style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>
+                                  {r.carrier} {r.service}
+                                </span>
+                                {r.estimated_days != null && (
+                                  <span style={{ fontSize: 11, color: C.muted }}>
+                                    {r.estimated_days === 0
+                                      ? "Same day"
+                                      : `${r.estimated_days} business day${r.estimated_days === 1 ? "" : "s"}`}
+                                  </span>
+                                )}
+                              </span>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>
+                                {fmt(r.amount_cents / 100)}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {rateState.status === "idle" && (
+                      <span style={{ fontSize: 11, color: C.muted }}>
+                        Enter your ZIP to see live USPS / UPS rates.
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
             <div
@@ -578,7 +819,7 @@ export const CartDrawer = () => {
             <button
               type="button"
               onClick={startCheckout}
-              disabled={checkoutState === "loading" || deliveryBlocked}
+              disabled={checkoutState === "loading" || deliveryBlocked || carrierBlocked}
               style={{
                 marginTop: 6,
                 width: "100%",
@@ -592,15 +833,23 @@ export const CartDrawer = () => {
                 letterSpacing: "0.12em",
                 textTransform: "uppercase",
                 boxShadow: SHADOWS.primaryGlow,
-                cursor: checkoutState === "loading" ? "wait" : deliveryBlocked ? "not-allowed" : "pointer",
-                opacity: checkoutState === "loading" || deliveryBlocked ? 0.6 : 1,
+                cursor:
+                  checkoutState === "loading"
+                    ? "wait"
+                    : deliveryBlocked || carrierBlocked
+                      ? "not-allowed"
+                      : "pointer",
+                opacity:
+                  checkoutState === "loading" || deliveryBlocked || carrierBlocked ? 0.6 : 1,
               }}
             >
               {checkoutState === "loading"
                 ? "Opening checkout…"
                 : deliveryBlocked
                   ? "Confirm delivery ZIP"
-                  : "Checkout"}
+                  : carrierBlocked
+                    ? "Pick a shipping rate"
+                    : "Checkout"}
             </button>
             {checkoutError && (
               <p style={{ fontSize: 12, color: C.brandError, marginTop: 4, textAlign: "center" }}>
