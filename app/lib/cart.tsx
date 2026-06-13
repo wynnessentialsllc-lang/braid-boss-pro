@@ -42,6 +42,12 @@ export type CartState = {
 };
 
 const STORAGE_KEY = "bbp-cart-v1";
+// sessionStorage key for the drawer's open state. We use sessionStorage,
+// not localStorage, so a closed-and-reopened tab starts cleanly; but a
+// same-tab refresh (which a buyer might do mid-purchase) keeps the drawer
+// open — including their shipping-rate picker state — so they don't lose
+// progress.
+const OPEN_STATE_KEY = "bbp-cart-open-v1";
 
 const emptyCart: CartState = { handle: null, items: [] };
 
@@ -123,6 +129,13 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     setCart(readStorage());
+    // Restore drawer-open state from the same-tab session so a mid-flow
+    // refresh keeps the buyer on the cart / rate-picker screen.
+    try {
+      if (typeof window !== "undefined" && window.sessionStorage.getItem(OPEN_STATE_KEY) === "1") {
+        setIsOpen(true);
+      }
+    } catch { /* private mode — non-fatal */ }
     setHydrated(true);
   }, []);
 
@@ -203,8 +216,14 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
     totalQuantity,
     subtotal,
     isOpen,
-    openCart: () => setIsOpen(true),
-    closeCart: () => setIsOpen(false),
+    openCart: () => {
+      setIsOpen(true);
+      try { window.sessionStorage.setItem(OPEN_STATE_KEY, "1"); } catch {}
+    },
+    closeCart: () => {
+      setIsOpen(false);
+      try { window.sessionStorage.removeItem(OPEN_STATE_KEY); } catch {}
+    },
     addItem,
     setQuantity,
     removeItem,
