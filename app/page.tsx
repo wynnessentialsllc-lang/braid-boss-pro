@@ -32056,6 +32056,15 @@ type OrderRow = {
   tracking_number: string | null;
   tracking_url: string | null;
   shipping_notes: string | null;
+  // Carrier rate-shopping metadata (Shippo). Set when the buyer picked a live
+  // carrier rate at checkout. shipping_rate_id is consumed by the label
+  // purchase route; label_url is the Shippo-hosted PDF the stylist prints.
+  shipping_rate_id: string | null;
+  shipping_carrier: string | null;
+  shipping_service: string | null;
+  shipping_estimated_days: number | null;
+  label_url: string | null;
+  label_purchased_at: string | null;
   paid_at: string | null;
   fulfilled_at: string | null;
   shipped_at: string | null;
@@ -32310,6 +32319,33 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
       return err ? { ok: false, err: err.message } : { ok: true };
     });
 
+  // Buy + print the prepaid Shippo label for a carrier-shipped order. The
+  // server bills the stylist's Shippo account, stamps the order shipped,
+  // emails the buyer the tracking, and returns the label PDF URL — which we
+  // open in a new tab so the stylist can print without leaving the sheet.
+  const buyShippingLabel = () =>
+    runAction(async () => {
+      if (!openOrder) return { ok: false };
+      try {
+        const { data: sess } = await getSupabase().auth.getSession();
+        const jwt = sess.session?.access_token || "";
+        if (!jwt) return { ok: false, err: "Sign in expired — refresh and try again." };
+        const res = await fetch("/api/shipping-label", {
+          method: "POST",
+          headers: { "content-type": "application/json", Authorization: `Bearer ${jwt}` },
+          body: JSON.stringify({ order_id: openOrder.id }),
+        });
+        const b = await res.json().catch(() => ({}));
+        if (!res.ok) return { ok: false, err: b?.error || "Couldn't buy the label." };
+        if (b?.label_url && typeof window !== "undefined") {
+          window.open(b.label_url, "_blank", "noopener");
+        }
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, err: e?.message || "Network error." };
+      }
+    });
+
   return (
     <div className="bbp-fade pb-32">
       <Header
@@ -32456,9 +32492,51 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
               {!isFinal && openOrder.status === "paid" && (
                 <Card className="p-3.5 space-y-2">
                   <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Shipping</p>
-                  <Input value={carrier} onChange={e => setCarrier(e.target.value)} placeholder="Carrier (USPS, UPS, FedEx)" />
-                  <Input value={trackingNumber} onChange={e => setTrackingNumber(e.target.value)} placeholder="Tracking number" />
-                  <Input value={trackingUrl} onChange={e => setTrackingUrl(e.target.value)} type="url" inputMode="url" placeholder="Tracking URL" />
+                  {openOrder.shipping_rate_id ? (
+                    // Carrier-shipped (Shippo rate-shopping). Once we have a
+                    // label_url, the manual carrier/tracking inputs are
+                    // redundant — surface the canonical label + tracking
+                    // and a re-open link instead.
+                    <div className="space-y-2">
+                      {openOrder.shipping_carrier && (
+                        <p className="text-[12px]" style={{ color: C.coffee }}>
+                          <span className="font-semibold">{openOrder.shipping_carrier}</span>
+                          {openOrder.shipping_service ? ` · ${openOrder.shipping_service}` : ""}
+                        </p>
+                      )}
+                      {openOrder.label_url ? (
+                        <div className="space-y-1.5">
+                          <p className="text-[11px]" style={{ color: C.muted }}>
+                            Label purchased{openOrder.label_purchased_at ? ` ${new Date(openOrder.label_purchased_at).toLocaleString()}` : ""}.
+                          </p>
+                          <a
+                            href={openOrder.label_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block text-center text-[12px] font-bold uppercase tracking-wider"
+                            style={{ color: C.brandPrimary, padding: 8, letterSpacing: "0.12em", border: `1px solid ${C.hairline}`, borderRadius: 12 }}
+                          >
+                            Open label PDF
+                          </a>
+                          {openOrder.tracking_number && (
+                            <p className="text-[11px]" style={{ color: C.muted }}>
+                              Tracking <span style={{ color: C.coffee, fontFamily: "monospace" }}>{openOrder.tracking_number}</span>
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <Button variant="primary" fullWidth onClick={buyShippingLabel}>
+                          {actionBusy ? "Buying label…" : "Buy & print label"}
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <Input value={carrier} onChange={e => setCarrier(e.target.value)} placeholder="Carrier (USPS, UPS, FedEx)" />
+                      <Input value={trackingNumber} onChange={e => setTrackingNumber(e.target.value)} placeholder="Tracking number" />
+                      <Input value={trackingUrl} onChange={e => setTrackingUrl(e.target.value)} type="url" inputMode="url" placeholder="Tracking URL" />
+                    </>
+                  )}
                 </Card>
               )}
 
@@ -32486,7 +32564,7 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
                         {actionBusy ? "Saving…" : "Mark fulfilled"}
                       </Button>
                     )}
-                    {openOrder.shipping_required && (
+                    {openOrder.shipping_required && !openOrder.shipping_rate_id && (
                       <Button variant="primary" onClick={markShipped}>
                         {actionBusy ? "Saving…" : "Mark shipped"}
                       </Button>
