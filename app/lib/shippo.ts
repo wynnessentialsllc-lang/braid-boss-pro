@@ -154,6 +154,62 @@ export async function fetchShipmentRates(opts: {
   return sortAndCapRates(normalized);
 }
 
+// POST /transactions — buy the prepaid label for a previously-quoted rate.
+// Sync (async:false) so we can react to a SUCCESS / ERROR in-line instead of
+// polling Shippo. Returns the carrier-issued tracking + a label PDF URL on
+// success. Failure paths:
+//   • Rate expired / not found  → Shippo replies SUCCESS with no label_url, or
+//     ERROR with messages — we surface the first message as the error.
+//   • Network / 4xx / 5xx       → thrown.
+// We pass label_file_type:'PDF' because PDF is what every shipping carrier
+// accepts at the counter (PNG / ZPL are printer-specific).
+
+export type PurchasedLabel = {
+  transaction_id: string;
+  tracking_number: string;
+  tracking_url: string;
+  label_url: string;
+  eta: string | null;
+};
+
+export async function buyLabel(
+  token: string,
+  rateId: string,
+): Promise<PurchasedLabel> {
+  const body = {
+    rate: rateId,
+    label_file_type: "PDF",
+    async: false,
+  };
+  const res = await fetch(`${SHIPPO_API}/transactions/`, {
+    method: "POST",
+    headers: headers(token),
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Shippo ${res.status}: ${text.slice(0, 200)}`);
+  }
+  const data: any = await res.json();
+  // Shippo's status field: 'SUCCESS' | 'QUEUED' | 'WAITING' | 'ERROR'. We use
+  // async:false so anything other than SUCCESS is treated as a hard fail and
+  // mapped to the first message Shippo gave us.
+  const status = String(data?.status || "").toUpperCase();
+  if (status !== "SUCCESS") {
+    const msgs = Array.isArray(data?.messages) ? data.messages : [];
+    const first = msgs.length > 0 ? String(msgs[0]?.text || "") : "";
+    throw new Error(first || `Shippo refused the label (status=${status || "unknown"}).`);
+  }
+  return {
+    transaction_id: String(data?.object_id || ""),
+    tracking_number: String(data?.tracking_number || ""),
+    tracking_url: String(data?.tracking_url_provider || ""),
+    label_url: String(data?.label_url || ""),
+    eta: data?.eta ? String(data.eta) : null,
+  };
+}
+
 // GET /rates/{id} — re-fetch the rate the buyer picked so the checkout
 // endpoint can confirm the amount before charging. Returns null when the
 // id is unknown / expired (Shippo rates expire after ~7 days) so the
