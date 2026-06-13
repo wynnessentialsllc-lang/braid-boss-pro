@@ -44,8 +44,10 @@ export async function checkDeliveryRadius(
 
   // Resolve the origin, geocoding + caching on first use. Prefer the pickup
   // ZIP (reliable); fall back to the full street address only if there's no ZIP.
-  let originLat = Number(row.delivery_origin_lat);
-  let originLng = Number(row.delivery_origin_lng);
+  // NB: coerce null → NaN explicitly — Number(null) is 0, which would look like
+  // a valid (0,0) origin and skip geocoding entirely.
+  let originLat = row.delivery_origin_lat == null ? NaN : Number(row.delivery_origin_lat);
+  let originLng = row.delivery_origin_lng == null ? NaN : Number(row.delivery_origin_lng);
   if (!Number.isFinite(originLat) || !Number.isFinite(originLng)) {
     const originZip = normalizeZip(row.pickup_postal_code);
     const fullAddr = [row.pickup_address_line1, row.pickup_city, row.pickup_state, row.pickup_postal_code]
