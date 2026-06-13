@@ -498,162 +498,151 @@ export const CartDrawer = () => {
               ))}
             </ul>
           )}
-        </div>
-
-        {cart.items.length > 0 && (
-          <footer
-            style={{
-              padding: "16px 20px 18px",
-              borderTop: `1px solid ${C.brandBorder}`,
-              display: "flex",
-              flexDirection: "column",
-              gap: 10,
-            }}
-          >
-            {ful && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: C.muted,
-                    fontWeight: 700,
-                    letterSpacing: "0.10em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  How would you like your order?
-                </span>
-                {(["shipping", "delivery", "pickup"] as const)
-                  .filter((m) =>
-                    m === "shipping"
-                      ? ful.shipping_enabled
+          {ful && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: C.muted,
+                  fontWeight: 700,
+                  letterSpacing: "0.10em",
+                  textTransform: "uppercase",
+                }}
+              >
+                How would you like your order?
+              </span>
+              {(["shipping", "delivery", "pickup"] as const)
+                .filter((m) =>
+                  m === "shipping"
+                    ? ful.shipping_enabled
+                    : m === "delivery"
+                      ? ful.delivery_enabled
+                      : ful.pickup_enabled,
+                )
+                .map((m) => {
+                  const selected = method === m;
+                  const label =
+                    m === "shipping" ? "Shipping" : m === "delivery" ? "Local delivery" : "Pickup";
+                  // For live-rate shipping the row never shows a flat $ — the
+                  // real number comes from the rate picker below.
+                  const carrierShippingRow =
+                    m === "shipping" && ful.shipping_mode === "carrier";
+                  const fee =
+                    m === "pickup"
+                      ? 0
                       : m === "delivery"
-                        ? ful.delivery_enabled
-                        : ful.pickup_enabled,
-                  )
-                  .map((m) => {
-                    const selected = method === m;
-                    const label =
-                      m === "shipping" ? "Shipping" : m === "delivery" ? "Local delivery" : "Pickup";
-                    // For live-rate shipping the row never shows a flat $ — the
-                    // real number comes from the rate picker below.
-                    const carrierShippingRow =
-                      m === "shipping" && ful.shipping_mode === "carrier";
-                    const fee =
-                      m === "pickup"
-                        ? 0
-                        : m === "delivery"
-                          ? Math.max(0, Number(ful.delivery_fee) || 0)
-                          : carrierShippingRow
-                            ? 0
-                            : (() => {
-                                const thr = Number(ful.shipping_free_threshold);
-                                if (Number.isFinite(thr) && thr > 0 && subtotal >= thr) return 0;
-                                return Math.max(0, Number(ful.shipping_flat_rate) || 0);
-                              })();
-                    const feeLabel = carrierShippingRow
-                      ? "Real-time rates"
-                      : fee === 0
-                        ? "Free"
-                        : fmt(fee);
-                    return (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => setMethod(m)}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 10,
-                          width: "100%",
-                          padding: "12px 14px",
-                          borderRadius: 12,
-                          border: `1.5px solid ${selected ? C.brandPrimary : C.brandBorder}`,
-                          background: selected ? "rgba(124,58,237,0.06)" : "#FFFFFF",
-                          cursor: "pointer",
-                          textAlign: "left",
-                        }}
-                      >
-                        <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                          <span
-                            aria-hidden
-                            style={{
-                              width: 18,
-                              height: 18,
-                              borderRadius: 999,
-                              border: `2px solid ${selected ? C.brandPrimary : C.mutedSoft}`,
-                              display: "grid",
-                              placeItems: "center",
-                              flexShrink: 0,
-                            }}
-                          >
-                            {selected && (
-                              <span style={{ width: 9, height: 9, borderRadius: 999, background: C.brandPrimary }} />
-                            )}
-                          </span>
-                          <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                            <span style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>{label}</span>
-                            {carrierShippingRow && (
-                              <span style={{ fontSize: 11, color: C.muted, lineHeight: 1.3 }}>
-                                Rates are calculated based on your delivery address.
-                              </span>
-                            )}
-                          </span>
-                        </span>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: fee === 0 ? C.brandPrimary : C.ink }}>
-                          {feeLabel}
-                        </span>
-                      </button>
-                    );
-                  })}
-                {deliveryLimited && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={deliveryZip}
-                      onChange={(e) => {
-                        const z = e.target.value.replace(/[^0-9]/g, "").slice(0, 5);
-                        setDeliveryZip(z);
-                        setDeliveryCheck({ status: "idle" });
-                      }}
-                      onBlur={() => runDeliveryCheck(deliveryZip)}
-                      placeholder="Delivery ZIP code"
+                        ? Math.max(0, Number(ful.delivery_fee) || 0)
+                        : carrierShippingRow
+                          ? 0
+                          : (() => {
+                              const thr = Number(ful.shipping_free_threshold);
+                              if (Number.isFinite(thr) && thr > 0 && subtotal >= thr) return 0;
+                              return Math.max(0, Number(ful.shipping_flat_rate) || 0);
+                            })();
+                  const feeLabel = carrierShippingRow
+                    ? "Real-time rates"
+                    : fee === 0
+                      ? "Free"
+                      : fmt(fee);
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setMethod(m)}
                       style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 10,
                         width: "100%",
-                        padding: "11px 14px",
+                        padding: "12px 14px",
                         borderRadius: 12,
-                        border: `1px solid ${
-                          deliveryCheck.status === "out" ? C.brandError : C.brandBorder
-                        }`,
-                        background: "#FFFFFF",
-                        color: C.ink,
-                        fontSize: 13,
-                        outline: "none",
-                        boxSizing: "border-box",
+                        border: `1.5px solid ${selected ? C.brandPrimary : C.brandBorder}`,
+                        background: selected ? "rgba(124,58,237,0.06)" : "#FFFFFF",
+                        cursor: "pointer",
+                        textAlign: "left",
                       }}
-                    />
-                    {deliveryCheck.status === "checking" && (
-                      <span style={{ fontSize: 11, color: C.muted }}>Checking your area…</span>
-                    )}
-                    {deliveryCheck.status === "ok" && deliveryCheck.miles != null && (
-                      <span style={{ fontSize: 11, color: C.brandPrimary, fontWeight: 600 }}>
-                        ✓ In delivery area ({deliveryCheck.miles} mi)
+                    >
+                      <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                        <span
+                          aria-hidden
+                          style={{
+                            width: 18,
+                            height: 18,
+                            borderRadius: 999,
+                            border: `2px solid ${selected ? C.brandPrimary : C.mutedSoft}`,
+                            display: "grid",
+                            placeItems: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {selected && (
+                            <span style={{ width: 9, height: 9, borderRadius: 999, background: C.brandPrimary }} />
+                          )}
+                        </span>
+                        <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>{label}</span>
+                          {carrierShippingRow && (
+                            <span style={{ fontSize: 11, color: C.muted, lineHeight: 1.3 }}>
+                              Rates are calculated based on your delivery address.
+                            </span>
+                          )}
+                        </span>
                       </span>
-                    )}
-                    {deliveryCheck.status === "out" && (
-                      <span style={{ fontSize: 11, color: C.brandError, fontWeight: 600 }}>
-                        {deliveryCheck.miles != null ? `~${deliveryCheck.miles} mi away — ` : ""}outside the
-                        {deliveryCheck.radius ? ` ${deliveryCheck.radius} mi` : ""} delivery area. Choose pickup or shipping.
+                      <span style={{ fontSize: 13, fontWeight: 700, color: fee === 0 ? C.brandPrimary : C.ink }}>
+                        {feeLabel}
                       </span>
-                    )}
-                    {deliveryCheck.status === "error" && (
-                      <span style={{ fontSize: 11, color: C.muted }}>Couldn&apos;t check that ZIP — try again.</span>
-                    )}
-                  </div>
-                )}
-                {carrierShipping && (
+                    </button>
+                  );
+                })}
+              {deliveryLimited && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={deliveryZip}
+                    onChange={(e) => {
+                      const z = e.target.value.replace(/[^0-9]/g, "").slice(0, 5);
+                      setDeliveryZip(z);
+                      setDeliveryCheck({ status: "idle" });
+                    }}
+                    onBlur={() => runDeliveryCheck(deliveryZip)}
+                    placeholder="Delivery ZIP code"
+                    style={{
+                      width: "100%",
+                      padding: "11px 14px",
+                      borderRadius: 12,
+                      border: `1px solid ${
+                        deliveryCheck.status === "out" ? C.brandError : C.brandBorder
+                      }`,
+                      background: "#FFFFFF",
+                      color: C.ink,
+                      fontSize: 13,
+                      outline: "none",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  {deliveryCheck.status === "checking" && (
+                    <span style={{ fontSize: 11, color: C.muted }}>Checking your area…</span>
+                  )}
+                  {deliveryCheck.status === "ok" && deliveryCheck.miles != null && (
+                    <span style={{ fontSize: 11, color: C.brandPrimary, fontWeight: 600 }}>
+                      ✓ In delivery area ({deliveryCheck.miles} mi)
+                    </span>
+                  )}
+                  {deliveryCheck.status === "out" && (
+                    <span style={{ fontSize: 11, color: C.brandError, fontWeight: 600 }}>
+                      {deliveryCheck.miles != null ? `~${deliveryCheck.miles} mi away — ` : ""}outside the
+                      {deliveryCheck.radius ? ` ${deliveryCheck.radius} mi` : ""} delivery area. Choose pickup or shipping.
+                    </span>
+                  )}
+                  {deliveryCheck.status === "error" && (
+                    <span style={{ fontSize: 11, color: C.muted }}>Couldn&apos;t check that ZIP — try again.</span>
+                  )}
+                </div>
+              )}
+              {carrierShipping && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <div style={{ display: "flex", gap: 8 }}>
                       <input
@@ -701,91 +690,105 @@ export const CartDrawer = () => {
                           textTransform: "uppercase",
                         }}
                       />
-                      <button
-                        type="button"
-                        onClick={fetchCarrierRates}
-                        disabled={rateState.status === "loading" || shipZip.length !== 5}
-                        style={{
-                          padding: "11px 14px",
-                          borderRadius: 12,
-                          border: `1px solid ${C.brandPrimary}`,
-                          background: rateState.status === "loading" ? "rgba(124,58,237,0.05)" : "#FFFFFF",
-                          color: C.brandPrimary,
-                          fontSize: 12,
-                          fontWeight: 700,
-                          cursor:
-                            rateState.status === "loading" || shipZip.length !== 5
-                              ? "not-allowed"
-                              : "pointer",
-                          letterSpacing: "0.04em",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {rateState.status === "loading" ? "Loading…" : "Get shipping options"}
-                      </button>
                     </div>
-                    {rateState.status === "error" && (
-                      <span style={{ fontSize: 11, color: C.brandError, fontWeight: 600 }}>
-                        {rateState.message}
-                      </span>
-                    )}
-                    {rateState.status === "ok" && rateStale && (
-                      <span style={{ fontSize: 11, color: C.brandWarning, fontWeight: 600 }}>
-                        Cart changed — get shipping options again.
-                      </span>
-                    )}
-                    {rateState.status === "ok" && !rateStale && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {rateState.rates.map((r) => {
-                          const selected = pickedRateId === r.id;
-                          return (
-                            <button
-                              key={r.id}
-                              type="button"
-                              onClick={() => setPickedRateId(r.id)}
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                gap: 10,
-                                width: "100%",
-                                padding: "10px 12px",
-                                borderRadius: 10,
-                                border: `1.5px solid ${selected ? C.brandPrimary : C.brandBorder}`,
-                                background: selected ? "rgba(124,58,237,0.06)" : "#FFFFFF",
-                                cursor: "pointer",
-                                textAlign: "left",
-                              }}
-                            >
-                              <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                                <span style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>
-                                  {r.carrier} {r.service}
-                                </span>
-                                {r.estimated_days != null && (
-                                  <span style={{ fontSize: 11, color: C.muted }}>
-                                    {r.estimated_days === 0
-                                      ? "Same day"
-                                      : `${r.estimated_days} business day${r.estimated_days === 1 ? "" : "s"}`}
-                                  </span>
-                                )}
-                              </span>
-                              <span style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>
-                                {fmt(r.amount_cents / 100)}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {rateState.status === "idle" && (
-                      <span style={{ fontSize: 11, color: C.muted }}>
-                        Enter your ZIP code to see available shipping options.
-                      </span>
-                    )}
+                    <button
+                      type="button"
+                      onClick={fetchCarrierRates}
+                      disabled={rateState.status === "loading" || shipZip.length !== 5}
+                      style={{
+                        width: "100%",
+                        padding: "11px 14px",
+                        borderRadius: 12,
+                        border: `1px solid ${C.brandPrimary}`,
+                        background: rateState.status === "loading" ? "rgba(124,58,237,0.05)" : "#FFFFFF",
+                        color: C.brandPrimary,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor:
+                          rateState.status === "loading" || shipZip.length !== 5
+                            ? "not-allowed"
+                            : "pointer",
+                        letterSpacing: "0.04em",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {rateState.status === "loading" ? "Loading…" : "Get shipping options"}
+                    </button>
                   </div>
-                )}
-              </div>
-            )}
+                  {rateState.status === "error" && (
+                    <span style={{ fontSize: 11, color: C.brandError, fontWeight: 600 }}>
+                      {rateState.message}
+                    </span>
+                  )}
+                  {rateState.status === "ok" && rateStale && (
+                    <span style={{ fontSize: 11, color: C.brandWarning, fontWeight: 600 }}>
+                      Cart changed — get shipping options again.
+                    </span>
+                  )}
+                  {rateState.status === "ok" && !rateStale && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {rateState.rates.map((r) => {
+                        const selected = pickedRateId === r.id;
+                        return (
+                          <button
+                            key={r.id}
+                            type="button"
+                            onClick={() => setPickedRateId(r.id)}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: 10,
+                              width: "100%",
+                              padding: "10px 12px",
+                              borderRadius: 10,
+                              border: `1.5px solid ${selected ? C.brandPrimary : C.brandBorder}`,
+                              background: selected ? "rgba(124,58,237,0.06)" : "#FFFFFF",
+                              cursor: "pointer",
+                              textAlign: "left",
+                            }}
+                          >
+                            <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>
+                                {r.carrier} {r.service}
+                              </span>
+                              {r.estimated_days != null && (
+                                <span style={{ fontSize: 11, color: C.muted }}>
+                                  {r.estimated_days === 0
+                                    ? "Same day"
+                                    : `${r.estimated_days} business day${r.estimated_days === 1 ? "" : "s"}`}
+                                </span>
+                              )}
+                            </span>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>
+                              {fmt(r.amount_cents / 100)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {rateState.status === "idle" && (
+                    <span style={{ fontSize: 11, color: C.muted }}>
+                      Enter your ZIP code to see available shipping options.
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {cart.items.length > 0 && (
+          <footer
+            style={{
+              padding: "16px 20px 18px",
+              borderTop: `1px solid ${C.brandBorder}`,
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
             <div
               style={{
                 display: "flex",
