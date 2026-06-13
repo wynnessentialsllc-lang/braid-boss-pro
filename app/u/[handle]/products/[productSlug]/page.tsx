@@ -710,7 +710,8 @@ export default function ProductDetailPage() {
               )}
               {deliveryCheck.status === "out" && (
                 <p className="text-[11px] mt-1 font-semibold" style={{ color: C.brandError }}>
-                  Outside delivery area{deliveryCheck.radius ? ` (within ${deliveryCheck.radius} mi)` : ""} — choose pickup or shipping.
+                  {deliveryCheck.miles != null ? `~${deliveryCheck.miles} mi away — ` : ""}outside the
+                  {deliveryCheck.radius ? ` ${deliveryCheck.radius} mi` : ""} delivery area. Choose pickup or shipping.
                 </p>
               )}
               {deliveryCheck.status === "error" && (
