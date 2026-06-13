@@ -67,6 +67,41 @@ const fmt = (n: number, currency = "USD") => {
   }
 };
 
+// sessionStorage helpers for cart-drawer state we want to survive a
+// same-tab refresh (rate-picker ZIP / state / fetched quote / picked id).
+// SSR-safe — return empty/null on the server, write only in the browser.
+// All writes are best-effort; private-mode + over-quota throws are swallowed.
+const readSessionString = (key: string): string => {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.sessionStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+};
+const writeSessionString = (key: string, value: string): void => {
+  if (typeof window === "undefined") return;
+  try {
+    if (value) window.sessionStorage.setItem(key, value);
+    else window.sessionStorage.removeItem(key);
+  } catch { /* non-fatal */ }
+};
+const readSessionJSON = <T,>(key: string): T | null => {
+  const raw = readSessionString(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+};
+const writeSessionJSON = (key: string, value: unknown): void => {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch { /* non-fatal */ }
+};
+
 // ---- Floating cart badge --------------------------------------------------
 
 export const CartFloatingBadge = () => {
@@ -158,8 +193,13 @@ export const CartDrawer = () => {
   // Live carrier shipping (Shippo) — buyer enters a ZIP + state, we fetch
   // rates from the stylist's Shippo account, the buyer picks one. The picked
   // rate id flows to checkout, where it's re-fetched + charged.
-  const [shipZip, setShipZip] = useState("");
-  const [shipState, setShipState] = useState("");
+  //
+  // Persisted to sessionStorage so a same-tab refresh mid-purchase doesn't
+  // wipe the buyer's ZIP / state / fetched rates / picked rate. The
+  // CartProvider also restores isOpen, so refresh keeps them on the
+  // rate-picker screen instead of bouncing them back to the product page.
+  const [shipZip, setShipZip] = useState(() => readSessionString("bbp-cart-ship-zip"));
+  const [shipState, setShipState] = useState(() => readSessionString("bbp-cart-ship-state"));
   // The cart snapshot the most-recent rate quote was for; if the live cart
   // has drifted (quantity bump, item add/remove) we treat the quote as stale.
   const [rateState, setRateState] = useState<
@@ -167,8 +207,27 @@ export const CartDrawer = () => {
     | { status: "loading" }
     | { status: "ok"; rates: CarrierRate[]; snapshot: string }
     | { status: "error"; message: string }
-  >({ status: "idle" });
-  const [pickedRateId, setPickedRateId] = useState<string | null>(null);
+  >(() => {
+    const stored = readSessionJSON<{ rates: CarrierRate[]; snapshot: string }>("bbp-cart-rate-quote");
+    return stored ? { status: "ok", rates: stored.rates, snapshot: stored.snapshot } : { status: "idle" };
+  });
+  const [pickedRateId, setPickedRateId] = useState<string | null>(() =>
+    readSessionString("bbp-cart-picked-rate-id") || null,
+  );
+
+  // Write-through to sessionStorage on every change. Strings + the picked
+  // rate id stay in sync; only "ok" rate quotes are persisted (loading /
+  // error states have no value to restore).
+  useEffect(() => { writeSessionString("bbp-cart-ship-zip", shipZip); }, [shipZip]);
+  useEffect(() => { writeSessionString("bbp-cart-ship-state", shipState); }, [shipState]);
+  useEffect(() => { writeSessionString("bbp-cart-picked-rate-id", pickedRateId ?? ""); }, [pickedRateId]);
+  useEffect(() => {
+    if (rateState.status === "ok") {
+      writeSessionJSON("bbp-cart-rate-quote", { rates: rateState.rates, snapshot: rateState.snapshot });
+    } else if (rateState.status === "idle") {
+      writeSessionString("bbp-cart-rate-quote", "");
+    }
+  }, [rateState]);
 
   // Fingerprint of inputs that affect carrier rates (cart contents + method).
   // Derived so React Compiler is happy — no effect-driven setState dance.
