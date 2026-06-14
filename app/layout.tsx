@@ -157,6 +157,48 @@ export default function RootLayout({
             }),
           }}
         />
+        {/* No-JavaScript fallback. The homepage (app/page.tsx) is a
+            client-rendered SPA that paints a loading splash until its
+            JS executes, so a crawler or reviewer that doesn't run
+            scripts would otherwise see no content. This <noscript>
+            block — rendered server-side into the initial HTML and
+            never shown when JS runs — gives those clients a plain,
+            self-contained description of the product, what it costs,
+            and links to the full marketing and legal pages. */}
+        <noscript>
+          <div style={{ maxWidth: 720, margin: "0 auto", padding: "32px 20px", fontFamily: "system-ui, sans-serif", lineHeight: 1.6, color: "#2b211c" }}>
+            <h1 style={{ fontSize: 28, margin: "0 0 8px" }}>Braid Boss Pro</h1>
+            <p style={{ fontSize: 18, margin: "0 0 16px" }}>
+              The all-in-one booking and business app built specifically for braid stylists, operated by Wynn Essentials LLC.
+            </p>
+            <p style={{ margin: "0 0 12px" }}>
+              Braid Boss Pro is subscription software that helps independent braid stylists run their business:
+            </p>
+            <ul style={{ margin: "0 0 16px", paddingLeft: 20 }}>
+              <li>Branded online booking links and appointment scheduling</li>
+              <li>Stripe deposits and balance payments</li>
+              <li>Digital service contracts with e-signature</li>
+              <li>Client records, pricing quotes, and a retail storefront</li>
+              <li>Automated SMS and email appointment reminders (opt-in only)</li>
+            </ul>
+            <p style={{ margin: "0 0 16px" }}>
+              <strong>Pricing:</strong> 14-day free trial, then $14.99/month or $149/year. Cancel anytime.
+            </p>
+            <p style={{ margin: 0 }}>
+              Learn more:{" "}
+              <a href="/features">Features</a>{" · "}
+              <a href="/pricing">Pricing</a>{" · "}
+              <a href="/how-it-works">How it works</a>{" · "}
+              <a href="/faq">FAQ</a>{" · "}
+              <a href="/support">Support</a>{" · "}
+              <a href="/privacy">Privacy Policy</a>{" · "}
+              <a href="/terms">Terms</a>
+            </p>
+            <p style={{ margin: "16px 0 0" }}>
+              Contact: <a href="mailto:hello@hairwellnessslab.com">hello@hairwellnessslab.com</a>
+            </p>
+          </div>
+        </noscript>
         <PullToRefresh />
         {/* CartProvider wraps everything so the storefront + admin
             can read/write the same cart state. The floating badge

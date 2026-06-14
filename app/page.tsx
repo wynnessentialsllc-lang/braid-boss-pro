@@ -20665,6 +20665,19 @@ const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
           style={{ color: C.muted }}>
           Continue as guest · data stays on this device
         </button>
+        {/* Public marketing + legal links. Keeps a path to a full
+            description of the product (what it is, what it costs) and
+            the privacy/terms pages reachable even from the bare sign-in
+            screen — so the homepage never reads as just a login wall. */}
+        <nav
+          aria-label="Learn more"
+          className="flex items-center justify-center flex-wrap gap-x-4 gap-y-1 mt-4 text-[12px]"
+        >
+          <a href="/features" style={{ color: C.coffee }}>Features</a>
+          <a href="/pricing" style={{ color: C.coffee }}>Pricing</a>
+          <a href="/privacy" style={{ color: C.coffee }}>Privacy</a>
+          <a href="/terms" style={{ color: C.coffee }}>Terms</a>
+        </nav>
       </div>
     </div>
   );
