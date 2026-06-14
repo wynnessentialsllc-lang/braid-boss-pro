@@ -817,6 +817,37 @@ export type ShopFulfillment = {
   delivery_fee: number | null;
   pickup_instructions: string | null;
   delivery_radius_miles: number | null;
+  // Stylist-configured pickup ETA range — surfaced to the buyer under the
+  // Pickup radio so "Free" reads as "Free + here's when". Both nullable
+  // (legacy shops); both are days, integers.
+  turnaround_days_min: number | null;
+  turnaround_days_max: number | null;
+};
+
+// Render the pickup turnaround as a buyer-friendly string. Returns null
+// when the stylist hasn't set either bound — in that case the cart shows
+// no ETA line at all, which is the original behavior.
+//
+// Branches:
+//   • min only       → "Usually ready in N days"
+//   • max only       → "Usually ready in up to N days"
+//   • equal bounds   → "Usually ready in N day(s)"
+//   • different      → "Usually ready in 1–3 days"
+// "day" / "days" singular handled inline; "in 1 day" reads more naturally
+// than "in 1 days" and we don't want to surprise a stylist who set "1, 1".
+export const formatPickupEta = (cfg: ShopFulfillment): string | null => {
+  const min = cfg.turnaround_days_min;
+  const max = cfg.turnaround_days_max;
+  const valid = (n: number | null): n is number =>
+    n != null && Number.isFinite(n) && n > 0;
+  if (!valid(min) && !valid(max)) return null;
+  const dayWord = (n: number) => (n === 1 ? "day" : "days");
+  if (valid(min) && valid(max)) {
+    if (min === max) return `Usually ready in ${min} ${dayWord(min)}`;
+    return `Usually ready in ${min}–${max} days`;
+  }
+  if (valid(min)) return `Usually ready in ${min} ${dayWord(min)}`;
+  return `Usually ready in up to ${max} ${dayWord(max!)}`;
 };
 
 const numOrNull = (v: unknown): number | null => {
@@ -844,6 +875,8 @@ export const fetchShopFulfillment = async (
     delivery_fee: numOrNull(row.delivery_fee),
     pickup_instructions: row.pickup_instructions ?? null,
     delivery_radius_miles: numOrNull(row.delivery_radius_miles),
+    turnaround_days_min: numOrNull(row.turnaround_days_min),
+    turnaround_days_max: numOrNull(row.turnaround_days_max),
   };
   if (!cfg.pickup_enabled && !cfg.delivery_enabled && !cfg.shipping_enabled) return null;
   return cfg;

@@ -20,6 +20,26 @@ type ShopFulfillment = {
   shipping_free_threshold: number | null;
   delivery_fee: number | null;
   delivery_radius_miles: number | null;
+  turnaround_days_min: number | null;
+  turnaround_days_max: number | null;
+};
+
+// Render the pickup turnaround as a buyer-friendly string. Mirrors
+// formatPickupEta in app/lib/storefront.ts; duplicated here to keep the
+// client bundle thin (no extra import needed for one helper).
+const pickupEtaText = (cfg: ShopFulfillment): string | null => {
+  const min = cfg.turnaround_days_min;
+  const max = cfg.turnaround_days_max;
+  const valid = (n: number | null): n is number =>
+    n != null && Number.isFinite(n) && n > 0;
+  if (!valid(min) && !valid(max)) return null;
+  const dayWord = (n: number) => (n === 1 ? "day" : "days");
+  if (valid(min) && valid(max)) {
+    if (min === max) return `Usually ready in ${min} ${dayWord(min)}`;
+    return `Usually ready in ${min}–${max} days`;
+  }
+  if (valid(min)) return `Usually ready in ${min} ${dayWord(min)}`;
+  return `Usually ready in up to ${max} ${dayWord(max!)}`;
 };
 
 // One live carrier rate returned by /api/shipping-rates. Mirrors NormalizedRate
@@ -587,6 +607,14 @@ export const CartDrawer = () => {
                               Rates are calculated based on your delivery address.
                             </span>
                           )}
+                          {m === "pickup" && (() => {
+                            const eta = pickupEtaText(ful);
+                            return eta ? (
+                              <span style={{ fontSize: 11, color: C.muted, lineHeight: 1.3 }}>
+                                {eta}. We&apos;ll email you when it&apos;s ready.
+                              </span>
+                            ) : null;
+                          })()}
                         </span>
                       </span>
                       <span style={{ fontSize: 13, fontWeight: 700, color: fee === 0 ? C.brandPrimary : C.ink }}>
