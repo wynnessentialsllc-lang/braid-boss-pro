@@ -732,6 +732,20 @@ export const EDUCATION_CATEGORIES: EducationCategory[] = [
           "Open Shop → Orders → Abandoned and either archive or delete every row older than a week. Your Orders tab will feel a lot lighter.",
         relatedTool: "Shop → Orders → Abandoned tab",
       },
+      {
+        id: "publish-shop-policies",
+        title: "How to publish shipping, return, and refund policies",
+        readMinutes: 3,
+        body: [
+          "Posting visible shipping and return policies isn't just a nicety — they're your strongest defense in a chargeback dispute, they're required by Buy Now Pay Later providers like Affirm and Klarna, and several states (California is the loudest example) default to a full 30-day refund when no policy is posted. Three short paragraphs save you a lot later.",
+          "Open Shop → Products → Shipping settings and scroll to the new \"Shop policies\" card. Fill in Shipping (how fast you ship, the carriers, what happens to lost packages), Returns (the window, condition, how to start one), and Refunds (when and how the money goes back). Plain language is fine — what matters is that a buyer can read it before they pay.",
+          "Once you save, the text goes live at <strong>/@&lt;your-handle&gt;/policies</strong> and is linked from the cart checkout with the line \"By placing this order you agree to our shipping & return policies.\" That tap is the buyer's affirmative acknowledgment — the part Stripe, Affirm, and Klarna look for when reviewing a dispute.",
+          "Keep it honest. \"No returns, all sales final\" is a policy too, and a clearly-stated strict policy is better than no policy at all. What you can't do is say nothing and refuse returns later — that's the case the buyer will win.",
+        ],
+        tryThisWeek:
+          "Write 3-5 sentences for each of Shipping, Return, Refund and paste them into the Shop policies card. Then open your own cart and click the policies link below the Checkout button to confirm they show up.",
+        relatedTool: "Shop → Products → Shipping → Shop policies",
+      },
     ],
   },
 ];

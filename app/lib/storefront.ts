@@ -835,6 +835,36 @@ export type PickupSlot = {
   end_time: string;   // "HH:MM"
 };
 
+// Shop policies — buyer-facing shipping / return / refund text the
+// stylist publishes via shop_settings. Read by the public policies
+// page (/@handle/policies) and linked from the cart checkout
+// disclosure as the chargeback / consumer-law / BNPL safety net.
+export type ShopPolicies = {
+  shipping_policy: string | null;
+  return_policy: string | null;
+  refund_policy: string | null;
+  studio_name: string | null;
+  handle: string | null;
+};
+
+export const fetchShopPolicies = async (
+  slug: string,
+): Promise<ShopPolicies | null> => {
+  if (!slug) return null;
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("public_get_shop_policies", { slug_in: slug });
+  if (error) return null;
+  const row = (Array.isArray(data) ? data[0] : data) as any;
+  if (!row) return null;
+  return {
+    shipping_policy: row.shipping_policy ?? null,
+    return_policy: row.return_policy ?? null,
+    refund_policy: row.refund_policy ?? null,
+    studio_name: row.studio_name ?? null,
+    handle: row.handle ?? null,
+  };
+};
+
 export const fetchPickupAvailability = async (
   slug: string,
   daysAhead = 21,

@@ -33266,6 +33266,12 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
   // additionally verifies the Shippo-Auth-Signature header (HMAC-SHA256
   // over the raw body), defense-in-depth on top of the URL ?secret= check.
   const [shippoWebhookSecret, setShippoWebhookSecret] = useState("");
+  // Buyer-facing shop policies (Phase 4). Rendered on /@handle/policies
+  // and linked from the cart checkout disclosure. Free text, 5000 char
+  // cap each (matches the server-side CHECK).
+  const [shippingPolicy, setShippingPolicy] = useState("");
+  const [returnPolicy, setReturnPolicy] = useState("");
+  const [refundPolicy, setRefundPolicy] = useState("");
   // Shippo token test ("Test connection" button). Calls /api/shippo-test
   // which validates against goshippo.com → /carrier_accounts and returns
   // the active carriers + mode (test/live) so the stylist sees concretely
@@ -33396,6 +33402,9 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
         setShippingMode(data.shipping_mode === "carrier" ? "carrier" : "flat");
         setShippoToken(data.shippo_api_token || "");
         setShippoWebhookSecret(data.shippo_webhook_secret || "");
+        setShippingPolicy(data.shipping_policy || "");
+        setReturnPolicy(data.return_policy || "");
+        setRefundPolicy(data.refund_policy || "");
         setParcelL(data.ship_parcel_length_in == null ? "" : String(data.ship_parcel_length_in));
         setParcelW(data.ship_parcel_width_in == null ? "" : String(data.ship_parcel_width_in));
         setParcelH(data.ship_parcel_height_in == null ? "" : String(data.ship_parcel_height_in));
@@ -33445,6 +33454,9 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
       shipping_mode: shippingMode,
       shippo_api_token: shippoToken.trim() || null,
       shippo_webhook_secret: shippoWebhookSecret.trim() || null,
+      shipping_policy: shippingPolicy.trim().slice(0, 5000) || null,
+      return_policy:   returnPolicy.trim().slice(0, 5000) || null,
+      refund_policy:   refundPolicy.trim().slice(0, 5000) || null,
       ship_parcel_length_in: parcelL.trim() === "" ? null : Math.max(0, Number(parcelL) || 0),
       ship_parcel_width_in: parcelW.trim() === "" ? null : Math.max(0, Number(parcelW) || 0),
       ship_parcel_height_in: parcelH.trim() === "" ? null : Math.max(0, Number(parcelH) || 0),
@@ -33635,6 +33647,58 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
                     </div>
                   )}
                 </>
+              )}
+            </Card>
+
+            {/* Shop policies — public-facing shipping / return / refund
+                text. Surfaced at /@handle/policies and linked from the
+                cart checkout disclosure. Optional but strongly
+                recommended for chargeback / BNPL / consumer-law
+                defense; the education hub explains. */}
+            <Card className="p-3.5 space-y-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Shop policies</p>
+                <p className="text-[11px] mt-1" style={{ color: C.muted, lineHeight: 1.45 }}>
+                  Buyer-facing text shown on your <strong>/@&lt;your-handle&gt;/policies</strong> page. Linked from the cart checkout so a buyer&apos;s purchase is an affirmative acknowledgment — your strongest chargeback defense.
+                </p>
+              </div>
+              <Field label="Shipping policy" hint="When orders ship, carriers, lost-package handling, etc.">
+                <textarea
+                  value={shippingPolicy}
+                  onChange={e => setShippingPolicy(e.target.value.slice(0, 5000))}
+                  maxLength={5000}
+                  rows={4}
+                  placeholder="e.g. Orders ship in 1–3 business days via USPS Priority Mail. Tracking is included on every order. Lost packages are replaced after the carrier&apos;s search is closed."
+                  className="w-full rounded-xl px-3 py-2.5 text-[13px]"
+                  style={{ border: `1px solid ${C.hairline}`, background: C.cream, color: C.espresso, lineHeight: 1.4, resize: "vertical", boxSizing: "border-box" }}
+                />
+              </Field>
+              <Field label="Return policy" hint="What you accept, the window, and how to start a return.">
+                <textarea
+                  value={returnPolicy}
+                  onChange={e => setReturnPolicy(e.target.value.slice(0, 5000))}
+                  maxLength={5000}
+                  rows={4}
+                  placeholder="e.g. Returns accepted within 14 days of delivery in original, unopened packaging. Contact us to start a return — we&apos;ll send a prepaid return label. Items sold as final sale are not eligible."
+                  className="w-full rounded-xl px-3 py-2.5 text-[13px]"
+                  style={{ border: `1px solid ${C.hairline}`, background: C.cream, color: C.espresso, lineHeight: 1.4, resize: "vertical", boxSizing: "border-box" }}
+                />
+              </Field>
+              <Field label="Refund policy" hint="When and how you issue refunds once a return arrives.">
+                <textarea
+                  value={refundPolicy}
+                  onChange={e => setRefundPolicy(e.target.value.slice(0, 5000))}
+                  maxLength={5000}
+                  rows={4}
+                  placeholder="e.g. Refunds are issued within 5 business days of receiving the return. The refund goes back to the original payment method; the shipping fee on the original order is non-refundable."
+                  className="w-full rounded-xl px-3 py-2.5 text-[13px]"
+                  style={{ border: `1px solid ${C.hairline}`, background: C.cream, color: C.espresso, lineHeight: 1.4, resize: "vertical", boxSizing: "border-box" }}
+                />
+              </Field>
+              {(shippingPolicy.trim() || returnPolicy.trim() || refundPolicy.trim()) && (
+                <p className="text-[11px]" style={{ color: C.success, lineHeight: 1.45 }}>
+                  ✓ Live at <strong>/@&lt;your-handle&gt;/policies</strong> once you save.
+                </p>
               )}
             </Card>
 
