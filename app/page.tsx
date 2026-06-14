@@ -498,7 +498,7 @@ import {
   BarChart3, Layers, MessageSquare, Send, AlertTriangle, CheckCircle2,
   XCircle, Filter, MoreHorizontal, SlidersHorizontal, LogOut,
   LifeBuoy, Bug, Lightbulb, PlayCircle, ShieldCheck, HelpCircle, Package,
-  ShoppingBag, CreditCard, Minus, Wallet
+  ShoppingBag, CreditCard, Minus, Wallet, Share2
 } from "lucide-react";
 
 /* ============================================================
@@ -31502,6 +31502,45 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Public storefront slug (the /@handle), so each product gets a
+  // stable, shareable page link. This is the link to send a client —
+  // NOT a one-time checkout.stripe.com session URL, which is single-use
+  // and breaks when forwarded.
+  const [shopSlug, setShopSlug] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (!store.userId) return;
+    let off = false;
+    (async () => {
+      try {
+        const { data } = await getSupabase()
+          .from("booking_links")
+          .select("slug, active")
+          .eq("user_id", store.userId)
+          .eq("active", true)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (!off) setShopSlug((data as any)?.slug || null);
+      } catch { /* no storefront slug yet */ }
+    })();
+    return () => { off = true; };
+  }, [store.userId]);
+  const shopOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  const shopUrl = shopSlug ? `${shopOrigin}/@${shopSlug}/shop` : null;
+  const productShareUrl = (p: any): string | null =>
+    shopSlug && p?.slug ? `${shopOrigin}/@${shopSlug}/products/${p.slug}` : null;
+  const copyShareLink = async (url: string | null, key: string) => {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1600);
+    } catch {
+      try { window.prompt("Copy this link to share with your client:", url); } catch { /* ignore */ }
+    }
+  };
+
   // Gift-card denominations → variants. Each amount becomes a
   // variant named "$25" priced at 25, so the existing variant-price
   // path in the checkout route charges the right amount. Ids are
@@ -31603,6 +31642,17 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
             )}
           </div>
         )}
+        {shopUrl && (
+          <button type="button" onClick={() => copyShareLink(shopUrl, "shop")}
+            className="w-full flex items-center justify-between rounded-xl px-3.5 py-2.5 active:scale-[0.99] transition"
+            style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+            <div className="flex items-center gap-2 min-w-0">
+              <Share2 size={15} style={{ color: C.brandPrimary }} />
+              <span className="text-[12px] font-semibold truncate" style={{ color: C.espresso }}>Share your shop · /@{shopSlug}</span>
+            </div>
+            <span className="text-[11px] font-bold shrink-0" style={{ color: copiedKey === "shop" ? C.brandSuccess : C.brandPrimary }}>{copiedKey === "shop" ? "Copied ✓" : "Copy link"}</span>
+          </button>
+        )}
         {api?.error && (
           <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
             <p className="text-[12px]" style={{ color: C.danger }}>{api.error}</p>
@@ -31679,7 +31729,16 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                     {p.external_checkout_url ? " · External link" : ""}
                   </p>
                 </div>
-                <ChevronRight size={16} style={{ color: C.muted, marginTop: 2 }} />
+                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                  {productShareUrl(p) && (
+                    <button type="button" onClick={(e) => { e.stopPropagation(); copyShareLink(productShareUrl(p), p.id); }}
+                      className="text-[10px] font-bold px-2 py-1 rounded-lg active:scale-[0.97] transition"
+                      style={{ border: `1px solid ${C.hairline}`, color: copiedKey === p.id ? C.brandSuccess : C.brandPrimary }}>
+                      {copiedKey === p.id ? "Copied ✓" : "Copy link"}
+                    </button>
+                  )}
+                  <ChevronRight size={16} style={{ color: C.muted }} />
+                </div>
               </div>
             </Card>
           ))
