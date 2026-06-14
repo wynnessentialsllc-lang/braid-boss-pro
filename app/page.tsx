@@ -33141,6 +33141,11 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
   // Shipping mode: 'flat' = stylist's own rate; 'carrier' = live Shippo rates.
   const [shippingMode, setShippingMode] = useState<"flat" | "carrier">("flat");
   const [shippoToken, setShippoToken] = useState("");
+  // Shippo webhook signing secret — optional per-stylist value pasted from
+  // goshippo.com → API → Webhooks. When set, the receiving route
+  // additionally verifies the Shippo-Auth-Signature header (HMAC-SHA256
+  // over the raw body), defense-in-depth on top of the URL ?secret= check.
+  const [shippoWebhookSecret, setShippoWebhookSecret] = useState("");
   // Shippo token test ("Test connection" button). Calls /api/shippo-test
   // which validates against goshippo.com → /carrier_accounts and returns
   // the active carriers + mode (test/live) so the stylist sees concretely
@@ -33270,6 +33275,7 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
         setShippingFreeThreshold(data.shipping_free_threshold == null ? "" : String(data.shipping_free_threshold));
         setShippingMode(data.shipping_mode === "carrier" ? "carrier" : "flat");
         setShippoToken(data.shippo_api_token || "");
+        setShippoWebhookSecret(data.shippo_webhook_secret || "");
         setParcelL(data.ship_parcel_length_in == null ? "" : String(data.ship_parcel_length_in));
         setParcelW(data.ship_parcel_width_in == null ? "" : String(data.ship_parcel_width_in));
         setParcelH(data.ship_parcel_height_in == null ? "" : String(data.ship_parcel_height_in));
@@ -33318,6 +33324,7 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
       shipping_free_threshold: shippingFreeThreshold.trim() === "" ? null : Math.max(0, Number(shippingFreeThreshold) || 0),
       shipping_mode: shippingMode,
       shippo_api_token: shippoToken.trim() || null,
+      shippo_webhook_secret: shippoWebhookSecret.trim() || null,
       ship_parcel_length_in: parcelL.trim() === "" ? null : Math.max(0, Number(parcelL) || 0),
       ship_parcel_width_in: parcelW.trim() === "" ? null : Math.max(0, Number(parcelW) || 0),
       ship_parcel_height_in: parcelH.trim() === "" ? null : Math.max(0, Number(parcelH) || 0),
@@ -33484,6 +33491,16 @@ const ShippingSettingsScreen = ({ store, onBack }: { store: any; onBack: () => v
                           </p>
                         )}
                       </div>
+                      <Field label="Webhook signing secret" hint="Optional. goshippo.com → API → Webhooks → reveal signing secret.">
+                        <Input
+                          value={shippoWebhookSecret}
+                          onChange={(e) => setShippoWebhookSecret(e.target.value)}
+                          placeholder="Paste to enable signature verification"
+                          autoCapitalize="off"
+                          autoCorrect="off"
+                          spellCheck={false}
+                        />
+                      </Field>
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Default package (inches)</p>
                         <div className="grid grid-cols-3 gap-2 mt-1">
