@@ -19,13 +19,17 @@ export type AvailabilityRule = {
   break_start: string | null;
   break_end: string | null;
   is_open: boolean;
+  // D11: when true, the storefront includes this weekday in the buyer's
+  // pickup date picker (filtered further by turnaround + exceptions).
+  // Defaults to false; existing rows pre-migration read as false.
+  pickup_enabled: boolean;
   created_at?: string;
   updated_at?: string;
 };
 
 export type AvailabilityRuleInput = Pick<
   AvailabilityRule,
-  "weekday" | "start_time" | "end_time" | "break_start" | "break_end" | "is_open"
+  "weekday" | "start_time" | "end_time" | "break_start" | "break_end" | "is_open" | "pickup_enabled"
 >;
 
 export type AvailabilityExceptionKind = "off" | "custom" | "blocked";
@@ -52,13 +56,13 @@ export type AvailabilityExceptionInput = Omit<
 // configured yet. Tue–Sat 9–6 with a 12:30–1:30 break is a calm
 // braider-friendly default.
 export const DEFAULT_WEEKLY_RULES: AvailabilityRuleInput[] = [
-  { weekday: 0, start_time: "10:00", end_time: "16:00", break_start: null, break_end: null, is_open: false },
-  { weekday: 1, start_time: "10:00", end_time: "16:00", break_start: null, break_end: null, is_open: false },
-  { weekday: 2, start_time: "09:00", end_time: "18:00", break_start: "12:30", break_end: "13:30", is_open: true },
-  { weekday: 3, start_time: "09:00", end_time: "18:00", break_start: "12:30", break_end: "13:30", is_open: true },
-  { weekday: 4, start_time: "09:00", end_time: "18:00", break_start: "12:30", break_end: "13:30", is_open: true },
-  { weekday: 5, start_time: "09:00", end_time: "18:00", break_start: "12:30", break_end: "13:30", is_open: true },
-  { weekday: 6, start_time: "09:00", end_time: "16:00", break_start: null, break_end: null, is_open: true },
+  { weekday: 0, start_time: "10:00", end_time: "16:00", break_start: null, break_end: null, is_open: false, pickup_enabled: false },
+  { weekday: 1, start_time: "10:00", end_time: "16:00", break_start: null, break_end: null, is_open: false, pickup_enabled: false },
+  { weekday: 2, start_time: "09:00", end_time: "18:00", break_start: "12:30", break_end: "13:30", is_open: true, pickup_enabled: false },
+  { weekday: 3, start_time: "09:00", end_time: "18:00", break_start: "12:30", break_end: "13:30", is_open: true, pickup_enabled: false },
+  { weekday: 4, start_time: "09:00", end_time: "18:00", break_start: "12:30", break_end: "13:30", is_open: true, pickup_enabled: false },
+  { weekday: 5, start_time: "09:00", end_time: "18:00", break_start: "12:30", break_end: "13:30", is_open: true, pickup_enabled: false },
+  { weekday: 6, start_time: "09:00", end_time: "16:00", break_start: null, break_end: null, is_open: true, pickup_enabled: false },
 ];
 
 // ---- Combined hook ----------------------------------------------------
@@ -115,6 +119,7 @@ export const useAvailability = (
       break_start: draft.break_start || null,
       break_end: draft.break_end || null,
       is_open: !!draft.is_open,
+      pickup_enabled: !!draft.pickup_enabled,
     };
     const { data, error: err } = await supabase
       .from("availability_rules")

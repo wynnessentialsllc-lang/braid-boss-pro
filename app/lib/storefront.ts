@@ -824,6 +824,44 @@ export type ShopFulfillment = {
   turnaround_days_max: number | null;
 };
 
+// One upcoming pickup-allowed date for the storefront's date picker. The
+// public_get_pickup_availability RPC returns the next 21 days the stylist
+// is open + has pickup_enabled, with start/end times for that day from
+// availability_rules. When the list is empty, the storefront falls back
+// to the A4 free-text preferred-pickup-time field.
+export type PickupSlot = {
+  date: string;       // YYYY-MM-DD (ISO date)
+  start_time: string; // "HH:MM"
+  end_time: string;   // "HH:MM"
+};
+
+export const fetchPickupAvailability = async (
+  slug: string,
+  daysAhead = 21,
+): Promise<PickupSlot[]> => {
+  if (!slug) return [];
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("public_get_pickup_availability", {
+    slug_in: slug,
+    days_ahead: daysAhead,
+  });
+  if (error || !Array.isArray(data)) return [];
+  return data
+    .map((r: any) => {
+      const d = r?.pickup_date ? new Date(r.pickup_date) : null;
+      if (!d || Number.isNaN(d.valueOf())) return null;
+      // Render in UTC to avoid the buyer's local time pushing the date
+      // back across midnight (the DB stamps midnight UTC for each date).
+      const iso = d.toISOString().slice(0, 10);
+      return {
+        date: iso,
+        start_time: String(r.start_time || ""),
+        end_time: String(r.end_time || ""),
+      } as PickupSlot;
+    })
+    .filter((s): s is PickupSlot => s !== null);
+};
+
 // Render the pickup turnaround as a buyer-friendly string. Returns null
 // when the stylist hasn't set either bound — in that case the cart shows
 // no ETA line at all, which is the original behavior.

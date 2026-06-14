@@ -29616,6 +29616,7 @@ const AvailabilityScreen = ({ store, onBack }: { store: any; onBack: () => void 
       break_start: r.break_start,
       break_end: r.break_end,
       is_open: r.is_open,
+      pickup_enabled: r.pickup_enabled,
     });
   };
 
@@ -29800,6 +29801,18 @@ const AvailabilityScreen = ({ store, onBack }: { store: any; onBack: () => void 
                 onChange={v => setEditingRule({ ...editingRule, is_open: v })}
               />
             </Card>
+            {editingRule.is_open && (
+              <Card className="p-3.5 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Available for pickups</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Buyers can schedule pickup orders during this day&apos;s hours.</p>
+                </div>
+                <Toggle
+                  checked={!!editingRule.pickup_enabled}
+                  onChange={v => setEditingRule({ ...editingRule, pickup_enabled: v })}
+                />
+              </Card>
+            )}
             {editingRule.is_open && (
               <>
                 <div className="grid grid-cols-2 gap-3">
@@ -32117,6 +32130,10 @@ type OrderRow = {
   return_tracking_number: string | null;
   return_tracking_url: string | null;
   return_purchased_at: string | null;
+  // Structured pickup pick (D11) — set when the buyer chose a date from
+  // the day-of-week-filtered picker. Renders alongside / instead of the
+  // free-text pickup_preferred_time on the order detail.
+  pickup_scheduled_at: string | null;
   // Soft-archive timestamp for abandoned-cart rows. Archived rows are
   // hidden from the Abandoned tab but recoverable from the Archived
   // tab. Set by archive_product_order / bulk_archive_product_orders.
@@ -32805,7 +32822,18 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
                     {[openOrder.shipping_address?.line1, openOrder.shipping_address?.line2, [openOrder.shipping_address?.city, openOrder.shipping_address?.state, openOrder.shipping_address?.postal_code].filter(Boolean).join(", ")].filter(Boolean).join(" · ")}
                   </p>
                 )}
-                {openOrder.pickup_preferred_time && (
+                {openOrder.pickup_scheduled_at && (
+                  <div className="mt-2 p-2.5 rounded-xl" style={{ background: "rgba(124,58,237,0.06)", border: `1px solid ${C.hairline}` }}>
+                    <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.brandPrimary, letterSpacing: "0.14em" }}>Pickup scheduled</p>
+                    <p className="text-[13px] mt-1" style={{ color: C.espresso, lineHeight: 1.4 }}>
+                      {new Date(openOrder.pickup_scheduled_at).toLocaleString(undefined, {
+                        weekday: "long", month: "short", day: "numeric",
+                        hour: "numeric", minute: "2-digit",
+                      })}
+                    </p>
+                  </div>
+                )}
+                {!openOrder.pickup_scheduled_at && openOrder.pickup_preferred_time && (
                   <div className="mt-2 p-2.5 rounded-xl" style={{ background: "rgba(124,58,237,0.06)", border: `1px solid ${C.hairline}` }}>
                     <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.brandPrimary, letterSpacing: "0.14em" }}>Preferred pickup time</p>
                     <p className="text-[13px] mt-1" style={{ color: C.espresso, lineHeight: 1.4 }}>
