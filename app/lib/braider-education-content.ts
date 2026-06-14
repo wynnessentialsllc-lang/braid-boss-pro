@@ -665,6 +665,73 @@ export const EDUCATION_CATEGORIES: EducationCategory[] = [
           "Turn on Account → Notifications → Text messages (SMS), buy a Starter credit pack, then open your own booking link and confirm the SMS opt-in checkbox shows when you enter a phone number.",
         relatedTool: "Account → Notifications · Settings → SMS credits",
       },
+      {
+        id: "set-up-live-carrier-shipping",
+        title: "How to ship retail orders with live USPS / UPS rates",
+        readMinutes: 4,
+        body: [
+          "If you sell hair, edge control, or any retail product through your storefront, you can stop guessing at shipping. Braid Boss Pro can pull live rates from your own Shippo account so a buyer in California and a buyer down the street each pay what their package actually costs — not a flat fee that's either eating your margin or scaring people off.",
+          "First open a free account at goshippo.com and grab your live API token (API Configuration → Developer Keys). In Braid Boss Pro: Shop → Products → tap the Shipping card → switch Shipping mode to \"Live rates\" → paste the token. Set a default package size (e.g. 12×9×3 inches) and confirm your pickup address up top — Shippo needs both to quote.",
+          "Tap \"Test connection.\" If your token is good, you'll see the carriers that will quote (USPS at minimum) and a second green line confirming the delivery webhook is registered. The webhook is what flips an order to \"Delivered\" automatically when the carrier scans it.",
+          "Last piece: every product needs a Shipping weight (oz). Open a product → enter the weight. Without it, a quote can't be calculated. Once weights are set, the cart shows real-time rates the moment a buyer enters their ZIP.",
+        ],
+        tryThisWeek:
+          "Paste your Shippo token, tap Test connection, and add weights to your three best-selling retail products. Then add one to your own cart and confirm USPS rates appear.",
+        relatedTool: "Shop → Products → Shipping · Products → Shipping weight (oz)",
+      },
+      {
+        id: "buy-and-print-shipping-label",
+        title: "How to buy and print a shipping label for an order",
+        readMinutes: 2,
+        body: [
+          "Once a buyer pays for an order that used live rates at checkout, you can print the prepaid label without ever leaving the app. Open the order from Shop → Orders, scroll to the Shipping card, and tap \"Buy & print label.\"",
+          "Behind the scenes, Braid Boss Pro re-quotes using the actual address the buyer entered at Stripe (not just the ZIP they typed in the cart), so the carrier label always goes to the right doorstep. Your Shippo balance is billed for the label cost. The PDF opens in a new tab — print it on regular paper or a thermal label printer, tape it to the box, drop it off.",
+          "The order flips to \"Shipped\" automatically, the buyer gets a tracking email, and you get a receipt email showing what you printed (carrier, service, tracking number, label PDF link). Tap the order again later and the same Open label PDF link is still there if you need to reprint.",
+        ],
+        tryThisWeek:
+          "On your next live-rate order, buy the label from the order screen and confirm the PDF, the tracking email, and your receipt email all arrive within a minute.",
+        relatedTool: "Shop → Orders → (open order) → Shipping → Buy & print label",
+      },
+      {
+        id: "set-pickup-days",
+        title: "How to set the days you're available for pickup orders",
+        readMinutes: 3,
+        body: [
+          "If you offer Pickup as a fulfillment method, you probably don't want every day of the week — maybe Saturdays and Wednesdays work but not Mondays. Braid Boss Pro uses your existing booking schedule as the source of truth: any day you're open for appointments can also be marked open for pickups.",
+          "Open Settings → Availability and tap a weekday. On open days, you'll see an \"Available for pickups\" toggle directly under the Open toggle. Flip it on for every day you want to receive pickup orders. The hours you already set for that day (e.g. 10am–6pm) become the pickup window the buyer sees.",
+          "On the storefront, the cart's Pickup option now shows a date picker filtered to your enabled days — only the next 21 days, only the ones you've allowed, and only after your turnaround minimum (so a 1-3 day prep window won't offer tomorrow). The buyer picks a date and a time inside your window; you see it on the order detail labeled \"Pickup scheduled.\"",
+          "Block one off without unwinding the toggle: add an all-day blocked event on that date in your calendar. The pickup picker treats it the same way it treats your appointment schedule and hides that date automatically.",
+        ],
+        tryThisWeek:
+          "In Settings → Availability, turn \"Available for pickups\" on for Saturday. Then open your own cart, pick Pickup, and confirm only Saturdays show in the date dropdown.",
+        relatedTool: "Settings → Availability → (open day) → Available for pickups",
+      },
+      {
+        id: "generate-return-label",
+        title: "How to send a buyer a prepaid return label",
+        readMinutes: 2,
+        body: [
+          "When a buyer needs to return a product, you don't have to ask them to pay shipping out of pocket — you can generate a prepaid return label from the order itself. Open the order from Shop → Orders. Below the outbound Shipping card you'll see a Return label card with a \"Generate return label\" button.",
+          "Behind the scenes, Braid Boss Pro reverses the shipment (their address becomes the from, your pickup address becomes the to) and buys a label through the same carrier and service the order shipped with. Your Shippo balance is billed for the return label cost. The PDF opens in a new tab so you can email or text it to them.",
+          "Generating a return label and issuing a refund are separate actions on purpose — return the product first, refund when it arrives, or refund up front if that's how you want to handle it. Whichever order makes sense for the situation.",
+        ],
+        tryThisWeek:
+          "On any shipped order, tap Generate return label and confirm the PDF opens. Send it to a friend's email or your own to see what the recipient sees.",
+        relatedTool: "Shop → Orders → (open order) → Return label",
+      },
+      {
+        id: "clean-up-abandoned-carts",
+        title: "How to clean up abandoned carts in your Orders tab",
+        readMinutes: 2,
+        body: [
+          "Every time a buyer opens checkout but closes the tab without paying, a pending order row is created so the webhook has something to match against if they come back. These pile up over time and clutter your Orders view — especially on a busy storefront.",
+          "Open Shop → Orders → Abandoned tab. Each row is an unpaid cart session. Tap one and you'll see \"Archive abandoned cart\" (hides it but keeps the record) or \"Delete permanently\" (wipes it for good). For batch cleanup, tap the checkboxes in the list and use \"Archive selected\" or \"Delete selected\" in the toolbar.",
+          "A nuclear option is also there: \"Delete all abandoned\" wipes every abandoned-cart row at once (including archived ones). It's safe — the server only deletes rows that are truly abandoned (pending, never paid, no Stripe payment intent). A real order can never get caught up in it even if you tap by accident.",
+        ],
+        tryThisWeek:
+          "Open Shop → Orders → Abandoned and either archive or delete every row older than a week. Your Orders tab will feel a lot lighter.",
+        relatedTool: "Shop → Orders → Abandoned tab",
+      },
     ],
   },
 ];
