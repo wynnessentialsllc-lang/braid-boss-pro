@@ -1133,6 +1133,32 @@ export const CartDrawer = () => {
                 }}
               />
             )}
+            {/* Chargeback / BNPL / consumer-law safety net. Inline link
+                to the shop's policies page (read-only). The buyer's tap
+                on Checkout is the affirmative acknowledgment. */}
+            {cart.handle && (
+              <p
+                style={{
+                  fontSize: 10,
+                  color: C.muted,
+                  textAlign: "center",
+                  margin: 0,
+                  lineHeight: 1.4,
+                  letterSpacing: "0.02em",
+                }}
+              >
+                By placing this order you agree to our{" "}
+                <a
+                  href={`/@${encodeURIComponent(cart.handle)}/policies`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: C.brandPrimary, textDecoration: "underline" }}
+                >
+                  shipping &amp; return policies
+                </a>
+                .
+              </p>
+            )}
             <button
               type="button"
               onClick={startCheckout}
