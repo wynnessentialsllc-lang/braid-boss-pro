@@ -36278,10 +36278,11 @@ const CheckoutSegTab = ({ active, label, badge, onSelect }: {
   </button>
 );
 
-const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
+const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentRecord }: {
   store: any;
   openReceipt: (rcp: ReceiptRecord) => void;
   goToMoney: (p: string) => void;
+  openAppointmentRecord?: (a: any) => void;
 }) => {
   const currency = store.business?.currency || "USD";
   const fmt = (n: number) => fmtMoney(n, currency);
@@ -36454,9 +36455,24 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
 
   const totals = useMemo(() => computeSaleTotals(draft), [draft]);
 
+  // Money already collected against a booking through a recorded payment
+  // that links back to it (e.g. a card sale rung up against the
+  // appointment), keyed by appointment id. Lets us hide a phantom balance
+  // for a booking that's actually been paid for outside the deposit field.
+  const collectedByAppt = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of (store.transactions as any[]) || []) {
+      const aid = t?.appointmentId || t?.appointment_id;
+      if (!aid) continue;
+      const amt = txnIncomeAmount(t);
+      if (amt > 0) m.set(aid, (m.get(aid) || 0) + amt);
+    }
+    return m;
+  }, [store.transactions]);
+
   // Unpaid appointments the "Appt" source can collect a balance for:
   // real bookings (not personal events / blocked time), not cancelled,
-  // with money still owed. Soonest first.
+  // with money still owed AFTER any linked payment. Soonest first.
   const unpaidAppointments = useMemo(() => {
     return ((store.appointments as any[]) || [])
       .filter((a) => {
@@ -36465,10 +36481,17 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
         if (s === "cancelled" || s === "canceled" || s === "no_show") return false;
         const paid = a.balance_paid === true || a.balancePaid === true || a.paymentStatus === "paid";
         if (paid) return false;
-        return parseMoney(a.balanceDue) > 0 || (parseMoney(a.totalPrice) > 0 && parseMoney(a.depositPaid) <= 0);
+        const net = Math.max(0, parseMoney(a.totalPrice) - parseMoney(a.discountAmount));
+        const baseBalance = parseMoney(a.balanceDue) > 0
+          ? parseMoney(a.balanceDue)
+          : Math.max(0, net - parseMoney(a.depositPaid));
+        // Subtract any payment recorded against this booking so a sale
+        // rung up for it stops surfacing as still-owed.
+        const balance = baseBalance - (collectedByAppt.get(a.id) || 0);
+        return balance > 0.005;
       })
       .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
-  }, [store.appointments]);
+  }, [store.appointments, collectedByAppt]);
 
   // ---- ticket mutation -------------------------------------------------
   const addLine = (line: Omit<SaleLine, "id">) => {
@@ -36846,17 +36869,34 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
               <p className="text-[13px] text-center py-8" style={{ color: C.muted }}>No appointments with a balance to collect. Booked clients with money owed show up here.</p>
             )}
             {unpaidAppointments.map((a) => {
-              const bal = parseMoney(a.balanceDue) || Math.max(0, parseMoney(a.totalPrice) - parseMoney(a.discountAmount) - parseMoney(a.depositPaid));
+              const baseBal = parseMoney(a.balanceDue) > 0
+                ? parseMoney(a.balanceDue)
+                : Math.max(0, parseMoney(a.totalPrice) - parseMoney(a.discountAmount) - parseMoney(a.depositPaid));
+              const bal = Math.max(0, baseBal - (collectedByAppt.get(a.id) || 0));
               return (
-                <Card key={a.id} onClick={() => { setApptTip(""); setError(null); setApptPay(a); }} style={{ padding: 14 }}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-semibold truncate" style={{ color: C.ink }}>{a.clientName || "Client"}</p>
-                      <p className="text-[12px] truncate" style={{ color: C.muted }}>{a.style || a.serviceName || "Service"}{a.date ? ` · ${a.date}` : ""}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="font-bold" style={{ color: C.espresso }}>{fmt(bal)}</p>
-                      <p className="text-[11px]" style={{ color: C.muted }}>balance</p>
+                <Card key={a.id} style={{ padding: 14 }}>
+                  <div className="flex items-center justify-between gap-2">
+                    {/* Tap the booking to collect its balance. */}
+                    <button type="button" className="flex items-center gap-3 flex-1 min-w-0 text-left active:scale-[0.99] transition"
+                      onClick={() => { setApptTip(""); setError(null); setApptPay(a); }}>
+                      <div className="min-w-0">
+                        <p className="font-semibold truncate" style={{ color: C.ink }}>{a.clientName || "Client"}</p>
+                        <p className="text-[12px] truncate" style={{ color: C.muted }}>{a.style || a.serviceName || "Service"}{a.date ? ` · ${a.date}` : ""}</p>
+                      </div>
+                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="text-right">
+                        <p className="font-bold" style={{ color: C.espresso }}>{fmt(bal)}</p>
+                        <p className="text-[11px]" style={{ color: C.muted }}>balance</p>
+                      </div>
+                      {/* Open the full appointment — edit, mark paid, or
+                          delete a stray/test booking right from here. */}
+                      <button type="button" aria-label="Open appointment"
+                        onClick={() => openAppointmentRecord?.(a)}
+                        className="p-2 rounded-full active:scale-95 transition"
+                        style={{ color: C.coffee, border: `1px solid ${C.hairline}` }}>
+                        <Edit3 size={15} />
+                      </button>
                     </div>
                   </div>
                 </Card>
@@ -37785,7 +37825,8 @@ export default function App() {
             <Clients store={store} openCommunication={openCommunication} openQuickAppt={openQuickAppt} savePhoto={handleSavePhoto} deletePhoto={handleDeletePhoto} openClientId={clientToOpenId} clearOpenClientId={() => setClientToOpenId(null)} openAppointmentRecord={(a) => { setActive("schedule"); setApptPrefill(a); }} />
           )}
           {active === "checkout" && (
-            <BossCheckoutScreen store={store} openReceipt={openReceipt} goToMoney={goToMoney} />
+            <BossCheckoutScreen store={store} openReceipt={openReceipt} goToMoney={goToMoney}
+              openAppointmentRecord={(a) => { setActive("schedule"); setApptPrefill(a); }} />
           )}
           {active === "money" && (
             <Money store={store}
