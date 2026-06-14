@@ -12429,7 +12429,11 @@ const Clients = ({ store, openClientPhotos, openCommunication, openQuickAppt, sa
 
       <ClientProfileSheet
         open={!!profileFor}
-        client={profileFor}
+        // Re-derive the live record from the store so edits made inside
+        // the sheet (tags, comm preference, rebooking reminders…) reflect
+        // immediately — profileFor is a snapshot taken when the sheet
+        // opened and doesn't update when store.clients changes.
+        client={profileFor ? (((store.clients as any[]) || []).find((c: any) => c?.id === profileFor.id) || profileFor) : null}
         store={store}
         onClose={() => setProfileFor(null)}
         onEdit={() => { const c = profileFor; setProfileFor(null); setEditing(c); }}
