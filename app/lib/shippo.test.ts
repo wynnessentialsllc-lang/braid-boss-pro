@@ -6,6 +6,7 @@ import {
   listWebhooks,
   normalizeRate,
   registerTrackingWebhook,
+  requoteForAddress,
   sortAndCapRates,
   type NormalizedRate,
 } from "./shippo";
@@ -339,5 +340,70 @@ describe("registerTrackingWebhook", () => {
     await expect(
       registerTrackingWebhook("t", "https://x/api/shippo-webhook?secret=y"),
     ).rejects.toThrow(/Shippo 400/);
+  });
+});
+
+describe("requoteForAddress", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const baseOpts = {
+    token: "t",
+    from: { zip: "94117", country: "US" },
+    to: { zip: "94704", country: "US" },
+    parcel: { length: 10, width: 8, height: 4, weight_oz: 16 },
+    carrier: "USPS",
+    service: "Priority Mail",
+  };
+
+  it("returns the matching rate when carrier + service line up", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        rates: [
+          { object_id: "r1", amount: "10.01", provider: "USPS", servicelevel: { name: "Ground Advantage" } },
+          { object_id: "r2", amount: "14.20", provider: "USPS", servicelevel: { name: "Priority Mail" } },
+        ],
+      }),
+    });
+    const r = await requoteForAddress(baseOpts);
+    expect(r?.id).toBe("r2");
+    expect(r?.amount_cents).toBe(1420);
+  });
+
+  it("is case-insensitive on carrier + service", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        rates: [
+          { object_id: "r2", amount: "14.20", provider: "Usps", servicelevel: { name: "priority mail" } },
+        ],
+      }),
+    });
+    const r = await requoteForAddress(baseOpts);
+    expect(r?.id).toBe("r2");
+  });
+
+  it("returns null when no rate matches the carrier+service pair", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        rates: [
+          { object_id: "r1", amount: "10.01", provider: "USPS", servicelevel: { name: "Ground Advantage" } },
+        ],
+      }),
+    });
+    expect(await requoteForAddress(baseOpts)).toBeNull();
+  });
+
+  it("returns null on Shippo error (fail-soft)", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 500, text: async () => "boom" });
+    expect(await requoteForAddress(baseOpts)).toBeNull();
   });
 });
