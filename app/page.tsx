@@ -32110,6 +32110,13 @@ type OrderRow = {
   // checkout for pickup-method orders. Surfaced on the stylist's order
   // detail sheet so they can confirm via DM/email/SMS.
   pickup_preferred_time: string | null;
+  // Return-label fields (Phase B7). Set when the stylist taps "Generate
+  // return label" on the order detail sheet — a prepaid Shippo label
+  // reversing the outbound shipment.
+  return_label_url: string | null;
+  return_tracking_number: string | null;
+  return_tracking_url: string | null;
+  return_purchased_at: string | null;
   // Soft-archive timestamp for abandoned-cart rows. Archived rows are
   // hidden from the Abandoned tab but recoverable from the Archived
   // tab. Set by archive_product_order / bulk_archive_product_orders.
@@ -32500,6 +32507,32 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
       return err ? { ok: false, err: err.message } : { ok: true, count: Number(data) };
     });
   };
+
+  // Generate a prepaid return label — addresses reversed from the
+  // outbound shipment, billed to the stylist's Shippo balance. Independent
+  // of the refund flow; the stylist can issue this without refunding.
+  const generateReturnLabel = () =>
+    runAction(async () => {
+      if (!openOrder) return { ok: false };
+      try {
+        const { data: sess } = await getSupabase().auth.getSession();
+        const jwt = sess.session?.access_token || "";
+        if (!jwt) return { ok: false, err: "Sign in expired — refresh and try again." };
+        const res = await fetch("/api/return-label", {
+          method: "POST",
+          headers: { "content-type": "application/json", Authorization: `Bearer ${jwt}` },
+          body: JSON.stringify({ order_id: openOrder.id }),
+        });
+        const b = await res.json().catch(() => ({}));
+        if (!res.ok) return { ok: false, err: b?.error || "Couldn't generate the return label." };
+        if (b?.label_url && typeof window !== "undefined") {
+          window.open(b.label_url, "_blank", "noopener");
+        }
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, err: e?.message || "Network error." };
+      }
+    });
 
   // Buy + print the prepaid Shippo label for a carrier-shipped order. The
   // server bills the stylist's Shippo account, stamps the order shipped,
@@ -32921,6 +32954,40 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
                     {actionBusy ? "…" : "Delete permanently"}
                   </Button>
                 </div>
+              )}
+              {/* Return label — only on carrier-shipped paid orders (we
+                  reverse the outbound shipment, so we need a real
+                  destination + an outbound rate to mirror). The button
+                  swaps for a label-PDF link + tracking once purchased. */}
+              {!openIsAbandoned && openOrder.status === "paid" && !!openOrder.shipping_rate_id && (
+                <Card className="p-3.5 space-y-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>Return label</p>
+                  {openOrder.return_label_url ? (
+                    <div className="space-y-1.5">
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        Purchased{openOrder.return_purchased_at ? ` ${new Date(openOrder.return_purchased_at).toLocaleString()}` : ""}.
+                      </p>
+                      <a
+                        href={openOrder.return_label_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block text-center text-[12px] font-bold uppercase tracking-wider"
+                        style={{ color: C.brandPrimary, padding: 8, letterSpacing: "0.12em", border: `1px solid ${C.hairline}`, borderRadius: 12 }}
+                      >
+                        Open return label PDF
+                      </a>
+                      {openOrder.return_tracking_number && (
+                        <p className="text-[11px]" style={{ color: C.muted }}>
+                          Tracking <span style={{ color: C.coffee, fontFamily: "monospace" }}>{openOrder.return_tracking_number}</span>
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <Button variant="outline" fullWidth onClick={generateReturnLabel}>
+                      {actionBusy ? "Generating…" : "Generate return label"}
+                    </Button>
+                  )}
+                </Card>
               )}
               {!openIsAbandoned && openOrder.status !== "canceled" && !isFinal && (
                 <Button variant="outline" fullWidth onClick={markCanceled}>
