@@ -67,7 +67,7 @@ import {
   loadMarketplaceListing,
   saveMarketplaceListing,
 } from "./lib/marketplace";
-import { type GiftCard, listGiftCards } from "./lib/gift-cards";
+import { type GiftCard, type GiftCardLookup, listGiftCards, findGiftCardByCode, redeemGiftCardInPerson } from "./lib/gift-cards";
 import {
   type LoyaltySettings, type LoyaltyRedemption,
   DEFAULT_LOYALTY, loadLoyaltySettings, saveLoyaltySettings,
@@ -35985,9 +35985,11 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
   const currency = store.business?.currency || "USD";
   const fmt = (n: number) => fmtMoney(n, currency);
 
+  const userId: string | null = store.userId;
+
   // The running ticket + how the stylist is building it.
   const [lines, setLines] = useState<SaleLine[]>([]);
-  const [tab, setTab] = useState<"catalog" | "keypad" | "cart">("catalog");
+  const [tab, setTab] = useState<"catalog" | "keypad" | "cart" | "appt">("catalog");
   const [search, setSearch] = useState("");
   const [keypad, setKeypad] = useState("");
   const [keypadLabel, setKeypadLabel] = useState("");
@@ -35998,6 +36000,13 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
   const [tip, setTip] = useState("");
   const [taxRate, setTaxRate] = useState("");
 
+  // Credits applied as tender: a redeemed gift card + a loyalty reward.
+  const [giftCode, setGiftCode] = useState("");
+  const [giftCard, setGiftCard] = useState<GiftCardLookup | null>(null);
+  const [giftLookupBusy, setGiftLookupBusy] = useState(false);
+  const [loyalty, setLoyalty] = useState<{ settings: LoyaltySettings; available: number } | null>(null);
+  const [loyaltyApplied, setLoyaltyApplied] = useState(false);
+
   // Payment flow.
   const [payOpen, setPayOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -36006,11 +36015,42 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<CheckoutDoneState | null>(null);
 
+  // Appointment collection (the "Appt" source): collect a booked
+  // client's outstanding balance the same way the appointment editor
+  // does — mark the booking paid so revenue flows through the
+  // appointment, never double-counted as a separate manual sale.
+  const [apptPay, setApptPay] = useState<any | null>(null);
+  const [apptTip, setApptTip] = useState("");
+
   useEffect(() => {
     let off = false;
     (async () => { const ok = await tapToPaySupported(); if (!off) setTtpAvailable(ok); })();
     return () => { off = true; };
   }, []);
+
+  // Load the selected client's loyalty standing so a ready reward can be
+  // applied as tender. Resets when the client changes / clears.
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      setLoyalty(null); setLoyaltyApplied(false);
+      if (!userId || !clientId) return;
+      try {
+        const [settings, reds] = await Promise.all([
+          loadLoyaltySettings(userId),
+          fetchLoyaltyRedemptions(userId),
+        ]);
+        if (off || !settings.enabled) return;
+        const completedVisits = ((store.appointments as any[]) || [])
+          .filter((a) => a?.clientId === clientId && String(a?.status || "").toLowerCase() === "completed").length;
+        const earned = earnedPoints(completedVisits, settings.pointsPerVisit);
+        const redeemed = reds.filter((r) => r.clientId === clientId).reduce((s, r) => s + r.pointsSpent, 0);
+        setLoyalty({ settings, available: Math.max(0, earned - redeemed) });
+      } catch { /* card just won't show */ }
+    })();
+    return () => { off = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, clientId, store.appointments]);
 
   const services = useMemo(
     () => ((store.servicesApi?.services as Service[]) || [])
@@ -36042,6 +36082,8 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
   const clientName = selectedClient ? (selectedClient.name || selectedClient.clientName || "Client") : null;
   const discount = activeDiscounts.find((d) => d.id === discountId) || null;
 
+  const loyaltyReady = !!loyalty && loyalty.available >= loyalty.settings.rewardPoints && loyalty.settings.rewardValue > 0;
+
   const draft: SaleDraft = useMemo(() => ({
     lines,
     discount: discount
@@ -36052,9 +36094,31 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
     clientId: clientId || null,
     clientName,
     appointmentId: null,
-  }), [lines, discount, tip, taxRate, clientId, clientName]);
+    // Pass the full card balance / reward value; the model clamps each to
+    // what the ticket actually owes (gift card first, then loyalty).
+    giftCard: giftCard ? { id: giftCard.id, code: giftCard.code, amount: giftCard.balance } : null,
+    loyaltyReward: loyaltyApplied && loyaltyReady && loyalty
+      ? { pointsSpent: loyalty.settings.rewardPoints, rewardValue: loyalty.settings.rewardValue }
+      : null,
+  }), [lines, discount, tip, taxRate, clientId, clientName, giftCard, loyaltyApplied, loyaltyReady, loyalty]);
 
   const totals = useMemo(() => computeSaleTotals(draft), [draft]);
+
+  // Unpaid appointments the "Appt" source can collect a balance for:
+  // real bookings (not personal events / blocked time), not cancelled,
+  // with money still owed. Soonest first.
+  const unpaidAppointments = useMemo(() => {
+    return ((store.appointments as any[]) || [])
+      .filter((a) => {
+        if (!a || (a.kind && a.kind !== "appointment")) return false;
+        const s = String(a.status || "").toLowerCase();
+        if (s === "cancelled" || s === "canceled" || s === "no_show") return false;
+        const paid = a.balance_paid === true || a.balancePaid === true || a.paymentStatus === "paid";
+        if (paid) return false;
+        return parseMoney(a.balanceDue) > 0 || (parseMoney(a.totalPrice) > 0 && parseMoney(a.depositPaid) <= 0);
+      })
+      .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+  }, [store.appointments]);
 
   // ---- ticket mutation -------------------------------------------------
   const addLine = (line: Omit<SaleLine, "id">) => {
@@ -36077,6 +36141,8 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
     setLines([]); setClientId(""); setDiscountId(""); setTip(""); setTaxRate("");
     setKeypad(""); setKeypadLabel(""); setTab("catalog"); setError(null);
     setTtpStatus(null); setDone(null); setPayOpen(false);
+    setGiftCard(null); setGiftCode(""); setLoyaltyApplied(false);
+    setApptPay(null); setApptTip("");
   };
 
   const addService = (s: Service) => addLine({
@@ -36096,15 +36162,50 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
 
   const cartCount = lines.reduce((n, l) => n + l.quantity, 0);
 
+  // ---- gift card lookup ------------------------------------------------
+  const lookupGiftCard = async () => {
+    const code = giftCode.trim();
+    if (!userId || !code) return;
+    setGiftLookupBusy(true); setError(null);
+    try {
+      const card = await findGiftCardByCode(userId, code);
+      if (!card) setError("No gift card found for that code.");
+      else if (card.status !== "active" || card.balance <= 0) { setError("That gift card has no balance left."); setGiftCard(null); }
+      else setGiftCard(card);
+    } catch {
+      setError("Couldn't look up that gift card.");
+    } finally { setGiftLookupBusy(false); }
+  };
+
   // ---- finalize --------------------------------------------------------
-  const finalizeSale = async (tender: SaleTender, methodLabel: string, stripePaymentIntentId?: string) => {
-    const saleId = `bcx_${uid()}`;
+  // Redeem the gift card BEFORE the tender is charged: the charge amount
+  // already assumes the card covered its share, so a redemption that
+  // failed afterward would hand out credit without decrementing the card.
+  const redeemGiftFirst = async (saleId: string): Promise<boolean> => {
+    if (!giftCard || totals.giftCardApplied <= 0) return true;
+    const r = await redeemGiftCardInPerson(giftCard.id, saleId, totals.giftCardApplied);
+    if (!r.ok) {
+      setError(r.reason === "insufficient" ? "The gift card balance is too low for this sale." : "Couldn't redeem the gift card. Please try again.");
+      return false;
+    }
+    return true;
+  };
+
+  const recordSale = async (saleId: string, tender: SaleTender, methodLabel: string, stripePaymentIntentId?: string) => {
     const rec = { id: saleId, date: todayISO(), ...buildSaleTransaction(draft, { tender, stripePaymentIntentId }) };
     try {
       await store.upsertTransaction(rec);
     } catch {
       setError("Couldn't save the sale. Please try again.");
+      setProcessing(false);
       return false;
+    }
+
+    // Loyalty reward redeemed as tender → spend the points.
+    if (draft.loyaltyReward && clientId && totals.loyaltyApplied > 0) {
+      try {
+        await recordLoyaltyRedemption(userId!, clientId, draft.loyaltyReward.pointsSpent, draft.loyaltyReward.rewardValue);
+      } catch { /* best-effort: the dollar credit already applied */ }
     }
 
     // Deduct stock sold + any service hair recipe. Best-effort: the money
@@ -36162,6 +36263,7 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
       stockNote: deductions.length > 0 ? `Stock updated · ${deducted}/${deductions.length} item${deductions.length === 1 ? "" : "s"}` : null,
     });
     setLines([]);
+    setGiftCard(null); setGiftCode("");
     setPayOpen(false);
     setProcessing(false);
     setTtpStatus(null);
@@ -36170,6 +36272,8 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
 
   const payTapToPay = async () => {
     setError(null); setProcessing(true); setTtpStatus(null);
+    const saleId = `bcx_${uid()}`;
+    if (!(await redeemGiftFirst(saleId))) { setProcessing(false); return; }
     try {
       const res = await collectTapToPay({
         amountCents: Math.round(totals.amountDue * 100),
@@ -36179,7 +36283,7 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
         onStatus: (s) => setTtpStatus(s),
       });
       if (res.ok) {
-        await finalizeSale("tap_to_pay", "Tap to Pay", res.paymentIntentId);
+        await recordSale(saleId, "tap_to_pay", "Tap to Pay", res.paymentIntentId);
       } else {
         if (!res.canceled) setError(res.error);
         setProcessing(false); setTtpStatus(null);
@@ -36192,7 +36296,85 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
 
   const payManual = async (tender: SaleTender, label: string) => {
     setError(null); setProcessing(true);
-    await finalizeSale(tender, label);
+    const saleId = `bcx_${uid()}`;
+    if (!(await redeemGiftFirst(saleId))) { setProcessing(false); return; }
+    await recordSale(saleId, tender, label);
+  };
+
+  // ---- appointment balance collection ----------------------------------
+  // Collect a booked appointment's outstanding balance and mark it paid,
+  // mirroring the appointment editor's payment path. Revenue is derived
+  // from the appointment (deriveAppointmentTransactions), so we do NOT
+  // also write a manual sale row — that would double-count.
+  const finalizeApptCollect = async (appt: any, tender: SaleTender, methodLabel: string, stripePaymentIntentId?: string) => {
+    const netTotal = Math.max(0, parseMoney(appt.totalPrice) - parseMoney(appt.discountAmount));
+    const tipAmt = parseMoney(apptTip);
+    const updated = {
+      ...appt,
+      paymentStatus: "paid",
+      balance_paid: true,
+      balanceDue: 0,
+      depositPaid: netTotal,
+      tipAmount: tipAmt,
+      paymentMethod: methodLabel,
+      paymentDate: todayISO(),
+      status: String(appt.status || "").toLowerCase() === "completed" ? appt.status : "completed",
+      paymentNotes: [appt.paymentNotes, stripePaymentIntentId ? `Tap to Pay · ${stripePaymentIntentId}` : `Boss Checkout · ${methodLabel}`].filter(Boolean).join(" · "),
+    };
+    try {
+      await store.upsertAppointment(updated);
+    } catch {
+      setError("Couldn't update the appointment. Please try again.");
+      setProcessing(false);
+      return false;
+    }
+    let receipt: ReceiptRecord | null = null;
+    try {
+      const rcp = buildReceiptFromAppointment(updated, "receipt", store.receipts || [], `rcp_${uid()}`, updated.clientName);
+      receipt = (await store.upsertReceipt?.(rcp)) || rcp;
+    } catch { /* receipt optional */ }
+    const apptDraft: SaleDraft = {
+      lines: [{ id: "appt", kind: "service", name: appt.style || appt.serviceName || "Service", unitPrice: Math.max(0, parseMoney(appt.balanceDue) || netTotal), quantity: 1, hours: Number(appt.durationHours ?? appt.duration_hours) || 0 }],
+      tipAmount: tipAmt,
+    };
+    setDone({
+      totals: computeSaleTotals(apptDraft),
+      profit: computeSaleProfit(apptDraft),
+      methodLabel,
+      receipt,
+      stockNote: null,
+    });
+    setApptPay(null); setApptTip("");
+    setProcessing(false); setTtpStatus(null);
+    return true;
+  };
+
+  const apptCollectTotal = apptPay ? Math.max(0, (parseMoney(apptPay.balanceDue) || Math.max(0, parseMoney(apptPay.totalPrice) - parseMoney(apptPay.discountAmount))) + parseMoney(apptTip)) : 0;
+
+  const payApptTapToPay = async () => {
+    if (!apptPay) return;
+    setError(null); setProcessing(true); setTtpStatus(null);
+    try {
+      const res = await collectTapToPay({
+        amountCents: Math.round(apptCollectTotal * 100),
+        appointmentId: apptPay.id,
+        clientName: apptPay.clientName || undefined,
+        currency: String(currency).toLowerCase(),
+        description: `${apptPay.style || "Appointment"}${apptPay.clientName ? ` — ${apptPay.clientName}` : ""}`,
+        onStatus: (s) => setTtpStatus(s),
+      });
+      if (res.ok) await finalizeApptCollect(apptPay, "tap_to_pay", "Tap to Pay", res.paymentIntentId);
+      else { if (!res.canceled) setError(res.error); setProcessing(false); setTtpStatus(null); }
+    } catch {
+      setError("Tap to Pay failed. Try again or record the payment manually.");
+      setProcessing(false); setTtpStatus(null);
+    }
+  };
+
+  const payApptManual = async (tender: SaleTender, label: string) => {
+    if (!apptPay) return;
+    setError(null); setProcessing(true);
+    await finalizeApptCollect(apptPay, tender, label);
   };
 
   // ---- done screen -----------------------------------------------------
@@ -36247,6 +36429,7 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
         <div className="flex gap-1 p-1 rounded-2xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
           <CheckoutSegTab active={tab === "catalog"} label="Catalog" onSelect={() => setTab("catalog")} />
           <CheckoutSegTab active={tab === "keypad"} label="Keypad" onSelect={() => setTab("keypad")} />
+          <CheckoutSegTab active={tab === "appt"} label="Appt" badge={unpaidAppointments.length || undefined} onSelect={() => setTab("appt")} />
           <CheckoutSegTab active={tab === "cart"} label="Cart" badge={cartCount} onSelect={() => setTab("cart")} />
         </div>
 
@@ -36304,6 +36487,31 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
               <Input value={keypadLabel} onChange={(e) => setKeypadLabel(e.target.value)} placeholder="e.g. Take-down, deposit, touch-up" />
             </Field>
             <Button variant="primary" fullWidth icon={<Plus size={18} />} disabled={parseMoney(keypad) <= 0} onClick={addKeypad}>Add to ticket</Button>
+          </div>
+        )}
+
+        {tab === "appt" && (
+          <div className="space-y-2">
+            {unpaidAppointments.length === 0 && (
+              <p className="text-[13px] text-center py-8" style={{ color: C.muted }}>No appointments with a balance to collect. Booked clients with money owed show up here.</p>
+            )}
+            {unpaidAppointments.map((a) => {
+              const bal = parseMoney(a.balanceDue) || Math.max(0, parseMoney(a.totalPrice) - parseMoney(a.discountAmount) - parseMoney(a.depositPaid));
+              return (
+                <Card key={a.id} onClick={() => { setApptTip(""); setError(null); setApptPay(a); }} style={{ padding: 14 }}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold truncate" style={{ color: C.ink }}>{a.clientName || "Client"}</p>
+                      <p className="text-[12px] truncate" style={{ color: C.muted }}>{a.style || a.serviceName || "Service"}{a.date ? ` · ${a.date}` : ""}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-bold" style={{ color: C.espresso }}>{fmt(bal)}</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>balance</p>
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
           </div>
         )}
 
@@ -36373,6 +36581,37 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
             <MoneyInput value={taxRate} onChange={setTaxRate} prefix="" suffix="%" placeholder="0" />
           </Field>
 
+          {/* Gift card redemption */}
+          <Field label="Gift card">
+            {giftCard ? (
+              <div className="flex items-center justify-between rounded-xl px-3.5 py-3" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Gift size={16} style={{ color: C.brandPrimary }} />
+                  <span className="text-[13px] font-semibold truncate" style={{ color: C.ink }}>{giftCard.code} · {fmt(giftCard.balance)} left</span>
+                </div>
+                <button type="button" onClick={() => { setGiftCard(null); setGiftCode(""); }} className="p-1" style={{ color: C.brandError }}><X size={16} /></button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <div className="flex-1"><Input value={giftCode} onChange={(e) => setGiftCode(e.target.value)} placeholder="Enter gift card code" /></div>
+                <Button variant="outline" disabled={giftLookupBusy || !giftCode.trim()} onClick={lookupGiftCard}>{giftLookupBusy ? "…" : "Apply"}</Button>
+              </div>
+            )}
+          </Field>
+
+          {/* Loyalty reward redemption */}
+          {loyaltyReady && loyalty && (
+            <button type="button" onClick={() => setLoyaltyApplied((v) => !v)}
+              className="w-full flex items-center justify-between rounded-xl px-3.5 py-3 transition"
+              style={{ background: loyaltyApplied ? "rgba(124,58,237,0.08)" : C.paper, border: `1px solid ${loyaltyApplied ? C.brandPrimary : C.hairline}` }}>
+              <div className="flex items-center gap-2">
+                <Award size={16} style={{ color: C.brandPrimary }} />
+                <span className="text-[13px] font-semibold" style={{ color: C.ink }}>Apply {fmt(loyalty.settings.rewardValue)} loyalty reward</span>
+              </div>
+              <span className="text-[12px] font-semibold" style={{ color: loyaltyApplied ? C.brandPrimary : C.muted }}>{loyaltyApplied ? "Applied" : `${loyalty.available} pts`}</span>
+            </button>
+          )}
+
           {/* Totals */}
           <div className="rounded-2xl p-4 space-y-1.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
             {[
@@ -36380,6 +36619,8 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
               ...(totals.discountAmount > 0 ? [["Discount", -totals.discountAmount] as [string, number]] : []),
               ...(totals.taxAmount > 0 ? [["Tax", totals.taxAmount] as [string, number]] : []),
               ...(totals.tip > 0 ? [["Tip", totals.tip] as [string, number]] : []),
+              ...(totals.giftCardApplied > 0 ? [["Gift card", -totals.giftCardApplied] as [string, number]] : []),
+              ...(totals.loyaltyApplied > 0 ? [["Loyalty reward", -totals.loyaltyApplied] as [string, number]] : []),
             ].map(([label, val]) => (
               <div key={label as string} className="flex justify-between text-[13px]" style={{ color: C.coffee }}>
                 <span>{label}</span><span>{(val as number) < 0 ? "−" : ""}{fmt(Math.abs(val as number))}</span>
@@ -36413,6 +36654,59 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
             </div>
           )}
         </div>
+      </Sheet>
+
+      {/* Appointment balance-collection sheet */}
+      <Sheet open={!!apptPay} onClose={() => { if (!processing) { setApptPay(null); setApptTip(""); } }} title="Collect balance">
+        {apptPay && (
+          <div className="space-y-4">
+            <div className="rounded-2xl p-4" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              <p className="font-semibold" style={{ color: C.ink }}>{apptPay.clientName || "Client"}</p>
+              <p className="text-[12px]" style={{ color: C.muted }}>{apptPay.style || apptPay.serviceName || "Service"}{apptPay.date ? ` · ${apptPay.date}` : ""}</p>
+            </div>
+
+            <Field label="Tip">
+              <div className="flex gap-2 mb-2">
+                {[15, 18, 20].map((pct) => {
+                  const base = parseMoney(apptPay.balanceDue) || Math.max(0, parseMoney(apptPay.totalPrice) - parseMoney(apptPay.discountAmount));
+                  return (
+                    <button type="button" key={pct} onClick={() => setApptTip(((base * pct) / 100).toFixed(2))}
+                      className="flex-1 py-2 rounded-xl text-[13px] font-semibold" style={{ border: `1px solid ${C.hairline}`, color: C.coffee }}>{pct}%</button>
+                  );
+                })}
+                <button type="button" onClick={() => setApptTip("")} className="flex-1 py-2 rounded-xl text-[13px] font-semibold" style={{ border: `1px solid ${C.hairline}`, color: C.coffee }}>None</button>
+              </div>
+              <MoneyInput value={apptTip} onChange={setApptTip} placeholder="0.00" />
+            </Field>
+
+            <div className="flex justify-between rounded-2xl p-4" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              <span className="font-bold" style={{ color: C.ink }}>Total due</span>
+              <span className="font-bold" style={{ fontFamily: FONT_DISPLAY, fontSize: 20, color: C.espresso }}>{fmt(apptCollectTotal)}</span>
+            </div>
+
+            {error && <p className="text-[13px] text-center" style={{ color: C.brandError }}>{error}</p>}
+
+            {processing && ttpStatus ? (
+              <div className="rounded-2xl p-4 text-center" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                <RefreshCw size={20} className="mx-auto" style={{ color: C.brandPrimary }} />
+                <p className="text-[13px] mt-2 font-semibold" style={{ color: C.coffee }}>{TAP_TO_PAY_STAGE_LABEL[ttpStatus.stage]}</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {ttpAvailable && (
+                  <Button variant="primary" fullWidth icon={<CreditCard size={18} />} disabled={processing || apptCollectTotal <= 0} onClick={payApptTapToPay}>
+                    Tap to Pay · {fmt(apptCollectTotal)}
+                  </Button>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  {CHECKOUT_METHODS.map((m) => (
+                    <Button key={m.tender} variant="outline" disabled={processing} onClick={() => payApptManual(m.tender, m.label)}>{m.label}</Button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </Sheet>
     </div>
   );
