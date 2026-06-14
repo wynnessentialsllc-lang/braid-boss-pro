@@ -27,6 +27,46 @@ export type ShippoParcel = {
   weight_oz: number;
 };
 
+// USPS Priority Mail / Ground Advantage cap at 70 lb = 1120 oz. UPS/FedEx
+// cap higher (150 lb) but we default to the USPS limit so the cart can use
+// the cheapest service. Stylists with bulkier products will see the rate
+// list switch to UPS/FedEx automatically since USPS won't quote at that
+// weight; the split keeps each parcel under the floor.
+export const MAX_PARCEL_WEIGHT_OZ = 1120;
+
+// Split a single total weight across N parcels of equal weight when the
+// total exceeds MAX_PARCEL_WEIGHT_OZ. The base parcel dimensions are
+// preserved per parcel (we don't try to compute "smaller box for smaller
+// remainder" — stylists pick one default and ship multiple copies of it).
+//
+// Examples:
+//   total = 800 oz, max = 1120  → [{800}]                    (1 parcel)
+//   total = 1500 oz, max = 1120 → [{750}, {750}]             (2 parcels)
+//   total = 2500 oz, max = 1120 → [{833.33}, {833.33}, {833.34}] (3 parcels)
+//
+// Min-weight floor mirrors fetchShipmentRates: 1 oz so a tiny cart never
+// produces a zero-weight parcel some carriers reject.
+export const splitIntoParcels = (
+  base: { length: number; width: number; height: number },
+  totalWeightOz: number,
+  maxOz: number = MAX_PARCEL_WEIGHT_OZ,
+): ShippoParcel[] => {
+  const w = Math.max(MIN_WEIGHT_OZ, Number.isFinite(totalWeightOz) ? totalWeightOz : MIN_WEIGHT_OZ);
+  const n = Math.max(1, Math.ceil(w / maxOz));
+  const per = Math.round((w / n) * 100) / 100;
+  // Distribute the rounded weight; toss the rounding remainder onto the
+  // final parcel so the sum exactly matches the original total (carriers
+  // bill on per-parcel weight, so a sliver shift between parcels is fine).
+  const parcels: ShippoParcel[] = [];
+  let assigned = 0;
+  for (let i = 0; i < n - 1; i++) {
+    parcels.push({ ...base, weight_oz: per });
+    assigned += per;
+  }
+  parcels.push({ ...base, weight_oz: Math.max(MIN_WEIGHT_OZ, Math.round((w - assigned) * 100) / 100) });
+  return parcels;
+};
+
 // Per-shipment extras the cart can ask for. Both map to fees on the rate,
 // so we have to include them at quote time (adding them at label purchase
 // is too late — Shippo charges what the rate already encoded).
@@ -121,10 +161,27 @@ export async function fetchShipmentRates(opts: {
   token: string;
   from: ShippoAddress;
   to: ShippoAddress;
-  parcel: ShippoParcel;
+  // Back-compat: either a single parcel (the old signature, used by every
+  // existing caller) or an array (multi-parcel shipments — splitIntoParcels
+  // returns one). Shippo prices the shipment as a whole and the buyer sees
+  // one rate per service level regardless of parcel count.
+  parcel?: ShippoParcel;
+  parcels?: ShippoParcel[];
   extras?: ShippoExtras;
 }): Promise<NormalizedRate[]> {
-  const weight = Math.max(MIN_WEIGHT_OZ, Math.round(opts.parcel.weight_oz * 100) / 100);
+  // Normalize to an array. At least one parcel must be provided; we floor
+  // each to MIN_WEIGHT_OZ so a tiny cart doesn't get rejected by Shippo for
+  // sending a 0-oz parcel.
+  const inputParcels = opts.parcels && opts.parcels.length > 0
+    ? opts.parcels
+    : opts.parcel
+      ? [opts.parcel]
+      : [];
+  if (inputParcels.length === 0) {
+    throw new Error("fetchShipmentRates: at least one parcel required");
+  }
+  // The old single-parcel signature exposed a weight local; the new path
+  // floors per-parcel below, so the standalone weight is no longer needed.
   // Build the optional extra block. Skipped entirely when neither extra is
   // requested so the request stays minimal for the common case (no
   // signature, no declared value).
@@ -164,16 +221,14 @@ export async function fetchShipmentRates(opts: {
       email: opts.to.email || "",
       phone: opts.to.phone || "",
     },
-    parcels: [
-      {
-        length: String(opts.parcel.length),
-        width: String(opts.parcel.width),
-        height: String(opts.parcel.height),
-        distance_unit: "in",
-        weight: String(weight),
-        mass_unit: "oz",
-      },
-    ],
+    parcels: inputParcels.map((p) => ({
+      length: String(p.length),
+      width: String(p.width),
+      height: String(p.height),
+      distance_unit: "in",
+      weight: String(Math.max(MIN_WEIGHT_OZ, Math.round(p.weight_oz * 100) / 100)),
+      mass_unit: "oz",
+    })),
     async: false,
     ...(Object.keys(extra).length > 0 ? { extra } : {}),
   };
@@ -366,7 +421,8 @@ export async function requoteForAddress(opts: {
   token: string;
   from: ShippoAddress;
   to: ShippoAddress;
-  parcel: ShippoParcel;
+  parcel?: ShippoParcel;
+  parcels?: ShippoParcel[];
   extras?: ShippoExtras;
   carrier: string;
   service: string;
@@ -378,6 +434,7 @@ export async function requoteForAddress(opts: {
       from: opts.from,
       to: opts.to,
       parcel: opts.parcel,
+      parcels: opts.parcels,
       extras: opts.extras,
     });
   } catch {

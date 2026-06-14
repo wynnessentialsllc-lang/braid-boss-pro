@@ -14,7 +14,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { fetchShipmentRates, type NormalizedRate } from "../../lib/shippo";
+import { fetchShipmentRates, splitIntoParcels, type NormalizedRate } from "../../lib/shippo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -233,12 +233,14 @@ export async function POST(req: Request) {
         zip,
         country: "US",
       },
-      parcel: {
-        length: parcelL,
-        width: parcelW,
-        height: parcelH,
-        weight_oz: totalWeightOz,
-      },
+      // splitIntoParcels returns a single parcel when total weight fits
+      // under the carrier max (the common case), and 2+ parcels otherwise.
+      // Shippo prices the multi-parcel shipment as one rate so the buyer
+      // still sees one number per service level.
+      parcels: splitIntoParcels(
+        { length: parcelL, width: parcelW, height: parcelH },
+        totalWeightOz,
+      ),
       extras: {
         signature_confirmation: needsSignature ? "STANDARD" : null,
         insurance_amount: insuranceTotal > 0 ? insuranceTotal : null,

@@ -8,6 +8,7 @@ import {
   registerTrackingWebhook,
   requoteForAddress,
   sortAndCapRates,
+  splitIntoParcels,
   type NormalizedRate,
 } from "./shippo";
 
@@ -405,5 +406,43 @@ describe("requoteForAddress", () => {
   it("returns null on Shippo error (fail-soft)", async () => {
     fetchMock.mockResolvedValueOnce({ ok: false, status: 500, text: async () => "boom" });
     expect(await requoteForAddress(baseOpts)).toBeNull();
+  });
+});
+
+describe("splitIntoParcels", () => {
+  const dims = { length: 10, width: 8, height: 4 };
+
+  it("returns a single parcel when total fits under the cap", () => {
+    const out = splitIntoParcels(dims, 500);
+    expect(out).toHaveLength(1);
+    expect(out[0].weight_oz).toBe(500);
+    expect(out[0].length).toBe(10);
+  });
+
+  it("floors a 0-weight cart to MIN_WEIGHT_OZ", () => {
+    const out = splitIntoParcels(dims, 0);
+    expect(out).toHaveLength(1);
+    expect(out[0].weight_oz).toBe(1);
+  });
+
+  it("splits into 2 parcels when total exceeds the cap", () => {
+    const out = splitIntoParcels(dims, 1500); // 1500 oz > 1120 cap
+    expect(out).toHaveLength(2);
+    const sum = out.reduce((s, p) => s + p.weight_oz, 0);
+    expect(Math.round(sum * 100) / 100).toBe(1500);
+  });
+
+  it("splits into 3 parcels when needed and preserves total weight", () => {
+    const out = splitIntoParcels(dims, 2500); // 2500/1120 → 3 parcels
+    expect(out).toHaveLength(3);
+    const sum = out.reduce((s, p) => s + p.weight_oz, 0);
+    expect(Math.round(sum * 100) / 100).toBe(2500);
+  });
+
+  it("respects a custom max for non-USPS carriers", () => {
+    const out = splitIntoParcels(dims, 3000, 1500);
+    expect(out).toHaveLength(2);
+    const sum = out.reduce((s, p) => s + p.weight_oz, 0);
+    expect(Math.round(sum * 100) / 100).toBe(3000);
   });
 });
