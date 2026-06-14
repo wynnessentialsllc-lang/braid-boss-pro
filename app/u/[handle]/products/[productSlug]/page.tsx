@@ -80,7 +80,20 @@ export default function ProductDetailPage() {
   // any method, so Buy Now behaves exactly as before.
   const [ful, setFul] = useState<ShopFulfillment | null>(null);
   const [fulMethod, setFulMethod] = useState<FulfillmentMethod | null>(null);
-  const [deliveryZip, setDeliveryZip] = useState("");
+  // Hydrate from the buyer's last-used local-delivery ZIP so a returning
+  // visitor doesn't have to retype it. Stored shape mirrors CartDrawer's
+  // bbp-buyer-address-v1 blob.
+  const [deliveryZip, setDeliveryZip] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      const raw = window.localStorage.getItem("bbp-buyer-address-v1");
+      if (!raw) return "";
+      const v = JSON.parse(raw);
+      return v && typeof v === "object" && typeof v.deliveryZip === "string" ? v.deliveryZip : "";
+    } catch {
+      return "";
+    }
+  });
   const [deliveryCheck, setDeliveryCheck] = useState<
     { status: "idle" | "checking" | "ok" | "out" | "error"; miles?: number; radius?: number }
   >({ status: "idle" });
@@ -214,8 +227,21 @@ export default function ProductDetailPage() {
         setDeliveryCheck({ status: "error" });
         return;
       }
-      if (b.limited === false || b.within) setDeliveryCheck({ status: "ok", miles: b.miles, radius: b.radius });
-      else setDeliveryCheck({ status: "out", miles: b.miles, radius: b.radius });
+      if (b.limited === false || b.within) {
+        setDeliveryCheck({ status: "ok", miles: b.miles, radius: b.radius });
+        // Persist the confirmed delivery ZIP for next visit. Same blob the
+        // CartDrawer reads/writes; one shared "buyer address" record.
+        try {
+          if (typeof window !== "undefined") {
+            const raw = window.localStorage.getItem("bbp-buyer-address-v1");
+            const prev = raw ? JSON.parse(raw) : {};
+            window.localStorage.setItem(
+              "bbp-buyer-address-v1",
+              JSON.stringify({ ...prev, deliveryZip: zip.trim() }),
+            );
+          }
+        } catch { /* non-fatal */ }
+      } else setDeliveryCheck({ status: "out", miles: b.miles, radius: b.radius });
     } catch {
       setDeliveryCheck({ status: "error" });
     }
