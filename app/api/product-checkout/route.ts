@@ -72,6 +72,7 @@ export async function POST(req: Request) {
     fulfillment_method?: string | null;
     delivery_zip?: string | null;
     pickup_preferred_time?: string | null;
+    pickup_scheduled_at?: string | null;
     recovery_email?: string | null;
     shipping_rate_id?: string | null;
     items?: Array<{ product_slug?: string; quantity?: number; variant_id?: string | null; custom_amount?: number | null }>;
@@ -469,6 +470,15 @@ export async function POST(req: Request) {
       // is actually a pickup so a stray field on a shipping order can't
       // pollute the row.
       pickup_preferred_time: fulfillmentMethod === "pickup" ? pickupPreferredTime : null,
+      pickup_scheduled_at:
+        fulfillmentMethod === "pickup"
+          ? (() => {
+              const raw = String(body?.pickup_scheduled_at || "").trim();
+              if (!raw) return null;
+              const d = new Date(raw);
+              return Number.isNaN(d.valueOf()) ? null : d.toISOString();
+            })()
+          : null,
       recovery_email: recoveryEmail,
       application_fee: applicationFeeCents > 0 ? (applicationFeeCents / 100).toFixed(2) : null,
       currency: "usd",

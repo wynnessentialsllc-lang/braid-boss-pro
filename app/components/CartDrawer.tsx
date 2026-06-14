@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useCart, type CartItem } from "../lib/cart";
 import { useModalA11y } from "../lib/use-modal-a11y";
 import { getSupabase } from "../lib/supabase";
+import { fetchPickupAvailability, type PickupSlot } from "../lib/storefront";
 
 type FulfillmentMethod = "shipping" | "delivery" | "pickup";
 type ShopFulfillment = {
@@ -248,6 +249,14 @@ export const CartDrawer = () => {
   // order row; only used if the order stays in pending past 24h.
   const [recoveryEmail, setRecoveryEmail] = useState("");
   const [recoveryEmailOn, setRecoveryEmailOn] = useState(false);
+  // D11: structured pickup picks. When the stylist has toggled
+  // pickup_enabled on any day-of-week in their schedule, the storefront
+  // hides the free-text "preferred time" field and shows a date picker
+  // (filtered to those days) + a time inside the day's window. When the
+  // list is empty, we fall back to the A4 free-text flow.
+  const [pickupSlots, setPickupSlots] = useState<PickupSlot[]>([]);
+  const [pickupDate, setPickupDate] = useState("");
+  const [pickupTime, setPickupTime] = useState("");
   // Local-delivery radius check.
   const [deliveryZip, setDeliveryZip] = useState(() => readSavedAddress().deliveryZip || "");
   const [deliveryCheck, setDeliveryCheck] = useState<
@@ -421,6 +430,15 @@ export const CartDrawer = () => {
       } catch {
         /* ignore — falls back to legacy checkout */
       }
+      // Pickup availability — only loaded when the drawer opens. Empty
+      // list means the stylist hasn't enabled pickup_enabled on any day,
+      // so the free-text A4 field still renders.
+      try {
+        const slots = cart.handle ? await fetchPickupAvailability(cart.handle) : [];
+        if (!cancelled) setPickupSlots(slots);
+      } catch {
+        if (!cancelled) setPickupSlots([]);
+      }
     })();
     return () => {
       cancelled = true;
@@ -504,7 +522,18 @@ export const CartDrawer = () => {
           gift_card_code: giftCardCode.trim() || null,
           fulfillment_method: ful ? method : null,
           delivery_zip: method === "delivery" ? deliveryZip.trim() || null : null,
-          pickup_preferred_time: method === "pickup" ? pickupPreferredTime.trim() || null : null,
+          pickup_preferred_time:
+            method === "pickup" && pickupSlots.length === 0
+              ? pickupPreferredTime.trim() || null
+              : null,
+          // Structured pick (D11). Built as a local-time ISO so the
+          // server stamps the buyer-intended wall-clock; the API
+          // normalizes to UTC. Only sent when the stylist has a
+          // schedule + the buyer picked a date.
+          pickup_scheduled_at:
+            method === "pickup" && pickupSlots.length > 0 && pickupDate
+              ? `${pickupDate}T${pickupTime || pickupSlots.find((s) => s.date === pickupDate)?.start_time || "12:00"}:00`
+              : null,
           recovery_email: recoveryEmailOn ? recoveryEmail.trim() || null : null,
           shipping_rate_id: carrierShipping ? pickedRateId : null,
         }),
@@ -743,7 +772,70 @@ export const CartDrawer = () => {
                     </button>
                   );
                 })}
-              {method === "pickup" && (
+              {method === "pickup" && pickupSlots.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <select
+                      value={pickupDate}
+                      onChange={(e) => {
+                        setPickupDate(e.target.value);
+                        const slot = pickupSlots.find((s) => s.date === e.target.value);
+                        if (slot) setPickupTime(slot.start_time);
+                      }}
+                      style={{
+                        flex: 2,
+                        padding: "11px 14px",
+                        borderRadius: 12,
+                        border: `1px solid ${C.brandBorder}`,
+                        background: "#FFFFFF",
+                        color: C.ink,
+                        fontSize: 13,
+                        outline: "none",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <option value="">Pick a pickup date…</option>
+                      {pickupSlots.map((s) => (
+                        <option key={s.date} value={s.date}>
+                          {new Date(`${s.date}T12:00:00`).toLocaleDateString(undefined, {
+                            weekday: "long",
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="time"
+                      value={pickupTime}
+                      onChange={(e) => setPickupTime(e.target.value)}
+                      min={pickupSlots.find((s) => s.date === pickupDate)?.start_time || undefined}
+                      max={pickupSlots.find((s) => s.date === pickupDate)?.end_time || undefined}
+                      disabled={!pickupDate}
+                      style={{
+                        flex: 1,
+                        padding: "11px 14px",
+                        borderRadius: 12,
+                        border: `1px solid ${C.brandBorder}`,
+                        background: "#FFFFFF",
+                        color: C.ink,
+                        fontSize: 13,
+                        outline: "none",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+                  {pickupDate && (() => {
+                    const slot = pickupSlots.find((s) => s.date === pickupDate);
+                    return slot ? (
+                      <span style={{ fontSize: 11, color: C.muted, lineHeight: 1.3 }}>
+                        Open {slot.start_time}–{slot.end_time}. Your stylist will confirm.
+                      </span>
+                    ) : null;
+                  })()}
+                </div>
+              )}
+              {method === "pickup" && pickupSlots.length === 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   <input
                     type="text"
