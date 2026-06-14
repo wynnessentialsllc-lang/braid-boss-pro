@@ -72,6 +72,7 @@ export async function POST(req: Request) {
     fulfillment_method?: string | null;
     delivery_zip?: string | null;
     pickup_preferred_time?: string | null;
+    recovery_email?: string | null;
     shipping_rate_id?: string | null;
     items?: Array<{ product_slug?: string; quantity?: number; variant_id?: string | null; custom_amount?: number | null }>;
   };
@@ -100,6 +101,15 @@ export async function POST(req: Request) {
       .replace(/[\u0000-\u001f]/g, "")
       .trim()
       .slice(0, 200) || null;
+  // Optional cart-abandonment recovery email. Buyer ticks "Remind me if I
+  // don't finish" → if they bail before paying, a cron 24h later sends a
+  // single deep-link reminder to this address. Hard-cap length + light
+  // validation: anything not matching <local>@<host>.<tld> is dropped.
+  const recoveryEmail = (() => {
+    const raw = String(body?.recovery_email || "").trim().slice(0, 254).toLowerCase();
+    if (!raw) return null;
+    return /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(raw) ? raw : null;
+  })();
   // Buyer's picked Shippo rate id (live-carrier shipping mode). The checkout
   // re-fetches the rate from Shippo to confirm the amount before charging,
   // so a tampered id can't undercut the real shipping fee.
@@ -459,6 +469,7 @@ export async function POST(req: Request) {
       // is actually a pickup so a stray field on a shipping order can't
       // pollute the row.
       pickup_preferred_time: fulfillmentMethod === "pickup" ? pickupPreferredTime : null,
+      recovery_email: recoveryEmail,
       application_fee: applicationFeeCents > 0 ? (applicationFeeCents / 100).toFixed(2) : null,
       currency: "usd",
       shipping_required: collectShippingAddress,
