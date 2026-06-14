@@ -394,6 +394,16 @@ import {
 } from "./lib/packages";
 import { SMS_ENABLED } from "./lib/features";
 import {
+  computeSaleTotals,
+  computeSaleProfit,
+  buildSaleTransaction,
+  saleDeductions,
+  ticketLabel,
+  type SaleLine,
+  type SaleDraft,
+  type SaleTender,
+} from "./lib/boss-checkout";
+import {
   type ClientLike,
   matchClientByContact,
 } from "./lib/clients-match";
@@ -484,7 +494,8 @@ import {
   Star, Heart, Repeat, Play, Pause, Square, Timer as TimerIcon, Zap, Award,
   BarChart3, Layers, MessageSquare, Send, AlertTriangle, CheckCircle2,
   XCircle, Filter, MoreHorizontal, SlidersHorizontal, LogOut,
-  LifeBuoy, Bug, Lightbulb, PlayCircle, ShieldCheck, HelpCircle, Package
+  LifeBuoy, Bug, Lightbulb, PlayCircle, ShieldCheck, HelpCircle, Package,
+  ShoppingBag, CreditCard, Minus, Wallet
 } from "lucide-react";
 
 /* ============================================================
@@ -2721,6 +2732,7 @@ const TabBar = ({ active, setActive }: {
     { id: "calculator", label: "Quote", icon: CalcIcon },
     { id: "schedule", label: "Schedule", icon: Calendar },
     { id: "clients", label: "Clients", icon: Users },
+    { id: "checkout", label: "Checkout", icon: ShoppingBag },
     { id: "money", label: "Money", icon: TrendingUp },
   ];
   return (
@@ -35924,6 +35936,488 @@ const TapToPayAwareness = ({ onSetup, onDismiss }: { onSetup: () => void; onDism
   </div>
 );
 
+// ============================================================
+// Boss Checkout — in-person point of sale.
+//
+// Ring up a walk-in or a known client from the catalog (services +
+// retail stock) or a quick keypad amount, apply a discount + tip, then
+// take payment via Tap to Pay or record cash/Zelle/Cash App/etc. On
+// completion it writes one payment_transactions row, deducts the stock
+// sold (and any service hair recipe), issues a branded receipt, and
+// shows the stylist their take-home on the sale — the readout no other
+// POS surfaces. All the math lives in the pure, tested ./lib/boss-checkout
+// module; this screen is just the chair-side UI on top of it.
+// ============================================================
+
+type CheckoutDoneState = {
+  totals: ReturnType<typeof computeSaleTotals>;
+  profit: ReturnType<typeof computeSaleProfit>;
+  methodLabel: string;
+  receipt: ReceiptRecord | null;
+  stockNote: string | null;
+};
+
+const CHECKOUT_METHODS: { tender: SaleTender; label: string }[] = [
+  { tender: "cash", label: "Cash" },
+  { tender: "zelle", label: "Zelle" },
+  { tender: "cashapp", label: "Cash App" },
+  { tender: "venmo", label: "Venmo" },
+  { tender: "card", label: "Card (manual)" },
+  { tender: "other", label: "Other" },
+];
+
+const CheckoutSegTab = ({ active, label, badge, onSelect }: {
+  active: boolean; label: string; badge?: number; onSelect: () => void;
+}) => (
+  <button type="button" onClick={onSelect}
+    className="flex-1 py-2 rounded-xl text-[13px] font-semibold transition flex items-center justify-center gap-1.5"
+    style={{ background: active ? GRADIENTS.primary : "transparent", color: active ? "#fff" : C.coffee }}>
+    {label}
+    {badge ? <span className="text-[11px] px-1.5 rounded-full" style={{ background: active ? "rgba(255,255,255,0.25)" : C.brandBorder }}>{badge}</span> : null}
+  </button>
+);
+
+const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
+  store: any;
+  openReceipt: (rcp: ReceiptRecord) => void;
+  goToMoney: (p: string) => void;
+}) => {
+  const currency = store.business?.currency || "USD";
+  const fmt = (n: number) => fmtMoney(n, currency);
+
+  // The running ticket + how the stylist is building it.
+  const [lines, setLines] = useState<SaleLine[]>([]);
+  const [tab, setTab] = useState<"catalog" | "keypad" | "cart">("catalog");
+  const [search, setSearch] = useState("");
+  const [keypad, setKeypad] = useState("");
+  const [keypadLabel, setKeypadLabel] = useState("");
+
+  // Sale-level adjustments.
+  const [clientId, setClientId] = useState("");
+  const [discountId, setDiscountId] = useState("");
+  const [tip, setTip] = useState("");
+  const [taxRate, setTaxRate] = useState("");
+
+  // Payment flow.
+  const [payOpen, setPayOpen] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [ttpAvailable, setTtpAvailable] = useState(false);
+  const [ttpStatus, setTtpStatus] = useState<TapToPayStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<CheckoutDoneState | null>(null);
+
+  useEffect(() => {
+    let off = false;
+    (async () => { const ok = await tapToPaySupported(); if (!off) setTtpAvailable(ok); })();
+    return () => { off = true; };
+  }, []);
+
+  const services = useMemo(
+    () => ((store.servicesApi?.services as Service[]) || [])
+      .filter((s) => s.is_active)
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [store.servicesApi?.services],
+  );
+  const retailItems = useMemo(
+    () => ((store.inventoryItems as InventoryItem[]) || [])
+      .filter((i) => !i.archivedAt && isForSale(i))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [store.inventoryItems],
+  );
+  const clients = useMemo(
+    () => ((store.clients as any[]) || []).filter((c) => c?.id),
+    [store.clients],
+  );
+  const activeDiscounts = useMemo(
+    () => ((store.discountsApi?.discounts as Discount[]) || [])
+      .filter((d) => d.is_active && d.applies_to === "all"),
+    [store.discountsApi?.discounts],
+  );
+
+  const q = search.trim().toLowerCase();
+  const shownServices = q ? services.filter((s) => s.name.toLowerCase().includes(q)) : services;
+  const shownItems = q ? retailItems.filter((i) => i.name.toLowerCase().includes(q)) : retailItems;
+
+  const selectedClient = clients.find((c) => c.id === clientId) || null;
+  const clientName = selectedClient ? (selectedClient.name || selectedClient.clientName || "Client") : null;
+  const discount = activeDiscounts.find((d) => d.id === discountId) || null;
+
+  const draft: SaleDraft = useMemo(() => ({
+    lines,
+    discount: discount
+      ? { id: discount.id, name: discount.name, discount_type: discount.discount_type, value: discount.value }
+      : null,
+    tipAmount: parseMoney(tip),
+    taxRate: parseMoney(taxRate) / 100,
+    clientId: clientId || null,
+    clientName,
+    appointmentId: null,
+  }), [lines, discount, tip, taxRate, clientId, clientName]);
+
+  const totals = useMemo(() => computeSaleTotals(draft), [draft]);
+
+  // ---- ticket mutation -------------------------------------------------
+  const addLine = (line: Omit<SaleLine, "id">) => {
+    setLines((prev) => {
+      // Collapse a repeat tap of the same catalog ref into a qty bump.
+      const key = `${line.kind}:${line.refId || line.name}:${line.variationId || ""}`;
+      const idx = prev.findIndex((l) => `${l.kind}:${l.refId || l.name}:${l.variationId || ""}` === key);
+      if (idx >= 0 && line.kind !== "custom") {
+        const next = [...prev];
+        next[idx] = { ...next[idx], quantity: next[idx].quantity + (line.quantity || 1) };
+        return next;
+      }
+      return [...prev, { ...line, id: `cl_${uid()}` }];
+    });
+  };
+  const setQty = (id: string, qty: number) =>
+    setLines((prev) => prev.flatMap((l) => (l.id === id ? (qty <= 0 ? [] : [{ ...l, quantity: qty }]) : [l])));
+  const removeLine = (id: string) => setLines((prev) => prev.filter((l) => l.id !== id));
+  const resetSale = () => {
+    setLines([]); setClientId(""); setDiscountId(""); setTip(""); setTaxRate("");
+    setKeypad(""); setKeypadLabel(""); setTab("catalog"); setError(null);
+    setTtpStatus(null); setDone(null); setPayOpen(false);
+  };
+
+  const addService = (s: Service) => addLine({
+    kind: "service", name: s.name, unitPrice: Number(s.base_price) || 0, quantity: 1,
+    refId: s.id, hours: Number(s.duration_hours) || 0,
+  });
+  const addItem = (i: InventoryItem) => addLine({
+    kind: "product", name: i.name, unitPrice: itemRetailPrice(i), quantity: 1,
+    refId: i.id, inventoryItemId: i.id, unitCost: itemUnitCost(i),
+  });
+  const addKeypad = () => {
+    const amt = parseMoney(keypad);
+    if (amt <= 0) return;
+    addLine({ kind: "custom", name: keypadLabel.trim() || "Custom amount", unitPrice: amt, quantity: 1 });
+    setKeypad(""); setKeypadLabel(""); setTab("cart");
+  };
+
+  const cartCount = lines.reduce((n, l) => n + l.quantity, 0);
+
+  // ---- finalize --------------------------------------------------------
+  const finalizeSale = async (tender: SaleTender, methodLabel: string, stripePaymentIntentId?: string) => {
+    const saleId = `bcx_${uid()}`;
+    const rec = { id: saleId, date: todayISO(), ...buildSaleTransaction(draft, { tender, stripePaymentIntentId }) };
+    try {
+      await store.upsertTransaction(rec);
+    } catch {
+      setError("Couldn't save the sale. Please try again.");
+      return false;
+    }
+
+    // Deduct stock sold + any service hair recipe. Best-effort: the money
+    // already moved, so a stock hiccup never blocks the receipt. Movement
+    // ids are deterministic (saleId + index) so a retry can't double-deduct.
+    const deductions = saleDeductions(draft);
+    let deducted = 0;
+    for (let i = 0; i < deductions.length; i++) {
+      const d = deductions[i];
+      try {
+        const res = await applyMovement({
+          itemId: d.itemId,
+          variationId: d.variationId,
+          delta: -Math.abs(d.quantity),
+          reason: d.reason,
+          unitCostSnapshot: d.unitCostSnapshot,
+          note: d.note,
+          movementId: `boss_checkout:${saleId}:${i}`,
+        });
+        if (d.variationId) await store.setInventoryVariationQuantity?.(d.itemId, d.variationId, res.quantityOnHand);
+        else await store.setInventoryItemQuantity?.(d.itemId, res.quantityOnHand);
+        deducted += 1;
+      } catch { /* best-effort */ }
+    }
+
+    // Branded receipt — reuse the appointment receipt builder by handing it
+    // a sale-shaped object (post-discount goods total, paid in full).
+    let receipt: ReceiptRecord | null = null;
+    try {
+      const apptLike = {
+        id: saleId,
+        clientId: draft.clientId || undefined,
+        clientName: clientName || "Walk-in",
+        style: ticketLabel(lines),
+        date: todayISO(),
+        totalPrice: totals.subtotal,
+        discountAmount: totals.discountAmount,
+        discountName: discount?.name || "",
+        depositPaid: totals.taxableBase,
+        balanceDue: 0,
+        paymentStatus: "paid",
+        paymentMethod: methodLabel,
+        paymentDate: todayISO(),
+        paymentNotes: `Boss Checkout · ${ticketLabel(lines)}`,
+      };
+      const rcp = buildReceiptFromAppointment(apptLike, "receipt", store.receipts || [], `rcp_${uid()}`, clientName || "Walk-in");
+      receipt = (await store.upsertReceipt?.(rcp)) || rcp;
+    } catch { /* receipt is a nicety; never block the sale on it */ }
+
+    setDone({
+      totals,
+      profit: computeSaleProfit(draft),
+      methodLabel,
+      receipt,
+      stockNote: deductions.length > 0 ? `Stock updated · ${deducted}/${deductions.length} item${deductions.length === 1 ? "" : "s"}` : null,
+    });
+    setLines([]);
+    setPayOpen(false);
+    setProcessing(false);
+    setTtpStatus(null);
+    return true;
+  };
+
+  const payTapToPay = async () => {
+    setError(null); setProcessing(true); setTtpStatus(null);
+    try {
+      const res = await collectTapToPay({
+        amountCents: Math.round(totals.amountDue * 100),
+        clientName: clientName || undefined,
+        currency: String(currency).toLowerCase(),
+        description: ticketLabel(lines),
+        onStatus: (s) => setTtpStatus(s),
+      });
+      if (res.ok) {
+        await finalizeSale("tap_to_pay", "Tap to Pay", res.paymentIntentId);
+      } else {
+        if (!res.canceled) setError(res.error);
+        setProcessing(false); setTtpStatus(null);
+      }
+    } catch {
+      setError("Tap to Pay failed. Try again or record the payment manually.");
+      setProcessing(false); setTtpStatus(null);
+    }
+  };
+
+  const payManual = async (tender: SaleTender, label: string) => {
+    setError(null); setProcessing(true);
+    await finalizeSale(tender, label);
+  };
+
+  // ---- done screen -----------------------------------------------------
+  if (done) {
+    const p = done.profit;
+    return (
+      <div className="bbp-fade" style={{ paddingBottom: 120 }}>
+        <Header title="Sale complete" />
+        <div className="px-4 pt-5 space-y-4">
+          <div className="rounded-2xl p-6 text-center" style={{ background: GRADIENTS.primary, color: "#fff", boxShadow: SHADOWS.primaryGlow }}>
+            <CheckCircle2 size={40} className="mx-auto" strokeWidth={2} />
+            <p className="mt-2 text-[13px] font-semibold uppercase tracking-widest" style={{ letterSpacing: "0.12em", opacity: 0.9 }}>Paid · {done.methodLabel}</p>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 44, fontWeight: 600, lineHeight: 1.1 }}>{fmt(done.totals.amountDue)}</p>
+            {done.totals.creditsApplied > 0 && (
+              <p className="text-[12px] mt-1" style={{ opacity: 0.85 }}>{fmt(done.totals.creditsApplied)} covered by credits</p>
+            )}
+          </div>
+
+          {/* Take-home readout — the differentiator. */}
+          <Card style={{ padding: 18 }}>
+            <div className="flex items-center gap-2 mb-2">
+              <Wallet size={18} style={{ color: C.brandPrimary }} />
+              <span className="text-[12px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Your take-home</span>
+            </div>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 600, color: C.espresso }}>{fmt(p.takeHome)}</p>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {p.marginPct != null && <Pill tone="success">{p.marginPct}% margin</Pill>}
+              {p.takeHomePerHour != null && <Pill tone="gold">{fmt(p.takeHomePerHour)}/hr</Pill>}
+              {p.materialCost > 0 && <Pill tone="neutral">{fmt(p.materialCost)} materials</Pill>}
+              {done.totals.tip > 0 && <Pill tone="neutral">+{fmt(done.totals.tip)} tip</Pill>}
+            </div>
+            {done.stockNote && <p className="text-[12px] mt-3" style={{ color: C.muted }}>{done.stockNote}</p>}
+          </Card>
+
+          <div className="space-y-2">
+            {done.receipt && (
+              <Button variant="outline" fullWidth icon={<Receipt size={18} />} onClick={() => openReceipt(done.receipt!)}>View receipt</Button>
+            )}
+            <Button variant="primary" fullWidth icon={<Plus size={18} />} onClick={resetSale}>New sale</Button>
+            <Button variant="ghost" fullWidth onClick={() => { goToMoney("today"); }}>Go to Money</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- build screen ----------------------------------------------------
+  return (
+    <div className="bbp-fade" style={{ paddingBottom: cartCount > 0 ? 168 : 96 }}>
+      <Header title="Checkout" subtitle="Ring up an in-person sale" />
+      <div className="px-4 pt-4 space-y-4">
+        <div className="flex gap-1 p-1 rounded-2xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          <CheckoutSegTab active={tab === "catalog"} label="Catalog" onSelect={() => setTab("catalog")} />
+          <CheckoutSegTab active={tab === "keypad"} label="Keypad" onSelect={() => setTab("keypad")} />
+          <CheckoutSegTab active={tab === "cart"} label="Cart" badge={cartCount} onSelect={() => setTab("cart")} />
+        </div>
+
+        {tab === "catalog" && (
+          <div className="space-y-4">
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search services & products" prefix="" />
+            {shownServices.length === 0 && shownItems.length === 0 && (
+              <p className="text-[13px] text-center py-8" style={{ color: C.muted }}>No catalog items match. Add services in Settings → Services, or retail stock in Inventory.</p>
+            )}
+            {shownServices.length > 0 && (
+              <div>
+                <SectionTitle>Services</SectionTitle>
+                <div className="space-y-2">
+                  {shownServices.map((s) => (
+                    <Card key={s.id} onClick={() => addService(s)} style={{ padding: 14 }}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-semibold truncate" style={{ color: C.ink }}>{s.name}</p>
+                          <p className="text-[12px]" style={{ color: C.muted }}>{fmt(Number(s.base_price) || 0)} · {Number(s.duration_hours) || 0}h</p>
+                        </div>
+                        <Plus size={20} style={{ color: C.brandPrimary, flexShrink: 0 }} />
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+            {shownItems.length > 0 && (
+              <div>
+                <SectionTitle>Retail products</SectionTitle>
+                <div className="space-y-2">
+                  {shownItems.map((i) => (
+                    <Card key={i.id} onClick={() => addItem(i)} style={{ padding: 14 }}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-semibold truncate" style={{ color: C.ink }}>{i.name}</p>
+                          <p className="text-[12px]" style={{ color: C.muted }}>{fmt(itemRetailPrice(i))}{itemQuantity(i) > 0 ? ` · ${itemQuantity(i)} in stock` : " · out of stock"}</p>
+                        </div>
+                        <Plus size={20} style={{ color: C.brandPrimary, flexShrink: 0 }} />
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "keypad" && (
+          <div className="space-y-3">
+            <Field label="Amount">
+              <MoneyInput value={keypad} onChange={setKeypad} placeholder="0.00" />
+            </Field>
+            <Field label="Label (optional)">
+              <Input value={keypadLabel} onChange={(e) => setKeypadLabel(e.target.value)} placeholder="e.g. Take-down, deposit, touch-up" />
+            </Field>
+            <Button variant="primary" fullWidth icon={<Plus size={18} />} disabled={parseMoney(keypad) <= 0} onClick={addKeypad}>Add to ticket</Button>
+          </div>
+        )}
+
+        {tab === "cart" && (
+          <div className="space-y-2">
+            {lines.length === 0 && (
+              <p className="text-[13px] text-center py-8" style={{ color: C.muted }}>Your ticket is empty. Add items from the Catalog or Keypad.</p>
+            )}
+            {lines.map((l) => (
+              <Card key={l.id} style={{ padding: 12 }}>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold truncate" style={{ color: C.ink }}>{l.name}</p>
+                    <p className="text-[12px]" style={{ color: C.muted }}>{fmt(l.unitPrice)} each</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => setQty(l.id, l.quantity - 1)} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ border: `1px solid ${C.hairline}`, color: C.coffee }}><Minus size={15} /></button>
+                    <span className="w-5 text-center font-semibold" style={{ color: C.ink }}>{l.quantity}</span>
+                    <button type="button" onClick={() => setQty(l.id, l.quantity + 1)} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ border: `1px solid ${C.hairline}`, color: C.coffee }}><Plus size={15} /></button>
+                    <button type="button" onClick={() => removeLine(l.id)} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ color: C.brandError }}><Trash2 size={15} /></button>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Sticky charge bar */}
+      {cartCount > 0 && (
+        <div className="fixed left-1/2 z-30 w-full max-w-[480px] px-4" style={{ bottom: "calc(72px + env(safe-area-inset-bottom, 0px))", transform: "translateX(-50%)" }}>
+          <Button variant="primary" fullWidth onClick={() => { setError(null); setPayOpen(true); }}>
+            Charge {fmt(totals.amountDue)} · {cartCount} item{cartCount === 1 ? "" : "s"}
+          </Button>
+        </div>
+      )}
+
+      {/* Payment sheet */}
+      <Sheet open={payOpen} onClose={() => { if (!processing) setPayOpen(false); }} title="Take payment">
+        <div className="space-y-4">
+          <Field label="Client (optional)">
+            <Select value={clientId} onChange={(e) => setClientId(e.target.value)}
+              options={[{ value: "", label: "Walk-in (no client)" }, ...clients.map((c) => ({ value: c.id, label: c.name || c.clientName || "Client" }))]} />
+          </Field>
+
+          {activeDiscounts.length > 0 && (
+            <Field label="Discount">
+              <Select value={discountId} onChange={(e) => setDiscountId(e.target.value)}
+                options={[{ value: "", label: "No discount" }, ...activeDiscounts.map((d) => ({ value: d.id, label: `${d.name} · ${d.discount_type === "percentage" ? `${d.value}% off` : `${fmt(d.value)} off`}` }))]} />
+            </Field>
+          )}
+
+          <Field label="Tip">
+            <div className="flex gap-2 mb-2">
+              {[15, 18, 20].map((pct) => (
+                <button type="button" key={pct} onClick={() => setTip(((totals.taxableBase * pct) / 100).toFixed(2))}
+                  className="flex-1 py-2 rounded-xl text-[13px] font-semibold" style={{ border: `1px solid ${C.hairline}`, color: C.coffee }}>
+                  {pct}%
+                </button>
+              ))}
+              <button type="button" onClick={() => setTip("")} className="flex-1 py-2 rounded-xl text-[13px] font-semibold" style={{ border: `1px solid ${C.hairline}`, color: C.coffee }}>None</button>
+            </div>
+            <MoneyInput value={tip} onChange={setTip} placeholder="0.00" />
+          </Field>
+
+          <Field label="Sales tax %" hint="Leave 0 if not charging tax">
+            <MoneyInput value={taxRate} onChange={setTaxRate} prefix="" suffix="%" placeholder="0" />
+          </Field>
+
+          {/* Totals */}
+          <div className="rounded-2xl p-4 space-y-1.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+            {[
+              ["Subtotal", totals.subtotal],
+              ...(totals.discountAmount > 0 ? [["Discount", -totals.discountAmount] as [string, number]] : []),
+              ...(totals.taxAmount > 0 ? [["Tax", totals.taxAmount] as [string, number]] : []),
+              ...(totals.tip > 0 ? [["Tip", totals.tip] as [string, number]] : []),
+            ].map(([label, val]) => (
+              <div key={label as string} className="flex justify-between text-[13px]" style={{ color: C.coffee }}>
+                <span>{label}</span><span>{(val as number) < 0 ? "−" : ""}{fmt(Math.abs(val as number))}</span>
+              </div>
+            ))}
+            <div className="flex justify-between pt-1.5 mt-1" style={{ borderTop: `1px solid ${C.hairline}` }}>
+              <span className="font-bold" style={{ color: C.ink }}>Total due</span>
+              <span className="font-bold" style={{ fontFamily: FONT_DISPLAY, fontSize: 20, color: C.espresso }}>{fmt(totals.amountDue)}</span>
+            </div>
+          </div>
+
+          {error && <p className="text-[13px] text-center" style={{ color: C.brandError }}>{error}</p>}
+
+          {processing && ttpStatus ? (
+            <div className="rounded-2xl p-4 text-center" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              <RefreshCw size={20} className="mx-auto" style={{ color: C.brandPrimary }} />
+              <p className="text-[13px] mt-2 font-semibold" style={{ color: C.coffee }}>{TAP_TO_PAY_STAGE_LABEL[ttpStatus.stage]}</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {ttpAvailable && (
+                <Button variant="primary" fullWidth icon={<CreditCard size={18} />} disabled={processing || totals.amountDue <= 0} onClick={payTapToPay}>
+                  Tap to Pay · {fmt(totals.amountDue)}
+                </Button>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                {CHECKOUT_METHODS.map((m) => (
+                  <Button key={m.tender} variant="outline" disabled={processing} onClick={() => payManual(m.tender, m.label)}>{m.label}</Button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </Sheet>
+    </div>
+  );
+};
+
 export default function App() {
   const auth = useAuth();
   // First-launch welcome screen — gates AuthGate until the user
@@ -36541,6 +37035,9 @@ export default function App() {
           )}
           {active === "clients" && (
             <Clients store={store} openCommunication={openCommunication} openQuickAppt={openQuickAppt} savePhoto={handleSavePhoto} deletePhoto={handleDeletePhoto} openClientId={clientToOpenId} clearOpenClientId={() => setClientToOpenId(null)} openAppointmentRecord={(a) => { setActive("schedule"); setApptPrefill(a); }} />
+          )}
+          {active === "checkout" && (
+            <BossCheckoutScreen store={store} openReceipt={openReceipt} goToMoney={goToMoney} />
           )}
           {active === "money" && (
             <Money store={store}
