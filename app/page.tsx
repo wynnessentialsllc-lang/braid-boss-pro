@@ -14713,6 +14713,9 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
           category: "Shop sale",
           note: t.note || t.serviceName || "Checkout sale",
           stream: "shop" as const,
+          // Boss Checkout rows are richer than the manual edit sheet can
+          // round-trip (line items, gift card, loyalty), so don't open it.
+          readOnly: true,
         };
       }
       return { ...t, stream: txnStream(t) };
@@ -14734,6 +14737,7 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
       category: "Online order",
       note: "Online store order",
       stream: "shop" as const,
+      readOnly: true,
     })),
     [store.productOrders, range]);
 
@@ -14918,7 +14922,7 @@ const MoneyTab = ({ all, income, serviceIncome = 0, shopIncome = 0, expenses, ne
     ) : (
       <div className="space-y-2">
         {all.map(t => (
-          <Card key={t.id} className="p-3 flex items-center gap-3" onClick={!t.fromAppt ? () => editTx(t) : undefined}>
+          <Card key={t.id} className="p-3 flex items-center gap-3" onClick={!t.fromAppt && !t.readOnly ? () => editTx(t) : undefined}>
             <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: t.type === "income" ? "rgba(92,124,74,0.12)" : "rgba(156,61,46,0.12)" }}>
               {t.type === "income" ? <ArrowUpRight size={18} style={{ color: C.success }} /> : <ArrowDownRight size={18} style={{ color: C.danger }} />}
             </div>
