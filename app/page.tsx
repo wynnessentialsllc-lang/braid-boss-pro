@@ -490,7 +490,7 @@ import {
 } from "./lib/push";
 import {
   Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon, MapPin, Gift,
-  Plus, X, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Search, Copy, Check, Trash2, Edit3,
+  Plus, X, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Search, Copy, Check, Trash2, Edit3, ExternalLink,
   Crown, ArrowLeftRight,
   FileText, DollarSign, Clock, Phone, Mail, AlertCircle, Sparkles,
   ArrowUpRight, ArrowDownRight, Save, RefreshCw, Download, Upload, Bell, BellOff,
@@ -36228,6 +36228,12 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentReco
   const [ttpStatus, setTtpStatus] = useState<TapToPayStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<CheckoutDoneState | null>(null);
+  // Card-payment link flow: a hosted Stripe Checkout link for the ticket
+  // the client pays by card / Apple Pay (when Tap to Pay isn't available).
+  // We hold the link + the sale id we'll record once it clears, and poll
+  // for completion while the sheet is open.
+  const [cardCharge, setCardCharge] = useState<{ url: string; sessionId: string; saleId: string; qr: string | null } | null>(null);
+  const [cardWaiting, setCardWaiting] = useState(false);
 
   // Appointment collection (the "Appt" source): collect a booked
   // client's outstanding balance the same way the appointment editor
@@ -36585,6 +36591,83 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentReco
     if (!(await redeemGiftFirst(saleId))) { setProcessing(false); return; }
     await recordSale(saleId, tender, label);
   };
+
+  // Charge a card without a reader: mint a hosted Stripe Checkout link for
+  // the amount due, show the client a QR / link, and poll for completion.
+  // Gift card is redeemed up front (amountDue already nets it out), so the
+  // link only charges the remaining card portion.
+  const startCardCharge = async () => {
+    setError(null); setProcessing(true);
+    const saleId = `bcx_${uid()}`;
+    if (!(await redeemGiftFirst(saleId))) { setProcessing(false); return; }
+    try {
+      const supabase = getSupabase();
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) { setError("Please sign in again to charge a card."); setProcessing(false); return; }
+      const res = await fetch("/api/checkout-charge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          access_token: token,
+          amount_cents: Math.round(totals.amountDue * 100),
+          description: ticketLabel(lines),
+          client_name: clientName || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.url || !data?.id) {
+        setError(data?.error || "Couldn't start the card payment.");
+        setProcessing(false);
+        return;
+      }
+      let qr: string | null = null;
+      try { qr = await (await import("qrcode")).default.toDataURL(String(data.url), { margin: 1, width: 240 }); }
+      catch { qr = null; }
+      setCardCharge({ url: String(data.url), sessionId: String(data.id), saleId, qr });
+      setCardWaiting(true);
+      setProcessing(false);
+    } catch {
+      setError("Couldn't start the card payment. Try again.");
+      setProcessing(false);
+    }
+  };
+
+  // Poll the open card session until the client finishes paying, then
+  // record the sale just like any other tender. Stops on cancel / unmount.
+  useEffect(() => {
+    if (!cardCharge || !cardWaiting) return;
+    let stop = false;
+    const check = async () => {
+      try {
+        const supabase = getSupabase();
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess?.session?.access_token;
+        if (!token) return;
+        const res = await fetch("/api/checkout-charge/status", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ access_token: token, session_id: cardCharge.sessionId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (stop) return;
+        if (data?.payment_status === "paid") {
+          setCardWaiting(false);
+          await recordSale(cardCharge.saleId, "card", "Card", data.payment_intent || undefined);
+          setCardCharge(null);
+        } else if (data?.status === "expired") {
+          setCardWaiting(false);
+          setError("That payment link expired. Start a new card charge.");
+        }
+      } catch { /* transient — keep polling */ }
+    };
+    const id = setInterval(check, 3500);
+    void check();
+    return () => { stop = true; clearInterval(id); };
+    // recordSale is stable enough for this flow; re-running on its identity
+    // would restart the poller mid-wait.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardCharge, cardWaiting]);
 
   // ---- appointment balance collection ----------------------------------
   // Collect a booked appointment's outstanding balance and mark it paid,
@@ -36948,6 +37031,16 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentReco
                   Tap to Pay · {fmt(totals.amountDue)}
                 </Button>
               )}
+              {/* Charge a card without a reader — client pays via a Stripe
+                  link / QR (card or Apple Pay). Primary when Tap to Pay
+                  isn't available on this device. */}
+              <Button variant={ttpAvailable ? "outline" : "primary"} fullWidth icon={<CreditCard size={18} />}
+                disabled={processing || totals.amountDue <= 0} onClick={startCardCharge}>
+                Charge card · {fmt(totals.amountDue)}
+              </Button>
+              <p className="text-[11px] text-center" style={{ color: C.muted }}>
+                Cash, Zelle &amp; the rest just record a payment you took another way.
+              </p>
               <div className="grid grid-cols-2 gap-2">
                 {CHECKOUT_METHODS.map((m) => (
                   <Button key={m.tender} variant="outline" disabled={processing} onClick={() => payManual(m.tender, m.label)}>{m.label}</Button>
@@ -36956,6 +37049,32 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentReco
             </div>
           )}
         </div>
+      </Sheet>
+
+      {/* Card-payment link sheet — QR + link for the client to pay, polled
+          to completion, then recorded like any other tender. */}
+      <Sheet open={!!cardCharge} onClose={() => { if (!processing) { setCardCharge(null); setCardWaiting(false); } }} title="Card payment">
+        {cardCharge && (
+          <div className="space-y-4 text-center">
+            <p className="text-[13px]" style={{ color: C.muted }}>
+              Have the client scan to pay <strong style={{ color: C.espresso }}>{fmt(totals.amountDue)}</strong> by card or Apple Pay.
+            </p>
+            {cardCharge.qr && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={cardCharge.qr} alt="Scan to pay" width={200} height={200} style={{ margin: "0 auto", borderRadius: 12, border: `1px solid ${C.hairline}` }} />
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" fullWidth icon={<ExternalLink size={15} />} onClick={() => { try { window.open(cardCharge.url, "_blank"); } catch { /* popup blocked */ } }}>Open link</Button>
+              <Button variant="outline" fullWidth icon={<Copy size={15} />} onClick={() => { try { void navigator.clipboard?.writeText(cardCharge.url); } catch { /* clipboard blocked */ } }}>Copy link</Button>
+            </div>
+            <div className="rounded-2xl p-3 flex items-center justify-center gap-2" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              <RefreshCw size={15} className="animate-spin" style={{ color: C.brandPrimary }} />
+              <span className="text-[13px] font-semibold" style={{ color: C.coffee }}>Waiting for payment…</span>
+            </div>
+            {error && <p className="text-[13px]" style={{ color: C.brandError }}>{error}</p>}
+            <Button variant="ghost" fullWidth onClick={() => { setCardCharge(null); setCardWaiting(false); setError(null); }}>Cancel</Button>
+          </div>
+        )}
       </Sheet>
 
       {/* Appointment balance-collection sheet */}
