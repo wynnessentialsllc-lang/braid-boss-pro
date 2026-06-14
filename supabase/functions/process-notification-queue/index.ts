@@ -1269,6 +1269,45 @@ const renderOrderShipped = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- stylist_label_printed (notify stylist: label bought + tracking) -
+// Fires from /api/shipping-label right after Shippo bills the stylist's
+// account for the prepaid label. Mirrors the buyer-facing order_shipped
+// email but addressed to the stylist with a per-order receipt: who it
+// shipped to, the carrier/service, the tracking number, and a "View order"
+// link back into the Orders screen.
+const renderStylistLabelPrinted = (p: Record<string, any>) => {
+  const customerName   = p.customerName   || "Customer";
+  const orderRef       = p.orderRef       || "";
+  const carrier        = String(p.carrier        || "").trim();
+  const service        = String(p.service        || "").trim();
+  const trackingNumber = String(p.trackingNumber || "").trim();
+  const trackingUrl    = String(p.trackingUrl    || "").trim();
+  const labelUrl       = String(p.labelUrl       || "").trim();
+  const viewOrderUrl   = String(p.viewOrderUrl   || "").trim();
+  const cityState      = String(p.shipToCityState || "").trim();
+  const labelCost      = Number(p.labelCostUsd);
+  const subject = `Label printed — ${customerName}${orderRef ? ` · #${orderRef}` : ""}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Label printed</p>
+    <h1 style="font-size:20px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">Ready to drop off.</h1>
+    <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">
+      Label purchased for <strong>${escape(customerName)}</strong>${cityState ? ` in <strong>${escape(cityState)}</strong>` : ""}${carrier ? ` via <strong>${escape(carrier)}${service ? ` ${escape(service)}` : ""}</strong>` : ""}${Number.isFinite(labelCost) && labelCost > 0 ? ` for <strong>$${labelCost.toFixed(2)}</strong>` : ""}.
+    </p>
+    ${trackingNumber ? `
+      <div style="background:${C.cream};border:1px solid ${C.hairline};border-radius:12px;padding:14px 16px;margin:0 0 14px;">
+        <p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.muted};margin:0 0 6px;font-weight:700;">Tracking</p>
+        <p style="font-size:15px;line-height:22px;margin:0;color:${C.espresso};font-weight:600;font-family:SFMono-Regular,Menlo,Monaco,Consolas,monospace;">${escape(trackingNumber)}</p>
+        ${trackingUrl ? `<p style="margin:10px 0 0;"><a href="${escape(trackingUrl)}" style="font-size:13px;color:${C.goldDeep};text-decoration:none;font-weight:600;">Open carrier tracking →</a></p>` : ""}
+      </div>` : ""}
+    ${labelUrl ? `<p style="margin:0 0 14px;"><a href="${escape(labelUrl)}" style="font-size:13px;color:${C.goldDeep};text-decoration:none;font-weight:600;">Reopen label PDF →</a></p>` : ""}
+    ${viewOrderUrl ? ctaButton("View order", viewOrderUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:18px 0 0;">
+      The buyer was emailed the tracking number separately.
+    </p>
+  `);
+  return { subject, html };
+};
+
 // ---- rebook_nudge (marketing: "your style is due for a refresh") ----
 // Fired by the daily process_rebook_nudges() cron. CAN-SPAM compliant
 // — every render appends an unsubscribe footer with a one-tap opt-out
@@ -1645,6 +1684,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderOrderReadyForPickup(row.payload || {});
     case "order_shipped":
       return renderOrderShipped(row.payload || {});
+    case "stylist_label_printed":
+      return renderStylistLabelPrinted(row.payload || {});
     case "rebook_nudge":
       return renderRebookNudge(row.payload || {});
     case "birthday_greeting":
