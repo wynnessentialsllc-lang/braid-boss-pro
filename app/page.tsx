@@ -275,6 +275,7 @@ import {
   buildSalesReport,
   pctChange,
   previousPeriodReference,
+  rangeWindow,
   RANGES,
   type ReportRange,
   type SalesReport,
@@ -405,6 +406,7 @@ import {
   type SaleTender,
 } from "./lib/boss-checkout";
 import { buildDayReport } from "./lib/day-report";
+import { computeShopSales, shopSalesInRange, txnStream, txnIncomeAmount, isCheckoutSale } from "./lib/shop-sales";
 import {
   type ClientLike,
   matchClientByContact,
@@ -4913,6 +4915,14 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
+  // Shop sales (in-person Boss Checkout + paid online orders), kept apart
+  // from service revenue so the stylist sees each stream. Service cards
+  // above stay appointment-only; this folds the retail money back in.
+  const shopSales = useMemo(
+    () => computeShopSales(transactions, store.productOrders, today),
+    [transactions, store.productOrders, today],
+  );
+
   // Until the first cloud pull lands, the figures below come from a
   // possibly-stale local cache. Show "—" for money rather than flash an
   // out-of-date number that snaps to the real value a second later.
@@ -4991,7 +5001,10 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
     const completedThisWeek = weekRevenueAppts(appointments, today);
     const weekRevenue = roundCents(completedThisWeek.reduce((s, a) => s + calculateCollectedAmount(a), 0));
     const pendingBalance = calculatePendingBalance(appointments, today);
-    const txIncomeMonth = transactions.filter(t => t.type === "income" && t.date >= msISO).reduce((s, t) => s + parseMoney(t.amount), 0);
+    // txnIncomeAmount counts hand-entered income AND Boss Checkout sales
+    // (which carry no `type` field); the prior `type === "income"` filter
+    // silently dropped checkout money from Month Profit.
+    const txIncomeMonth = transactions.filter(t => t.date >= msISO).reduce((s, t) => s + txnIncomeAmount(t), 0);
     const apptIncomeMonth = appointments
       .filter(a => isIncomeAppt(a) && a.date >= msISO)
       .reduce((s, a) => s + calculateCollectedAmount(a), 0);
@@ -5216,9 +5229,13 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
             <KpiCard label="Month clients" value={stats.monthClients} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("monthClients")} compact riseDelay={0} />
             <KpiCard label="Avg ticket (30d)" value={money(revenueStats.averageTicket30d)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => openKpi("avgTicket")} compact riseDelay={40} />
             <KpiCard label="Month expected" value={money(revenueStats.monthExpected)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "primary" : "neutral"} onClick={() => openKpi("monthExpected")} compact riseDelay={80} />
-            <KpiCard label="Total earned" value={money(revenueStats.monthEarned)} icon={<TrendingUp size={16} />} tone={revenueStats.monthEarned > 0 ? "success" : "neutral"} onClick={() => openKpi("monthEarned")} compact riseDelay={120} />
-            <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={money(revenueStats.yearMade)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => goToMoney("all")} compact riseDelay={160} />
-            <KpiCard label={`${new Date().getFullYear()} clients`} value={stats.yearClients} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("yearClients")} compact riseDelay={200} />
+            <KpiCard label="Services earned" value={money(revenueStats.monthEarned)} icon={<TrendingUp size={16} />} tone={revenueStats.monthEarned > 0 ? "success" : "neutral"} onClick={() => openKpi("monthEarned")} compact riseDelay={120} />
+            {/* Shop sales — in-person Checkout + online store, this month.
+                Sits beside "Services earned" so the two money streams read
+                side by side. Taps through to the Money tab. */}
+            <KpiCard label="Shop sales (mo)" value={money(shopSales.month)} icon={<ShoppingBag size={16} />} tone={shopSales.month > 0 ? "gold" : "neutral"} onClick={() => goToMoney("month")} compact riseDelay={160} />
+            <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={money(revenueStats.yearMade + shopSales.year)} icon={<Sparkles size={16} />} tone={(revenueStats.yearMade + shopSales.year) > 0 ? "gold" : "neutral"} onClick={() => goToMoney("all")} compact riseDelay={200} />
+            <KpiCard label={`${new Date().getFullYear()} clients`} value={stats.yearClients} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("yearClients")} compact riseDelay={240} />
           </div>
         </div>
 
@@ -14679,7 +14696,47 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
     return { start: localDateISO(start), end: todayISO() };
   }, [period]);
 
-  const txInRange = useMemo(() => store.transactions.filter(t => t.date >= range.start && t.date <= range.end), [store.transactions, range]);
+  // Normalize stored transactions for the Money list + totals. Two shapes
+  // live in store.transactions: hand-entered sheet rows (carry type +
+  // category) and Boss Checkout sales (carry data.source = "boss_checkout"
+  // but NO `type`, so the old `type === "income"` filter silently dropped
+  // them). Map both onto a uniform { type, amount, category, note, stream }
+  // so checkout money finally shows up here, tagged as shop vs service.
+  const txInRange = useMemo(() => (store.transactions as any[])
+    .filter(t => t.date >= range.start && t.date <= range.end)
+    .map((t: any) => {
+      if (isCheckoutSale(t)) {
+        return {
+          ...t,
+          type: "expense" === t.type ? "expense" : "income",
+          amount: txnIncomeAmount(t),
+          category: "Shop sale",
+          note: t.note || t.serviceName || "Checkout sale",
+          stream: "shop" as const,
+        };
+      }
+      return { ...t, stream: txnStream(t) };
+    }),
+    [store.transactions, range]);
+
+  // Paid online storefront orders in range — folded in as shop income so
+  // the Money tab reflects the whole shop, not just the in-person POS.
+  const orderIncome = useMemo(() => (store.productOrders as any[] || [])
+    .filter((o: any) => {
+      const day = (o?.paid_at ? localDateISO(new Date(o.paid_at)) : "");
+      return String(o?.status).toLowerCase() === "paid" && day >= range.start && day <= range.end;
+    })
+    .map((o: any) => ({
+      id: `order_${o.id ?? uid()}`,
+      type: "income",
+      date: o.paid_at ? localDateISO(new Date(o.paid_at)) : range.end,
+      amount: Number(o.amount_total) || 0,
+      category: "Online order",
+      note: "Online store order",
+      stream: "shop" as const,
+    })),
+    [store.productOrders, range]);
+
   const apptIncome = useMemo(() => store.appointments
     .filter((a: any) => isIncomeAppt(a) && a.date >= range.start && a.date <= range.end)
     .map((a: any) => ({
@@ -14691,11 +14748,15 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
       note: `${a.style || "Service"} — ${store.clientById(a.clientId)?.name || "Client"}`,
       fromAppt: true,
       apptId: a.id,
+      stream: "service" as const,
     })),
     [store.appointments, store.clients, range]);
 
-  const all = useMemo(() => [...apptIncome, ...txInRange].sort((a, b) => b.date.localeCompare(a.date)), [apptIncome, txInRange]);
-  const income = all.filter(t => t.type === "income").reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  const all = useMemo(() => [...apptIncome, ...orderIncome, ...txInRange].sort((a, b) => b.date.localeCompare(a.date)), [apptIncome, orderIncome, txInRange]);
+  const incomeRows = all.filter(t => t.type === "income");
+  const income = incomeRows.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  const shopIncome = incomeRows.filter(t => t.stream === "shop").reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  const serviceIncome = income - shopIncome;
   const expenses = all.filter(t => t.type === "expense").reduce((s, t) => s + (Number(t.amount) || 0), 0);
   const net = income - expenses;
 
@@ -14735,7 +14796,7 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
       </div>
 
       {tab === "money" ? (
-        <MoneyTab all={all} income={income} expenses={expenses} net={net} business={store.business}
+        <MoneyTab all={all} income={income} serviceIncome={serviceIncome} shopIncome={shopIncome} expenses={expenses} net={net} business={store.business}
           editTx={editTx} openTxSheet={openTxSheet}
           receipts={store.receipts || []}
           openReceipt={openReceipt}
@@ -14750,9 +14811,11 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
   );
 };
 
-const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, receipts = [], openReceipt, businessExpenses = [], openProfitDetail, period = "week" }: {
+const MoneyTab = ({ all, income, serviceIncome = 0, shopIncome = 0, expenses, net, business, editTx, openTxSheet, receipts = [], openReceipt, businessExpenses = [], openProfitDetail, period = "week" }: {
   all: any[];
   income: number;
+  serviceIncome?: number;
+  shopIncome?: number;
   expenses: number;
   net: number;
   business: any;
@@ -14802,6 +14865,14 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
           <p style={{ margin: "2px 0 14px", fontSize: 11, color: C.muted }}>{rangeMeta.sub}</p>
           <MiniBarChart data={buckets} ariaLabel="Daily income, last 7 days" />
           <div style={{ marginTop: 14 }}>
+            {/* Keep the two money streams visible whenever the shop has
+                rung anything up, so service vs retail income reads apart. */}
+            {shopIncome > 0 && (
+              <>
+                <MetricRow label="Services" value={fmtMoney(serviceIncome, business.currency)} />
+                <MetricRow label="Shop sales" value={fmtMoney(shopIncome, business.currency)} />
+              </>
+            )}
             <MetricRow label="Expenses" value={fmtMoney(expenses, business.currency)} />
             <div className="mt-2 pt-2" style={{ borderTop: `1px solid rgba(21, 17, 26,0.08)` }}>
               <MetricRow
@@ -24015,6 +24086,18 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
   );
   const repeats = useMemo(() => repeatClientStats(appointments, 5), [appointments]);
 
+  // Shop sales for the selected window — in-person Checkout sales plus
+  // paid online store orders, kept separate from the service-driven sales
+  // summary above. `manualTxns` is the same payment_transactions ledger
+  // (it carries Boss Checkout rows); store.productOrders holds paid orders.
+  const shopSales = useMemo(
+    () => {
+      const win = rangeWindow(range, todayISO());
+      return shopSalesInRange(manualTxns, store.productOrders, win.start, win.end);
+    },
+    [range, manualTxns, store.productOrders],
+  );
+
   // Cancelled appointments are already excluded from the aggregators
   // above (isBillable drops them), but they still live in the books
   // and can clutter test data. Bulk purge is the natural sibling to
@@ -24120,6 +24203,23 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
             ))}
           </div>
         </div>
+
+        {/* SHOP SALES — retail money (in-person Checkout + online store),
+            reported apart from the service sales summary above. */}
+        {shopSales > 0 && (
+          <div>
+            <SectionTitle>Shop sales · {report.rangeLabel.toLowerCase()}</SectionTitle>
+            <Card className="p-3.5 flex items-center gap-3">
+              <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: "rgba(176,141,87,0.14)" }}>
+                <ShoppingBag size={18} style={{ color: C.goldDeep }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>{fmtMoney(shopSales, currency)}</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>In-person Checkout sales + online store orders</p>
+              </div>
+            </Card>
+          </div>
+        )}
 
         {/* GROSS SALES CHART */}
         <div>
@@ -36999,6 +37099,29 @@ export default function App() {
   const intakeFormApi = useIntakeForm(auth.userId);
   const packagesApi = useClientPackages(auth.userId);
 
+  // Paid online storefront orders (product_orders). These aren't part of
+  // the push-synced local store, so we pull the paid rows directly once
+  // per user so the dashboard + Money tab can fold shop revenue in next to
+  // services. Best-effort: a failed fetch just means shop sales read $0
+  // until the next open.
+  const [shopOrders, setShopOrders] = useState<any[]>([]);
+  useEffect(() => {
+    const uid = auth.userId;
+    let cancelled = false;
+    (async () => {
+      if (!uid) { if (!cancelled) setShopOrders([]); return; }
+      try {
+        const { data, error } = await getSupabase()
+          .from("product_orders")
+          .select("status, amount_total, paid_at")
+          .eq("user_id", uid)
+          .eq("status", "paid");
+        if (!cancelled && !error) setShopOrders(data || []);
+      } catch { if (!cancelled) setShopOrders([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [auth.userId]);
+
   // Bridge: the Approvals queue pulls booking_requests LIVE on every
   // refresh, so it reliably knows when a client cancelled (via the
   // secure token link) — but the appointments store is push-only and
@@ -37060,6 +37183,7 @@ export default function App() {
       email: auth.email,
       premium,
       requestUpgrade,
+      productOrders: shopOrders,
       discountsApi,
       servicesApi,
       serviceCategoriesApi,
@@ -37094,7 +37218,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, clientReviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi, messagesApi, intakeFormApi, packagesApi]);
+  }, [rawStore, auth.userId, auth.email, premium, requestUpgrade, shopOrders, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, clientReviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi, messagesApi, intakeFormApi, packagesApi]);
 
   const sync = useCloudSync(auth.userId, store);
 
