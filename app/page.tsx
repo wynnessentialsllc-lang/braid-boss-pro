@@ -14713,9 +14713,8 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
           category: "Shop sale",
           note: t.note || t.serviceName || "Checkout sale",
           stream: "shop" as const,
-          // Boss Checkout rows are richer than the manual edit sheet can
-          // round-trip (line items, gift card, loyalty), so don't open it.
-          readOnly: true,
+          // Tappable so a test/checkout sale can be opened and deleted from
+          // the activity list (the edit sheet's Delete removes the row).
         };
       }
       return { ...t, stream: txnStream(t) };
