@@ -82,10 +82,36 @@ type ClientLike = {
   name?: string;
   phone?: string;
   email?: string;
+  // Rebooking reminder controls, stored on the client record:
+  //   - rebookingOptOut: stop reminders indefinitely (a client on an
+  //     open-ended break, or a test/junk record).
+  //   - rebookingSnoozedUntil: hide until this date (yyyy-mm-dd), then the
+  //     client flows back into the list automatically.
+  // Both are cleared by resuming reminders from the client's profile.
+  rebookingOptOut?: boolean;
+  rebookingSnoozedUntil?: string | null;
 };
 
 const isCompleted = (a: ApptLike): boolean =>
   a.status === "completed" || a.paymentStatus === "paid";
+
+/**
+ * Is this client currently muted from rebooking reminders? True when
+ * they've opted out, or when an active snooze hasn't elapsed yet.
+ */
+export const isRebookingMuted = (
+  client: { rebookingOptOut?: boolean; rebookingSnoozedUntil?: string | null } | null | undefined,
+  todayIso: string,
+): boolean => {
+  if (!client) return false;
+  if (client.rebookingOptOut === true) return true;
+  const until = client.rebookingSnoozedUntil;
+  return typeof until === "string" && until.length > 0 && until > todayIso;
+};
+
+/** The snooze-until date N weeks from today (yyyy-mm-dd). */
+export const rebookingSnoozeUntil = (todayIso: string, weeks: number): string =>
+  addDaysISO(todayIso, Math.max(1, Math.round(weeks)) * 7);
 
 const parsePrice = (v: unknown): number => {
   if (v === null || v === undefined || v === "") return 0;
@@ -176,6 +202,8 @@ export const computeRebookingOpportunities = (
 
   for (const c of clients) {
     if (!c || !c.id) continue;
+    // Snoozed or opted-out clients are hidden from the reminder list.
+    if (isRebookingMuted(c, todayIso)) continue;
     const mine = byClient.get(c.id);
     if (!mine || mine.length === 0) continue;
 

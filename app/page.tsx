@@ -467,6 +467,8 @@ import {
   computeClientRebookingInsight,
   buildRebookingMessage,
   summarizeOpportunities,
+  isRebookingMuted,
+  rebookingSnoozeUntil,
   type RebookingOpportunity,
   type RebookingUrgency,
 } from "./lib/rebooking/rebooking-intelligence";
@@ -3181,11 +3183,20 @@ const RebookingScreen = ({
   const today = todayISO();
   const [filter, setFilter] = useState<"all" | RebookingUrgency>("all");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [dismissOp, setDismissOp] = useState<RebookingOpportunity | null>(null);
 
   const opportunities = useMemo(
     () => computeRebookingOpportunities(clients, appointments, today),
     [clients, appointments, today],
   );
+
+  // Snooze / stop reminders for a client by flagging their record; the
+  // list recomputes and the card drops out. Resume from the profile.
+  const applyMute = async (op: RebookingOpportunity, patch: { rebookingOptOut?: boolean; rebookingSnoozedUntil?: string | null }) => {
+    const c = clients.find((x: any) => x?.id === op.client_id) || { id: op.client_id, name: op.client_name };
+    try { await store.upsertClient({ ...c, ...patch }); } catch { /* stays visible on failure */ }
+    setDismissOp(null);
+  };
   const summary = useMemo(() => summarizeOpportunities(opportunities), [opportunities]);
   const filtered = useMemo(
     () => filter === "all" ? opportunities : opportunities.filter(o => o.urgency === filter),
@@ -3319,11 +3330,31 @@ const RebookingScreen = ({
                     {copiedId === op.client_id ? "Copied" : "Copy message"}
                   </button>
                 </div>
+                <button type="button" onClick={() => setDismissOp(op)}
+                  className="w-full mt-2 flex items-center justify-center gap-1.5 text-[11px] font-semibold active:scale-[0.98] transition"
+                  style={{ color: C.muted }}>
+                  <BellOff size={13} /> Snooze or stop reminders
+                </button>
               </Card>
             ))}
           </div>
         )}
       </div>
+
+      {/* Snooze / stop reminders */}
+      <Sheet open={!!dismissOp} onClose={() => setDismissOp(null)} title="Pause reminders">
+        {dismissOp && (
+          <div className="space-y-2.5">
+            <p className="text-[13px]" style={{ color: C.coffee }}>
+              Stop reminding you to rebook <span className="font-semibold" style={{ color: C.espresso }}>{dismissOp.client_name}</span>?
+            </p>
+            <Button variant="outline" fullWidth onClick={() => applyMute(dismissOp, { rebookingSnoozedUntil: rebookingSnoozeUntil(today, 4), rebookingOptOut: false })}>Snooze 4 weeks</Button>
+            <Button variant="outline" fullWidth onClick={() => applyMute(dismissOp, { rebookingSnoozedUntil: rebookingSnoozeUntil(today, 12), rebookingOptOut: false })}>Snooze 3 months</Button>
+            <Button variant="outline" fullWidth icon={<BellOff size={16} />} onClick={() => applyMute(dismissOp, { rebookingOptOut: true, rebookingSnoozedUntil: null })}>Stop reminders (taking a break)</Button>
+            <p className="text-[11px] pt-1" style={{ color: C.muted }}>You can resume reminders anytime from {dismissOp.client_name.split(" ")[0]}&apos;s profile.</p>
+          </div>
+        )}
+      </Sheet>
     </div>
   );
 };
@@ -13368,6 +13399,30 @@ const ClientProfileSheet = ({
             openCommunication={onMessage}
             onDuplicate={onBookAppointment}
           />
+        )}
+
+        {/* Rebooking reminders — resume or pause this client's reminders.
+            Turning the toggle on clears any "stop" or snooze; turning it
+            off stops reminders until you switch it back on. */}
+        {section === "overview" && client?.id && (
+          <Card className="p-3.5 mt-2" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.12em" }}>Rebooking reminders</p>
+                <p className="text-[12px] mt-0.5" style={{ color: C.coffee }}>
+                  {client.rebookingOptOut
+                    ? "Off — taking a break"
+                    : isRebookingMuted(client, today)
+                      ? `Snoozed until ${fmtDate(client.rebookingSnoozedUntil)}`
+                      : "On — we'll flag them when they're due"}
+                </p>
+              </div>
+              <Toggle
+                checked={!isRebookingMuted(client, today)}
+                onChange={(on) => store.upsertClient({ ...client, rebookingOptOut: !on, rebookingSnoozedUntil: null })}
+              />
+            </div>
+          </Card>
         )}
 
         {/* CLIENT DETAILS — preferred styles, scalp sensitivity,
