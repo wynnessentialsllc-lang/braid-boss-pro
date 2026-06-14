@@ -36372,6 +36372,25 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentReco
     } catch { /* surfaced by the row staying refundable */ }
   };
 
+  // Remove a record from the day report. Appointment-derived rows reflect
+  // a paid booking, so we open the appointment (delete/cancel it there);
+  // manual / Boss Checkout sale rows are deleted straight from the ledger.
+  // Lets the stylist clear out test sales without leaving the report.
+  const manageReportTxn = async (t: Transaction) => {
+    if (t.source === "appointment" && t.appointmentId) {
+      const appt = ((store.appointments as any[]) || []).find((a) => a?.id === t.appointmentId);
+      if (appt) { setReportOpen(false); openAppointmentRecord?.(appt); }
+      return;
+    }
+    if (t.source === "manual" && t.id.startsWith("manual-")) {
+      const rawId = t.id.slice("manual-".length);
+      const ok = typeof window === "undefined" ? true
+        : window.confirm(`Remove this ${fmt(Math.abs(t.amount))} “${t.serviceName}” record? This deletes it from your books.`);
+      if (!ok) return;
+      try { await store.deleteTransaction(rawId); } catch { /* stays in the list on failure */ }
+    }
+  };
+
   const shiftReportDate = (days: number) => {
     const d = new Date(`${reportDate}T12:00:00`);
     d.setDate(d.getDate() + days);
@@ -37273,6 +37292,11 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentReco
                 {report.txns.map((t) => {
                   const refundable = t.id.startsWith("manual-bcx_") && t.method !== "stripe" && t.amount > 0;
                   const refunded = refundable && isRefunded(t);
+                  // A test sale can be removed: open the booking (appointment
+                  // rows) or delete the ledger entry (manual / checkout sales).
+                  const removable =
+                    (t.source === "appointment" && !!t.appointmentId) ||
+                    (t.source === "manual" && t.id.startsWith("manual-"));
                   return (
                     <div key={t.id} className="flex items-center justify-between rounded-xl px-3.5 py-2.5 gap-2" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
                       <div className="min-w-0">
@@ -37285,6 +37309,15 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentReco
                           refunded
                             ? <span className="text-[11px] font-semibold" style={{ color: C.muted }}>Refunded</span>
                             : <button type="button" onClick={() => refundCashSale(t)} className="text-[11px] font-semibold px-2 py-1 rounded-lg" style={{ border: `1px solid ${C.hairline}`, color: C.brandError }}>Refund</button>
+                        )}
+                        {removable && (
+                          <button type="button"
+                            aria-label={t.source === "appointment" ? "Open appointment" : "Delete record"}
+                            onClick={() => manageReportTxn(t)}
+                            className="p-1.5 rounded-full active:scale-95 transition"
+                            style={{ color: t.source === "appointment" ? C.coffee : C.brandError, border: `1px solid ${C.hairline}` }}>
+                            {t.source === "appointment" ? <Edit3 size={14} /> : <Trash2 size={14} />}
+                          </button>
                         )}
                       </div>
                     </div>
