@@ -14,7 +14,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { buyLabel, requoteForAddress, type NormalizedRate } from "../../lib/shippo";
+import { buyLabel, requoteForAddress, splitIntoParcels, type NormalizedRate } from "../../lib/shippo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -219,7 +219,7 @@ export async function POST(req: Request) {
                 zip: String(shipAddr.postal_code || ""),
                 country: String(shipAddr.country || "US"),
               },
-              parcel: { length: parcelL, width: parcelW, height: parcelH, weight_oz: weightOz },
+              parcels: splitIntoParcels({ length: parcelL, width: parcelW, height: parcelH }, weightOz),
               extras: {
                 signature_confirmation: needsSignature ? "STANDARD" : null,
                 insurance_amount: insuranceTotal > 0 ? insuranceTotal : null,
