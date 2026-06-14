@@ -403,6 +403,7 @@ import {
   type SaleDraft,
   type SaleTender,
 } from "./lib/boss-checkout";
+import { buildDayReport } from "./lib/day-report";
 import {
   type ClientLike,
   matchClientByContact,
@@ -36022,6 +36023,55 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
   const [apptPay, setApptPay] = useState<any | null>(null);
   const [apptTip, setApptTip] = useState("");
 
+  // Day report (the Z report / end-of-day cash-out).
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportDate, setReportDate] = useState(todayISO());
+
+  // All of the day's money, normalised across appointment balances +
+  // manual sales (Boss Checkout, cash, Zelle…). Live Stripe fees settle
+  // later and aren't needed for a same-day drawer count.
+  const dayTxns = useMemo(
+    () => mergeTransactions(
+      deriveAppointmentTransactions((store.appointments as any[]) || []),
+      [],
+      ((store.transactions as any[]) || []).map(fromManualRecord),
+    ),
+    [store.appointments, store.transactions],
+  );
+  const report = useMemo(() => buildDayReport(dayTxns, reportDate), [dayTxns, reportDate]);
+
+  // A Boss Checkout sale already refunded? (a refund row notes its origin.)
+  const isRefunded = (t: Transaction) =>
+    ((store.transactions as any[]) || []).some((r) => r?.note === `Refund of ${t.id}`);
+
+  // Refund a non-Stripe Boss Checkout sale by recording a signed-negative
+  // ledger row. Card-present (Tap to Pay) sales must be refunded in Stripe
+  // so the card is actually credited, so those route out instead.
+  const refundCashSale = async (t: Transaction) => {
+    if (isRefunded(t)) return;
+    try {
+      await store.upsertTransaction({
+        id: `bcxr_${uid()}`,
+        date: todayISO(),
+        clientId: t.clientId,
+        clientName: t.clientName,
+        serviceName: `Refund · ${t.serviceName}`,
+        amount: -Math.abs(t.amount),
+        tipAmount: 0,
+        paymentType: "refund",
+        paymentMethod: t.method,
+        paidAt: new Date().toISOString(),
+        note: `Refund of ${t.id}`,
+      });
+    } catch { /* surfaced by the row staying refundable */ }
+  };
+
+  const shiftReportDate = (days: number) => {
+    const d = new Date(`${reportDate}T12:00:00`);
+    d.setDate(d.getDate() + days);
+    setReportDate(localDateISO(d));
+  };
+
   useEffect(() => {
     let off = false;
     (async () => { const ok = await tapToPaySupported(); if (!off) setTtpAvailable(ok); })();
@@ -36424,7 +36474,7 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
   // ---- build screen ----------------------------------------------------
   return (
     <div className="bbp-fade" style={{ paddingBottom: cartCount > 0 ? 168 : 96 }}>
-      <Header title="Checkout" subtitle="Ring up an in-person sale" />
+      <Header title="Checkout" subtitle="Ring up an in-person sale" rightAction={{ icon: <BarChart3 size={18} />, onClick: () => { setReportDate(todayISO()); setReportOpen(true); } }} />
       <div className="px-4 pt-4 space-y-4">
         <div className="flex gap-1 p-1 rounded-2xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
           <CheckoutSegTab active={tab === "catalog"} label="Catalog" onSelect={() => setTab("catalog")} />
@@ -36707,6 +36757,86 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney }: {
             )}
           </div>
         )}
+      </Sheet>
+
+      {/* Day report — the Z report / cash-out */}
+      <Sheet open={reportOpen} onClose={() => setReportOpen(false)} title="Day report">
+        <div className="space-y-4">
+          {/* Date stepper */}
+          <div className="flex items-center justify-between">
+            <button type="button" onClick={() => shiftReportDate(-1)} className="w-9 h-9 rounded-full flex items-center justify-center" style={{ border: `1px solid ${C.hairline}`, color: C.coffee }}><ChevronLeft size={18} /></button>
+            <div className="text-center">
+              <p className="font-semibold" style={{ color: C.ink }}>{reportDate === todayISO() ? "Today" : reportDate}</p>
+              <p className="text-[11px]" style={{ color: C.muted }}>{report.count} sale{report.count === 1 ? "" : "s"}</p>
+            </div>
+            <button type="button" onClick={() => shiftReportDate(1)} disabled={reportDate >= todayISO()} className="w-9 h-9 rounded-full flex items-center justify-center disabled:opacity-30" style={{ border: `1px solid ${C.hairline}`, color: C.coffee }}><ChevronRight size={18} /></button>
+          </div>
+
+          {/* Net headline */}
+          <div className="rounded-2xl p-5 text-center" style={{ background: GRADIENTS.primary, color: "#fff", boxShadow: SHADOWS.primaryGlow }}>
+            <p className="text-[12px] font-semibold uppercase tracking-widest" style={{ letterSpacing: "0.12em", opacity: 0.9 }}>Net for the day</p>
+            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 40, fontWeight: 600, lineHeight: 1.1 }}>{fmt(report.net)}</p>
+          </div>
+
+          {/* Totals */}
+          <div className="rounded-2xl p-4 space-y-1.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+            {[
+              ["Collected", report.grossCollected],
+              ["Tips", report.tips],
+              ...(report.deposits > 0 ? [["Deposits", report.deposits] as [string, number]] : []),
+              ...(report.refunds > 0 ? [["Refunds", -report.refunds] as [string, number]] : []),
+            ].map(([label, val]) => (
+              <div key={label as string} className="flex justify-between text-[13px]" style={{ color: C.coffee }}>
+                <span>{label}</span><span>{(val as number) < 0 ? "−" : ""}{fmt(Math.abs(val as number))}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* By tender */}
+          {report.byTender.length > 0 && (
+            <div>
+              <SectionTitle>By payment type</SectionTitle>
+              <div className="space-y-2">
+                {report.byTender.map((t) => (
+                  <div key={t.method} className="flex items-center justify-between rounded-xl px-3.5 py-2.5" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+                    <span className="text-[13px] font-semibold" style={{ color: C.ink }}>{t.label}<span className="font-normal" style={{ color: C.muted }}> · {t.count}</span></span>
+                    <span className="text-[13px] font-semibold" style={{ color: C.espresso }}>{fmt(t.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Transactions */}
+          {report.txns.length > 0 && (
+            <div>
+              <SectionTitle>Transactions</SectionTitle>
+              <div className="space-y-2">
+                {report.txns.map((t) => {
+                  const refundable = t.id.startsWith("manual-bcx_") && t.method !== "stripe" && t.amount > 0;
+                  const refunded = refundable && isRefunded(t);
+                  return (
+                    <div key={t.id} className="flex items-center justify-between rounded-xl px-3.5 py-2.5 gap-2" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-semibold truncate" style={{ color: C.ink }}>{t.serviceName}</p>
+                        <p className="text-[11px]" style={{ color: C.muted }}>{t.clientName} · {t.method}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[13px] font-semibold" style={{ color: t.amount < 0 ? C.brandError : C.espresso }}>{t.amount < 0 ? "−" : ""}{fmt(Math.abs(t.amount + (t.amount > 0 ? t.tip : 0)))}</span>
+                        {refundable && (
+                          refunded
+                            ? <span className="text-[11px] font-semibold" style={{ color: C.muted }}>Refunded</span>
+                            : <button type="button" onClick={() => refundCashSale(t)} className="text-[11px] font-semibold px-2 py-1 rounded-lg" style={{ border: `1px solid ${C.hairline}`, color: C.brandError }}>Refund</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] mt-3" style={{ color: C.muted }}>Card (Tap to Pay) sales are refunded from your Stripe dashboard so the card is credited.</p>
+            </div>
+          )}
+        </div>
       </Sheet>
     </div>
   );
