@@ -87,6 +87,40 @@ const fmt = (n: number, currency = "USD") => {
   }
 };
 
+// localStorage helpers for the buyer's "last used" delivery / shipping
+// address. Returning buyers see their ZIP + state pre-filled instead of
+// retyping them every visit. Distinct from sessionStorage (which carries
+// mid-purchase state through a refresh): localStorage persists across
+// tabs and visits.
+//
+// Stored as a single JSON blob so the format can evolve without storage
+// migrations. Versioned key so a breaking change can ignore old data.
+const ADDRESS_KEY = "bbp-buyer-address-v1";
+type SavedBuyerAddress = { zip?: string; state?: string; deliveryZip?: string };
+
+const readSavedAddress = (): SavedBuyerAddress => {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(ADDRESS_KEY);
+    if (!raw) return {};
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+};
+const writeSavedAddress = (patch: SavedBuyerAddress): void => {
+  if (typeof window === "undefined") return;
+  try {
+    const prev = readSavedAddress();
+    const next: SavedBuyerAddress = { ...prev };
+    if (patch.zip != null) next.zip = patch.zip || undefined;
+    if (patch.state != null) next.state = patch.state || undefined;
+    if (patch.deliveryZip != null) next.deliveryZip = patch.deliveryZip || undefined;
+    window.localStorage.setItem(ADDRESS_KEY, JSON.stringify(next));
+  } catch { /* non-fatal */ }
+};
+
 // sessionStorage helpers for cart-drawer state we want to survive a
 // same-tab refresh (rate-picker ZIP / state / fetched quote / picked id).
 // SSR-safe — return empty/null on the server, write only in the browser.
@@ -205,7 +239,7 @@ export const CartDrawer = () => {
   const [ful, setFul] = useState<ShopFulfillment | null>(null);
   const [method, setMethod] = useState<FulfillmentMethod | null>(null);
   // Local-delivery radius check.
-  const [deliveryZip, setDeliveryZip] = useState("");
+  const [deliveryZip, setDeliveryZip] = useState(() => readSavedAddress().deliveryZip || "");
   const [deliveryCheck, setDeliveryCheck] = useState<
     { status: "idle" | "checking" | "ok" | "out" | "error"; miles?: number; radius?: number }
   >({ status: "idle" });
@@ -218,8 +252,16 @@ export const CartDrawer = () => {
   // wipe the buyer's ZIP / state / fetched rates / picked rate. The
   // CartProvider also restores isOpen, so refresh keeps them on the
   // rate-picker screen instead of bouncing them back to the product page.
-  const [shipZip, setShipZip] = useState(() => readSessionString("bbp-cart-ship-zip"));
-  const [shipState, setShipState] = useState(() => readSessionString("bbp-cart-ship-state"));
+  // Hydration precedence: sessionStorage wins (mid-purchase refresh state)
+  // → localStorage fallback (last-used address from a prior visit) → empty.
+  // A returning buyer who left and came back tomorrow gets their ZIP /
+  // state pre-filled without retyping.
+  const [shipZip, setShipZip] = useState(() =>
+    readSessionString("bbp-cart-ship-zip") || readSavedAddress().zip || "",
+  );
+  const [shipState, setShipState] = useState(() =>
+    readSessionString("bbp-cart-ship-state") || readSavedAddress().state || "",
+  );
   // The cart snapshot the most-recent rate quote was for; if the live cart
   // has drifted (quantity bump, item add/remove) we treat the quote as stale.
   const [rateState, setRateState] = useState<
@@ -279,6 +321,9 @@ export const CartDrawer = () => {
       }
       if (b.limited === false || b.within) {
         setDeliveryCheck({ status: "ok", miles: b.miles, radius: b.radius });
+        // Persist the delivery ZIP — confirmed in-area, worth pre-filling
+        // next visit.
+        writeSavedAddress({ deliveryZip: zip.trim() });
       } else {
         setDeliveryCheck({ status: "out", miles: b.miles, radius: b.radius });
       }
@@ -334,6 +379,10 @@ export const CartDrawer = () => {
       // Auto-select the cheapest rate (already sorted) so the buyer doesn't
       // have to tap before they see a Total they trust.
       setPickedRateId(body.rates[0].id);
+      // Save this address for next time — Shippo accepted it and returned
+      // rates, so it's a valid US ZIP/state pair worth pre-filling on a
+      // return visit.
+      writeSavedAddress({ zip: shipZip.trim(), state: shipState.trim().toUpperCase() });
     } catch (e: any) {
       setRateState({ status: "error", message: e?.message || "Network error." });
     }
