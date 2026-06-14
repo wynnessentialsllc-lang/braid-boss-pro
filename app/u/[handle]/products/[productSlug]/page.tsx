@@ -34,6 +34,7 @@ import {
   fetchPublicProduct,
   fetchPublicProducts,
   fetchShopFulfillment,
+  formatPickupEta,
   PRODUCT_CATEGORY_LABEL,
   type PublicProduct,
   type PublicProductDetail,
@@ -684,6 +685,14 @@ export default function ProductDetailPage() {
                             Rates are calculated based on your delivery address.
                           </span>
                         )}
+                        {m === "pickup" && (() => {
+                          const eta = formatPickupEta(ful);
+                          return eta ? (
+                            <span className="text-[11px]" style={{ color: C.muted, lineHeight: 1.3 }}>
+                              {eta}. We&apos;ll email you when it&apos;s ready.
+                            </span>
+                          ) : null;
+                        })()}
                       </span>
                     </span>
                     <span
