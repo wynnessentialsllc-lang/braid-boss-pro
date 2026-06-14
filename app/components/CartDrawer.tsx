@@ -242,6 +242,12 @@ export const CartDrawer = () => {
   // method === 'pickup'. Free text, server-capped to 200 chars + sanitized.
   // Stylist sees it on the order detail; no scheduling logic at this level.
   const [pickupPreferredTime, setPickupPreferredTime] = useState("");
+  // Optional cart-abandonment recovery email. If the buyer ticks the
+  // "Remind me" box and bails before paying, a cron 24h later emails
+  // them a deep link back to the shop. Persisted on the pre-insert
+  // order row; only used if the order stays in pending past 24h.
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [recoveryEmailOn, setRecoveryEmailOn] = useState(false);
   // Local-delivery radius check.
   const [deliveryZip, setDeliveryZip] = useState(() => readSavedAddress().deliveryZip || "");
   const [deliveryCheck, setDeliveryCheck] = useState<
@@ -499,6 +505,7 @@ export const CartDrawer = () => {
           fulfillment_method: ful ? method : null,
           delivery_zip: method === "delivery" ? deliveryZip.trim() || null : null,
           pickup_preferred_time: method === "pickup" ? pickupPreferredTime.trim() || null : null,
+          recovery_email: recoveryEmailOn ? recoveryEmail.trim() || null : null,
           shipping_rate_id: carrierShipping ? pickedRateId : null,
         }),
       });
@@ -993,6 +1000,47 @@ export const CartDrawer = () => {
                 boxSizing: "border-box",
               }}
             />
+            <label
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+                marginTop: 2,
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={recoveryEmailOn}
+                onChange={(e) => setRecoveryEmailOn(e.target.checked)}
+                style={{ width: 16, height: 16, accentColor: C.brandPrimary, marginTop: 3, flexShrink: 0, cursor: "pointer" }}
+              />
+              <span style={{ fontSize: 11, color: C.muted, lineHeight: 1.4 }}>
+                Email me a reminder if I don&apos;t finish checking out.
+              </span>
+            </label>
+            {recoveryEmailOn && (
+              <input
+                type="email"
+                value={recoveryEmail}
+                onChange={(e) => setRecoveryEmail(e.target.value.slice(0, 254))}
+                placeholder="your@email.com"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                style={{
+                  width: "100%",
+                  padding: "10px 14px",
+                  borderRadius: 12,
+                  border: `1px solid ${C.brandBorder}`,
+                  background: "#FFFFFF",
+                  color: C.ink,
+                  fontSize: 13,
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+            )}
             <button
               type="button"
               onClick={startCheckout}

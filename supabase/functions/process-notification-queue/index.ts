@@ -1269,6 +1269,39 @@ const renderOrderShipped = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- cart_abandoned (buyer never finished checkout, 24h nudge) -------
+// Fires from process_cart_abandoned_nudges (pg_cron, every 30 min). Only
+// reaches the buyer when they explicitly ticked the "Remind me" box at
+// checkout — opt-in, CAN-SPAM-friendly. One nudge per order, never.
+const renderCartAbandoned = (p: Record<string, any>) => {
+  const studioName = p.studioName || "your stylist";
+  const items     = Array.isArray(p.items) ? p.items : [];
+  const orderRef  = p.orderRef || "";
+  const returnUrl = String(p.returnUrl || "").trim();
+  const itemList  = items.map((it: any) => {
+    const qty = Number(it?.quantity) || 1;
+    const title = escape(it?.title || "Item");
+    const variant = it?.variant_name ? ` — ${escape(it.variant_name)}` : "";
+    return `<li style="font-size:14px;line-height:22px;color:${C.coffee};">${qty}× ${title}${variant}</li>`;
+  }).join("");
+  const subject = `You left items in your cart at ${studioName}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Your cart is waiting</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">Pick up where you left off.</h1>
+    <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">
+      You started checking out at <strong>${escape(studioName)}</strong> but didn't finish${orderRef ? ` (cart ref #${escape(orderRef)})` : ""}.
+    </p>
+    ${items.length > 0 ? `
+      <p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.muted};margin:0 0 6px;font-weight:700;">In your cart</p>
+      <ul style="margin:0 0 14px;padding-left:18px;">${itemList}</ul>` : ""}
+    ${returnUrl ? ctaButton("Return to shop", returnUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:18px 0 0;">
+      You're receiving this because you asked us to remind you. We only send one reminder per cart.
+    </p>
+  `);
+  return { subject, html };
+};
+
 // ---- stylist_label_printed (notify stylist: label bought + tracking) -
 // Fires from /api/shipping-label right after Shippo bills the stylist's
 // account for the prepaid label. Mirrors the buyer-facing order_shipped
@@ -1686,6 +1719,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderOrderShipped(row.payload || {});
     case "stylist_label_printed":
       return renderStylistLabelPrinted(row.payload || {});
+    case "cart_abandoned":
+      return renderCartAbandoned(row.payload || {});
     case "rebook_nudge":
       return renderRebookNudge(row.payload || {});
     case "birthday_greeting":
