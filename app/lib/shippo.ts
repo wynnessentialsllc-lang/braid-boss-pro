@@ -282,6 +282,72 @@ export async function listCarrierAccounts(
     }));
 }
 
+// Fetch tracking history for a carrier + tracking number from Shippo.
+// Powers the embedded timeline on the buyer's order page. We call from a
+// server route using the stylist's Shippo token; the buyer never sees it.
+
+export type TrackingEvent = {
+  status: string; // UNKNOWN | PRE_TRANSIT | TRANSIT | DELIVERED | RETURNED | FAILURE
+  status_details: string;
+  status_date: string | null;
+  location_city: string | null;
+  location_state: string | null;
+};
+
+export type TrackingHistory = {
+  status: string;
+  eta: string | null;
+  events: TrackingEvent[];
+};
+
+const carrierToken = (display: string): string =>
+  display.trim().toLowerCase().replace(/\s+/g, "_");
+
+const normalizeTrackingEvent = (raw: any): TrackingEvent | null => {
+  const status = String(raw?.status || "").trim();
+  if (!status) return null;
+  return {
+    status,
+    status_details: String(raw?.status_details || "").trim(),
+    status_date: raw?.status_date ? String(raw.status_date) : null,
+    location_city: raw?.location?.city ? String(raw.location.city) : null,
+    location_state: raw?.location?.state ? String(raw.location.state) : null,
+  };
+};
+
+export async function fetchTrackingHistory(
+  token: string,
+  carrierDisplay: string,
+  trackingNumber: string,
+): Promise<TrackingHistory | null> {
+  const carrier = carrierToken(carrierDisplay);
+  const num = trackingNumber.trim();
+  if (!carrier || !num) return null;
+  const res = await fetch(
+    `${SHIPPO_API}/tracks/${encodeURIComponent(carrier)}/${encodeURIComponent(num)}/`,
+    {
+      method: "GET",
+      headers: headers(token),
+      cache: "no-store",
+    },
+  );
+  if (!res.ok) return null;
+  const data: any = await res.json().catch(() => null);
+  if (!data) return null;
+  const events: TrackingEvent[] = [];
+  for (const e of Array.isArray(data?.tracking_history) ? data.tracking_history : []) {
+    const norm = normalizeTrackingEvent(e);
+    if (norm) events.push(norm);
+  }
+  // Most-recent-first so the timeline UI renders top-down without sorting.
+  events.reverse();
+  return {
+    status: String(data?.tracking_status?.status || "UNKNOWN").trim(),
+    eta: data?.eta ? String(data.eta) : null,
+    events,
+  };
+}
+
 // Re-quote a shipment for a known carrier + service against a new address.
 // Used at label-buy time to switch from the cart-entered ZIP/State quote to
 // a quote built from Stripe's collected full shipping address — the buyer
