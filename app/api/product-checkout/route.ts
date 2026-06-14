@@ -477,6 +477,48 @@ export async function POST(req: Request) {
     return fail(500, orderErr?.message || "Couldn't create the order row.");
   }
 
+  // Inventory reservation. Two simultaneous buyers checking out for the
+  // same last-in-stock unit would both pass the read-only validation
+  // above and both create Stripe sessions; the variant decrement only
+  // happens at webhook time, so we'd end up oversold. reserve_inventory_
+  // for_order holds an advisory lock per (user, product, variant),
+  // computes available = inventory - active reservations, and inserts
+  // a TTL-bounded reservation row. Existing reservations from abandoned
+  // sessions expire after 30 minutes and free up the stock automatically.
+  //
+  // We loop through resolved lines (already collapsed by SKU). A failure
+  // marks the pre-insert as failed, releases any reservations we did
+  // succeed in claiming, and surfaces the specific SKU to the buyer.
+  for (const line of resolved) {
+    const { data: ok, error: resErr } = await admin.rpc("reserve_inventory_for_order", {
+      p_user_id: stylistUserId,
+      p_product_id: line.product_id,
+      p_variant_id: line.variant_id,
+      p_quantity: line.quantity,
+      p_order_id: order.id,
+    });
+    if (resErr) {
+      console.warn(`[product-checkout] reserve failed for ${line.product_slug}: ${resErr.message}`);
+      // Don't block the sale on an RPC error — the legacy non-reserving
+      // path is at most as bad as today. Log and continue.
+      continue;
+    }
+    if (ok === false) {
+      // Roll back the reservations we did take so the next buyer isn't
+      // blocked by our half-committed claim, then mark the order failed.
+      await admin.rpc("release_inventory_for_order", { p_order_id: order.id });
+      await admin
+        .from("product_orders")
+        .update({ status: "failed", updated_at: new Date().toISOString() })
+        .eq("id", order.id);
+      const label = line.variant_name ? `${line.title} (${line.variant_name})` : line.title;
+      return fail(
+        409,
+        `'${label}' was claimed by another buyer while you were checking out. Refresh and try again.`,
+      );
+    }
+  }
+
   // Build the Stripe Checkout Session payload. Each resolved line
   // becomes a line_items[i] block; ad-hoc price_data per line (no
   // Stripe Product objects).
@@ -567,11 +609,13 @@ export async function POST(req: Request) {
         .from("product_orders")
         .update({ status: "failed", updated_at: new Date().toISOString() })
         .eq("id", order.id);
+      await admin.rpc("release_inventory_for_order", { p_order_id: order.id });
       return fail(502, "Couldn't apply the gift card. Try again in a moment.");
     }
     const coupon = (await couponRes.json()) as { id?: string };
     if (!coupon?.id) {
       await admin.from("product_orders").update({ status: "failed" }).eq("id", order.id);
+      await admin.rpc("release_inventory_for_order", { p_order_id: order.id });
       return fail(502, "Couldn't apply the gift card. Try again in a moment.");
     }
     form.set("discounts[0][coupon]", String(coupon.id));
@@ -641,11 +685,15 @@ export async function POST(req: Request) {
       .from("product_orders")
       .update({ status: "failed", updated_at: new Date().toISOString() })
       .eq("id", order.id);
+    // Free up reservations the order won't actually consume so the next
+    // buyer isn't blocked by a Stripe failure.
+    await admin.rpc("release_inventory_for_order", { p_order_id: order.id });
     return fail(502, `Stripe rejected the session (${stripeRes.status}). ${text.slice(0, 200)}`);
   }
   const session = (await stripeRes.json()) as { id?: string; url?: string };
   if (!session.id || !session.url) {
     await admin.from("product_orders").update({ status: "failed" }).eq("id", order.id);
+    await admin.rpc("release_inventory_for_order", { p_order_id: order.id });
     return fail(502, "Stripe returned an unusable session.");
   }
 
