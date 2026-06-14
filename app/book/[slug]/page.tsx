@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
 import BuildYourStyle from "../../components/booking/BuildYourStyle";
@@ -87,6 +87,95 @@ const SHADOWS = {
 };
 const FONT_DISPLAY = `"Cormorant Garamond", Georgia, serif`;
 const FONT_BODY = `"DM Sans", "Inter", system-ui, sans-serif`;
+
+// A single "Client Love" testimonial. Long reviews are clamped to a
+// few lines so the cards stay compact on the booking page; a
+// "Read more" toggle expands the full text in place. Short reviews
+// render without the toggle.
+function ClientLoveCard({ r, accent }: { r: PublicReview; accent: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = (r.review_text || "").length > 150;
+  const clamp: CSSProperties = expanded || !isLong
+    ? {}
+    : { display: "-webkit-box", WebkitLineClamp: 6, WebkitBoxOrient: "vertical", overflow: "hidden" };
+  return (
+    <div
+      role="listitem"
+      style={{
+        flex: "0 0 280px",
+        scrollSnapAlign: "start",
+        padding: 16,
+        borderRadius: 16,
+        background: C.paper,
+        border: `1px solid ${C.hairline}`,
+        boxShadow: "0 4px 12px rgba(21, 17, 26, 0.04)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      {r.stars ? (
+        <p aria-label={`${r.stars} out of 5 stars`} style={{ margin: 0, fontSize: 14, letterSpacing: 2, color: accent }}>
+          {"★".repeat(r.stars)}<span style={{ color: C.hairline }}>{"★".repeat(5 - r.stars)}</span>
+        </p>
+      ) : null}
+      <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 18, lineHeight: 1.4, color: C.espresso, fontStyle: "italic", ...clamp }}>
+        “{r.review_text}”
+      </p>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => setExpanded(e => !e)}
+          style={{
+            alignSelf: "flex-start",
+            background: "none",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+            color: accent,
+            fontSize: 12,
+            fontWeight: 700,
+          }}
+        >
+          {expanded ? "Read less" : "Read more"}
+        </button>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: "auto" }}>
+        {r.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={r.image_url}
+            alt={r.reviewer_name}
+            loading="lazy"
+            style={{ width: 36, height: 36, borderRadius: 999, objectFit: "cover", flexShrink: 0 }}
+          />
+        ) : (
+          <div
+            aria-hidden
+            style={{
+              width: 36, height: 36, borderRadius: 999, flexShrink: 0,
+              background: C.ivory, color: C.coffee,
+              display: "grid", placeItems: "center",
+              fontWeight: 700, fontSize: 13,
+              border: `1px solid ${C.hairline}`,
+            }}
+          >
+            {(r.reviewer_name || "?").slice(0, 1).toUpperCase()}
+          </div>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: C.espresso }}>
+            {r.reviewer_name}
+          </p>
+          <p style={{ margin: 0, fontSize: 11, color: C.muted, lineHeight: 1.3 }}>
+            {r.service_name || "Verified guest"}
+            {r.is_verified_booking ? " · Verified booking" : ""}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // Shown until the real booking link resolves (or when it can't).
 // Deliberately carries NO stylist data — no name, handle, avatar,
@@ -2572,64 +2661,7 @@ export default function PublicBookingPage() {
               }}
             >
               {reviews.map(r => (
-                <div
-                  key={r.id}
-                  role="listitem"
-                  style={{
-                    flex: "0 0 280px",
-                    scrollSnapAlign: "start",
-                    padding: 16,
-                    borderRadius: 16,
-                    background: C.paper,
-                    border: `1px solid ${C.hairline}`,
-                    boxShadow: "0 4px 12px rgba(21, 17, 26, 0.04)",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 10,
-                  }}
-                >
-                  {r.stars ? (
-                    <p aria-label={`${r.stars} out of 5 stars`} style={{ margin: 0, fontSize: 14, letterSpacing: 2, color: accent }}>
-                      {"★".repeat(r.stars)}<span style={{ color: C.hairline }}>{"★".repeat(5 - r.stars)}</span>
-                    </p>
-                  ) : null}
-                  <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 18, lineHeight: 1.4, color: C.espresso, fontStyle: "italic" }}>
-                    “{r.review_text}”
-                  </p>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: "auto" }}>
-                    {r.image_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={r.image_url}
-                        alt={r.reviewer_name}
-                        loading="lazy"
-                        style={{ width: 36, height: 36, borderRadius: 999, objectFit: "cover", flexShrink: 0 }}
-                      />
-                    ) : (
-                      <div
-                        aria-hidden
-                        style={{
-                          width: 36, height: 36, borderRadius: 999, flexShrink: 0,
-                          background: C.ivory, color: C.coffee,
-                          display: "grid", placeItems: "center",
-                          fontWeight: 700, fontSize: 13,
-                          border: `1px solid ${C.hairline}`,
-                        }}
-                      >
-                        {(r.reviewer_name || "?").slice(0, 1).toUpperCase()}
-                      </div>
-                    )}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: C.espresso }}>
-                        {r.reviewer_name}
-                      </p>
-                      <p style={{ margin: 0, fontSize: 11, color: C.muted, lineHeight: 1.3 }}>
-                        {r.service_name || "Verified guest"}
-                        {r.is_verified_booking ? " · Verified booking" : ""}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                <ClientLoveCard key={r.id} r={r} accent={accent} />
               ))}
             </div>
           </div>
