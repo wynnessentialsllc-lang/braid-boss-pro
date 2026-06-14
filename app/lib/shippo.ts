@@ -282,6 +282,51 @@ export async function listCarrierAccounts(
     }));
 }
 
+// Re-quote a shipment for a known carrier + service against a new address.
+// Used at label-buy time to switch from the cart-entered ZIP/State quote to
+// a quote built from Stripe's collected full shipping address — the buyer
+// might have entered different details in Stripe's checkout than the
+// rate-shopping form, and the label has to go to the actual destination.
+//
+// Strategy: fetch fresh rates for the new shipment, find the one matching
+// the original carrier + service (display-name match, case-insensitive),
+// return it. Returns null when:
+//   • Shippo fails (the caller falls back to the original rate id).
+//   • No rate at the same carrier+service is offered for the new address
+//     (e.g. service unavailable in that ZIP).
+// The caller is responsible for the "amount drift" decision — we just hand
+// back the best match.
+export async function requoteForAddress(opts: {
+  token: string;
+  from: ShippoAddress;
+  to: ShippoAddress;
+  parcel: ShippoParcel;
+  extras?: ShippoExtras;
+  carrier: string;
+  service: string;
+}): Promise<NormalizedRate | null> {
+  let rates: NormalizedRate[];
+  try {
+    rates = await fetchShipmentRates({
+      token: opts.token,
+      from: opts.from,
+      to: opts.to,
+      parcel: opts.parcel,
+      extras: opts.extras,
+    });
+  } catch {
+    return null;
+  }
+  const wantCarrier = opts.carrier.trim().toLowerCase();
+  const wantService = opts.service.trim().toLowerCase();
+  // Match on carrier + service display name. Case-insensitive because
+  // Shippo can vary capitalization between requests (e.g. "USPS" vs "Usps").
+  const match = rates.find(
+    (r) => r.carrier.toLowerCase() === wantCarrier && r.service.toLowerCase() === wantService,
+  );
+  return match || null;
+}
+
 // Webhook management. Each stylist registers a `track_updated` webhook
 // against their own Shippo account so we can flip orders to delivered as
 // carriers post status updates. The webhook URL embeds our
