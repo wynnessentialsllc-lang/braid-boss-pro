@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   selectableDiscounts,
   discountUsageFromAppointments,
+  computeStackedDiscounts,
   type Discount,
 } from "./discounts";
 
@@ -34,10 +35,52 @@ describe("discountUsageFromAppointments", () => {
     expect(m.get("d2")).toBe(1);
   });
 
+  it("counts each discount in a stacked (multi-discount) appointment once", () => {
+    const m = discountUsageFromAppointments([
+      { discounts: [{ id: "d1" }, { id: "d2" }], status: "scheduled" },
+      { discounts: [{ id: "d1" }], status: "completed" },
+      { discounts: [{ id: "d1" }, { id: "d2" }], status: "cancelled" }, // excluded
+      // legacy single-discount record still counts via discountId fallback
+      { discountId: "d2", status: "scheduled" },
+    ]);
+    expect(m.get("d1")).toBe(2);
+    expect(m.get("d2")).toBe(2);
+  });
+
   it("handles empty / nullish input", () => {
     expect(discountUsageFromAppointments(null).size).toBe(0);
     expect(discountUsageFromAppointments(undefined).size).toBe(0);
     expect(discountUsageFromAppointments([]).size).toBe(0);
+  });
+});
+
+describe("computeStackedDiscounts", () => {
+  const fixed = (id: string, value: number): Discount =>
+    ({ id, name: id, discount_type: "fixed", value } as unknown as Discount);
+  const pct = (id: string, value: number): Discount =>
+    ({ id, name: id, discount_type: "percentage", value } as unknown as Discount);
+
+  it("stacks two fixed discounts additively", () => {
+    const { lines, total } = computeStackedDiscounts(100, [fixed("a", 25), fixed("b", 10)]);
+    expect(lines.map(l => l.amount)).toEqual([25, 10]);
+    expect(total).toBe(35);
+  });
+
+  it("computes each percentage off the original subtotal", () => {
+    const { lines, total } = computeStackedDiscounts(200, [pct("a", 10), pct("b", 5)]);
+    expect(lines.map(l => l.amount)).toEqual([20, 10]);
+    expect(total).toBe(30);
+  });
+
+  it("caps the combined total at the subtotal (never negative net)", () => {
+    const { lines, total } = computeStackedDiscounts(100, [fixed("a", 80), fixed("b", 50)]);
+    expect(lines.map(l => l.amount)).toEqual([80, 20]);
+    expect(total).toBe(100);
+  });
+
+  it("returns no lines for an empty / nullish list", () => {
+    expect(computeStackedDiscounts(100, []).total).toBe(0);
+    expect(computeStackedDiscounts(100, null).lines).toEqual([]);
   });
 });
 

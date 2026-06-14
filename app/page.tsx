@@ -156,6 +156,7 @@ import {
   type Discount,
   type DiscountInput,
   type DiscountSummary,
+  type AppliedDiscount,
   NO_DISCOUNT,
   DISCOUNT_PRESETS,
   DISCOUNTS_EMPTY_COPY,
@@ -274,6 +275,7 @@ import {
   buildSalesReport,
   pctChange,
   previousPeriodReference,
+  rangeWindow,
   RANGES,
   type ReportRange,
   type SalesReport,
@@ -404,6 +406,7 @@ import {
   type SaleTender,
 } from "./lib/boss-checkout";
 import { buildDayReport } from "./lib/day-report";
+import { computeShopSales, shopSalesInRange, txnStream, txnIncomeAmount, isCheckoutSale } from "./lib/shop-sales";
 import {
   type ClientLike,
   matchClientByContact,
@@ -4943,6 +4946,14 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
+  // Shop sales (in-person Boss Checkout + paid online orders), kept apart
+  // from service revenue so the stylist sees each stream. Service cards
+  // above stay appointment-only; this folds the retail money back in.
+  const shopSales = useMemo(
+    () => computeShopSales(transactions, store.productOrders, today),
+    [transactions, store.productOrders, today],
+  );
+
   // Until the first cloud pull lands, the figures below come from a
   // possibly-stale local cache. Show "—" for money rather than flash an
   // out-of-date number that snaps to the real value a second later.
@@ -5021,7 +5032,10 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
     const completedThisWeek = weekRevenueAppts(appointments, today);
     const weekRevenue = roundCents(completedThisWeek.reduce((s, a) => s + calculateCollectedAmount(a), 0));
     const pendingBalance = calculatePendingBalance(appointments, today);
-    const txIncomeMonth = transactions.filter(t => t.type === "income" && t.date >= msISO).reduce((s, t) => s + parseMoney(t.amount), 0);
+    // txnIncomeAmount counts hand-entered income AND Boss Checkout sales
+    // (which carry no `type` field); the prior `type === "income"` filter
+    // silently dropped checkout money from Month Profit.
+    const txIncomeMonth = transactions.filter(t => t.date >= msISO).reduce((s, t) => s + txnIncomeAmount(t), 0);
     const apptIncomeMonth = appointments
       .filter(a => isIncomeAppt(a) && a.date >= msISO)
       .reduce((s, a) => s + calculateCollectedAmount(a), 0);
@@ -5246,9 +5260,13 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
             <KpiCard label="Month clients" value={stats.monthClients} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("monthClients")} compact riseDelay={0} />
             <KpiCard label="Avg ticket (30d)" value={money(revenueStats.averageTicket30d)} icon={<Receipt size={16} />} tone={revenueStats.averageTicket30d > 0 ? "gold" : "neutral"} onClick={() => openKpi("avgTicket")} compact riseDelay={40} />
             <KpiCard label="Month expected" value={money(revenueStats.monthExpected)} icon={<Calendar size={16} />} tone={revenueStats.monthExpected > 0 ? "primary" : "neutral"} onClick={() => openKpi("monthExpected")} compact riseDelay={80} />
-            <KpiCard label="Total earned" value={money(revenueStats.monthEarned)} icon={<TrendingUp size={16} />} tone={revenueStats.monthEarned > 0 ? "success" : "neutral"} onClick={() => openKpi("monthEarned")} compact riseDelay={120} />
-            <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={money(revenueStats.yearMade)} icon={<Sparkles size={16} />} tone={revenueStats.yearMade > 0 ? "gold" : "neutral"} onClick={() => goToMoney("all")} compact riseDelay={160} />
-            <KpiCard label={`${new Date().getFullYear()} clients`} value={stats.yearClients} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("yearClients")} compact riseDelay={200} />
+            <KpiCard label="Services earned" value={money(revenueStats.monthEarned)} icon={<TrendingUp size={16} />} tone={revenueStats.monthEarned > 0 ? "success" : "neutral"} onClick={() => openKpi("monthEarned")} compact riseDelay={120} />
+            {/* Shop sales — in-person Checkout + online store, this month.
+                Sits beside "Services earned" so the two money streams read
+                side by side. Taps through to the Money tab. */}
+            <KpiCard label="Shop sales (mo)" value={money(shopSales.month)} icon={<ShoppingBag size={16} />} tone={shopSales.month > 0 ? "gold" : "neutral"} onClick={() => goToMoney("month")} compact riseDelay={160} />
+            <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={money(revenueStats.yearMade + shopSales.year)} icon={<Sparkles size={16} />} tone={(revenueStats.yearMade + shopSales.year) > 0 ? "gold" : "neutral"} onClick={() => goToMoney("all")} compact riseDelay={200} />
+            <KpiCard label={`${new Date().getFullYear()} clients`} value={stats.yearClients} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("yearClients")} compact riseDelay={240} />
           </div>
         </div>
 
@@ -9582,7 +9600,31 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         paymentMethod: a?.paymentMethod || "",
         paymentNotes: a?.paymentNotes || "",
         // Discount snapshot — accept either camelCase (local) or
-        // snake_case (cloud row) so both prefill cleanly.
+        // snake_case (cloud row) so both prefill cleanly. `discounts` is
+        // the canonical list (multiple discounts stack); the legacy
+        // discountId/discountName/discountAmount fields are kept in sync
+        // for the promoted DB columns + anything that reads the single
+        // total (receipts, reports). Records saved before stacking carry
+        // only the legacy fields, so we migrate them into a 1-item list.
+        discounts: (() => {
+          const list = Array.isArray(a?.discounts) ? a.discounts : null;
+          if (list && list.length > 0) {
+            return list.map((d: any) => ({
+              id: String(d?.id ?? ""),
+              name: String(d?.name ?? ""),
+              amount: sanitizeMoneyInput(d?.amount ?? 0),
+            })).filter((d: AppliedDiscount) => d.id);
+          }
+          const legacyId = a?.discountId ?? a?.discount_id ?? null;
+          if (legacyId) {
+            return [{
+              id: String(legacyId),
+              name: String(a?.discountName ?? a?.discount_name ?? ""),
+              amount: sanitizeMoneyInput(a?.discountAmount ?? a?.discount_amount ?? 0),
+            }];
+          }
+          return [] as AppliedDiscount[];
+        })(),
         discountId: a?.discountId ?? a?.discount_id ?? null,
         discountName: a?.discountName ?? a?.discount_name ?? null,
         discountAmount: sanitizeMoneyInput(a?.discountAmount ?? a?.discount_amount ?? 0),
@@ -9676,15 +9718,36 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     () => selectableDiscounts(allDiscounts, Date.now(), discountUsage),
     [allDiscounts, discountUsage],
   );
-  // If the saved discount is no longer selectable (paused / expired)
-  // but is the one already on this appointment, keep it visible so
-  // the snapshot stays editable. Past records aren't re-priced.
-  const previewDiscount = useMemo(() => {
-    if (!form.discountId) return null;
-    return availableDiscounts.find(d => d.id === form.discountId)
-      || allDiscounts.find(d => d.id === form.discountId)
-      || null;
-  }, [form.discountId, availableDiscounts, allDiscounts]);
+  // The discounts already applied to this appointment.
+  const appliedDiscounts: AppliedDiscount[] = useMemo(
+    () => (Array.isArray(form.discounts) ? form.discounts : []),
+    [form.discounts],
+  );
+  // Discounts the stylist can still add: selectable, not already applied.
+  const addableDiscounts = useMemo(
+    () => availableDiscounts.filter(d => !appliedDiscounts.some(a => a.id === d.id)),
+    [availableDiscounts, appliedDiscounts],
+  );
+  // Recompute every applied discount's dollar amount against the current
+  // price. Discounts stack: each is figured off the gross price, but the
+  // running remainder is capped so the combined total can't exceed it.
+  // An applied discount whose definition was deleted/paused keeps its
+  // recorded amount (still capped) so historical records don't re-price.
+  const recomputeAppliedDiscounts = useCallback(
+    (list: AppliedDiscount[], total: number): AppliedDiscount[] => {
+      let remaining = Math.max(0, Number(total) || 0);
+      return list.map(item => {
+        const def = allDiscounts.find(d => d.id === item.id);
+        const raw = def
+          ? computeDiscountAmount(Number(total) || 0, def)
+          : Number(item.amount) || 0;
+        const amount = Number(Math.min(raw, remaining).toFixed(2));
+        remaining = Number((remaining - amount).toFixed(2));
+        return { id: item.id, name: def?.name ?? item.name, amount };
+      });
+    },
+    [allDiscounts],
+  );
 
   // Phase 2 — apply a service to the form. mode = "fill" only writes
   // empty/zero fields (default behavior so the user's manual edits
@@ -9715,29 +9778,60 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     }));
   };
 
-  const handleDiscountChange = (id: string) => {
-    if (!id) {
-      setForm({ ...form, discountId: null, discountName: null, discountAmount: 0 });
-      return;
-    }
+  const addDiscount = (id: string) => {
+    if (!id) return;
+    if (appliedDiscounts.some(d => d.id === id)) return;
     const d = availableDiscounts.find(x => x.id === id);
     if (!d) return;
-    const amt = computeDiscountAmount(Number(form.totalPrice) || 0, d);
-    setForm({ ...form, discountId: d.id, discountName: d.name, discountAmount: amt });
+    setForm(prev => ({
+      ...prev,
+      discounts: [...(prev.discounts || []), { id: d.id, name: d.name, amount: 0 }],
+    }));
   };
 
-  // Re-quote the discount whenever the entered total changes — a 10%
-  // discount on a $200 quote should jump to a 10% discount on a $250
-  // edit without the user having to reselect it.
+  const removeDiscount = (id: string) => {
+    setForm(prev => ({
+      ...prev,
+      discounts: (prev.discounts || []).filter((d: AppliedDiscount) => d.id !== id),
+    }));
+  };
+
+  // Keep the applied-discount amounts (and the legacy single-discount
+  // mirror fields) in sync whenever the discount list, the entered total,
+  // or the loaded discount definitions change. The mirror keeps the
+  // promoted DB columns + receipts/reports working off one combined total:
+  //   discountAmount = sum, discountId = first, discountName = "A + B".
   useEffect(() => {
-    if (!form.discountId) return;
-    const d = availableDiscounts.find(x => x.id === form.discountId);
-    if (!d) return;
-    const amt = computeDiscountAmount(Number(form.totalPrice) || 0, d);
-    if (amt !== Number(form.discountAmount)) {
-      setForm(prev => ({ ...prev, discountAmount: amt }));
+    const total = Number(form.totalPrice) || 0;
+    const next = recomputeAppliedDiscounts(appliedDiscounts, total);
+    const sum = Number(next.reduce((s, d) => s + d.amount, 0).toFixed(2));
+    const combinedName = next.map(d => d.name).filter(Boolean).join(" + ") || null;
+    const firstId = next[0]?.id ?? null;
+    const listChanged =
+      next.length !== appliedDiscounts.length ||
+      next.some((d, i) => {
+        const cur = appliedDiscounts[i];
+        return !cur || cur.amount !== d.amount || cur.name !== d.name;
+      });
+    if (
+      listChanged ||
+      Number(form.discountAmount) !== sum ||
+      (form.discountId ?? null) !== firstId ||
+      (form.discountName ?? null) !== combinedName
+    ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- derived re-quote of discount amounts, guarded against loops
+      setForm(prev => ({
+        ...prev,
+        discounts: next,
+        discountAmount: sum,
+        discountId: firstId,
+        discountName: combinedName,
+      }));
     }
-  }, [form.totalPrice, form.discountId, availableDiscounts]);
+    // Mirror fields (discountAmount/Id/Name) are written here, not read as
+    // triggers — including them would loop. The guard above is the loop break.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.totalPrice, appliedDiscounts, recomputeAppliedDiscounts]);
 
   // Account credit on the selected client. Applied to the BALANCE (never
   // the deposit) of this appointment. The ledger is canonical; we mirror
@@ -9815,7 +9909,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         clientPhone: "", clientEmail: "",
         style: "",
         depositPaid: 0, totalPrice: 0,
-        discountId: null, discountName: null, discountAmount: 0,
+        discounts: [], discountId: null, discountName: null, discountAmount: 0,
         paymentStatus: "", paymentDate: "", paymentMethod: "", paymentNotes: "",
         seriesId: undefined,
         remindersEnabled: false,
@@ -10492,6 +10586,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       paymentNotes: "",
       // Drop the discount snapshot — duplicates start from the gross
       // price; the user re-applies a discount on the new appointment.
+      discounts: [],
       discountId: null,
       discountName: null,
       discountAmount: 0,
@@ -10521,6 +10616,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       paymentDate: "",
       paymentMethod: "",
       paymentNotes: "",
+      discounts: [],
       discountId: null,
       discountName: null,
       discountAmount: 0,
@@ -11327,30 +11423,55 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
         {isAppointment && (
         <Field
-          label="Discount"
-          hint={availableDiscounts.length === 0
+          label="Discounts"
+          hint={availableDiscounts.length === 0 && appliedDiscounts.length === 0
             ? "Create a Studio Offer in Settings → Discounts."
-            : "Optional. Subtracts from the total price."}
+            : "Optional. Stack as many as you like — each subtracts from the total."}
         >
-          <Select
-            value={form.discountId || ""}
-            onChange={e => handleDiscountChange(e.target.value)}
-            options={(() => {
-              const opts = [{ value: "", label: "No discount" }];
-              for (const d of availableDiscounts) {
-                opts.push({ value: d.id, label: `${d.name} — ${formatDiscountValue(d)}` });
-              }
-              // If the saved discount is paused/expired, still show it
-              // so the user can unbind or keep the snapshot intact.
-              if (previewDiscount && !availableDiscounts.find(d => d.id === previewDiscount.id)) {
-                opts.push({
-                  value: previewDiscount.id,
-                  label: `${previewDiscount.name} — ${formatDiscountValue(previewDiscount)} (paused)`,
-                });
-              }
-              return opts;
-            })()}
-          />
+          {/* Applied discounts — each can be removed individually. */}
+          {appliedDiscounts.length > 0 && (
+            <ul className="space-y-2 mb-2" style={{ listStyle: "none", padding: 0, margin: "0 0 8px" }}>
+              {appliedDiscounts.map(d => {
+                const def = allDiscounts.find(x => x.id === d.id);
+                const isLive = availableDiscounts.some(x => x.id === d.id);
+                return (
+                  <li key={d.id}
+                    className="flex items-center justify-between gap-2 p-2.5 rounded-xl"
+                    style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>
+                        {d.name || "Discount"}
+                        {def && !isLive ? " (paused)" : ""}
+                      </p>
+                      <p className="text-[11px]" style={{ color: C.goldDeep }}>
+                        {def ? `${formatDiscountValue(def)} · ` : ""}− {fmtMoney(d.amount, business.currency)}
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => removeDiscount(d.id)}
+                      aria-label={`Remove ${d.name || "discount"}`}
+                      className="p-1.5 rounded-full active:scale-95 transition shrink-0"
+                      style={{ color: C.muted }}>
+                      <X size={16} />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {/* Add another discount. Resets to the placeholder after each pick. */}
+          {addableDiscounts.length > 0 && (
+            <Select
+              value=""
+              onChange={e => addDiscount(e.target.value)}
+              options={[
+                { value: "", label: appliedDiscounts.length > 0 ? "Add another discount…" : "Add a discount…" },
+                ...addableDiscounts.map(d => ({
+                  value: d.id,
+                  label: `${d.name} — ${formatDiscountValue(d)}`,
+                })),
+              ]}
+            />
+          )}
         </Field>
         )}
         {isAppointment && discountAmt > 0 && (
@@ -11361,12 +11482,15 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                 {fmtMoney(grossTotal, business.currency)}
               </span>
             </div>
-            <div className="flex items-center justify-between text-[13px] mt-1" style={{ color: C.goldDeep }}>
-              <span>Discount{form.discountName ? ` — ${form.discountName}` : ""}</span>
-              <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
-                − {fmtMoney(discountAmt, business.currency)}
-              </span>
-            </div>
+            {/* One line per applied discount so the math reads honestly. */}
+            {appliedDiscounts.filter(d => d.amount > 0).map(d => (
+              <div key={d.id} className="flex items-center justify-between text-[13px] mt-1" style={{ color: C.goldDeep }}>
+                <span className="truncate pr-2">Discount{d.name ? ` — ${d.name}` : ""}</span>
+                <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
+                  − {fmtMoney(d.amount, business.currency)}
+                </span>
+              </div>
+            ))}
             <div className="flex items-center justify-between text-[14px] font-semibold mt-2 pt-2"
               style={{ color: C.espresso, borderTop: `1px solid ${C.hairline}` }}>
               <span>Net total</span>
@@ -14627,7 +14751,51 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
     return { start: localDateISO(start), end: todayISO() };
   }, [period]);
 
-  const txInRange = useMemo(() => store.transactions.filter(t => t.date >= range.start && t.date <= range.end), [store.transactions, range]);
+  // Normalize stored transactions for the Money list + totals. Two shapes
+  // live in store.transactions: hand-entered sheet rows (carry type +
+  // category) and Boss Checkout sales (carry data.source = "boss_checkout"
+  // but NO `type`, so the old `type === "income"` filter silently dropped
+  // them). Map both onto a uniform { type, amount, category, note, stream }
+  // so checkout money finally shows up here, tagged as shop vs service.
+  const txInRange = useMemo(() => (store.transactions as any[])
+    .filter(t => t.date >= range.start && t.date <= range.end)
+    .map((t: any) => {
+      if (isCheckoutSale(t)) {
+        return {
+          ...t,
+          type: "expense" === t.type ? "expense" : "income",
+          amount: txnIncomeAmount(t),
+          category: "Shop sale",
+          note: t.note || t.serviceName || "Checkout sale",
+          stream: "shop" as const,
+          // Boss Checkout rows are richer than the manual edit sheet can
+          // round-trip (line items, gift card, loyalty), so don't open it.
+          readOnly: true,
+        };
+      }
+      return { ...t, stream: txnStream(t) };
+    }),
+    [store.transactions, range]);
+
+  // Paid online storefront orders in range — folded in as shop income so
+  // the Money tab reflects the whole shop, not just the in-person POS.
+  const orderIncome = useMemo(() => (store.productOrders as any[] || [])
+    .filter((o: any) => {
+      const day = (o?.paid_at ? localDateISO(new Date(o.paid_at)) : "");
+      return String(o?.status).toLowerCase() === "paid" && day >= range.start && day <= range.end;
+    })
+    .map((o: any) => ({
+      id: `order_${o.id ?? uid()}`,
+      type: "income",
+      date: o.paid_at ? localDateISO(new Date(o.paid_at)) : range.end,
+      amount: Number(o.amount_total) || 0,
+      category: "Online order",
+      note: "Online store order",
+      stream: "shop" as const,
+      readOnly: true,
+    })),
+    [store.productOrders, range]);
+
   const apptIncome = useMemo(() => store.appointments
     .filter((a: any) => isIncomeAppt(a) && a.date >= range.start && a.date <= range.end)
     .map((a: any) => ({
@@ -14639,11 +14807,15 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
       note: `${a.style || "Service"} — ${store.clientById(a.clientId)?.name || "Client"}`,
       fromAppt: true,
       apptId: a.id,
+      stream: "service" as const,
     })),
     [store.appointments, store.clients, range]);
 
-  const all = useMemo(() => [...apptIncome, ...txInRange].sort((a, b) => b.date.localeCompare(a.date)), [apptIncome, txInRange]);
-  const income = all.filter(t => t.type === "income").reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  const all = useMemo(() => [...apptIncome, ...orderIncome, ...txInRange].sort((a, b) => b.date.localeCompare(a.date)), [apptIncome, orderIncome, txInRange]);
+  const incomeRows = all.filter(t => t.type === "income");
+  const income = incomeRows.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  const shopIncome = incomeRows.filter(t => t.stream === "shop").reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  const serviceIncome = income - shopIncome;
   const expenses = all.filter(t => t.type === "expense").reduce((s, t) => s + (Number(t.amount) || 0), 0);
   const net = income - expenses;
 
@@ -14683,7 +14855,7 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
       </div>
 
       {tab === "money" ? (
-        <MoneyTab all={all} income={income} expenses={expenses} net={net} business={store.business}
+        <MoneyTab all={all} income={income} serviceIncome={serviceIncome} shopIncome={shopIncome} expenses={expenses} net={net} business={store.business}
           editTx={editTx} openTxSheet={openTxSheet}
           receipts={store.receipts || []}
           openReceipt={openReceipt}
@@ -14698,9 +14870,11 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
   );
 };
 
-const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, receipts = [], openReceipt, businessExpenses = [], openProfitDetail, period = "week" }: {
+const MoneyTab = ({ all, income, serviceIncome = 0, shopIncome = 0, expenses, net, business, editTx, openTxSheet, receipts = [], openReceipt, businessExpenses = [], openProfitDetail, period = "week" }: {
   all: any[];
   income: number;
+  serviceIncome?: number;
+  shopIncome?: number;
   expenses: number;
   net: number;
   business: any;
@@ -14750,6 +14924,14 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
           <p style={{ margin: "2px 0 14px", fontSize: 11, color: C.muted }}>{rangeMeta.sub}</p>
           <MiniBarChart data={buckets} ariaLabel="Daily income, last 7 days" />
           <div style={{ marginTop: 14 }}>
+            {/* Keep the two money streams visible whenever the shop has
+                rung anything up, so service vs retail income reads apart. */}
+            {shopIncome > 0 && (
+              <>
+                <MetricRow label="Services" value={fmtMoney(serviceIncome, business.currency)} />
+                <MetricRow label="Shop sales" value={fmtMoney(shopIncome, business.currency)} />
+              </>
+            )}
             <MetricRow label="Expenses" value={fmtMoney(expenses, business.currency)} />
             <div className="mt-2 pt-2" style={{ borderTop: `1px solid rgba(21, 17, 26,0.08)` }}>
               <MetricRow
@@ -14795,7 +14977,7 @@ const MoneyTab = ({ all, income, expenses, net, business, editTx, openTxSheet, r
     ) : (
       <div className="space-y-2">
         {all.map(t => (
-          <Card key={t.id} className="p-3 flex items-center gap-3" onClick={!t.fromAppt ? () => editTx(t) : undefined}>
+          <Card key={t.id} className="p-3 flex items-center gap-3" onClick={!t.fromAppt && !t.readOnly ? () => editTx(t) : undefined}>
             <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: t.type === "income" ? "rgba(92,124,74,0.12)" : "rgba(156,61,46,0.12)" }}>
               {t.type === "income" ? <ArrowUpRight size={18} style={{ color: C.success }} /> : <ArrowDownRight size={18} style={{ color: C.danger }} />}
             </div>
@@ -23963,6 +24145,18 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
   );
   const repeats = useMemo(() => repeatClientStats(appointments, 5), [appointments]);
 
+  // Shop sales for the selected window — in-person Checkout sales plus
+  // paid online store orders, kept separate from the service-driven sales
+  // summary above. `manualTxns` is the same payment_transactions ledger
+  // (it carries Boss Checkout rows); store.productOrders holds paid orders.
+  const shopSales = useMemo(
+    () => {
+      const win = rangeWindow(range, todayISO());
+      return shopSalesInRange(manualTxns, store.productOrders, win.start, win.end);
+    },
+    [range, manualTxns, store.productOrders],
+  );
+
   // Cancelled appointments are already excluded from the aggregators
   // above (isBillable drops them), but they still live in the books
   // and can clutter test data. Bulk purge is the natural sibling to
@@ -24068,6 +24262,23 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
             ))}
           </div>
         </div>
+
+        {/* SHOP SALES — retail money (in-person Checkout + online store),
+            reported apart from the service sales summary above. */}
+        {shopSales > 0 && (
+          <div>
+            <SectionTitle>Shop sales · {report.rangeLabel.toLowerCase()}</SectionTitle>
+            <Card className="p-3.5 flex items-center gap-3">
+              <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: "rgba(176,141,87,0.14)" }}>
+                <ShoppingBag size={18} style={{ color: C.goldDeep }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>{fmtMoney(shopSales, currency)}</p>
+                <p className="text-[11px]" style={{ color: C.muted }}>In-person Checkout sales + online store orders</p>
+              </div>
+            </Card>
+          </div>
+        )}
 
         {/* GROSS SALES CHART */}
         <div>
@@ -36947,6 +37158,29 @@ export default function App() {
   const intakeFormApi = useIntakeForm(auth.userId);
   const packagesApi = useClientPackages(auth.userId);
 
+  // Paid online storefront orders (product_orders). These aren't part of
+  // the push-synced local store, so we pull the paid rows directly once
+  // per user so the dashboard + Money tab can fold shop revenue in next to
+  // services. Best-effort: a failed fetch just means shop sales read $0
+  // until the next open.
+  const [shopOrders, setShopOrders] = useState<any[]>([]);
+  useEffect(() => {
+    const uid = auth.userId;
+    let cancelled = false;
+    (async () => {
+      if (!uid) { if (!cancelled) setShopOrders([]); return; }
+      try {
+        const { data, error } = await getSupabase()
+          .from("product_orders")
+          .select("status, amount_total, paid_at")
+          .eq("user_id", uid)
+          .eq("status", "paid");
+        if (!cancelled && !error) setShopOrders(data || []);
+      } catch { if (!cancelled) setShopOrders([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [auth.userId]);
+
   // Bridge: the Approvals queue pulls booking_requests LIVE on every
   // refresh, so it reliably knows when a client cancelled (via the
   // secure token link) — but the appointments store is push-only and
@@ -37008,6 +37242,7 @@ export default function App() {
       email: auth.email,
       premium,
       requestUpgrade,
+      productOrders: shopOrders,
       discountsApi,
       servicesApi,
       serviceCategoriesApi,
@@ -37042,7 +37277,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, auth.userId, premium, requestUpgrade, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, clientReviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi, messagesApi, intakeFormApi, packagesApi]);
+  }, [rawStore, auth.userId, auth.email, premium, requestUpgrade, shopOrders, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, clientReviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi, messagesApi, intakeFormApi, packagesApi]);
 
   const sync = useCloudSync(auth.userId, store);
 
