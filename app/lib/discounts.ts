@@ -116,6 +116,15 @@ export type DiscountSummary = {
 
 export const NO_DISCOUNT: DiscountSummary = { id: null, name: null, amount: 0 };
 
+// A discount snapshot as stored on an appointment when one (or more)
+// discounts are applied. Carries the computed dollar amount so historical
+// records never re-price if the underlying discount is later edited.
+export type AppliedDiscount = {
+  id: string;
+  name: string;
+  amount: number;
+};
+
 // Compute the dollar amount a given discount removes from `subtotal`.
 // Never returns more than the subtotal itself — the calculator wraps
 // this with `max(0, subtotal - amount)` to guarantee non-negative
@@ -134,6 +143,29 @@ export const computeDiscountAmount = (
     return Number(((sub * pct) / 100).toFixed(2));
   }
   return Number(Math.min(sub, value).toFixed(2));
+};
+
+// Apply several discounts to the same pre-discount subtotal and return
+// the per-discount lines plus the combined total. Discounts stack
+// additively — each is computed against the original subtotal — but the
+// running remainder is capped so the combined total can never exceed the
+// subtotal (two big discounts can't push the net below zero). Order is
+// preserved, so the UI shows discounts in the order they were added.
+export const computeStackedDiscounts = (
+  subtotal: number,
+  discounts: ReadonlyArray<Pick<Discount, "id" | "name" | "discount_type" | "value">> | null | undefined,
+): { lines: AppliedDiscount[]; total: number } => {
+  const sub = Math.max(0, Number(subtotal) || 0);
+  let remaining = sub;
+  const lines: AppliedDiscount[] = [];
+  for (const d of discounts || []) {
+    const raw = computeDiscountAmount(sub, d);
+    const amount = Number(Math.min(raw, remaining).toFixed(2));
+    remaining = Number((remaining - amount).toFixed(2));
+    lines.push({ id: d.id, name: d.name, amount });
+  }
+  const total = Number((sub - remaining).toFixed(2));
+  return { lines, total };
 };
 
 // Filter to discounts that are usable right now: active, within any
@@ -174,15 +206,21 @@ export const selectableDiscounts = (
 // appointment list: one count per non-cancelled appointment that carries
 // the discount. Used to enforce usage_limit without a stored counter.
 export const discountUsageFromAppointments = (
-  appointments: ReadonlyArray<{ discountId?: string | null; status?: string | null }> | null | undefined,
+  appointments: ReadonlyArray<{ discountId?: string | null; discounts?: ReadonlyArray<{ id?: string | null }> | null; status?: string | null }> | null | undefined,
 ): Map<string, number> => {
   const m = new Map<string, number>();
   for (const a of appointments || []) {
-    const id = a?.discountId;
-    if (!id) continue;
     const s = String(a?.status || "").toLowerCase();
     if (s === "cancelled" || s === "canceled") continue;
-    m.set(id, (m.get(id) ?? 0) + 1);
+    // Prefer the multi-discount array; fall back to the legacy single
+    // discountId for records saved before stacking existed. Each distinct
+    // discount on an appointment counts once toward its usage_limit.
+    const ids = Array.isArray(a?.discounts) && a!.discounts!.length > 0
+      ? Array.from(new Set(a!.discounts!.map(d => d?.id).filter(Boolean) as string[]))
+      : (a?.discountId ? [a.discountId] : []);
+    for (const id of ids) {
+      m.set(id, (m.get(id) ?? 0) + 1);
+    }
   }
   return m;
 };

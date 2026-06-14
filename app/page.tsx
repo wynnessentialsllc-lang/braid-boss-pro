@@ -156,6 +156,7 @@ import {
   type Discount,
   type DiscountInput,
   type DiscountSummary,
+  type AppliedDiscount,
   NO_DISCOUNT,
   DISCOUNT_PRESETS,
   DISCOUNTS_EMPTY_COPY,
@@ -9536,7 +9537,31 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         paymentMethod: a?.paymentMethod || "",
         paymentNotes: a?.paymentNotes || "",
         // Discount snapshot — accept either camelCase (local) or
-        // snake_case (cloud row) so both prefill cleanly.
+        // snake_case (cloud row) so both prefill cleanly. `discounts` is
+        // the canonical list (multiple discounts stack); the legacy
+        // discountId/discountName/discountAmount fields are kept in sync
+        // for the promoted DB columns + anything that reads the single
+        // total (receipts, reports). Records saved before stacking carry
+        // only the legacy fields, so we migrate them into a 1-item list.
+        discounts: (() => {
+          const list = Array.isArray(a?.discounts) ? a.discounts : null;
+          if (list && list.length > 0) {
+            return list.map((d: any) => ({
+              id: String(d?.id ?? ""),
+              name: String(d?.name ?? ""),
+              amount: sanitizeMoneyInput(d?.amount ?? 0),
+            })).filter((d: AppliedDiscount) => d.id);
+          }
+          const legacyId = a?.discountId ?? a?.discount_id ?? null;
+          if (legacyId) {
+            return [{
+              id: String(legacyId),
+              name: String(a?.discountName ?? a?.discount_name ?? ""),
+              amount: sanitizeMoneyInput(a?.discountAmount ?? a?.discount_amount ?? 0),
+            }];
+          }
+          return [] as AppliedDiscount[];
+        })(),
         discountId: a?.discountId ?? a?.discount_id ?? null,
         discountName: a?.discountName ?? a?.discount_name ?? null,
         discountAmount: sanitizeMoneyInput(a?.discountAmount ?? a?.discount_amount ?? 0),
@@ -9630,15 +9655,36 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     () => selectableDiscounts(allDiscounts, Date.now(), discountUsage),
     [allDiscounts, discountUsage],
   );
-  // If the saved discount is no longer selectable (paused / expired)
-  // but is the one already on this appointment, keep it visible so
-  // the snapshot stays editable. Past records aren't re-priced.
-  const previewDiscount = useMemo(() => {
-    if (!form.discountId) return null;
-    return availableDiscounts.find(d => d.id === form.discountId)
-      || allDiscounts.find(d => d.id === form.discountId)
-      || null;
-  }, [form.discountId, availableDiscounts, allDiscounts]);
+  // The discounts already applied to this appointment.
+  const appliedDiscounts: AppliedDiscount[] = useMemo(
+    () => (Array.isArray(form.discounts) ? form.discounts : []),
+    [form.discounts],
+  );
+  // Discounts the stylist can still add: selectable, not already applied.
+  const addableDiscounts = useMemo(
+    () => availableDiscounts.filter(d => !appliedDiscounts.some(a => a.id === d.id)),
+    [availableDiscounts, appliedDiscounts],
+  );
+  // Recompute every applied discount's dollar amount against the current
+  // price. Discounts stack: each is figured off the gross price, but the
+  // running remainder is capped so the combined total can't exceed it.
+  // An applied discount whose definition was deleted/paused keeps its
+  // recorded amount (still capped) so historical records don't re-price.
+  const recomputeAppliedDiscounts = useCallback(
+    (list: AppliedDiscount[], total: number): AppliedDiscount[] => {
+      let remaining = Math.max(0, Number(total) || 0);
+      return list.map(item => {
+        const def = allDiscounts.find(d => d.id === item.id);
+        const raw = def
+          ? computeDiscountAmount(Number(total) || 0, def)
+          : Number(item.amount) || 0;
+        const amount = Number(Math.min(raw, remaining).toFixed(2));
+        remaining = Number((remaining - amount).toFixed(2));
+        return { id: item.id, name: def?.name ?? item.name, amount };
+      });
+    },
+    [allDiscounts],
+  );
 
   // Phase 2 — apply a service to the form. mode = "fill" only writes
   // empty/zero fields (default behavior so the user's manual edits
@@ -9669,29 +9715,60 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     }));
   };
 
-  const handleDiscountChange = (id: string) => {
-    if (!id) {
-      setForm({ ...form, discountId: null, discountName: null, discountAmount: 0 });
-      return;
-    }
+  const addDiscount = (id: string) => {
+    if (!id) return;
+    if (appliedDiscounts.some(d => d.id === id)) return;
     const d = availableDiscounts.find(x => x.id === id);
     if (!d) return;
-    const amt = computeDiscountAmount(Number(form.totalPrice) || 0, d);
-    setForm({ ...form, discountId: d.id, discountName: d.name, discountAmount: amt });
+    setForm(prev => ({
+      ...prev,
+      discounts: [...(prev.discounts || []), { id: d.id, name: d.name, amount: 0 }],
+    }));
   };
 
-  // Re-quote the discount whenever the entered total changes — a 10%
-  // discount on a $200 quote should jump to a 10% discount on a $250
-  // edit without the user having to reselect it.
+  const removeDiscount = (id: string) => {
+    setForm(prev => ({
+      ...prev,
+      discounts: (prev.discounts || []).filter((d: AppliedDiscount) => d.id !== id),
+    }));
+  };
+
+  // Keep the applied-discount amounts (and the legacy single-discount
+  // mirror fields) in sync whenever the discount list, the entered total,
+  // or the loaded discount definitions change. The mirror keeps the
+  // promoted DB columns + receipts/reports working off one combined total:
+  //   discountAmount = sum, discountId = first, discountName = "A + B".
   useEffect(() => {
-    if (!form.discountId) return;
-    const d = availableDiscounts.find(x => x.id === form.discountId);
-    if (!d) return;
-    const amt = computeDiscountAmount(Number(form.totalPrice) || 0, d);
-    if (amt !== Number(form.discountAmount)) {
-      setForm(prev => ({ ...prev, discountAmount: amt }));
+    const total = Number(form.totalPrice) || 0;
+    const next = recomputeAppliedDiscounts(appliedDiscounts, total);
+    const sum = Number(next.reduce((s, d) => s + d.amount, 0).toFixed(2));
+    const combinedName = next.map(d => d.name).filter(Boolean).join(" + ") || null;
+    const firstId = next[0]?.id ?? null;
+    const listChanged =
+      next.length !== appliedDiscounts.length ||
+      next.some((d, i) => {
+        const cur = appliedDiscounts[i];
+        return !cur || cur.amount !== d.amount || cur.name !== d.name;
+      });
+    if (
+      listChanged ||
+      Number(form.discountAmount) !== sum ||
+      (form.discountId ?? null) !== firstId ||
+      (form.discountName ?? null) !== combinedName
+    ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- derived re-quote of discount amounts, guarded against loops
+      setForm(prev => ({
+        ...prev,
+        discounts: next,
+        discountAmount: sum,
+        discountId: firstId,
+        discountName: combinedName,
+      }));
     }
-  }, [form.totalPrice, form.discountId, availableDiscounts]);
+    // Mirror fields (discountAmount/Id/Name) are written here, not read as
+    // triggers — including them would loop. The guard above is the loop break.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.totalPrice, appliedDiscounts, recomputeAppliedDiscounts]);
 
   // Account credit on the selected client. Applied to the BALANCE (never
   // the deposit) of this appointment. The ledger is canonical; we mirror
@@ -9769,7 +9846,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         clientPhone: "", clientEmail: "",
         style: "",
         depositPaid: 0, totalPrice: 0,
-        discountId: null, discountName: null, discountAmount: 0,
+        discounts: [], discountId: null, discountName: null, discountAmount: 0,
         paymentStatus: "", paymentDate: "", paymentMethod: "", paymentNotes: "",
         seriesId: undefined,
         remindersEnabled: false,
@@ -10446,6 +10523,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       paymentNotes: "",
       // Drop the discount snapshot — duplicates start from the gross
       // price; the user re-applies a discount on the new appointment.
+      discounts: [],
       discountId: null,
       discountName: null,
       discountAmount: 0,
@@ -10475,6 +10553,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       paymentDate: "",
       paymentMethod: "",
       paymentNotes: "",
+      discounts: [],
       discountId: null,
       discountName: null,
       discountAmount: 0,
@@ -11281,30 +11360,55 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
 
         {isAppointment && (
         <Field
-          label="Discount"
-          hint={availableDiscounts.length === 0
+          label="Discounts"
+          hint={availableDiscounts.length === 0 && appliedDiscounts.length === 0
             ? "Create a Studio Offer in Settings → Discounts."
-            : "Optional. Subtracts from the total price."}
+            : "Optional. Stack as many as you like — each subtracts from the total."}
         >
-          <Select
-            value={form.discountId || ""}
-            onChange={e => handleDiscountChange(e.target.value)}
-            options={(() => {
-              const opts = [{ value: "", label: "No discount" }];
-              for (const d of availableDiscounts) {
-                opts.push({ value: d.id, label: `${d.name} — ${formatDiscountValue(d)}` });
-              }
-              // If the saved discount is paused/expired, still show it
-              // so the user can unbind or keep the snapshot intact.
-              if (previewDiscount && !availableDiscounts.find(d => d.id === previewDiscount.id)) {
-                opts.push({
-                  value: previewDiscount.id,
-                  label: `${previewDiscount.name} — ${formatDiscountValue(previewDiscount)} (paused)`,
-                });
-              }
-              return opts;
-            })()}
-          />
+          {/* Applied discounts — each can be removed individually. */}
+          {appliedDiscounts.length > 0 && (
+            <ul className="space-y-2 mb-2" style={{ listStyle: "none", padding: 0, margin: "0 0 8px" }}>
+              {appliedDiscounts.map(d => {
+                const def = allDiscounts.find(x => x.id === d.id);
+                const isLive = availableDiscounts.some(x => x.id === d.id);
+                return (
+                  <li key={d.id}
+                    className="flex items-center justify-between gap-2 p-2.5 rounded-xl"
+                    style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>
+                        {d.name || "Discount"}
+                        {def && !isLive ? " (paused)" : ""}
+                      </p>
+                      <p className="text-[11px]" style={{ color: C.goldDeep }}>
+                        {def ? `${formatDiscountValue(def)} · ` : ""}− {fmtMoney(d.amount, business.currency)}
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => removeDiscount(d.id)}
+                      aria-label={`Remove ${d.name || "discount"}`}
+                      className="p-1.5 rounded-full active:scale-95 transition shrink-0"
+                      style={{ color: C.muted }}>
+                      <X size={16} />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {/* Add another discount. Resets to the placeholder after each pick. */}
+          {addableDiscounts.length > 0 && (
+            <Select
+              value=""
+              onChange={e => addDiscount(e.target.value)}
+              options={[
+                { value: "", label: appliedDiscounts.length > 0 ? "Add another discount…" : "Add a discount…" },
+                ...addableDiscounts.map(d => ({
+                  value: d.id,
+                  label: `${d.name} — ${formatDiscountValue(d)}`,
+                })),
+              ]}
+            />
+          )}
         </Field>
         )}
         {isAppointment && discountAmt > 0 && (
@@ -11315,12 +11419,15 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                 {fmtMoney(grossTotal, business.currency)}
               </span>
             </div>
-            <div className="flex items-center justify-between text-[13px] mt-1" style={{ color: C.goldDeep }}>
-              <span>Discount{form.discountName ? ` — ${form.discountName}` : ""}</span>
-              <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
-                − {fmtMoney(discountAmt, business.currency)}
-              </span>
-            </div>
+            {/* One line per applied discount so the math reads honestly. */}
+            {appliedDiscounts.filter(d => d.amount > 0).map(d => (
+              <div key={d.id} className="flex items-center justify-between text-[13px] mt-1" style={{ color: C.goldDeep }}>
+                <span className="truncate pr-2">Discount{d.name ? ` — ${d.name}` : ""}</span>
+                <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
+                  − {fmtMoney(d.amount, business.currency)}
+                </span>
+              </div>
+            ))}
             <div className="flex items-center justify-between text-[14px] font-semibold mt-2 pt-2"
               style={{ color: C.espresso, borderTop: `1px solid ${C.hairline}` }}>
               <span>Net total</span>
