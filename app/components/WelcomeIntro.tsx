@@ -1220,6 +1220,20 @@ const WelcomeIntro = ({
             >
               FAQ
             </a>
+            <a
+              href="/privacy"
+              onClick={() => trackEvent("welcome_privacy_link", { category: "activation" })}
+              style={welcomeLinkStyle}
+            >
+              Privacy
+            </a>
+            <a
+              href="/terms"
+              onClick={() => trackEvent("welcome_terms_link", { category: "activation" })}
+              style={welcomeLinkStyle}
+            >
+              Terms
+            </a>
           </nav>
         </div>
       </div>
