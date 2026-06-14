@@ -107,6 +107,14 @@ export default function OrderTrackingPage() {
   const [order, setOrder] = useState<OrderRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Live Shippo tracking history. Fetched after the order resolves
+  // (we need its customer_token); the buyer never sees the stylist's
+  // Shippo token — /api/order-tracking proxies the call server-side.
+  const [tracking, setTracking] = useState<{
+    events: { status: string; status_details: string; status_date: string | null; location_city: string | null; location_state: string | null }[];
+    status: string | null;
+    eta: string | null;
+  } | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -127,6 +135,23 @@ export default function OrderTrackingPage() {
         } else {
           setError(null);
           setOrder(row as OrderRow);
+          // Best-effort live tracking. We fire it after the order row
+          // resolves so the buyer sees the static fields immediately;
+          // the timeline can fill in a moment later. Silent on failure
+          // — the static tracking_url link is the canonical fallback.
+          if (row.tracking_number) {
+            try {
+              const tres = await fetch("/api/order-tracking", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ token }),
+              });
+              const tb = await tres.json().catch(() => null);
+              if (!cancelled && tb && Array.isArray(tb.events) && tb.events.length > 0) {
+                setTracking(tb);
+              }
+            } catch { /* silent — static link still works */ }
+          }
         }
       }
       setLoading(false);
@@ -416,6 +441,60 @@ export default function OrderTrackingPage() {
                 </a>
               )}
             </div>
+          </section>
+        )}
+
+        {tracking && tracking.events.length > 0 && (
+          <section style={{ marginTop: 20 }}>
+            <h2 style={{ fontSize: 11, fontWeight: 800, color: C.muted, letterSpacing: "0.14em", textTransform: "uppercase", margin: 0 }}>
+              Tracking history
+            </h2>
+            <ul style={{ marginTop: 12, padding: 0, listStyle: "none" }}>
+              {tracking.events.slice(0, 12).map((e, i) => {
+                const when = e.status_date
+                  ? new Date(e.status_date).toLocaleString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })
+                  : "";
+                const place = [e.location_city, e.location_state].filter(Boolean).join(", ");
+                const isFirst = i === 0;
+                return (
+                  <li
+                    key={`${e.status_date || i}-${e.status}-${i}`}
+                    style={{
+                      position: "relative",
+                      paddingLeft: 18,
+                      paddingBottom: 12,
+                      borderLeft: `2px solid ${isFirst ? "#7C3AED" : C.brandBorder}`,
+                      marginLeft: 6,
+                    }}
+                  >
+                    <span
+                      aria-hidden
+                      style={{
+                        position: "absolute",
+                        left: -7,
+                        top: 0,
+                        width: 12,
+                        height: 12,
+                        borderRadius: 999,
+                        background: isFirst ? "#7C3AED" : C.brandBorder,
+                        border: `2px solid ${C.paper}`,
+                      }}
+                    />
+                    <p style={{ fontSize: 13, fontWeight: 700, color: C.ink, margin: 0, lineHeight: 1.3 }}>
+                      {e.status_details || e.status}
+                    </p>
+                    <p style={{ fontSize: 11, color: C.muted, margin: "2px 0 0" }}>
+                      {[when, place].filter(Boolean).join(" · ")}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
           </section>
         )}
 
