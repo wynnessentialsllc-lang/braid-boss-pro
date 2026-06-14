@@ -94,6 +94,9 @@ export default function ProductDetailPage() {
       return "";
     }
   });
+  // Optional buyer free-text — only sent when fulMethod === 'pickup'.
+  // Stylist sees it in the order detail; no scheduling logic at this level.
+  const [pickupPreferredTime, setPickupPreferredTime] = useState("");
   const [deliveryCheck, setDeliveryCheck] = useState<
     { status: "idle" | "checking" | "ok" | "out" | "error"; miles?: number; radius?: number }
   >({ status: "idle" });
@@ -303,6 +306,7 @@ export default function ProductDetailPage() {
           // hasn't enabled any — server then uses legacy behavior).
           fulfillment_method: ful ? fulMethod : null,
           delivery_zip: fulMethod === "delivery" ? deliveryZip.trim() || null : null,
+          pickup_preferred_time: fulMethod === "pickup" ? pickupPreferredTime.trim() || null : null,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -735,6 +739,28 @@ export default function ProductDetailPage() {
             <p className="text-[11px] mt-2" style={{ color: C.muted, lineHeight: 1.5 }}>
               {ful.pickup_instructions}
             </p>
+          )}
+          {fulMethod === "pickup" && (
+            <div className="mt-2.5 flex flex-col gap-1">
+              <input
+                type="text"
+                value={pickupPreferredTime}
+                onChange={(e) => setPickupPreferredTime(e.target.value.slice(0, 200))}
+                placeholder="Preferred pickup time (optional)"
+                maxLength={200}
+                className="w-full rounded-xl px-3.5 py-3 text-[13px]"
+                style={{
+                  border: `1px solid ${C.brandBorder}`,
+                  background: "#FFFFFF",
+                  color: C.brandText,
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+              <span className="text-[11px]" style={{ color: C.muted, lineHeight: 1.3 }}>
+                e.g. &quot;Friday after 5pm.&quot; Your stylist will confirm.
+              </span>
+            </div>
           )}
           {deliveryLimited && (
             <div className="mt-2.5">
