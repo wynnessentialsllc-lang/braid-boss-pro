@@ -193,6 +193,24 @@ export async function POST(req: Request) {
   if (rpcErr) {
     return NextResponse.json({ error: rpcErr.message }, { status: 500 });
   }
+  // Payment succeeded — mark_product_order_paid has already done the
+  // real inventory decrement. Release the corresponding TTL reservation
+  // so available stock doesn't get double-subtracted (inventory − real
+  // decrement − reservation = wrong) when the next reserve runs.
+  // Best-effort; a release failure doesn't break the order.
+  try {
+    const { data: paidOrder } = await admin
+      .from("product_orders")
+      .select("id")
+      .eq("stripe_session_id", sessionId || "")
+      .maybeSingle();
+    if (paidOrder?.id) {
+      await admin.rpc("release_inventory_for_order", { p_order_id: paidOrder.id });
+    }
+  } catch (e: any) {
+    console.warn(`[product-checkout-webhook] reservation release failed: ${e?.message || e}`);
+  }
+
   if (marked === false) {
     // No matching row — the pre-insert in the checkout route never
     // wrote the order (rare). Ack so Stripe doesn't retry forever.
