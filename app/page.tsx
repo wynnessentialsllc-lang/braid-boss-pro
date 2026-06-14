@@ -2726,10 +2726,12 @@ const TabBar = ({ active, setActive }: {
 }) => {
   const tabs = [
     { id: "dashboard", label: "Home", icon: Home },
-    // Tab id stays "studio" for back-compat with every active===
-    // "studio" check across the codebase; only the visible label is
-    // updated since the tab routes to the SettingsScreen.
-    { id: "studio", label: "Settings", icon: SettingsIcon },
+    // Settings is intentionally NOT a bottom-nav tab: it's pure config,
+    // the least-frequently used surface, and already reachable from the
+    // gear on the Home header (openSettings → secondary "settings"). The
+    // `active === "studio"` render branch + deep links still work, so
+    // anything that routes there keeps functioning — we only drop the
+    // button so Checkout fits without crowding the bar.
     { id: "calculator", label: "Quote", icon: CalcIcon },
     { id: "schedule", label: "Schedule", icon: Calendar },
     { id: "clients", label: "Clients", icon: Users },
