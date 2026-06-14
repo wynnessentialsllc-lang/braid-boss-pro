@@ -238,6 +238,10 @@ export const CartDrawer = () => {
   // shop hasn't configured any, so checkout behaves exactly as before.
   const [ful, setFul] = useState<ShopFulfillment | null>(null);
   const [method, setMethod] = useState<FulfillmentMethod | null>(null);
+  // Optional "preferred pickup time" the buyer types — only used when
+  // method === 'pickup'. Free text, server-capped to 200 chars + sanitized.
+  // Stylist sees it on the order detail; no scheduling logic at this level.
+  const [pickupPreferredTime, setPickupPreferredTime] = useState("");
   // Local-delivery radius check.
   const [deliveryZip, setDeliveryZip] = useState(() => readSavedAddress().deliveryZip || "");
   const [deliveryCheck, setDeliveryCheck] = useState<
@@ -494,6 +498,7 @@ export const CartDrawer = () => {
           gift_card_code: giftCardCode.trim() || null,
           fulfillment_method: ful ? method : null,
           delivery_zip: method === "delivery" ? deliveryZip.trim() || null : null,
+          pickup_preferred_time: method === "pickup" ? pickupPreferredTime.trim() || null : null,
           shipping_rate_id: carrierShipping ? pickedRateId : null,
         }),
       });
@@ -731,6 +736,31 @@ export const CartDrawer = () => {
                     </button>
                   );
                 })}
+              {method === "pickup" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <input
+                    type="text"
+                    value={pickupPreferredTime}
+                    onChange={(e) => setPickupPreferredTime(e.target.value.slice(0, 200))}
+                    placeholder="Preferred pickup time (optional)"
+                    maxLength={200}
+                    style={{
+                      width: "100%",
+                      padding: "11px 14px",
+                      borderRadius: 12,
+                      border: `1px solid ${C.brandBorder}`,
+                      background: "#FFFFFF",
+                      color: C.ink,
+                      fontSize: 13,
+                      outline: "none",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  <span style={{ fontSize: 11, color: C.muted, lineHeight: 1.3 }}>
+                    e.g. &quot;Friday after 5pm&quot; or &quot;Saturday morning.&quot; Your stylist will confirm.
+                  </span>
+                </div>
+              )}
               {deliveryLimited && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <input

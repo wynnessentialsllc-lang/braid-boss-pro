@@ -32106,6 +32106,10 @@ type OrderRow = {
   // alongside paid_at to tell real pending-payment orders apart from
   // abandoned-cart pre-inserts.
   stripe_payment_intent: string | null;
+  // Optional buyer-supplied preferred pickup time, free-text, captured at
+  // checkout for pickup-method orders. Surfaced on the stylist's order
+  // detail sheet so they can confirm via DM/email/SMS.
+  pickup_preferred_time: string | null;
   // Soft-archive timestamp for abandoned-cart rows. Archived rows are
   // hidden from the Abandoned tab but recoverable from the Archived
   // tab. Set by archive_product_order / bulk_archive_product_orders.
@@ -32767,6 +32771,14 @@ const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
                   <p className="text-[12px] mt-2" style={{ color: C.coffee, lineHeight: 1.4 }}>
                     {[openOrder.shipping_address?.line1, openOrder.shipping_address?.line2, [openOrder.shipping_address?.city, openOrder.shipping_address?.state, openOrder.shipping_address?.postal_code].filter(Boolean).join(", ")].filter(Boolean).join(" · ")}
                   </p>
+                )}
+                {openOrder.pickup_preferred_time && (
+                  <div className="mt-2 p-2.5 rounded-xl" style={{ background: "rgba(124,58,237,0.06)", border: `1px solid ${C.hairline}` }}>
+                    <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.brandPrimary, letterSpacing: "0.14em" }}>Preferred pickup time</p>
+                    <p className="text-[13px] mt-1" style={{ color: C.espresso, lineHeight: 1.4 }}>
+                      {openOrder.pickup_preferred_time}
+                    </p>
+                  </div>
                 )}
                 <p className="text-[11px] mt-2" style={{ color: C.muted }}>Order ref: <span style={{ fontFamily: "monospace" }}>{openOrder.customer_token}</span></p>
               </Card>

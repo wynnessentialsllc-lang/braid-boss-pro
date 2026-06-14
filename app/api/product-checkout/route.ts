@@ -71,6 +71,7 @@ export async function POST(req: Request) {
     gift_card_code?: string | null;
     fulfillment_method?: string | null;
     delivery_zip?: string | null;
+    pickup_preferred_time?: string | null;
     shipping_rate_id?: string | null;
     items?: Array<{ product_slug?: string; quantity?: number; variant_id?: string | null; custom_amount?: number | null }>;
   };
@@ -90,6 +91,15 @@ export async function POST(req: Request) {
     return m === "shipping" || m === "delivery" || m === "pickup" ? m : null;
   })();
   const deliveryZip = String(body?.delivery_zip || "").trim();
+  // Optional free-text "preferred pickup time" — only honored for pickup
+  // orders. Hard-cap to 200 chars to match the server-side check, and skip
+  // common HTML / control bytes a bot might toss in.
+  const pickupPreferredTime =
+    String(body?.pickup_preferred_time || "")
+      .replace(/[<>]/g, "")
+      .replace(/[\u0000-\u001f]/g, "")
+      .trim()
+      .slice(0, 200) || null;
   // Buyer's picked Shippo rate id (live-carrier shipping mode). The checkout
   // re-fetches the rate from Shippo to confirm the amount before charging,
   // so a tampered id can't undercut the real shipping fee.
@@ -444,6 +454,11 @@ export async function POST(req: Request) {
       subtotal: subtotalDollars.toFixed(2),
       shipping_cost: (shippingFeeCents / 100).toFixed(2),
       fulfillment_method: fulfillmentMethod,
+      // Pickup-only field; sanitized + length-capped above and ignored by
+      // the DB when method isn't 'pickup'. We only persist when the order
+      // is actually a pickup so a stray field on a shipping order can't
+      // pollute the row.
+      pickup_preferred_time: fulfillmentMethod === "pickup" ? pickupPreferredTime : null,
       application_fee: applicationFeeCents > 0 ? (applicationFeeCents / 100).toFixed(2) : null,
       currency: "usd",
       shipping_required: collectShippingAddress,
