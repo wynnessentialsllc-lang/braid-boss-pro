@@ -463,6 +463,11 @@ import {
   type CaptionResult,
   type PlanResult,
 } from "./lib/social-ai";
+import {
+  type NudgeResult,
+  type RebookChannel,
+  type RebookTone,
+} from "./lib/rebooking-ai";
 import { buildCsv } from "./lib/csv";
 import ImportStudio, { IMPORT_TAGLINE } from "./components/ImportStudio";
 import { deriveClientInsights, formatLastBookedHint } from "./lib/client-insights";
@@ -3230,6 +3235,70 @@ const RebookingScreen = ({
     });
   };
 
+  // ---- AI personalization ----------------------------------------------
+  const [aiOp, setAiOp] = useState<RebookingOpportunity | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiChannel, setAiChannel] = useState<RebookChannel>("sms");
+  const [aiTone, setAiTone] = useState<RebookTone | "auto">("auto");
+  const [aiOffer, setAiOffer] = useState("");
+  const [aiResult, setAiResult] = useState<NudgeResult | null>(null);
+  const [aiCopied, setAiCopied] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  const openAi = (op: RebookingOpportunity) => {
+    setAiOp(op); setAiResult(null); setAiError(null);
+    setAiOffer(""); setAiChannel("sms"); setAiTone("auto");
+  };
+
+  const generateNudge = async () => {
+    const op = aiOp;
+    if (!op) return;
+    setAiBusy(true); setAiResult(null); setAiError(null);
+    try {
+      const { data: sess } = await getSupabase().auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) { setAiError("Please sign in again."); return; }
+      const c = clients.find((x: any) => x?.id === op.client_id) || { id: op.client_id, name: op.client_name };
+      const insights = deriveClientInsights(c, appointments, today);
+      const res = await fetch("/api/rebooking-ai", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          access_token: token,
+          kind: "nudge",
+          channel: aiChannel,
+          tone: aiTone === "auto" ? undefined : aiTone,
+          offer: aiOffer.trim(),
+          brief: {
+            firstName: op.client_name,
+            lastStyle: op.last_style,
+            daysOverdue: op.days_overdue,
+            visitCount: insights.visitCount,
+            isVip: insights.isVip,
+            lifetimeSpend: insights.lifetimeSpend,
+          },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setAiError(data?.error || "Couldn't generate that."); return; }
+      setAiResult(data.result as NudgeResult);
+    } catch {
+      setAiError("Couldn't reach the AI. Try again.");
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const copyAiResult = async () => {
+    if (!aiResult) return;
+    const text = aiResult.channel === "sms"
+      ? aiResult.message
+      : `${aiResult.subject}\n\n${aiResult.body}`;
+    const ok = await copyTextToClipboard(text);
+    setAiCopied(ok);
+    window.setTimeout(() => setAiCopied(false), 1600);
+  };
+
   const FILTERS: { id: "all" | RebookingUrgency; label: string; count: number }[] = [
     { id: "all", label: "All", count: summary.total },
     { id: "high", label: "High", count: summary.high },
@@ -3338,6 +3407,11 @@ const RebookingScreen = ({
                     {copiedId === op.client_id ? "Copied" : "Copy message"}
                   </button>
                 </div>
+                <button type="button" onClick={() => openAi(op)}
+                  className="w-full mt-2 px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition flex items-center justify-center gap-1.5"
+                  style={{ background: C.espresso, color: C.cream, letterSpacing: "0.08em" }}>
+                  <Sparkles size={13} /> Personalize with AI
+                </button>
                 <button type="button" onClick={() => setDismissOp(op)}
                   className="w-full mt-2 flex items-center justify-center gap-1.5 text-[11px] font-semibold active:scale-[0.98] transition"
                   style={{ color: C.muted }}>
@@ -3360,6 +3434,80 @@ const RebookingScreen = ({
             <Button variant="outline" fullWidth onClick={() => applyMute(dismissOp, { rebookingSnoozedUntil: rebookingSnoozeUntil(today, 12), rebookingOptOut: false })}>Snooze 3 months</Button>
             <Button variant="outline" fullWidth icon={<BellOff size={16} />} onClick={() => applyMute(dismissOp, { rebookingOptOut: true, rebookingSnoozedUntil: null })}>Stop reminders (taking a break)</Button>
             <p className="text-[11px] pt-1" style={{ color: C.muted }}>You can resume reminders anytime from {dismissOp.client_name.split(" ")[0]}&apos;s profile.</p>
+          </div>
+        )}
+      </Sheet>
+
+      {/* Personalize with AI */}
+      <Sheet open={!!aiOp} onClose={() => setAiOp(null)} title={aiOp ? `Message ${aiOp.client_name.split(" ")[0]}` : "Personalize"}>
+        {aiOp && (
+          <div className="space-y-3.5 pb-2">
+            <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+              I&apos;ll write a personalized rebooking message using {aiOp.client_name.split(" ")[0]}&apos;s history
+              {aiOp.last_style ? <> — last in for <span className="font-semibold">{aiOp.last_style}</span></> : ""}.
+            </p>
+
+            {/* Channel */}
+            <div className="grid grid-cols-2 gap-2">
+              {(["sms", "email"] as RebookChannel[]).map((ch) => (
+                <button key={ch} type="button" onClick={() => setAiChannel(ch)}
+                  className="rounded-full py-2 text-[12px] font-semibold transition"
+                  style={aiChannel === ch
+                    ? { background: C.espresso, color: C.cream }
+                    : { background: C.paper, color: C.espresso, border: `1px solid ${C.hairline}` }}>
+                  {ch === "sms" ? "Text / DM" : "Email"}
+                </button>
+              ))}
+            </div>
+
+            {/* Tone */}
+            <div className="flex gap-2 overflow-x-auto bbp-scroll -mx-1 px-1">
+              {(["auto", "warm", "professional", "playful", "vip"] as const).map((t) => (
+                <button key={t} type="button" onClick={() => setAiTone(t)}
+                  className="px-3 py-1.5 rounded-full text-[11px] font-semibold shrink-0 capitalize transition"
+                  style={aiTone === t
+                    ? { background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}` }
+                    : { background: C.cream, color: C.coffee, border: `1px solid ${C.hairline}` }}>
+                  {t === "auto" ? "Auto tone" : t}
+                </button>
+              ))}
+            </div>
+
+            {/* Optional offer */}
+            <input
+              value={aiOffer}
+              onChange={(e) => setAiOffer(e.target.value)}
+              placeholder="Optional offer to include — e.g. $20 off this month"
+              className="w-full rounded-xl px-3 py-2.5 text-[13px]"
+              style={{ background: C.paper, color: C.espresso, border: `1px solid ${C.hairline}` }}
+            />
+            <p className="text-[10.5px] -mt-1.5" style={{ color: C.muted }}>
+              Leave blank for no discount — I never invent offers.
+            </p>
+
+            <button type="button" disabled={aiBusy} onClick={generateNudge}
+              className="w-full rounded-full py-3 text-[13px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2"
+              style={{ background: C.espresso, color: C.cream, opacity: aiBusy ? 0.6 : 1 }}>
+              <Sparkles size={16} /> {aiBusy ? "Writing…" : aiResult ? "Rewrite" : "Write message"}
+            </button>
+
+            {aiError && <p className="text-[12px] text-center" style={{ color: C.danger }}>{aiError}</p>}
+
+            {aiResult && (
+              <div className="rounded-xl p-3.5" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+                {aiResult.channel === "email" && (
+                  <p className="text-[13px] font-bold mb-1.5" style={{ color: C.espresso }}>{aiResult.subject}</p>
+                )}
+                <p className="text-[13px] whitespace-pre-wrap" style={{ color: C.coffee, lineHeight: 1.55 }}>
+                  {aiResult.channel === "sms" ? aiResult.message : aiResult.body}
+                </p>
+                <button type="button" onClick={copyAiResult}
+                  className="mt-3 w-full rounded-full py-2.5 text-[12px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-1.5"
+                  style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}` }}>
+                  <Copy size={14} /> {aiCopied ? "Copied" : aiResult.channel === "sms" ? "Copy message" : "Copy email"}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </Sheet>
