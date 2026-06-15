@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { useParams, useRouter } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
 import BuildYourStyle from "../../components/booking/BuildYourStyle";
+import BookingConcierge from "../../components/booking/BookingConcierge";
 import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LABEL } from "../../lib/waitlist";
 import { emitAnalyticsEvent } from "../../lib/analytics-events";
 import { SMS_ENABLED } from "../../lib/features";
@@ -2963,6 +2964,20 @@ export default function PublicBookingPage() {
                     </p>
                   );
                 })()}
+                {/* Booking concierge — instant Q&A from the stylist's
+                    real catalog + policy. Sits above "Build your style"
+                    so a client can ask before browsing; "Book this"
+                    selects the suggested service in the menu below. */}
+                {link?.user_id && (
+                  <div style={{ marginBottom: 12 }}>
+                    <BookingConcierge
+                      slug={slug}
+                      accent={accent}
+                      businessName={link.business_name}
+                      onPickService={setServiceId}
+                    />
+                  </div>
+                )}
                 {/* Build your style — AI consultation for clients who
                     don't see the style they want. Sits between the
                     category browse and the service menu so a client who
