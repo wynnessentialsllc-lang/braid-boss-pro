@@ -5,9 +5,12 @@ import {
   parseConciergeReply,
   formatOpenDay,
   buildAvailabilityNote,
+  formatClock,
+  buildHoursNote,
   CONCIERGE_MAX_MESSAGES,
   CONCIERGE_MAX_CHARS,
   type ConciergeServiceLite,
+  type BusinessHoursRow,
 } from "./concierge";
 
 const services: ConciergeServiceLite[] = [
@@ -153,5 +156,61 @@ describe("buildSystemPrompt with availability", () => {
   it("falls back to the calendar when no availability is given", () => {
     const prompt = buildSystemPrompt({ businessName: "Boss Braids", currency: "USD", services: [] });
     expect(prompt).toContain("cannot see the live calendar");
+  });
+});
+
+describe("formatClock", () => {
+  it("formats 24h times into friendly 12h labels", () => {
+    expect(formatClock("09:00")).toBe("9 AM");
+    expect(formatClock("09:30")).toBe("9:30 AM");
+    expect(formatClock("13:30")).toBe("1:30 PM");
+    expect(formatClock("00:00")).toBe("12 AM");
+    expect(formatClock("12:00")).toBe("12 PM");
+    expect(formatClock("18:00")).toBe("6 PM");
+  });
+  it("passes through malformed input", () => {
+    expect(formatClock("nope")).toBe("nope");
+    expect(formatClock(null)).toBe("");
+  });
+});
+
+describe("buildHoursNote", () => {
+  const rules: BusinessHoursRow[] = [
+    { weekday: 0, is_open: false, start_time: "10:00", end_time: "16:00", break_start: null, break_end: null },
+    { weekday: 1, is_open: false, start_time: "10:00", end_time: "16:00", break_start: null, break_end: null },
+    { weekday: 2, is_open: true, start_time: "09:00", end_time: "18:00", break_start: "12:30", break_end: "13:30" },
+    { weekday: 6, is_open: true, start_time: "09:00", end_time: "16:00", break_start: null, break_end: null },
+  ];
+  it("summarizes open days with hours + breaks and lists closed days", () => {
+    const note = buildHoursNote(rules);
+    expect(note).toBe(
+      "Open Tuesday 9 AM–6 PM (break 12:30 PM–1:30 PM), Saturday 9 AM–4 PM. " +
+        "Closed Sunday, Monday, Wednesday, Thursday, Friday.",
+    );
+  });
+  it("returns null when nothing usable is configured", () => {
+    expect(buildHoursNote(null)).toBeNull();
+    expect(buildHoursNote([])).toBeNull();
+    expect(buildHoursNote([{ weekday: 1, is_open: false }])).toBeNull();
+    // Open flag but no window -> not usable.
+    expect(buildHoursNote([{ weekday: 1, is_open: true, start_time: null, end_time: null }])).toBeNull();
+  });
+  it("omits the break clause when none is set", () => {
+    const note = buildHoursNote([
+      { weekday: 6, is_open: true, start_time: "09:00", end_time: "16:00" },
+    ]);
+    expect(note).toBe("Open Saturday 9 AM–4 PM. Closed Sunday, Monday, Tuesday, Wednesday, Thursday, Friday.");
+  });
+});
+
+describe("buildSystemPrompt with hours", () => {
+  it("includes the weekly hours and lets the assistant answer day/hours questions", () => {
+    const prompt = buildSystemPrompt({
+      businessName: "Boss Braids", currency: "USD", services: [],
+      hoursNote: "Open Tuesday 9 AM–6 PM. Closed Sunday, Monday.",
+    });
+    expect(prompt).toContain("Open Tuesday 9 AM–6 PM. Closed Sunday, Monday.");
+    expect(prompt.toLowerCase()).toContain("hours of operation");
+    expect(prompt).toContain("are you open on <day>?");
   });
 });

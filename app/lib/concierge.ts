@@ -42,6 +42,14 @@ export interface ConciergeContext {
    * assistant may answer "when are you free?" from it.
    */
   availabilityNote?: string | null;
+  /**
+   * Human-readable summary of the recurring weekly hours of operation
+   * (e.g. "Open Tue 9 AM–6 PM, … Sat 9 AM–4 PM. Closed Sun, Mon."), or
+   * null when the schedule is unknown. When present the assistant may
+   * answer "what are your hours?", "what days are you open?", and
+   * "are you open on <weekday>?" from it.
+   */
+  hoursNote?: string | null;
 }
 
 // Conversation + per-message caps. The history is client-supplied (the
@@ -120,13 +128,22 @@ export const buildSystemPrompt = (ctx: ConciergeContext): string => {
     ? `- For "when are you free?", you MAY share the next open days listed under Availability below, then tell them to pick an exact time on the booking calendar on this page. Never invent days that aren't listed; if asked about a day not listed, say it looks full and suggest the listed ones.`
     : `- You cannot see the live calendar. For "when are you free?" or specific dates, tell them to pick a date on the booking calendar on this page.`;
 
+  const hours = ctx.hoursNote?.trim() || "";
+  // Hours of operation are the recurring weekly schedule — distinct from the
+  // live openings above. With them the assistant can answer "what are your
+  // hours?", "what days are you open?", and "are you open on Saturdays?".
+  const hoursRule = hours
+    ? `- For questions about hours, which days they're open, or "are you open on <day>?", answer directly from the Hours line below. If a day isn't in the open list, say they're closed that day and name the days they are open. These are regular weekly hours, so still send them to the booking calendar to lock an exact appointment time.`
+    : `- If asked about hours or which days they're open and it's not listed below, say you'll let the stylist confirm and point them to the booking calendar on this page.`;
+
   return [
     `You are the friendly booking assistant for ${biz}, a hair-braiding studio. You help clients on the booking page understand the services and decide what to book.`,
     "",
     "Rules:",
-    `- Answer ONLY from the catalog, policy, and availability below. Never invent services, prices, durations, or open days.`,
+    `- Answer ONLY from the catalog, policy, hours, and availability below. Never invent services, prices, durations, open days, or hours.`,
     `- Do not state a price the catalog doesn't list. If a client asks "how much", name the matching service and let its listed price speak; never make up a number or a discount.`,
     calendarRule,
+    hoursRule,
     `- You never take payment or finalize a booking. Custom styles go to the stylist for review.`,
     `- Keep replies short and warm — 1 to 3 sentences. Use emoji sparingly, at most one.`,
     `- When one catalog service clearly fits what they want, set suggestedServiceId to that service's id so the page can highlight it.`,
@@ -136,6 +153,7 @@ export const buildSystemPrompt = (ctx: ConciergeContext): string => {
     "Catalog:",
     lines,
     policy,
+    hours ? `\nHours — regular weekly hours of operation: ${hours}` : "",
     avail ? `\nAvailability — next open days (times shown on the calendar): ${avail}` : "",
   ].join("\n");
 };
@@ -230,4 +248,68 @@ export const buildAvailabilityNote = (
     .slice(0, maxDays);
   if (!open.length) return null;
   return open.map((r) => formatOpenDay(r.day_iso)).join(", ");
+};
+
+// ---- business hours ----------------------------------------------------
+
+export interface BusinessHoursRow {
+  weekday: number;          // 0 = Sunday … 6 = Saturday
+  is_open: boolean;
+  start_time?: string | null; // "HH:mm"
+  end_time?: string | null;   // "HH:mm"
+  break_start?: string | null;
+  break_end?: string | null;
+}
+
+const FULL_WEEKDAY = [
+  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+];
+
+/** "09:00" -> "9 AM", "09:30" -> "9:30 AM", "13:30" -> "1:30 PM". */
+export const formatClock = (hhmm: string | null | undefined): string => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((hhmm || "").trim());
+  if (!m) return (hhmm || "").trim();
+  let h = +m[1];
+  const min = +m[2];
+  const period = h >= 12 ? "PM" : "AM";
+  h = ((h + 11) % 12) + 1;
+  return min === 0 ? `${h} ${period}` : `${h}:${String(min).padStart(2, "0")} ${period}`;
+};
+
+/**
+ * Summarize weekly availability rules into a single human line for the
+ * prompt, e.g. "Open Tue 9 AM–6 PM (break 12:30 PM–1:30 PM), … Sat 9 AM–4
+ * PM. Closed Sun, Mon." Returns null when no usable schedule is configured,
+ * so the assistant falls back to "I'll let the stylist confirm".
+ */
+export const buildHoursNote = (
+  rows: BusinessHoursRow[] | null | undefined,
+): string | null => {
+  if (!Array.isArray(rows) || !rows.length) return null;
+  const byDay = new Map<number, BusinessHoursRow>();
+  for (const r of rows) {
+    if (r && Number.isInteger(r.weekday) && r.weekday >= 0 && r.weekday <= 6) {
+      byDay.set(r.weekday, r);
+    }
+  }
+  if (!byDay.size) return null;
+
+  const openParts: string[] = [];
+  const closed: string[] = [];
+  for (let wd = 0; wd <= 6; wd++) {
+    const r = byDay.get(wd);
+    if (!r || !r.is_open || !r.start_time || !r.end_time) {
+      closed.push(FULL_WEEKDAY[wd]);
+      continue;
+    }
+    let part = `${FULL_WEEKDAY[wd]} ${formatClock(r.start_time)}–${formatClock(r.end_time)}`;
+    if (r.break_start && r.break_end) {
+      part += ` (break ${formatClock(r.break_start)}–${formatClock(r.break_end)})`;
+    }
+    openParts.push(part);
+  }
+  if (!openParts.length) return null;
+
+  const note = `Open ${openParts.join(", ")}.`;
+  return closed.length ? `${note} Closed ${closed.join(", ")}.` : note;
 };
