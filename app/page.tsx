@@ -18779,6 +18779,33 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
             <Card
               className="p-4 active:scale-[0.99]"
               onClick={() => {
+                if (typeof window !== "undefined") window.location.assign("/admin");
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div
+                    aria-hidden
+                    style={{
+                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                      background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
+                    }}
+                  >
+                    <Crown size={15} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold" style={{ color: C.espresso }}>Command center</p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      Revenue, braiders &amp; activation · admin only
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight size={18} style={{ color: C.muted }} />
+              </div>
+            </Card>
+            <Card
+              className="p-4 active:scale-[0.99]"
+              onClick={() => {
                 if (typeof window !== "undefined") window.location.assign("/admin/analytics");
               }}
             >
@@ -18796,7 +18823,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold" style={{ color: C.espresso }}>Analytics</p>
                     <p className="text-[11px]" style={{ color: C.muted }}>
-                      Pre-launch dashboard · admin only
+                      Event funnel &amp; feature usage · admin only
                     </p>
                   </div>
                 </div>
