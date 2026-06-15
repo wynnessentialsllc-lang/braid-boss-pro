@@ -495,6 +495,9 @@ export default function PublicBookingPage() {
   // so existing booking links keep working during the rollout.
   const [catalog, setCatalog] = useState<PublicService[]>([]);
   const [serviceId, setServiceId] = useState<string>("");
+  // "Send a photo for a quote" — folded into the booking assistant. The
+  // style builder stays hidden until the client taps that action.
+  const [showStyleBuilder, setShowStyleBuilder] = useState(false);
   // Picked variation (one of service.add_ons). "" = no variation
   // selected; the resolver then falls back to the parent service.
   const [selectedVariationId, setSelectedVariationId] = useState<string>("");
@@ -2975,16 +2978,23 @@ export default function PublicBookingPage() {
                       accent={accent}
                       businessName={link.business_name}
                       onPickService={setServiceId}
+                      onSendPhoto={() => {
+                        setShowStyleBuilder(true);
+                        // Let the builder mount, then scroll it into view.
+                        setTimeout(() => {
+                          document.getElementById("bbp-style-builder")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }, 60);
+                      }}
                     />
                   </div>
                 )}
-                {/* Build your style — AI consultation for clients who
-                    don't see the style they want. Sits between the
-                    category browse and the service menu so a client who
-                    scanned the categories and still didn't find their
-                    look can build it before scrolling the full list. */}
-                {link?.user_id && (
-                  <BuildYourStyle slug={slug} userId={link.user_id} accent={accent} />
+                {/* Build your style — folded into the assistant above. It
+                    stays hidden until the client taps "Send a photo for a
+                    quote", then opens expanded right here. */}
+                {link?.user_id && showStyleBuilder && (
+                  <div id="bbp-style-builder" style={{ marginBottom: 12 }}>
+                    <BuildYourStyle slug={slug} userId={link.user_id} accent={accent} autoOpen />
+                  </div>
                 )}
                 {/* Acuity-style service menu. The dropdown was hidden
                     behind a tap; cards put every option in front of

@@ -36,6 +36,12 @@ export interface ConciergeContext {
   services: ConciergeServiceLite[];
   /** One-line summary of the no-show / cancellation policy, or null. */
   noShowFeeNote?: string | null;
+  /**
+   * Human-readable summary of the next open days (e.g. "Tue Jun 17, Thu Jun
+   * 19, Sat Jun 21"), or null when availability is unknown. When present the
+   * assistant may answer "when are you free?" from it.
+   */
+  availabilityNote?: string | null;
 }
 
 // Conversation + per-message caps. The history is client-supplied (the
@@ -106,13 +112,21 @@ export const buildSystemPrompt = (ctx: ConciergeContext): string => {
     ? `\nPolicy: ${ctx.noShowFeeNote.trim()}`
     : "";
 
+  const avail = ctx.availabilityNote?.trim() || "";
+  // The calendar rule changes depending on whether we have live openings to
+  // share. With openings, the assistant can name the next free days but must
+  // still send the client to the calendar to lock an exact time.
+  const calendarRule = avail
+    ? `- For "when are you free?", you MAY share the next open days listed under Availability below, then tell them to pick an exact time on the booking calendar on this page. Never invent days that aren't listed; if asked about a day not listed, say it looks full and suggest the listed ones.`
+    : `- You cannot see the live calendar. For "when are you free?" or specific dates, tell them to pick a date on the booking calendar on this page.`;
+
   return [
     `You are the friendly booking assistant for ${biz}, a hair-braiding studio. You help clients on the booking page understand the services and decide what to book.`,
     "",
     "Rules:",
-    `- Answer ONLY from the catalog and policy below. Never invent services, prices, durations, or availability.`,
+    `- Answer ONLY from the catalog, policy, and availability below. Never invent services, prices, durations, or open days.`,
     `- Do not state a price the catalog doesn't list. If a client asks "how much", name the matching service and let its listed price speak; never make up a number or a discount.`,
-    `- You cannot see the live calendar. For "when are you free?" or specific dates, tell them to pick a date on the booking calendar on this page.`,
+    calendarRule,
     `- You never take payment or finalize a booking. Custom styles go to the stylist for review.`,
     `- Keep replies short and warm — 1 to 3 sentences. Use emoji sparingly, at most one.`,
     `- When one catalog service clearly fits what they want, set suggestedServiceId to that service's id so the page can highlight it.`,
@@ -122,6 +136,7 @@ export const buildSystemPrompt = (ctx: ConciergeContext): string => {
     "Catalog:",
     lines,
     policy,
+    avail ? `\nAvailability — next open days (times shown on the calendar): ${avail}` : "",
   ].join("\n");
 };
 
@@ -176,4 +191,43 @@ export const parseConciergeReply = (
     suggestedServiceId,
     readyToBook: obj.readyToBook === true,
   };
+};
+
+// ---- availability ------------------------------------------------------
+
+export interface MonthAvailabilityRow {
+  day_iso: string;
+  slot_count: number;
+  status?: string | null;
+}
+
+const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "2026-06-17" -> "Tue Jun 17" (UTC-safe, no Date tz drift). */
+export const formatOpenDay = (iso: string): string => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  if (!m) return iso;
+  const [, y, mo, d] = m;
+  const wd = new Date(Date.UTC(+y, +mo - 1, +d)).getUTCDay();
+  return `${WEEKDAY[wd]} ${MONTH[+mo - 1]} ${+d}`;
+};
+
+/**
+ * Summarize month-availability rows into the next few open days from today,
+ * as a compact human string for the prompt. Returns null when nothing's open.
+ */
+export const buildAvailabilityNote = (
+  rows: MonthAvailabilityRow[] | null | undefined,
+  todayIso: string,
+  maxDays = 6,
+): string | null => {
+  if (!Array.isArray(rows)) return null;
+  const open = rows
+    .filter((r) => r && typeof r.day_iso === "string" && r.day_iso >= todayIso)
+    .filter((r) => (Number(r.slot_count) || 0) > 0 || r.status === "open")
+    .sort((a, b) => a.day_iso.localeCompare(b.day_iso))
+    .slice(0, maxDays);
+  if (!open.length) return null;
+  return open.map((r) => formatOpenDay(r.day_iso)).join(", ");
 };
