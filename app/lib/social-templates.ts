@@ -87,6 +87,16 @@ const THEMES: Record<string, TemplateTheme> = {
   },
 };
 
+// Theme keys an AI-generated template may choose from. Exported so the
+// social-AI layer can have the model pick a palette by name and the UI can
+// rebuild a real TemplateTheme for the existing canvas renderer.
+export const SOCIAL_THEME_KEYS = ["blush", "lavender", "plum", "sunlit", "frost"] as const;
+export type SocialThemeKey = (typeof SOCIAL_THEME_KEYS)[number];
+
+/** Resolve a theme key to its palette, falling back to lavender. */
+export const getSocialTheme = (key: string | null | undefined): TemplateTheme =>
+  THEMES[(key || "").trim()] ?? THEMES.lavender;
+
 export const SOCIAL_TEMPLATES: SocialTemplate[] = [
   // ---- Gift cards -------------------------------------------------
   {

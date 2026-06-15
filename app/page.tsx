@@ -458,6 +458,11 @@ import {
   type SocialTemplate,
   type SocialBranding,
 } from "./lib/social-templates";
+import {
+  buildAiTemplate,
+  type CaptionResult,
+  type PlanResult,
+} from "./lib/social-ai";
 import { buildCsv } from "./lib/csv";
 import ImportStudio, { IMPORT_TAGLINE } from "./components/ImportStudio";
 import { deriveClientInsights, formatLastBookedHint } from "./lib/client-insights";
@@ -35068,6 +35073,53 @@ const SocialTemplateCanvas = ({
   );
 };
 
+// Shows an AI-generated caption + hashtags + best-time with a one-tap copy.
+const CaptionBlock = ({ caption, onCopy }: { caption: CaptionResult; onCopy: () => void }) => (
+  <div className="rounded-xl p-3 mt-3" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+    <p className="text-[13px] whitespace-pre-wrap" style={{ color: C.espresso, lineHeight: 1.5 }}>{caption.caption}</p>
+    {caption.hashtags.length > 0 && (
+      <p className="text-[12px] mt-2" style={{ color: C.muted, lineHeight: 1.5 }}>{caption.hashtags.join(" ")}</p>
+    )}
+    <div className="flex items-center justify-between mt-2.5">
+      {caption.bestTime
+        ? <span className="text-[11px] font-semibold flex items-center gap-1" style={{ color: C.coffee }}><Clock size={12} /> Best time: {caption.bestTime}</span>
+        : <span />}
+      <button
+        type="button"
+        onClick={onCopy}
+        className="text-[12px] font-semibold flex items-center gap-1 active:scale-[0.97] transition"
+        style={{ color: C.espresso }}
+      >
+        <Copy size={13} /> Copy
+      </button>
+    </div>
+  </div>
+);
+
+// Downscale a picked image to a base64 JPEG for the vision call (keeps the
+// request small). Mirrors the helper in BuildYourStyle.
+const imageFileToBase64 = (file: File, maxEdge = 1024): Promise<{ data: string; media_type: string }> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read failed"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("decode failed"));
+      img.onload = () => {
+        const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+        resolve({ data: dataUrl.slice(dataUrl.indexOf(",") + 1), media_type: "image/jpeg" });
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+
 const SocialTemplatesScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const userId: string | null = store.userId;
   const [businessName, setBusinessName] = useState<string>(store.business?.businessName || "Your Studio");
@@ -35078,6 +35130,110 @@ const SocialTemplatesScreen = ({ store, onBack }: { store: any; onBack: () => vo
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 1800); };
+
+  // ---- AI content studio state -----------------------------------------
+  const [aiBusy, setAiBusy] = useState(false);
+  const [caption, setCaption] = useState<CaptionResult | null>(null); // for the selected template
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<"prompt" | "photo">("prompt");
+  const [promptText, setPromptText] = useState("");
+  const [photoB64, setPhotoB64] = useState<{ data: string; media_type: string } | null>(null);
+  const [photoName, setPhotoName] = useState<string | null>(null);
+  const [genTemplate, setGenTemplate] = useState<SocialTemplate | null>(null);
+  const [genCaption, setGenCaption] = useState<CaptionResult | null>(null);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [plan, setPlan] = useState<PlanResult | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  // Open a template's detail sheet, clearing any caption from a prior one.
+  const openTemplate = (t: SocialTemplate) => { setSelected(t); setCaption(null); };
+
+  const authToken = async (): Promise<string | null> => {
+    const { data } = await getSupabase().auth.getSession();
+    return data?.session?.access_token || null;
+  };
+
+  const callSocialAi = async (payload: Record<string, unknown>): Promise<any | null> => {
+    const token = await authToken();
+    if (!token) { showToast("Please sign in again"); return null; }
+    const res = await fetch("/api/social-ai", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ access_token: token, ...payload }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(body?.error || "Couldn't generate that"); return null; }
+    return body.result ?? null;
+  };
+
+  const captionFor = (t: { name: string; headline: string; subhead: string }) => ({
+    name: t.name, headline: t.headline, subhead: t.subhead,
+  });
+
+  const generateCaption = async (t: SocialTemplate) => {
+    setAiBusy(true); setCaption(null);
+    try {
+      const result = await callSocialAi({ kind: "caption", template: captionFor(t) });
+      if (result) setCaption(result as CaptionResult);
+    } catch { showToast("Couldn't reach the AI"); }
+    finally { setAiBusy(false); }
+  };
+
+  const generateFromPrompt = async () => {
+    if (!promptText.trim()) return;
+    setAiBusy(true); setGenTemplate(null); setGenCaption(null);
+    try {
+      const result = await callSocialAi({ kind: "template", prompt: promptText.trim() });
+      if (result) setGenTemplate(buildAiTemplate(result));
+    } catch { showToast("Couldn't reach the AI"); }
+    finally { setAiBusy(false); }
+  };
+
+  const onPickPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoName(file.name);
+    try { setPhotoB64(await imageFileToBase64(file)); }
+    catch { showToast("Couldn't read that image"); setPhotoB64(null); setPhotoName(null); }
+  };
+
+  const generateFromPhoto = async () => {
+    if (!photoB64) { showToast("Add a photo first"); return; }
+    setAiBusy(true); setGenTemplate(null); setGenCaption(null);
+    try {
+      const result = await callSocialAi({
+        kind: "photo",
+        prompt: promptText.trim(),
+        image_base64: photoB64.data,
+        media_type: photoB64.media_type,
+      });
+      if (result) {
+        setGenTemplate(buildAiTemplate(result));
+        setGenCaption({ caption: result.caption, hashtags: result.hashtags, bestTime: result.bestTime });
+      }
+    } catch { showToast("Couldn't reach the AI"); }
+    finally { setAiBusy(false); }
+  };
+
+  const generatePlan = async () => {
+    setAiBusy(true); setPlan(null);
+    try {
+      const result = await callSocialAi({ kind: "plan" });
+      if (result) setPlan(result as PlanResult);
+    } catch { showToast("Couldn't reach the AI"); }
+    finally { setAiBusy(false); }
+  };
+
+  const copyCaption = async (c: CaptionResult) => {
+    const text = [c.caption, "", c.hashtags.join(" ")].join("\n").trim();
+    showToast((await copyTextToClipboard(text)) ? "Caption copied" : "Couldn't copy");
+  };
+
+  const resetCreate = () => {
+    setCreateOpen(false);
+    setPromptText(""); setPhotoB64(null); setPhotoName(null);
+    setGenTemplate(null); setGenCaption(null);
+  };
 
   // Pull branding off the public booking link so the post matches the
   // stylist's storefront — name, logo, accent color, and the URL the
@@ -35197,6 +35353,36 @@ const SocialTemplatesScreen = ({ store, onBack }: { store: any; onBack: () => vo
           </p>
         </Card>
 
+        {/* AI content studio — generate a fresh template, turn a finished
+            photo into a post, or plan a week. Captions live in the detail
+            sheet below. */}
+        <Card className="p-3.5" style={{ background: C.cream, border: `1px solid ${accentColor || C.gold}33` }}>
+          <p className="text-[11px] font-bold uppercase tracking-widest mb-2 flex items-center gap-1.5" style={{ color: accentColor || C.espresso, letterSpacing: "0.12em" }}>
+            <Sparkles size={13} /> AI content studio
+          </p>
+          <p className="text-[12px] mb-3" style={{ color: C.coffee, lineHeight: 1.5 }}>
+            Describe a promo or drop in a braid photo and I&apos;ll write the post — caption, hashtags, and a branded graphic in your colors.
+          </p>
+          <div className="grid grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => { setCreateMode("prompt"); setGenTemplate(null); setGenCaption(null); setCreateOpen(true); }}
+              className="rounded-xl py-2.5 text-[12px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-1.5"
+              style={{ background: C.espresso, color: C.cream }}
+            >
+              <Sparkles size={14} /> Create with AI
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPlan(null); setPlanOpen(true); }}
+              className="rounded-xl py-2.5 text-[12px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-1.5"
+              style={{ background: C.paper, color: C.espresso, border: `1px solid ${C.hairline}` }}
+            >
+              <Calendar size={14} /> Plan my week
+            </button>
+          </div>
+        </Card>
+
         {groups.map((g) => (
           <div key={g.category}>
             <SectionTitle>{SOCIAL_CATEGORY_LABELS[g.category]}</SectionTitle>
@@ -35205,7 +35391,7 @@ const SocialTemplatesScreen = ({ store, onBack }: { store: any; onBack: () => vo
                 <button
                   type="button"
                   key={t.id}
-                  onClick={() => setSelected(t)}
+                  onClick={() => openTemplate(t)}
                   className="text-left active:scale-[0.98] transition"
                 >
                   <SocialTemplateCanvas template={t} branding={branding} size={420} />
@@ -35245,8 +35431,146 @@ const SocialTemplatesScreen = ({ store, onBack }: { store: any; onBack: () => vo
             <p className="text-[11px] text-center" style={{ color: C.muted }}>
               Saves a square (1080×1080) image — perfect for an Instagram or TikTok post.
             </p>
+
+            {/* AI caption + hashtags for this graphic */}
+            <div className="pt-1">
+              <button
+                type="button"
+                disabled={aiBusy}
+                onClick={() => selected && generateCaption(selected)}
+                className="w-full rounded-full py-3 text-[13px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2"
+                style={{ background: C.cream, color: C.espresso, border: `1px solid ${(accentColor || C.gold)}55`, opacity: aiBusy ? 0.6 : 1 }}
+              >
+                <Sparkles size={16} /> {aiBusy && !caption ? "Writing…" : caption ? "Rewrite caption" : "Write a caption with AI"}
+              </button>
+              {caption && <CaptionBlock caption={caption} onCopy={() => copyCaption(caption)} />}
+            </div>
           </div>
         )}
+      </Sheet>
+
+      {/* Create with AI — prompt → template, or photo → post */}
+      <Sheet open={createOpen} onClose={resetCreate} title="Create with AI">
+        <div className="space-y-4 pb-2">
+          <div className="grid grid-cols-2 gap-2">
+            {(["prompt", "photo"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => { setCreateMode(mode); setGenTemplate(null); setGenCaption(null); }}
+                className="rounded-full py-2 text-[12px] font-semibold transition flex items-center justify-center gap-1.5"
+                style={createMode === mode
+                  ? { background: C.espresso, color: C.cream }
+                  : { background: C.paper, color: C.espresso, border: `1px solid ${C.hairline}` }}
+              >
+                {mode === "prompt" ? <><Sparkles size={14} /> From a prompt</> : <><Camera size={14} /> From a photo</>}
+              </button>
+            ))}
+          </div>
+
+          {createMode === "photo" && (
+            <div>
+              <input ref={photoInputRef} type="file" accept="image/*" onChange={onPickPhoto} style={{ display: "none" }} />
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                className="w-full rounded-xl py-3 text-[13px] text-left px-3"
+                style={{ background: C.paper, color: photoName ? C.espresso : C.muted, border: `1px solid ${C.hairline}` }}
+              >
+                {photoName ? `📷 ${photoName}` : "Tap to add a finished-braid photo"}
+              </button>
+            </div>
+          )}
+
+          <textarea
+            value={promptText}
+            onChange={(e) => setPromptText(e.target.value)}
+            rows={3}
+            placeholder={createMode === "prompt"
+              ? "Describe the promo — e.g. \"Friday flash sale, 20% off knotless\""
+              : "Optional: anything to mention about this style"}
+            className="w-full rounded-xl px-3 py-2.5 text-[13px]"
+            style={{ background: C.paper, color: C.espresso, border: `1px solid ${C.hairline}`, resize: "vertical" }}
+          />
+
+          <button
+            type="button"
+            disabled={aiBusy || (createMode === "prompt" ? !promptText.trim() : !photoB64)}
+            onClick={() => (createMode === "prompt" ? generateFromPrompt() : generateFromPhoto())}
+            className="w-full rounded-full py-3 text-[13px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2"
+            style={{ background: C.espresso, color: C.cream, opacity: aiBusy || (createMode === "prompt" ? !promptText.trim() : !photoB64) ? 0.6 : 1 }}
+          >
+            <Sparkles size={16} /> {aiBusy ? "Generating…" : genTemplate ? "Regenerate" : "Generate"}
+          </button>
+
+          {genTemplate && (
+            <div className="space-y-3 pt-1">
+              <SocialTemplateCanvas template={genTemplate} branding={branding} size={900} />
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => handleShare(genTemplate)}
+                  className="rounded-full py-3 text-[13px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2"
+                  style={{ background: C.paper, color: C.espresso, border: `1px solid ${C.hairline}`, opacity: busy ? 0.6 : 1 }}
+                >
+                  <Send size={16} /> Share
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => handleDownload(genTemplate)}
+                  className="rounded-full py-3 text-[13px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2"
+                  style={{ background: C.espresso, color: C.cream, opacity: busy ? 0.6 : 1 }}
+                >
+                  <Download size={16} /> {busy ? "Working…" : "Download"}
+                </button>
+              </div>
+              {genCaption && <CaptionBlock caption={genCaption} onCopy={() => copyCaption(genCaption)} />}
+            </div>
+          )}
+        </div>
+      </Sheet>
+
+      {/* Plan my week */}
+      <Sheet open={planOpen} onClose={() => setPlanOpen(false)} title="Plan my week">
+        <div className="space-y-3 pb-2">
+          <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+            Seven post ideas tuned to your services and the season. Use them as prompts for the AI creator above.
+          </p>
+          <button
+            type="button"
+            disabled={aiBusy}
+            onClick={generatePlan}
+            className="w-full rounded-full py-3 text-[13px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2"
+            style={{ background: C.espresso, color: C.cream, opacity: aiBusy ? 0.6 : 1 }}
+          >
+            <Sparkles size={16} /> {aiBusy ? "Planning…" : plan ? "Re-plan" : "Generate my week"}
+          </button>
+          {plan && (
+            <div className="space-y-2">
+              {plan.posts.map((p, i) => (
+                <div key={i} className="rounded-xl p-3" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[12px] font-bold" style={{ color: C.espresso }}>{p.day}</p>
+                    <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full" style={{ background: C.cream, color: C.muted }}>
+                      {SOCIAL_CATEGORY_LABELS[p.category]}
+                    </span>
+                  </div>
+                  <p className="text-[12.5px]" style={{ color: C.coffee, lineHeight: 1.45 }}>{p.idea}</p>
+                  <button
+                    type="button"
+                    onClick={() => { setPromptText(p.idea); setCreateMode("prompt"); setGenTemplate(null); setGenCaption(null); setPlanOpen(false); setCreateOpen(true); }}
+                    className="mt-2 text-[11.5px] font-semibold flex items-center gap-1"
+                    style={{ color: accentColor || C.espresso }}
+                  >
+                    <Sparkles size={12} /> Create this post
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </Sheet>
 
       {toast && (
