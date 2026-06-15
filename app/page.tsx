@@ -3060,6 +3060,10 @@ const BusinessCoachCard = ({
   const [busy, setBusy] = useState(false);
   const [briefing, setBriefing] = useState<CoachBriefing | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Once a briefing lands it opens expanded (you just asked for it), but
+  // it can be collapsed down to the headline so the KPI cards below stay
+  // close to the top on a quick glance.
+  const [expanded, setExpanded] = useState(true);
 
   const generate = async () => {
     setBusy(true); setError(null);
@@ -3076,6 +3080,7 @@ const BusinessCoachCard = ({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(data?.error || "Couldn't generate your briefing."); return; }
       setBriefing(data.briefing as CoachBriefing);
+      setExpanded(true);
     } catch {
       setError("Couldn't reach the coach. Try again.");
     } finally {
@@ -3118,34 +3123,53 @@ const BusinessCoachCard = ({
 
         {briefing && !busy && (
           <div className="space-y-3">
-            <p className="text-[15px] font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{briefing.headline}</p>
-            {briefing.summary && (
-              <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.55 }}>{briefing.summary}</p>
+            <button type="button" onClick={() => setExpanded(v => !v)}
+              className="w-full flex items-start justify-between gap-2 text-left active:scale-[0.99] transition"
+              aria-expanded={expanded}>
+              <p className="text-[15px] font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{briefing.headline}</p>
+              {expanded
+                ? <ChevronUp size={18} className="shrink-0 mt-0.5" style={{ color: C.coffee }} />
+                : <ChevronDown size={18} className="shrink-0 mt-0.5" style={{ color: C.coffee }} />}
+            </button>
+
+            {!expanded && briefing.actions.length > 0 && (
+              <button type="button" onClick={() => setExpanded(true)}
+                className="text-[11.5px] font-semibold text-left" style={{ color: C.goldDeep }}>
+                {briefing.actions.length} move{briefing.actions.length === 1 ? "" : "s"} for today · tap to view
+              </button>
             )}
-            {briefing.actions.length > 0 && (
-              <div className="space-y-2">
-                {briefing.actions.map((a, i) => (
-                  <div key={i} className="rounded-xl p-3 flex gap-2.5" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
-                    <div className="rounded-full flex items-center justify-center shrink-0"
-                      style={{ width: 22, height: 22, background: C.gold, color: C.espresso, fontSize: 11, fontWeight: 700, fontFamily: FONT_DISPLAY }}>
-                      {i + 1}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[12.5px] font-semibold" style={{ color: C.espresso }}>{a.title}</p>
-                      {a.detail && <p className="text-[11.5px] mt-0.5" style={{ color: C.muted, lineHeight: 1.45 }}>{a.detail}</p>}
-                    </div>
+
+            {expanded && (
+              <div className="space-y-3">
+                {briefing.summary && (
+                  <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.55 }}>{briefing.summary}</p>
+                )}
+                {briefing.actions.length > 0 && (
+                  <div className="space-y-2">
+                    {briefing.actions.map((a, i) => (
+                      <div key={i} className="rounded-xl p-3 flex gap-2.5" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+                        <div className="rounded-full flex items-center justify-center shrink-0"
+                          style={{ width: 22, height: 22, background: C.gold, color: C.espresso, fontSize: 11, fontWeight: 700, fontFamily: FONT_DISPLAY }}>
+                          {i + 1}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[12.5px] font-semibold" style={{ color: C.espresso }}>{a.title}</p>
+                          {a.detail && <p className="text-[11.5px] mt-0.5" style={{ color: C.muted, lineHeight: 1.45 }}>{a.detail}</p>}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
+                {briefing.encouragement && (
+                  <p className="text-[12px] italic" style={{ color: C.goldDeep }}>{briefing.encouragement}</p>
+                )}
+                <button type="button" onClick={generate}
+                  className="w-full mt-1 rounded-full py-2 text-[12px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-1.5"
+                  style={{ background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}` }}>
+                  <Sparkles size={13} /> Refresh briefing
+                </button>
               </div>
             )}
-            {briefing.encouragement && (
-              <p className="text-[12px] italic" style={{ color: C.goldDeep }}>{briefing.encouragement}</p>
-            )}
-            <button type="button" onClick={generate}
-              className="w-full mt-1 rounded-full py-2 text-[12px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-1.5"
-              style={{ background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}` }}>
-              <Sparkles size={13} /> Refresh briefing
-            </button>
           </div>
         )}
       </Card>
@@ -5466,6 +5490,18 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
           )}
         </div>
 
+        {/* YOUR AI COACH — sits directly under Today's chair so the
+            strategic "what should I do today" read lands above the fold,
+            right after the instant who's-in-my-chair glance and ahead of
+            the raw KPI cards it interprets. */}
+        <BusinessCoachCard
+          clients={clients}
+          appointments={appointments}
+          today={today}
+          currency={business.currency}
+          ownerName={business.ownerName?.split(" ")[0] || null}
+        />
+
         {/* Hierarchy: money-critical cards get a dedicated headline
             row (today / week revenue, deposits this week, pending
             balance). Pending Balance is `emphasized` so it lifts
@@ -5643,14 +5679,6 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
             </div>
           )}
         </div>
-
-        <BusinessCoachCard
-          clients={clients}
-          appointments={appointments}
-          today={today}
-          currency={business.currency}
-          ownerName={business.ownerName?.split(" ")[0] || null}
-        />
 
         <RebookingOpportunitiesCard
           opportunities={topRebookings}
