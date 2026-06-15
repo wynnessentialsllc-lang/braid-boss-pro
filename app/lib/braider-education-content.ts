@@ -748,6 +748,474 @@ export const EDUCATION_CATEGORIES: EducationCategory[] = [
       },
     ],
   },
+  {
+    id: "setup-page",
+    name: "Setup & Your Booking Page",
+    blurb: "Get your link, menu, and schedule ready for clients.",
+    lessons: [
+      {
+        id: "connect-stripe",
+        title: "How to connect Stripe so you can get paid",
+        readMinutes: 3,
+        body: [
+          "Stripe is what actually moves money — it lets you collect deposits, take card payments, and get paid out to your bank. Until it's connected, the booking and shop tools work, but no card money can change hands.",
+          "Open Settings → Stripe Connect and tap to start onboarding. Stripe walks you through your business details, your bank account, and a quick identity check. When it's done you're sent back into the app and the status flips to \"Active.\" If Stripe ever shows \"Action required,\" open it and finish what it's asking for — card charges pause until you do.",
+          "Connecting Stripe once unlocks the rest of the money features: deposits at booking, Tap to Pay, Buy Now Pay Later, and instant cash-out. You only do this setup a single time.",
+        ],
+        tryThisWeek:
+          "Open Settings → Stripe Connect and finish onboarding until the status reads \"Active,\" then take one small test payment so you've seen the whole flow.",
+        relatedTool: "Settings → Stripe Connect",
+      },
+      {
+        id: "customize-booking-page",
+        title: "How to customize your booking page and claim your link",
+        readMinutes: 3,
+        body: [
+          "Your booking page is the link you drop in your Instagram and TikTok bio — it's where clients see your styles, prices, and policies and request an appointment. The first time you turn it on you get a random link; you can swap it for a memorable one like /book/your-name.",
+          "From your booking-link card, tap \"Customize booking page.\" There you set your studio name, a header style, your logo and banner, a short bio, your location, and your social links. Scroll to the branded-link section to type the custom ending you want (lowercase letters, numbers, and hyphens). Save, and everything publishes to your public page right away.",
+          "This same screen is home base for a few other settings — your Google review link and your mobile-service travel area both live here too.",
+        ],
+        tryThisWeek:
+          "Set your branded link to your name or business name, add your logo and a one-line bio, then paste the new /book link into your Instagram bio.",
+        relatedTool: "Customize booking page",
+      },
+      {
+        id: "build-services-menu",
+        title: "How to build your services & styles menu",
+        readMinutes: 4,
+        body: [
+          "Your services menu is what clients pick from when they book — and it's where you set the price, the time you need, and whether a deposit is required for each style. Open Settings → Services & styles and tap to add a service.",
+          "For each style you set a name, how long it takes, the base price, and a deposit. Then you can add variations (like \"hair included\" or longer lengths) as price add-ons, optional paid add-ons (takedown, custom color), prep instructions the client sees before booking, and a cover photo. Group related styles under a category so your menu stays tidy.",
+          "The duration you set is what blocks your calendar, so be realistic — it's what keeps clients from booking on top of each other. You can mark your best styles as featured so they show first.",
+        ],
+        tryThisWeek:
+          "Add or clean up your most-booked style: set a realistic duration, a deposit, one variation, and a cover photo, then preview it on your booking link.",
+        relatedTool: "Settings → Services & styles",
+      },
+      {
+        id: "set-availability",
+        title: "How to set your hours, days off, and time blocks",
+        readMinutes: 3,
+        body: [
+          "Your availability decides which slots clients can grab. Open Settings → Availability and, for each weekday, mark whether you're open and set the hours you work. Closed days simply won't show any slots.",
+          "For one-off changes you don't have to touch the weekly schedule — add an exception for a specific date: take the whole day off, set custom hours, or block a window (say 2–4pm for a school run) while leaving the rest of the day bookable.",
+          "Building a little buffer into your day and protecting one weekly block for admin, content, and rest is a scheduling decision worth making on purpose — it keeps one long appointment from swallowing everything.",
+        ],
+        tryThisWeek:
+          "Set your real weekly hours, then add one exception for an upcoming day off so you can see how blocking a date works.",
+        relatedTool: "Settings → Availability",
+      },
+      {
+        id: "offer-mobile-service",
+        title: "How to offer mobile / travel service and set a travel fee",
+        readMinutes: 3,
+        body: [
+          "If you travel to clients, you can charge for it automatically instead of guessing. First set your travel base and how far you'll go: open Customize booking page → Mobile services, set your address and a service radius (say 15 miles).",
+          "Then turn mobile on for the specific services you'll do on the road, and pick how the fee is calculated — a flat fee, a per-mile rate, a hybrid (first few miles free, then per-mile), or tiered bands by distance. At booking, the app measures the distance from the client's address and adds the right travel fee to the ticket.",
+          "Clients outside your radius simply won't see the mobile option, so you won't get booked for a drive you didn't want.",
+        ],
+        tryThisWeek:
+          "Set your travel base and radius, turn mobile on for one service with a flat fee, then book a test from a nearby address to watch the fee appear.",
+        relatedTool: "Customize booking page → Mobile services",
+      },
+      {
+        id: "set-up-reminders",
+        title: "How to set up automatic appointment reminders",
+        readMinutes: 3,
+        body: [
+          "Reminders are what cut down no-shows without you texting everyone by hand. Open Settings → Reminder settings, turn reminders on, and choose how they go out — email, text, or both.",
+          "Then pick which reminders send: the booking confirmation, a day-before nudge, a same-day \"starting soon,\" a deposit-due note, a balance-due note, and a late alert. Each one is its own switch, so you only send what fits your business. You can edit the wording with templates and set quiet hours so nothing goes out overnight.",
+          "Text reminders run on prepaid SMS credits and need the client to opt in at booking — see the SMS lesson for the full setup. Email reminders work on their own.",
+        ],
+        tryThisWeek:
+          "Turn on the confirmation and 24-hour reminders, set your quiet hours, and book a test appointment to see the confirmation arrive.",
+        relatedTool: "Settings → Reminder settings",
+      },
+      {
+        id: "set-up-contracts",
+        title: "How to create and attach e-sign contracts",
+        readMinutes: 3,
+        body: [
+          "A contract puts your policy, deposit terms, prep expectations, and aftercare in one place the client agrees to before the appointment. Open Settings → Contracts to write one in plain language — clear beats legal-sounding for both sides.",
+          "You can attach a contract to specific services or to all of them. When it applies, the client signs on their phone as part of booking, and you get back a signed PDF with a timestamp for your records.",
+          "Requirements vary by location and situation — check your local requirements and consider professional advice for anything you're unsure about.",
+        ],
+        tryThisWeek:
+          "Draft a one-page agreement covering your policy, deposit, prep, and aftercare, then attach it to your longest service and sign a test booking yourself.",
+        relatedTool: "Settings → Contracts",
+      },
+      {
+        id: "set-booking-policies-in-app",
+        title: "How to publish your booking policies in the app",
+        readMinutes: 2,
+        body: [
+          "Writing a good policy is half the job; the other half is putting it where clients actually see it. Open Settings → Booking policies and enter your cancellation window, no-show rule, late grace period, and deposit terms.",
+          "Once saved, your policies show on your booking page so every client agrees to them up front — which is exactly what makes a policy easy to hold later. The Policies & Protection lessons cover what to actually write.",
+        ],
+        tryThisWeek:
+          "Enter your cancellation, no-show, and late rules in Settings → Booking policies, then open your booking link to confirm they show before checkout.",
+        relatedTool: "Settings → Booking policies",
+      },
+    ],
+  },
+  {
+    id: "money-tools",
+    name: "Getting Paid & Money Tools",
+    blurb: "Take payments, track money, and stay ready for tax time.",
+    lessons: [
+      {
+        id: "take-tap-to-pay",
+        title: "How to take card payments in person with Tap to Pay",
+        readMinutes: 3,
+        body: [
+          "Tap to Pay lets you accept a tapped card, Apple Pay, or a watch right on a newer iPhone — no separate card reader. Turn it on in Settings → Tap to Pay once your Stripe account is active.",
+          "When an appointment has a balance, open it and look for the in-person payment card; tap \"Tap to Pay,\" wait for it to say it's ready, then hold the client's card or phone near the top of your iPhone. You'll see the charge confirm and can send the client a digital receipt.",
+          "It needs a supported iPhone and a connected, active Stripe account. The very first charge on a device shows Apple's terms once, and the reader may do a quick one-time update.",
+        ],
+        tryThisWeek:
+          "If you're on a supported iPhone with Stripe active, enable Tap to Pay and run one small test charge so it's familiar before a real client is in the chair.",
+        relatedTool: "Settings → Tap to Pay",
+      },
+      {
+        id: "price-with-calculator",
+        title: "How to price a style with the calculator and save the quote",
+        readMinutes: 3,
+        body: [
+          "The Calculator tab turns pricing from a guess into a number. Enter your hair cost, overhead, the hourly rate you want to earn, and the hours a style takes, plus a base price and any add-ons.",
+          "It shows you the parts that matter: your take-home after materials, your real take-home per hour, and your margin. If the per-hour number is below your target, that's your signal to adjust the price.",
+          "Tap the save icon to store the quote — saved quotes live behind the document icon in the Calculator, and you can turn any one into an appointment later. It's one source of truth from estimate to booking.",
+        ],
+        tryThisWeek:
+          "Run your most-booked style through the Calculator and check the take-home per hour. If it's under your target, note the gap and save the quote.",
+        relatedTool: "Calculator → Saved quotes",
+      },
+      {
+        id: "track-expenses",
+        title: "How to track your business expenses",
+        readMinutes: 2,
+        body: [
+          "Knowing what you spend is what makes your profit real instead of a guess. Open the Money tab and go to Expenses, then add each cost — hair, supplies, booth rent, travel, subscriptions — with an amount, a category, and the date.",
+          "You can snap a receipt photo and mark recurring costs (like a monthly subscription) so they're counted every month. Expenses total up by week and month so you can see where the money actually goes.",
+          "These entries also feed your tax pack, so logging them as you go saves a scramble at tax time.",
+        ],
+        tryThisWeek:
+          "Add every business expense from the past week in one sitting, then check which category is your biggest spend.",
+        relatedTool: "Money → Expenses",
+      },
+      {
+        id: "read-reports",
+        title: "How to read your sales reports",
+        readMinutes: 3,
+        body: [
+          "Reports show what you actually made over a stretch of time. Open Settings → Reports (or the Money tab) and pick a range — a day, week, month, quarter, or year.",
+          "You'll see gross and net sales, how many appointments, your average ticket, your top styles by revenue, and a breakdown by how clients paid (cash vs. card vs. other). Tap a number to drill into the exact appointments behind it.",
+          "Your top styles by revenue are your real profit drivers — those are the ones worth protecting time for and promoting most.",
+        ],
+        tryThisWeek:
+          "Pull last week's report and note the two or three styles that show up top by revenue.",
+        relatedTool: "Settings → Reports",
+      },
+      {
+        id: "generate-tax-pack",
+        title: "How to generate your tax pack for tax season",
+        readMinutes: 3,
+        body: [
+          "The tax pack pulls a year of money into one document you can hand to an accountant. Open Settings → Tax pack and pick the tax year.",
+          "It gathers your collected appointment income and shop orders, lists your expenses, and groups them by standard expense categories so they line up with how a small business reports them. Export it as a PDF to file or share.",
+          "It's a starting point, not tax advice — your accountant may reclassify things based on how your business is set up, so it's worth a quick review together. Keeping your expenses logged through the year is what makes this accurate.",
+        ],
+        tryThisWeek:
+          "Generate last year's tax pack, skim the categories, and send the PDF to whoever helps you file.",
+        relatedTool: "Settings → Tax pack",
+      },
+      {
+        id: "sell-gift-cards",
+        title: "How to sell and redeem gift cards",
+        readMinutes: 2,
+        body: [
+          "Gift cards bring in money up front and send new faces your way. You sell them as a product in your Shop — when someone buys one, a redeemable code is created and added to your gift-card list.",
+          "Open Settings → Gift cards to see every card you've issued, its balance, and who bought it. At checkout you enter the client's code and the balance comes off what they owe; whatever's left stays on the card for next time.",
+          "Because a code carries its own balance, anyone holding it can redeem it — treat the code like cash.",
+        ],
+        tryThisWeek:
+          "Add a gift-card product to your Shop, buy one as a test, and redeem the code on a practice checkout to see the balance apply.",
+        relatedTool: "Settings → Gift cards",
+      },
+    ],
+  },
+  {
+    id: "growth-tools",
+    name: "Grow & Market Your Chair",
+    blurb: "Fill your calendar and bring clients back.",
+    lessons: [
+      {
+        id: "run-discounts",
+        title: "How to create and run discounts",
+        readMinutes: 2,
+        body: [
+          "Discounts let you run a deal without lowering your real prices. Open Settings → Discounts and create one as a flat dollar amount or a percentage off.",
+          "You can switch a discount on or off, give it a start and end date, and cap how many times it's used. Active discounts can be applied when you book or check out an appointment.",
+          "To protect how your core work is valued, lean on slow-day or off-peak discounts rather than discounting your headline styles — that fills gaps without training clients to wait for a sale.",
+        ],
+        tryThisWeek:
+          "Create one slow-day discount (say $25 off Monday/Tuesday), turn it on, and apply it to a test booking.",
+        relatedTool: "Settings → Discounts",
+      },
+      {
+        id: "set-up-loyalty",
+        title: "How to set up a loyalty points program",
+        readMinutes: 2,
+        body: [
+          "A loyalty program quietly rewards the clients who keep coming back. Open Settings → Loyalty points, turn it on, and set three numbers: points earned per visit, points needed for a reward, and what the reward is worth.",
+          "Clients rack up points automatically as they complete visits, and you redeem a reward from the client's profile when they've earned it.",
+          "Keep the math simple and easy to explain at the chair — a clear \"come X times, get $Y\" is what makes clients actually chase it.",
+        ],
+        tryThisWeek:
+          "Turn on loyalty with a simple reward (e.g. a reward every several visits) and mention it to a returning client at checkout.",
+        relatedTool: "Settings → Loyalty points",
+      },
+      {
+        id: "reward-referrals",
+        title: "How to reward client referrals",
+        readMinutes: 3,
+        body: [
+          "Word of mouth is your best marketing, and referrals reward it. Open Settings → Referrals, turn it on, and set the credit a client earns for sending you someone new.",
+          "When you add the new client, mark who referred them. After that new client completes their first paid appointment, the referrer earns the credit, which you apply as a discount on their next visit.",
+          "Your happiest, most-booked clients are the ones to tell first — they already recommend you, so give them a reason to do it on purpose.",
+        ],
+        tryThisWeek:
+          "Turn on referrals with a set reward, then ask one VIP client if they know someone who needs braids.",
+        relatedTool: "Settings → Referrals",
+      },
+      {
+        id: "get-on-marketplace",
+        title: "How to get found on the braider marketplace",
+        readMinutes: 2,
+        body: [
+          "The marketplace is a public \"find a braider near you\" page where new clients can discover you by city. Open Settings → Marketplace listing, turn it on, and enter your city (and region if you'd like).",
+          "Your listing shows your studio name, logo, price range, and star rating, and links straight to your booking page. You'll need an active booking link for the listing to go live.",
+          "It works around the clock to send you new clients, so it's worth keeping on once your booking page looks the way you want.",
+        ],
+        tryThisWeek:
+          "Turn on your marketplace listing, set your city, and view your card on the discover page to see what new clients see.",
+        relatedTool: "Settings → Marketplace listing",
+      },
+      {
+        id: "send-marketing",
+        title: "How to send email campaigns and create social posts",
+        readMinutes: 3,
+        body: [
+          "The Marketing screen has two tools. The first is email campaigns: write a message, choose who gets it (everyone, recent clients, or clients who've gone quiet), and send it now or schedule it for later.",
+          "The second is social media templates — branded graphics for things like \"now booking,\" new style drops, and seasonal promos, already filled with your name, logo, and colors. You can pull a caption and post to Instagram or TikTok in a couple of taps.",
+          "There are also optional automatic nudges — rebooking reminders, birthday greetings, and win-back messages — you can switch on so the routine outreach runs without you.",
+        ],
+        tryThisWeek:
+          "Create one \"now booking\" social post and send a short win-back email to clients who haven't been in for a while.",
+        relatedTool: "Settings → Marketing",
+      },
+      {
+        id: "use-growth-guide",
+        title: "How to use the Boss Growth Guide",
+        readMinutes: 2,
+        body: [
+          "The Boss Growth Guide is your built-in coach for the current season. Open Settings → Boss Growth Guide and it shows what to promote right now: the styles in demand, post ideas and hooks, smart pricing moves, profit-safe deal ideas, and a short weekly action plan.",
+          "It highlights styles you already offer and updates as the calendar moves through the year, so checking it weekly keeps you a step ahead of each season's rush.",
+          "Everything in it is a suggestion — test the pricing and promo ideas against your own market and clientele.",
+        ],
+        tryThisWeek:
+          "Read the current season's section and act on one item — a pricing move, a promo, or one of the weekly tasks.",
+        relatedTool: "Settings → Boss Growth Guide",
+      },
+      {
+        id: "read-booking-intelligence",
+        title: "How to read your Booking Intelligence and Boss Insights",
+        readMinutes: 3,
+        body: [
+          "Booking Intelligence shows the patterns behind your bookings. Open Settings → Booking intelligence and pick a window (7, 30, or 90 days) to see your booking funnel, top services by conversion, your busiest day and hour, and where clients are coming from.",
+          "It also estimates revenue you're leaving on the table — unmet demand you could capture with more slots or a price tweak. Use it to decide what to protect and what to promote.",
+          "On your home dashboard, Boss Insights does the day-to-day version: quick prompts like who to follow up with, which appointment is missing a deposit, and who's overdue to rebook. Tap a card to jump straight to the screen that fixes it.",
+        ],
+        tryThisWeek:
+          "Open Booking intelligence, find your busiest hour, and protect that slot for your highest-ticket style.",
+        relatedTool: "Settings → Booking intelligence",
+      },
+    ],
+  },
+  {
+    id: "ops-tools",
+    name: "Clients, Bookings & Shop Tools",
+    blurb: "Run your queue, your clients, and your retail in one place.",
+    lessons: [
+      {
+        id: "manage-waitlist",
+        title: "How to manage your waitlist",
+        readMinutes: 2,
+        body: [
+          "A waitlist turns a full calendar and last-minute cancellations into bookings instead of lost income. Clients join from your booking page with their preferred dates and how flexible they are; you manage the queue in Settings → Waitlist.",
+          "You can mark someone as contacted, convert a waiting client straight into an appointment, or — when a slot opens up — broadcast the opening by email to everyone waiting, first to grab it gets it.",
+          "Keeping the list warm (a quick check each week) is what makes it pay off the day a cancellation lands.",
+        ],
+        tryThisWeek:
+          "Open Settings → Waitlist, mark one waiting client contacted, and try a broadcast so you know how to fill the next cancellation fast.",
+        relatedTool: "Settings → Waitlist",
+      },
+      {
+        id: "approve-requests",
+        title: "How to approve booking requests",
+        readMinutes: 3,
+        body: [
+          "When a client books on your page, the request lands in your approval queue so you can vet it before it's confirmed. Open Settings → Approvals to see everything pending in one place.",
+          "Tap a request to review the client, style, and time. You can approve it — setting the deposit and a hold window for them to pay — decline it, or deny and refund if needed. Once the deposit is in, you approve and schedule, and the client gets a confirmation with their contract and balance details.",
+          "A hold that isn't paid in time expires on its own, so a slot you offered doesn't stay locked up forever.",
+        ],
+        tryThisWeek:
+          "Take one pending request all the way through approve-and-schedule and watch the confirmation reach the client.",
+        relatedTool: "Settings → Approvals",
+      },
+      {
+        id: "handle-style-requests",
+        title: "How to handle custom style (quote) requests",
+        readMinutes: 2,
+        body: [
+          "Sometimes a client wants a look that isn't on your menu. With style requests on, they can send an inspiration photo with details — size, length, hair — and ask for a price.",
+          "The app suggests the closest service from your menu and a ballpark price range anchored to your real pricing (it never invents a number). You review the request in Settings → Style requests, adjust the service or price if needed, and send a formal quote with a link to book.",
+          "It's a clean way to say yes to custom work without pricing on the fly in your DMs.",
+        ],
+        tryThisWeek:
+          "Submit a style request from your own booking page to see how the suggested service and price range come back, then send yourself a quote.",
+        relatedTool: "Settings → Style requests",
+      },
+      {
+        id: "sell-packages",
+        title: "How to sell visit packages and prepaid credit",
+        readMinutes: 2,
+        body: [
+          "Packages let clients pay up front for a set of visits (like \"5 maintenance appointments\") or a prepaid credit balance — money in your pocket now and a client who's committed to coming back.",
+          "Open Settings → Packages, create a template (visits or credit) with a price, then issue it to a client. At checkout the app deducts a visit or the right amount automatically, and you can see each client's remaining balance any time.",
+          "It works best for styles with a natural rhythm — maintenance, takedowns, kids on a schedule — where a client is coming back anyway.",
+        ],
+        tryThisWeek:
+          "Create one multi-visit package, issue it to a frequent client, and redeem a visit on their next checkout to see it draw down.",
+        relatedTool: "Settings → Packages",
+      },
+      {
+        id: "save-style-presets",
+        title: "How to save style presets for faster quoting",
+        readMinutes: 2,
+        body: [
+          "If you quote the same combos over and over, presets save the whole setup so you don't rebuild it each time. Build a service with its variations and add-ons in the Calculator, then save it as a preset (the layers icon).",
+          "Next time, open Style Presets from the Calculator or your dashboard and tap one to fill the entire quote instantly. It's the fastest way to price your bread-and-butter styles consistently.",
+          "Presets are saved on the device you make them on, so build them on the phone you actually quote from.",
+        ],
+        tryThisWeek:
+          "Save your three most common style combos as presets, then use one to build your next quote in a single tap.",
+        relatedTool: "Calculator → Style Presets",
+      },
+      {
+        id: "time-your-styles",
+        title: "How to time your styles with the built-in timer",
+        readMinutes: 2,
+        body: [
+          "Knowing how long a style really takes is the foundation of pricing it right. Tap Start Timer on your dashboard at the start of an appointment; pause it for breaks and stop it when you're done, and the session saves with its duration.",
+          "Over a few weeks you build a real picture — this style takes two hours, that one takes five — instead of guessing. Pair that with the Calculator to set prices that actually pay you per hour.",
+          "Sessions are stored on the device you time on, so use your main phone.",
+        ],
+        tryThisWeek:
+          "Time three different styles this week, then compare the real durations against the times set on your services menu.",
+        relatedTool: "Dashboard → Start Timer",
+      },
+      {
+        id: "set-up-shop",
+        title: "How to set up your shop and add products",
+        readMinutes: 3,
+        body: [
+          "Your shop is a retail storefront for hair, edge control, and anything else you sell — clients check out by card through Stripe. Open Settings → Shop and add a product with a title, price, description, photos, and stock count.",
+          "If a product comes in options, add them as variants (like colors) on one listing instead of making a separate product for each. You can feature your best sellers, and choose whether each product ships, offers pickup, or both. Each product gets a shareable link you can send or post.",
+          "For shipping with live carrier rates, return labels, and shop policies, see the dedicated shop lessons in App Features & How-Tos.",
+        ],
+        tryThisWeek:
+          "Add your best-selling product with photos, stock, and variants, then open its link to see what buyers see.",
+        relatedTool: "Settings → Shop",
+      },
+      {
+        id: "track-inventory",
+        title: "How to track inventory (and import it)",
+        readMinutes: 3,
+        body: [
+          "Inventory keeps you from running out mid-week. Open Settings → Inventory and add items with a quantity on hand, your cost, the retail price, and a low-stock alert so you get a heads-up before you're out.",
+          "Mark whether each item is for sale to clients, used on clients as a supply, or both — that controls where it shows up. Items that come in colors or sizes can hold a quantity per variation. If you already track stock elsewhere, you can import a CSV in one pass or seed it from the products in your shop.",
+          "Setting a low-stock threshold on your top few hair colors is the single highest-value habit here.",
+        ],
+        tryThisWeek:
+          "Add your top three hair colors with quantities and a low-stock alert, or import your existing stock list as a CSV.",
+        relatedTool: "Settings → Inventory",
+      },
+      {
+        id: "message-clients-inbox",
+        title: "How to message clients in the Inbox",
+        readMinutes: 2,
+        body: [
+          "The Inbox keeps client conversations tied to their booking instead of scattered across your texts and DMs. When a client messages from their appointment link, the thread shows up in your Inbox; you reply there and they see it on their appointment page.",
+          "Open it from the bell on your dashboard or Settings → Inbox, tap a thread, and type. Unread threads are badged so you can see what's waiting.",
+          "These are in-app messages, not texts — for automatic text reminders, use SMS reminders. Replying quickly is one of the easiest ways to feel premium to a client.",
+        ],
+        tryThisWeek:
+          "Open the Inbox, reply to any waiting thread, and aim to answer new client messages within an hour this week.",
+        relatedTool: "Inbox",
+      },
+      {
+        id: "use-communication-log",
+        title: "How to use your communication log",
+        readMinutes: 2,
+        body: [
+          "The communication log is the receipt of everything the app has sent your clients — confirmations, reminders, balance and deposit notes, cancellations. Open Settings → Communication log to see it newest-first.",
+          "Tap an entry to read the full message. It's a quick way to confirm a reminder actually went out, or to check that the cadence matches what you set in Reminder settings.",
+          "If a reminder ever isn't going out when you expect, this is the first place to look before checking your reminder switches.",
+        ],
+        tryThisWeek:
+          "Skim your communication log, then confirm the reminders you see line up with what you turned on in Reminder settings.",
+        relatedTool: "Settings → Communication log",
+      },
+      {
+        id: "use-client-profiles",
+        title: "How to use client profiles, VIP signals, and rebooking",
+        readMinutes: 3,
+        body: [
+          "Every client has a profile that pulls their history into one card — visits, lifetime spend, preferred styles, allergies and scalp notes, family members, and contact info. Open Clients and tap a name to see it.",
+          "The app surfaces signals automatically: your VIPs (your repeat, high-spend clients), how long it's been since someone's last visit, and when they're due to rebook. From the rebooking section you can generate a personal nudge to send — it only mentions an offer if you add one.",
+          "A light rebooking message timed to a style's lifespan reads as a service, not a sales pitch — and it's one of the highest-return things you can do each week.",
+        ],
+        tryThisWeek:
+          "Open your clients list, find the ones overdue to rebook, and send a personal nudge to two of them.",
+        relatedTool: "Clients",
+      },
+      {
+        id: "collect-reviews",
+        title: "How to collect and feature client reviews",
+        readMinutes: 3,
+        body: [
+          "Reviews are what convince a new client to book before they've ever met you. After an appointment, the app can ask the client for a review by email; the ones that come in land in Settings → Client Love.",
+          "From there you choose which reviews to feature on your booking page so visitors see your best social proof first. You can also add testimonials from happy past clients yourself to get started before the automatic ones build up.",
+          "To send your happiest clients on to leave a public Google review too, set your Google review link — see \"How to set up Google reviews\" in Social Media & Growth.",
+        ],
+        tryThisWeek:
+          "Feature your three strongest reviews on your booking page, and add one testimonial from a past client if you're just starting out.",
+        relatedTool: "Settings → Client Love",
+      },
+      {
+        id: "get-support",
+        title: "How to get help from the Support Center",
+        readMinutes: 1,
+        body: [
+          "When something's not working or you're stuck, the Support Center is the fastest way to reach help. Open Settings → Support Center to find answers and to send a message describing what's happening.",
+          "Including what you were doing and what you expected makes it much quicker to sort out — a screenshot helps too.",
+        ],
+        tryThisWeek:
+          "Open the Support Center once so you know where it is before a day you actually need it.",
+        relatedTool: "Settings → Support Center",
+      },
+    ],
+  },
 ];
 
 export const EDUCATION_TOTAL_LESSONS = EDUCATION_CATEGORIES.reduce(
