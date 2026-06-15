@@ -1,0 +1,141 @@
+import { describe, it, expect } from "vitest";
+import {
+  buildCoachSnapshot,
+  cleanSnapshot,
+  snapshotFacts,
+  buildCoachSystem,
+  coachTool,
+  parseCoachBriefing,
+  COACH_TOOL_NAME,
+  type CoachSnapshot,
+} from "./business-coach";
+
+const TODAY = "2026-06-15";
+
+const clients = [
+  { id: "a", name: "Amara Jones" },
+  { id: "b", name: "Keisha Bell" },
+];
+
+const appointments = [
+  // Amara: completed knotless 75 days ago (rebook window 6wk) -> overdue, no future booking
+  { id: "1", clientId: "a", date: "2026-04-01", style: "Knotless Box Braids", status: "completed", paymentStatus: "paid", totalPrice: 220, balanceDue: 0 },
+  // Keisha: paid this month (revenue) ...
+  { id: "2", clientId: "b", date: "2026-06-02", style: "Passion Twists", status: "completed", paymentStatus: "paid", totalPrice: 180, balanceDue: 0 },
+  // ... and an upcoming appt today (so NOT a rebooking opportunity)
+  { id: "3", clientId: "b", date: "2026-06-15", style: "Passion Twists", status: "scheduled", totalPrice: 180, balanceDue: 90 },
+];
+
+describe("buildCoachSnapshot", () => {
+  const snap = buildCoachSnapshot(clients, appointments, TODAY, "USD");
+
+  it("counts today's non-completed appointments", () => {
+    expect(snap.appts.todayCount).toBe(1);
+    expect(snap.appts.next7Count).toBeGreaterThanOrEqual(1);
+  });
+
+  it("sums this-month revenue from paid appts", () => {
+    expect(snap.revenue.thisMonth).toBe(180); // Keisha's June appt; Amara's was April
+  });
+
+  it("surfaces overdue clients as rebooking opportunities, newest-overdue first", () => {
+    expect(snap.rebooking.due).toBeGreaterThanOrEqual(1);
+    expect(snap.topOpportunities[0]?.firstName).toBe("Amara");
+    // the rebooking engine normalizes the raw style to a display label
+    expect(snap.topOpportunities[0]?.style?.toLowerCase()).toContain("knotless");
+    expect(snap.topOpportunities[0]?.daysOverdue).toBeGreaterThan(0);
+  });
+
+  it("reports client totals", () => {
+    expect(snap.clients.total).toBe(2);
+  });
+
+  it("does not throw on empty / garbage input", () => {
+    expect(() => buildCoachSnapshot([], [], TODAY)).not.toThrow();
+    expect(() => buildCoachSnapshot(null as any, null as any, TODAY)).not.toThrow();
+  });
+});
+
+describe("snapshotFacts", () => {
+  const snap = buildCoachSnapshot(clients, appointments, TODAY, "USD");
+  it("renders the key numbers as text", () => {
+    const facts = snapshotFacts(snap);
+    expect(facts).toContain("Revenue this month: $180");
+    expect(facts).toContain("Appointments today: 1");
+    expect(facts).toContain("Amara");
+  });
+});
+
+describe("buildCoachSystem", () => {
+  const snap = buildCoachSnapshot(clients, appointments, TODAY, "USD");
+  it("includes the business name and forbids inventing figures", () => {
+    const sys = buildCoachSystem(snap, { businessName: "Boss Braids", ownerFirstName: "Nia" });
+    expect(sys).toContain("Boss Braids");
+    expect(sys).toContain("Nia");
+    expect(sys.toLowerCase()).toContain("never invent");
+  });
+});
+
+describe("coachTool", () => {
+  it("declares the briefing tool with required fields", () => {
+    const t = coachTool();
+    expect(t.name).toBe(COACH_TOOL_NAME);
+    expect(t.input_schema.required).toContain("actions");
+  });
+});
+
+describe("cleanSnapshot", () => {
+  it("coerces wire data and clamps arrays", () => {
+    const dirty = {
+      currency: "GBP",
+      revenue: { thisMonth: "500", momChangePct: "abc" },
+      appts: { todayCount: 2 },
+      topOpportunities: Array.from({ length: 9 }, (_, i) => ({ firstName: `c${i}`, daysOverdue: `${i}`, value: 100 })),
+    };
+    const snap = cleanSnapshot(dirty);
+    expect(snap.currency).toBe("GBP");
+    expect(snap.revenue.thisMonth).toBe(500);
+    expect(snap.revenue.momChangePct).toBeNull(); // "abc" -> null
+    expect(snap.appts.todayCount).toBe(2);
+    expect(snap.topOpportunities.length).toBe(5); // clamped
+  });
+
+  it("fills safe defaults from empty input", () => {
+    const snap = cleanSnapshot({});
+    expect(snap.currency).toBe("USD");
+    expect(snap.revenue.thisMonth).toBe(0);
+    expect(snap.topOpportunities).toEqual([]);
+  });
+});
+
+describe("parseCoachBriefing", () => {
+  it("keeps valid actions and clamps to 4, filling defaults", () => {
+    const out = parseCoachBriefing({
+      headline: "Strong week!",
+      summary: "Revenue is up.",
+      actions: [
+        { title: "Rebook Amara", detail: "She's 33 days overdue." },
+        { title: "" }, // dropped (no title)
+        { title: "Collect balances", detail: "$90 outstanding." },
+      ],
+      encouragement: "Keep going!",
+    });
+    expect(out?.headline).toBe("Strong week!");
+    expect(out?.actions).toHaveLength(2);
+    expect(out?.actions[0].title).toBe("Rebook Amara");
+  });
+
+  it("returns null when there's no headline or summary", () => {
+    expect(parseCoachBriefing({ actions: [] })).toBeNull();
+  });
+
+  it("supplies a fallback headline when only a summary is present", () => {
+    const out = parseCoachBriefing({ summary: "Quiet day ahead." });
+    expect(out?.headline).toBeTruthy();
+    expect(out?.summary).toBe("Quiet day ahead.");
+  });
+});
+
+// Type-level sanity: the snapshot shape is stable.
+const _typecheck: CoachSnapshot = buildCoachSnapshot([], [], TODAY);
+void _typecheck;
