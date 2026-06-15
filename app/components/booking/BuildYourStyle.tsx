@@ -28,6 +28,9 @@ type Props = {
   userId: string;
   accent?: string;
   currency?: string;
+  /** Start expanded (skip the "Don't see your style?" launcher) — used when
+   *  opened from inside the booking assistant. */
+  autoOpen?: boolean;
 };
 
 type Quote = {
@@ -70,8 +73,8 @@ const toBase64Image = (file: File, maxEdge = 1024): Promise<{ data: string; medi
     reader.readAsDataURL(file);
   });
 
-export default function BuildYourStyle({ slug, userId, accent = "#7C3AED", currency = "USD" }: Props) {
-  const [open, setOpen] = useState(false);
+export default function BuildYourStyle({ slug, userId, accent = "#7C3AED", currency = "USD", autoOpen = false }: Props) {
+  const [open, setOpen] = useState(autoOpen);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Intake

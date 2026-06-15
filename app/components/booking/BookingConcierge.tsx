@@ -23,6 +23,10 @@ type Props = {
   businessName?: string | null;
   /** Highlight/select a suggested catalog service in the form above. */
   onPickService?: (serviceId: string) => void;
+  /** Launch the "send a photo for a quote" builder (folded in from the old
+   *  "Don't see your style?" card). When provided, the assistant shows the
+   *  action. */
+  onSendPhoto?: () => void;
 };
 
 type ChatTurn = ConciergeMessage & { suggestedServiceId?: string | null };
@@ -32,6 +36,7 @@ export default function BookingConcierge({
   accent = "#7C3AED",
   businessName,
   onPickService,
+  onSendPhoto,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -130,7 +135,7 @@ export default function BookingConcierge({
   return (
     <div style={{ border: `1px solid ${accent}33`, background: "#fff", borderRadius: 16, padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#15111A" }}>Ask {biz}</p>
+        <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#15111A" }}>Ask {biz}&apos;s assistant</p>
         <button
           type="button"
           onClick={() => setOpen(false)}
@@ -195,6 +200,23 @@ export default function BookingConcierge({
       <p style={{ margin: "8px 0 0", fontSize: 11, color: "#9F95A8", textAlign: "center" }}>
         Answers are a guide — the stylist confirms final pricing and availability.
       </p>
+
+      {/* Folded-in "Don't see your style?" — send a photo for a ballpark quote */}
+      {onSendPhoto && (
+        <button
+          type="button"
+          onClick={onSendPhoto}
+          style={{
+            width: "100%", marginTop: 12, padding: "11px 12px", borderRadius: 12,
+            border: `1px dashed ${accent}`, background: `${accent}0D`, color: "#15111A",
+            fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left",
+            display: "flex", alignItems: "center", gap: 8,
+          }}
+        >
+          <span style={{ fontSize: 16 }}>📸</span>
+          <span>Don&apos;t see your style? <span style={{ color: "#6F6477", fontWeight: 500 }}>Send a photo for a ballpark quote.</span></span>
+        </button>
+      )}
     </div>
   );
 }

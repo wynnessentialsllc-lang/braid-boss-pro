@@ -35949,6 +35949,73 @@ const MarketingScreen = ({ store, onBack, openSocialTemplates }: { store: any; o
     setComposerOpen(true);
   };
 
+  // ---- AI win-back draft -----------------------------------------------
+  // Computes the lapsed cohort on-device (count + common styles, no PII),
+  // asks /api/rebooking-ai for a campaign draft, then opens the composer
+  // pre-filled with a matching "lapsed" segment.
+  const [winbackOpen, setWinbackOpen] = useState(false);
+  const [winbackDays, setWinbackDays] = useState(60);
+  const [winbackOffer, setWinbackOffer] = useState("");
+  const [winbackBusy, setWinbackBusy] = useState(false);
+  const [winbackError, setWinbackError] = useState<string | null>(null);
+  const [aiPrefill, setAiPrefill] = useState<{ name: string; subject: string; body: string; segment: CampaignSegment } | null>(null);
+
+  const lapsedCohort = (lapsedDays: number) => {
+    const cs: any[] = store.clients || [];
+    const appts: any[] = store.appointments || [];
+    const today = todayISO();
+    let count = 0;
+    const styleTally: Record<string, number> = {};
+    for (const c of cs) {
+      const ins = deriveClientInsights(c, appts, today);
+      if (ins.lastBookedDaysAgo != null && ins.lastBookedDaysAgo >= lapsedDays) {
+        count += 1;
+        const s = (ins.lastBookedStyle || "").trim();
+        if (s) styleTally[s] = (styleTally[s] || 0) + 1;
+      }
+    }
+    const topStyles = Object.entries(styleTally).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([s]) => s);
+    return { lapsedDays, count, topStyles };
+  };
+
+  const winbackCount = useMemo(() => {
+    const cs: any[] = store.clients || [];
+    const appts: any[] = store.appointments || [];
+    const today = todayISO();
+    let count = 0;
+    for (const c of cs) {
+      const ins = deriveClientInsights(c, appts, today);
+      if (ins.lastBookedDaysAgo != null && ins.lastBookedDaysAgo >= winbackDays) count += 1;
+    }
+    return count;
+  }, [winbackDays, store.clients, store.appointments]);
+
+  const generateWinback = async () => {
+    setWinbackBusy(true); setWinbackError(null);
+    try {
+      const { data: sess } = await getSupabase().auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) { setWinbackError("Please sign in again."); return; }
+      const cohort = lapsedCohort(winbackDays);
+      const res = await fetch("/api/rebooking-ai", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ access_token: token, kind: "winback", offer: winbackOffer.trim(), cohort }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setWinbackError(data?.error || "Couldn't draft that."); return; }
+      const r = data.result as { name: string; subject: string; body: string };
+      setAiPrefill({ name: r.name, subject: r.subject, body: r.body, segment: { kind: "lapsed", min_days: winbackDays } });
+      setWinbackOpen(false);
+      setEditingCampaign(null);
+      setComposerOpen(true);
+    } catch {
+      setWinbackError("Couldn't reach the AI. Try again.");
+    } finally {
+      setWinbackBusy(false);
+    }
+  };
+
   const handleDeleteCampaign = async (c: MarketingCampaign) => {
     if (!userId) return;
     if (!confirm(`Delete "${c.name}"? This can't be undone.`)) return;
@@ -36111,14 +36178,24 @@ const MarketingScreen = ({ store, onBack, openSocialTemplates }: { store: any; o
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <SectionTitle>Campaigns</SectionTitle>
-            <button
-              type="button"
-              onClick={() => openComposer(null)}
-              className="rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-[0.97] transition"
-              style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}`, letterSpacing: "0.04em" }}
-            >
-              + New campaign
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { setWinbackError(null); setWinbackOpen(true); }}
+                className="rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-[0.97] transition inline-flex items-center gap-1"
+                style={{ background: C.cream, color: C.espresso, border: `1px solid ${C.gold}`, letterSpacing: "0.04em" }}
+              >
+                <Sparkles size={12} /> AI win-back
+              </button>
+              <button
+                type="button"
+                onClick={() => openComposer(null)}
+                className="rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-[0.97] transition"
+                style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}`, letterSpacing: "0.04em" }}
+              >
+                + New campaign
+              </button>
+            </div>
           </div>
           {campaigns.length === 0 ? (
             <Card className="p-5 text-center">
@@ -36186,13 +36263,61 @@ const MarketingScreen = ({ store, onBack, openSocialTemplates }: { store: any; o
       {composerOpen && (
         <CampaignComposerSheet
           campaign={editingCampaign}
+          prefill={editingCampaign ? null : aiPrefill}
           userId={userId}
           clients={(store.clients || []) as EntityRecord[]}
-          onClose={() => { setComposerOpen(false); setEditingCampaign(null); }}
+          onClose={() => { setComposerOpen(false); setEditingCampaign(null); setAiPrefill(null); }}
           onSaved={async () => { await refreshCampaigns(); }}
           onDelete={editingCampaign ? () => handleDeleteCampaign(editingCampaign) : undefined}
         />
       )}
+
+      {/* AI win-back — configure the lapsed window + optional offer, then
+          generate a draft that opens in the composer. */}
+      <Sheet open={winbackOpen} onClose={() => setWinbackOpen(false)} title="AI win-back draft">
+        <div className="space-y-4 pb-2">
+          <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+            I&apos;ll draft a warm email inviting clients who haven&apos;t booked in a while to come back. You can edit and pick the exact audience before sending.
+          </p>
+
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: C.muted, letterSpacing: "0.12em" }}>Lapsed window</p>
+            <div className="flex gap-2">
+              {[60, 90, 120].map((d) => (
+                <button key={d} type="button" onClick={() => setWinbackDays(d)}
+                  className="flex-1 rounded-full py-2 text-[12px] font-semibold transition"
+                  style={winbackDays === d
+                    ? { background: C.espresso, color: C.cream }
+                    : { background: C.paper, color: C.espresso, border: `1px solid ${C.hairline}` }}>
+                  {d}+ days
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] mt-1.5" style={{ color: C.muted }}>
+              About <span className="font-semibold" style={{ color: C.espresso }}>{winbackCount}</span> client{winbackCount === 1 ? "" : "s"} haven&apos;t booked in {winbackDays}+ days.
+            </p>
+          </div>
+
+          <div>
+            <input
+              value={winbackOffer}
+              onChange={(e) => setWinbackOffer(e.target.value)}
+              placeholder="Optional offer — e.g. 15% off your comeback appointment"
+              className="w-full rounded-xl px-3 py-2.5 text-[13px]"
+              style={{ background: C.paper, color: C.espresso, border: `1px solid ${C.hairline}` }}
+            />
+            <p className="text-[10.5px] mt-1" style={{ color: C.muted }}>Leave blank for no discount — I never invent offers.</p>
+          </div>
+
+          {winbackError && <p className="text-[12px]" style={{ color: C.danger }}>{winbackError}</p>}
+
+          <button type="button" disabled={winbackBusy} onClick={generateWinback}
+            className="w-full rounded-full py-3 text-[13px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-2"
+            style={{ background: C.espresso, color: C.cream, opacity: winbackBusy ? 0.6 : 1 }}>
+            <Sparkles size={16} /> {winbackBusy ? "Drafting…" : "Draft campaign"}
+          </button>
+        </div>
+      </Sheet>
 
       {editService && (
         <Sheet open onClose={() => setEditService(null)} title={editService.name}>
@@ -36266,9 +36391,10 @@ const MarketingScreen = ({ store, onBack, openSocialTemplates }: { store: any; o
 // {{book_url}}) get substituted server-side at send. No rich text
 // in V1 — keeps the editor honest about what lands in the inbox.
 const CampaignComposerSheet = ({
-  campaign, userId, clients, onClose, onSaved, onDelete,
+  campaign, prefill, userId, clients, onClose, onSaved, onDelete,
 }: {
   campaign: MarketingCampaign | null;
+  prefill?: { name: string; subject: string; body: string; segment: CampaignSegment } | null;
   userId: string | null;
   clients: EntityRecord[];
   onClose: () => void;
@@ -36276,11 +36402,11 @@ const CampaignComposerSheet = ({
   onDelete?: () => Promise<void> | void;
 }) => {
   const isReadOnly = campaign?.status === "sent" || campaign?.status === "sending";
-  const [name, setName]       = useState(campaign?.name || "");
-  const [subject, setSubject] = useState(campaign?.subject || "");
-  const [body, setBody]       = useState(campaign?.body_text || "");
+  const [name, setName]       = useState(campaign?.name || prefill?.name || "");
+  const [subject, setSubject] = useState(campaign?.subject || prefill?.subject || "");
+  const [body, setBody]       = useState(campaign?.body_text || prefill?.body || "");
   const initialSegment: CampaignSegment =
-    (campaign?.segment as CampaignSegment) || { kind: "all" };
+    (campaign?.segment as CampaignSegment) || prefill?.segment || { kind: "all" };
   const [segmentKind, setSegmentKind] = useState<CampaignSegment["kind"]>(initialSegment.kind);
   const [activeDays, setActiveDays] = useState<string>(
     initialSegment.kind === "active_last" ? String(initialSegment.days) : "60",

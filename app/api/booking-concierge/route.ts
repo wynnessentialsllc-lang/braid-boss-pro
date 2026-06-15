@@ -22,8 +22,10 @@ import {
   buildSystemPrompt,
   conciergeTool,
   parseConciergeReply,
+  buildAvailabilityNote,
   CONCIERGE_TOOL_NAME,
   type ConciergeServiceLite,
+  type MonthAvailabilityRow,
 } from "../../lib/concierge";
 import { rateLimit, clientIp } from "../../lib/rate-limit";
 
@@ -149,7 +151,34 @@ export async function POST(req: Request) {
     /* ignore — policy line is non-critical */
   }
 
-  const system = buildSystemPrompt({ businessName, currency: "USD", services, noShowFeeNote });
+  // Live availability, best-effort — gives the assistant the next open days
+  // so it can answer "when are you free?". We pull this month + next month
+  // (covers month-boundary questions) and summarize the soonest openings.
+  // Any failure just falls back to "check the calendar".
+  let availabilityNote: string | null = null;
+  try {
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const [y, m] = todayIso.split("-").map(Number);
+    const nextY = m === 12 ? y + 1 : y;
+    const nextM = m === 12 ? 1 : m + 1;
+    const months = await Promise.all([
+      admin.rpc("public_get_month_availability", { slug_in: slug, year_in: y, month_in: m }),
+      admin.rpc("public_get_month_availability", { slug_in: slug, year_in: nextY, month_in: nextM }),
+    ]);
+    const rows: MonthAvailabilityRow[] = [];
+    for (const r of months) {
+      if (Array.isArray(r.data)) {
+        for (const row of r.data as any[]) {
+          rows.push({ day_iso: String(row.day_iso), slot_count: Number(row.slot_count) || 0, status: row.status ?? null });
+        }
+      }
+    }
+    availabilityNote = buildAvailabilityNote(rows, todayIso, 6);
+  } catch {
+    /* non-critical — assistant will point to the calendar */
+  }
+
+  const system = buildSystemPrompt({ businessName, currency: "USD", services, noShowFeeNote, availabilityNote });
 
   try {
     const client = new Anthropic({ apiKey: anthropicKey });
