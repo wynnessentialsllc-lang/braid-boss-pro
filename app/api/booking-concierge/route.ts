@@ -23,9 +23,11 @@ import {
   conciergeTool,
   parseConciergeReply,
   buildAvailabilityNote,
+  buildHoursNote,
   CONCIERGE_TOOL_NAME,
   type ConciergeServiceLite,
   type MonthAvailabilityRow,
+  type BusinessHoursRow,
 } from "../../lib/concierge";
 import { rateLimit, clientIp } from "../../lib/rate-limit";
 
@@ -178,7 +180,29 @@ export async function POST(req: Request) {
     /* non-critical — assistant will point to the calendar */
   }
 
-  const system = buildSystemPrompt({ businessName, currency: "USD", services, noShowFeeNote, availabilityNote });
+  // Recurring weekly hours, best-effort — lets the assistant answer "what
+  // are your hours?", "what days are you open?", and "are you open on
+  // <weekday>?" instead of deflecting to the calendar. Any failure (e.g.
+  // the RPC isn't deployed yet) just drops the Hours line from the prompt.
+  let hoursNote: string | null = null;
+  try {
+    const { data } = await admin.rpc("public_get_business_hours", { slug_in: slug });
+    if (Array.isArray(data)) {
+      const rows: BusinessHoursRow[] = (data as any[]).map((r) => ({
+        weekday: Number(r.weekday),
+        is_open: r.is_open === true,
+        start_time: r.start_time ?? null,
+        end_time: r.end_time ?? null,
+        break_start: r.break_start ?? null,
+        break_end: r.break_end ?? null,
+      }));
+      hoursNote = buildHoursNote(rows);
+    }
+  } catch {
+    /* non-critical — assistant will point to the calendar */
+  }
+
+  const system = buildSystemPrompt({ businessName, currency: "USD", services, noShowFeeNote, availabilityNote, hoursNote });
 
   try {
     const client = new Anthropic({ apiKey: anthropicKey });

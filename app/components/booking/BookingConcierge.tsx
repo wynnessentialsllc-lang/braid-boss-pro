@@ -31,6 +31,18 @@ type Props = {
 
 type ChatTurn = ConciergeMessage & { suggestedServiceId?: string | null };
 
+// Tappable starter questions shown on the empty chat so the answerable
+// topics are discoverable instead of relying on the client to guess what
+// to type. Each chip sends its full question as a normal user turn.
+const STARTER_QUESTIONS: { label: string; question: string }[] = [
+  { label: "Hours", question: "What are your hours?" },
+  { label: "Days open", question: "What days are you open?" },
+  { label: "Next opening", question: "When's your next available opening?" },
+  { label: "Styles", question: "What styles do you offer?" },
+  { label: "Pricing", question: "How much do your styles cost?" },
+  { label: "Cancellation policy", question: "What's your cancellation policy?" },
+];
+
 export default function BookingConcierge({
   slug,
   accent = "#7C3AED",
@@ -52,8 +64,8 @@ export default function BookingConcierge({
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [turns, sending]);
 
-  const send = async () => {
-    const text = draft.trim().slice(0, CONCIERGE_MAX_CHARS);
+  const send = async (override?: string) => {
+    const text = (override ?? draft).trim().slice(0, CONCIERGE_MAX_CHARS);
     if (!text || sending) return;
     setError(null);
     setDraft("");
@@ -151,9 +163,34 @@ export default function BookingConcierge({
         style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto", marginBottom: 12 }}
       >
         {turns.length === 0 && (
-          <p style={{ ...bubble("assistant"), alignSelf: "flex-start" }}>
-            Hi! Ask me anything about {biz}&apos;s styles, pricing, timing, or booking. 💛
-          </p>
+          <>
+            <p style={{ ...bubble("assistant"), alignSelf: "flex-start" }}>
+              Hi! Ask me anything about {biz}&apos;s styles, pricing, timing, hours, or booking. 💛
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+              {STARTER_QUESTIONS.map((q) => (
+                <button
+                  key={q.label}
+                  type="button"
+                  onClick={() => send(q.question)}
+                  disabled={sending}
+                  style={{
+                    border: `1px solid ${accent}`,
+                    background: `${accent}0D`,
+                    color: accent,
+                    fontWeight: 600,
+                    fontSize: 12.5,
+                    borderRadius: 999,
+                    padding: "6px 12px",
+                    cursor: sending ? "default" : "pointer",
+                    opacity: sending ? 0.6 : 1,
+                  }}
+                >
+                  {q.label}
+                </button>
+              ))}
+            </div>
+          </>
         )}
         {turns.map((t, i) => (
           <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: t.role === "user" ? "flex-end" : "flex-start", gap: 6 }}>
@@ -190,7 +227,7 @@ export default function BookingConcierge({
         />
         <button
           type="button"
-          onClick={send}
+          onClick={() => send()}
           disabled={sending || !draft.trim()}
           style={{ border: "none", background: accent, color: "#fff", fontWeight: 700, fontSize: 14, borderRadius: 10, padding: "0 16px", cursor: sending || !draft.trim() ? "default" : "pointer", opacity: sending || !draft.trim() ? 0.6 : 1 }}
         >
