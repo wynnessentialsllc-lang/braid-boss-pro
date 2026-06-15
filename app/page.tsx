@@ -468,6 +468,10 @@ import {
   type RebookChannel,
   type RebookTone,
 } from "./lib/rebooking-ai";
+import {
+  buildCoachSnapshot,
+  type CoachBriefing,
+} from "./lib/business-coach";
 import { buildCsv } from "./lib/csv";
 import ImportStudio, { IMPORT_TAGLINE } from "./components/ImportStudio";
 import { deriveClientInsights, formatLastBookedHint } from "./lib/client-insights";
@@ -3037,6 +3041,118 @@ const copyTextToClipboard = async (text: string): Promise<boolean> => {
 // Premium card. Dashboard surface for the rebooking system. Empty state
 // uses the same Sparkles + cream block as the existing retention card
 // for visual consistency.
+// AI daily briefing. Computes an aggregate snapshot on-device, posts it to
+// /api/business-coach, and renders a plain-English read on the day plus a
+// few concrete actions. Collapsed by default — one tap to generate.
+const BusinessCoachCard = ({
+  clients,
+  appointments,
+  today,
+  currency,
+  ownerName,
+}: {
+  clients: any[];
+  appointments: any[];
+  today: string;
+  currency: string;
+  ownerName: string | null;
+}) => {
+  const [busy, setBusy] = useState(false);
+  const [briefing, setBriefing] = useState<CoachBriefing | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const generate = async () => {
+    setBusy(true); setError(null);
+    try {
+      const { data: sess } = await getSupabase().auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) { setError("Please sign in again."); return; }
+      const snapshot = buildCoachSnapshot(clients, appointments, today, currency);
+      const res = await fetch("/api/business-coach", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ access_token: token, snapshot, owner_first_name: ownerName || "" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(data?.error || "Couldn't generate your briefing."); return; }
+      setBriefing(data.briefing as CoachBriefing);
+    } catch {
+      setError("Couldn't reach the coach. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <SectionTitle>Your AI coach</SectionTitle>
+      <Card className="p-4" style={{
+        background: "linear-gradient(135deg, rgba(255,107,157,0.10), rgba(255,77,109,0.06))",
+        border: `1px solid ${C.hairline}`,
+      }}>
+        {!briefing && !busy && (
+          <div className="text-center py-1">
+            <Sparkles size={18} style={{ color: C.brandPrimary, margin: "0 auto 6px" }} />
+            <p className="text-sm font-semibold" style={{ color: C.espresso }}>Today&apos;s briefing</p>
+            <p className="text-xs mt-1 max-w-xs mx-auto leading-relaxed" style={{ color: C.muted }}>
+              A plain-English read on your numbers plus a few high-leverage moves for today.
+            </p>
+            <button type="button" onClick={generate}
+              className="mt-3 px-4 py-2 rounded-full text-[12px] font-semibold active:scale-[0.98] transition inline-flex items-center gap-1.5"
+              style={{ background: C.espresso, color: C.cream }}>
+              <Sparkles size={14} /> Generate briefing
+            </button>
+          </div>
+        )}
+
+        {busy && (
+          <p className="text-center text-sm py-3" style={{ color: C.coffee }}>Reading your numbers…</p>
+        )}
+
+        {error && !busy && (
+          <div className="text-center py-2">
+            <p className="text-[12px]" style={{ color: C.danger }}>{error}</p>
+            <button type="button" onClick={generate} className="mt-2 text-[12px] font-semibold" style={{ color: C.espresso }}>Try again</button>
+          </div>
+        )}
+
+        {briefing && !busy && (
+          <div className="space-y-3">
+            <p className="text-[15px] font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{briefing.headline}</p>
+            {briefing.summary && (
+              <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.55 }}>{briefing.summary}</p>
+            )}
+            {briefing.actions.length > 0 && (
+              <div className="space-y-2">
+                {briefing.actions.map((a, i) => (
+                  <div key={i} className="rounded-xl p-3 flex gap-2.5" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+                    <div className="rounded-full flex items-center justify-center shrink-0"
+                      style={{ width: 22, height: 22, background: C.gold, color: C.espresso, fontSize: 11, fontWeight: 700, fontFamily: FONT_DISPLAY }}>
+                      {i + 1}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[12.5px] font-semibold" style={{ color: C.espresso }}>{a.title}</p>
+                      {a.detail && <p className="text-[11.5px] mt-0.5" style={{ color: C.muted, lineHeight: 1.45 }}>{a.detail}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {briefing.encouragement && (
+              <p className="text-[12px] italic" style={{ color: C.goldDeep }}>{briefing.encouragement}</p>
+            )}
+            <button type="button" onClick={generate}
+              className="w-full mt-1 rounded-full py-2 text-[12px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-1.5"
+              style={{ background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}` }}>
+              <Sparkles size={13} /> Refresh briefing
+            </button>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
 const RebookingOpportunitiesCard = ({
   opportunities,
   summary,
@@ -5527,6 +5643,14 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
             </div>
           )}
         </div>
+
+        <BusinessCoachCard
+          clients={clients}
+          appointments={appointments}
+          today={today}
+          currency={business.currency}
+          ownerName={business.ownerName?.split(" ")[0] || null}
+        />
 
         <RebookingOpportunitiesCard
           opportunities={topRebookings}
