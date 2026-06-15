@@ -5466,6 +5466,18 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
           )}
         </div>
 
+        {/* YOUR AI COACH — sits directly under Today's chair so the
+            strategic "what should I do today" read lands above the fold,
+            right after the instant who's-in-my-chair glance and ahead of
+            the raw KPI cards it interprets. */}
+        <BusinessCoachCard
+          clients={clients}
+          appointments={appointments}
+          today={today}
+          currency={business.currency}
+          ownerName={business.ownerName?.split(" ")[0] || null}
+        />
+
         {/* Hierarchy: money-critical cards get a dedicated headline
             row (today / week revenue, deposits this week, pending
             balance). Pending Balance is `emphasized` so it lifts
@@ -5643,14 +5655,6 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
             </div>
           )}
         </div>
-
-        <BusinessCoachCard
-          clients={clients}
-          appointments={appointments}
-          today={today}
-          currency={business.currency}
-          ownerName={business.ownerName?.split(" ")[0] || null}
-        />
 
         <RebookingOpportunitiesCard
           opportunities={topRebookings}
