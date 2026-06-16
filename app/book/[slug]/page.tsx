@@ -4177,7 +4177,7 @@ export default function PublicBookingPage() {
                   style={{ marginTop: 2, width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }}
                 />
                 <span style={{ fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
-                  I agree to receive transactional SMS from Braid Boss Pro on behalf of my stylist about my appointment (confirmations, reminders, balance reminders, rebooking). Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out, <strong>HELP</strong> for help. See our{" "}
+                  I agree to receive transactional SMS from Braid Boss Pro on behalf of my stylist about my appointment (confirmations, reminders, balance reminders, rebooking). Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out, <strong>HELP</strong> for help. Consent is not a condition of purchase. See our{" "}
                   <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Privacy Policy</a>{" "}
                   and{" "}
                   <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Terms</a>.
