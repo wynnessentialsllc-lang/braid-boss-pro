@@ -32,6 +32,39 @@ const firstNameOf = (name: string | null | undefined): string => {
   return n ? n.charAt(0).toUpperCase() + n.slice(1) : "A client";
 };
 
+const toNum = (v: unknown): number => {
+  if (v === null || v === undefined || v === "") return 0;
+  const n = typeof v === "number" ? v : parseFloat(String(v));
+  return Number.isFinite(n) ? n : 0;
+};
+
+// Split unpaid balances by whether the service has actually been rendered.
+// Mirrors the app's own `paymentStatusOf` rule: a balance only counts as
+// "earned/overdue" once the appointment is in the past (or marked
+// completed) — because that's when the stylist has done the work. Future
+// appointments carry a balance that isn't owed yet (payment is collected
+// at/after the service), so the coach must never treat it as money to chase.
+const classifyBalances = (
+  appts: any[],
+  todayIso: string,
+): { earnedUnpaid: number; dueToday: number; upcoming: number } => {
+  let earnedUnpaid = 0;
+  let dueToday = 0;
+  let upcoming = 0;
+  for (const a of appts) {
+    if (!a || isCancelled(a) || a?.paymentStatus === "paid") continue;
+    const bal = toNum(a?.balanceDue);
+    if (!(bal > 0)) continue;
+    const date = typeof a?.date === "string" ? a.date : "";
+    const completed = a?.status === "completed";
+    if (completed || (date && date < todayIso)) earnedUnpaid += bal;
+    else if (date === todayIso) dueToday += bal;
+    else if (date && date > todayIso) upcoming += bal;
+    // No-date / orphaned rows carry no meaningful balance — skip them.
+  }
+  return { earnedUnpaid, dueToday, upcoming };
+};
+
 // ---- snapshot ----------------------------------------------------------
 
 export interface CoachOpportunity {
@@ -48,7 +81,16 @@ export interface CoachSnapshot {
     lastMonth: number;
     momChangePct: number | null;
     averageTicket: number;
-    pendingBalance: number;
+    // Unpaid balances split by whether the service has been rendered yet.
+    // This is a service business — money is earned when the service is
+    // performed, so only `earnedUnpaid` (service already completed) is
+    // truly owed. `dueToday` is expected at the chair today, and
+    // `upcoming` is not yet earned (the appointment hasn't happened).
+    balances: {
+      earnedUnpaid: number;
+      dueToday: number;
+      upcoming: number;
+    };
     topStyle: string | null;
   };
   appts: {
@@ -94,6 +136,8 @@ export const buildCoachSnapshot = (
     if (date >= todayIso && date < weekEnd) next7Count += 1;
   }
 
+  const balances = classifyBalances(appts, todayIso);
+
   const ops = computeRebookingOpportunities(clients, appts, todayIso);
   const sum = summarizeOpportunities(ops);
   const topOpportunities: CoachOpportunity[] = ops.slice(0, 3).map((o: RebookingOpportunity) => ({
@@ -110,7 +154,11 @@ export const buildCoachSnapshot = (
       lastMonth: rev.lastMonth,
       momChangePct: rev.momChangePct,
       averageTicket: rev.averageTicket,
-      pendingBalance: rev.pendingBalance,
+      balances: {
+        earnedUnpaid: Math.round((balances.earnedUnpaid + Number.EPSILON) * 100) / 100,
+        dueToday: Math.round((balances.dueToday + Number.EPSILON) * 100) / 100,
+        upcoming: Math.round((balances.upcoming + Number.EPSILON) * 100) / 100,
+      },
       topStyle: rev.topStyle?.name || null,
     },
     appts: {
@@ -179,7 +227,11 @@ export const cleanSnapshot = (raw: unknown): CoachSnapshot => {
       lastMonth: num(o?.revenue?.lastMonth),
       momChangePct: numOrNull(o?.revenue?.momChangePct),
       averageTicket: num(o?.revenue?.averageTicket),
-      pendingBalance: num(o?.revenue?.pendingBalance),
+      balances: {
+        earnedUnpaid: num(o?.revenue?.balances?.earnedUnpaid),
+        dueToday: num(o?.revenue?.balances?.dueToday),
+        upcoming: num(o?.revenue?.balances?.upcoming),
+      },
       topStyle: s(o?.revenue?.topStyle),
     },
     appts: {
@@ -222,7 +274,23 @@ export const snapshotFacts = (snap: CoachSnapshot): string => {
     }).`,
   );
   lines.push(`Average ticket: ${money(r.averageTicket, c)}.`);
-  if (r.pendingBalance > 0) lines.push(`Outstanding/unpaid balances: ${money(r.pendingBalance, c)}.`);
+  // Balances are split by whether the work is done. Only earnedUnpaid is
+  // genuinely owed; dueToday/upcoming have not been earned yet.
+  if (r.balances.earnedUnpaid > 0) {
+    lines.push(
+      `Already-earned unpaid balances (service ALREADY completed, money genuinely owed): ${money(r.balances.earnedUnpaid, c)}.`,
+    );
+  }
+  if (r.balances.dueToday > 0) {
+    lines.push(
+      `Balance expected at today's appointments (collect at the chair today): ${money(r.balances.dueToday, c)}.`,
+    );
+  }
+  if (r.balances.upcoming > 0) {
+    lines.push(
+      `Upcoming balances on future appointments (NOT yet earned — paid at the time of service, nothing to chase): ${money(r.balances.upcoming, c)}.`,
+    );
+  }
   if (r.topStyle) lines.push(`Top-earning style this month: ${r.topStyle}.`);
   lines.push(`Appointments today: ${snap.appts.todayCount}; next 7 days: ${snap.appts.next7Count}.`);
   if (snap.appts.busiestDay) lines.push(`Busiest day of week: ${snap.appts.busiestDay}.`);
@@ -252,13 +320,19 @@ export const buildCoachSystem = (snap: CoachSnapshot, ctx: CoachContext): string
     `You are a sharp, encouraging business coach for ${ctx.businessName || "a hair-braiding business"}.${who}`,
     "Use ONLY the numbers in the briefing below — never invent figures, clients, or trends not present.",
     "",
+    "This is a service business: clients pay in exchange for services rendered, and payment is usually collected at or after the appointment — rarely before. Respect this when talking about money:",
+    "- ONLY 'already-earned unpaid balances' (service already completed) are genuinely owed. These are the only balances you may tell the owner to follow up on or collect.",
+    "- 'Balance expected at today's appointments' is collected at the chair today — you may remind the owner to collect it when the client is in the seat, but it is not a debt to chase.",
+    "- 'Upcoming balances on future appointments' are NOT earned yet because the service hasn't happened. NEVER describe these as money owed, already-earned, or revenue waiting to be collected, and never tell the owner to chase clients for them.",
+    "- If there are no already-earned unpaid balances, do not invent a 'collect your outstanding balances' action.",
+    "",
     "Today's numbers:",
     snapshotFacts(snap),
     "",
     "Write a short daily briefing:",
     "- headline: one upbeat, specific line about how things stand.",
     "- summary: 2-3 sentences interpreting the numbers in plain English.",
-    "- actions: 2-3 concrete, high-leverage things to do today/this week, each tied to a number above (e.g. rebooking overdue clients, collecting outstanding balances, filling a quiet day). Name specific clients only if they appear in the briefing.",
+    "- actions: 2-3 concrete, high-leverage things to do today/this week, each tied to a number above (e.g. rebooking overdue clients, following up on already-earned unpaid balances, collecting today's balances at the chair, filling a quiet day). Name specific clients only if they appear in the briefing.",
     "- encouragement: one warm closing line.",
     "Be concrete and motivating, not generic. No fake statistics.",
   ].join("\n");

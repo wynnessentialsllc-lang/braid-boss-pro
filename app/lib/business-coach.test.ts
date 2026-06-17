@@ -38,6 +38,31 @@ describe("buildCoachSnapshot", () => {
     expect(snap.revenue.thisMonth).toBe(180); // Keisha's June appt; Amara's was April
   });
 
+  it("classifies an unpaid balance on today's appointment as due-today, not earned", () => {
+    // Appt #3 is today (2026-06-15), scheduled, $90 balance -> service not
+    // rendered yet, so it is collected at the chair, NOT already earned.
+    expect(snap.revenue.balances.dueToday).toBe(90);
+    expect(snap.revenue.balances.earnedUnpaid).toBe(0);
+    expect(snap.revenue.balances.upcoming).toBe(0);
+  });
+
+  it("treats a past unpaid appointment as already-earned, and a future one as upcoming", () => {
+    const snap2 = buildCoachSnapshot(
+      clients,
+      [
+        // Past, unpaid -> service rendered, genuinely owed.
+        { id: "p", clientId: "a", date: "2026-06-10", status: "scheduled", totalPrice: 200, balanceDue: 200 },
+        // Future, unpaid -> not earned yet.
+        { id: "f", clientId: "b", date: "2026-06-20", status: "scheduled", totalPrice: 150, balanceDue: 150 },
+      ],
+      TODAY,
+      "USD",
+    );
+    expect(snap2.revenue.balances.earnedUnpaid).toBe(200);
+    expect(snap2.revenue.balances.upcoming).toBe(150);
+    expect(snap2.revenue.balances.dueToday).toBe(0);
+  });
+
   it("surfaces overdue clients as rebooking opportunities, newest-overdue first", () => {
     expect(snap.rebooking.due).toBeGreaterThanOrEqual(1);
     expect(snap.topOpportunities[0]?.firstName).toBe("Amara");
@@ -64,6 +89,24 @@ describe("snapshotFacts", () => {
     expect(facts).toContain("Appointments today: 1");
     expect(facts).toContain("Amara");
   });
+
+  it("labels today's balance as collect-at-the-chair, not already earned", () => {
+    const facts = snapshotFacts(snap);
+    expect(facts).toContain("today's appointments");
+    // The $90 today balance must NOT be framed as already-earned/owed.
+    expect(facts).not.toContain("Already-earned unpaid balances");
+  });
+
+  it("labels future balances as not-yet-earned", () => {
+    const snapFuture = buildCoachSnapshot(
+      clients,
+      [{ id: "f", clientId: "b", date: "2026-06-25", status: "scheduled", totalPrice: 150, balanceDue: 150 }],
+      TODAY,
+      "USD",
+    );
+    const facts = snapshotFacts(snapFuture);
+    expect(facts).toContain("NOT yet earned");
+  });
 });
 
 describe("buildCoachSystem", () => {
@@ -73,6 +116,12 @@ describe("buildCoachSystem", () => {
     expect(sys).toContain("Boss Braids");
     expect(sys).toContain("Nia");
     expect(sys.toLowerCase()).toContain("never invent");
+  });
+
+  it("reminds the coach this is a service business and future balances aren't owed", () => {
+    const sys = buildCoachSystem(snap, { businessName: "Boss Braids" });
+    expect(sys.toLowerCase()).toContain("service business");
+    expect(sys.toLowerCase()).toContain("not earned yet");
   });
 });
 
