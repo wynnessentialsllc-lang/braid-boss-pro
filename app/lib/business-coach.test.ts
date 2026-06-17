@@ -75,6 +75,62 @@ describe("buildCoachSnapshot", () => {
     expect(snap.clients.total).toBe(2);
   });
 
+  it("builds a 7-day workload read and flags missing days off", () => {
+    expect(snap.workload.next7).toHaveLength(7);
+    // Only appt #3 is in the next 7 days (today), so 6 of 7 days are off.
+    expect(snap.workload.daysOffNext7).toBe(6);
+    expect(snap.workload.todayCount).toBe(1);
+  });
+
+  it("detects a long back-to-back stretch with no day off", () => {
+    // Five consecutive days each carrying a booking, starting today.
+    const back2back = Array.from({ length: 5 }, (_, i) => {
+      const d = new Date("2026-06-15T00:00:00");
+      d.setDate(d.getDate() + i);
+      return {
+        id: `b${i}`, clientId: "a", date: d.toISOString().slice(0, 10),
+        status: "scheduled", totalPrice: 200, balanceDue: 0, durationHours: 6,
+      };
+    });
+    const s = buildCoachSnapshot(clients, back2back, TODAY, "USD");
+    expect(s.workload.longestStretch).toBeGreaterThanOrEqual(5);
+    expect(s.workload.daysOffNext7).toBe(2); // 5 worked of 7
+    expect(s.workload.todayHours).toBe(6);
+  });
+
+  it("treats a personal/blocked entry as time off, not a booking", () => {
+    const s = buildCoachSnapshot(
+      clients,
+      [{ id: "off", date: "2026-06-16", kind: "personal", eventTitle: "Rest day" }],
+      TODAY,
+      "USD",
+    );
+    const tomorrow = s.workload.next7.find((d) => d.date === "2026-06-16");
+    expect(tomorrow?.isOff).toBe(true);
+    expect(tomorrow?.hasTimeOff).toBe(true);
+    expect(s.workload.timeOffScheduledNext7).toBe(true);
+  });
+
+  it("computes monthly goal progress when a goal is provided", () => {
+    // thisMonth revenue is 180; goal 600 -> 30%, 420 to go.
+    const s = buildCoachSnapshot(clients, appointments, TODAY, "USD", 800, 600);
+    expect(s.goal.amount).toBe(600);
+    expect(s.goal.revenueThisMonth).toBe(180);
+    expect(s.goal.progressPct).toBe(30);
+    expect(s.goal.remaining).toBe(420);
+  });
+
+  it("leaves the goal null when none is set", () => {
+    expect(snap.goal.amount).toBeNull();
+    expect(snap.goal.progressPct).toBeNull();
+  });
+
+  it("flags the top of the month only in the first days", () => {
+    expect(buildCoachSnapshot(clients, [], "2026-06-02").period.isTopOfMonth).toBe(true);
+    expect(buildCoachSnapshot(clients, [], "2026-06-15").period.isTopOfMonth).toBe(false);
+    expect(buildCoachSnapshot(clients, [], "2026-06-02").period.monthLabel).toBe("June");
+  });
+
   it("does not throw on empty / garbage input", () => {
     expect(() => buildCoachSnapshot([], [], TODAY)).not.toThrow();
     expect(() => buildCoachSnapshot(null as any, null as any, TODAY)).not.toThrow();
@@ -122,6 +178,14 @@ describe("buildCoachSystem", () => {
     const sys = buildCoachSystem(snap, { businessName: "Boss Braids" });
     expect(sys.toLowerCase()).toContain("service business");
     expect(sys.toLowerCase()).toContain("not earned yet");
+  });
+
+  it("instructs the coach on wellbeing, new-client growth, and the monthly goal", () => {
+    const sys = buildCoachSystem(snap, { businessName: "Boss Braids" });
+    expect(sys.toLowerCase()).toContain("burn out");
+    expect(sys.toLowerCase()).toContain("day off");
+    expect(sys.toLowerCase()).toContain("new clientele");
+    expect(sys.toLowerCase()).toContain("monthlycheckin");
   });
 });
 
@@ -172,6 +236,19 @@ describe("parseCoachBriefing", () => {
     expect(out?.headline).toBe("Strong week!");
     expect(out?.actions).toHaveLength(2);
     expect(out?.actions[0].title).toBe("Rebook Amara");
+  });
+
+  it("keeps wellbeing and monthlyCheckIn fields, defaulting to empty strings", () => {
+    const withWell = parseCoachBriefing({
+      headline: "Hi", summary: "s",
+      wellbeing: "Take Sunday off — you've worked 6 days straight.",
+      monthlyCheckIn: "New month: aim for $1,800.",
+    });
+    expect(withWell?.wellbeing).toContain("Sunday");
+    expect(withWell?.monthlyCheckIn).toContain("1,800");
+    const without = parseCoachBriefing({ headline: "Hi", summary: "s" });
+    expect(without?.wellbeing).toBe("");
+    expect(without?.monthlyCheckIn).toBe("");
   });
 
   it("returns null when there's no headline or summary", () => {

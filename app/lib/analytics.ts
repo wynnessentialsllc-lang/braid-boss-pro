@@ -130,8 +130,14 @@ export const calculateClientAnalytics = (
     if (ltv >= vipThreshold && completed.length >= 3) vip += 1;
     if (days !== null && days > 90 && !upcoming) inactive += 1;
     if (days !== null && days >= 60 && days <= 90 && !upcoming && completed.length >= 2) atRisk += 1;
-    const firstAppt = mine.map(a => a.date).filter(Boolean).sort()[0];
-    if (firstAppt && firstAppt >= monthStart) newThisMonth += 1;
+    // "New this month" = a client whose FIRST actual visit (a completed /
+    // paid appointment) happened this month. Using completed appts — not
+    // every booking — keeps this consistent with revenue and the rest of
+    // these metrics: a client who only has a future, not-yet-serviced
+    // booking hasn't "come in" yet, so they don't count as new until the
+    // service is rendered.
+    const firstServiced = completed.map(a => a.date).filter(Boolean).sort()[0];
+    if (firstServiced && firstServiced >= monthStart) newThisMonth += 1;
   }
 
   return {

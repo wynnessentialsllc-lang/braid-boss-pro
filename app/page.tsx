@@ -515,7 +515,7 @@ import {
   BarChart3, Layers, MessageSquare, Send, AlertTriangle, CheckCircle2,
   XCircle, Filter, MoreHorizontal, SlidersHorizontal, LogOut,
   LifeBuoy, Bug, Lightbulb, PlayCircle, ShieldCheck, HelpCircle, Package,
-  ShoppingBag, CreditCard, Minus, Wallet, Share2
+  ShoppingBag, CreditCard, Minus, Wallet, Share2, Target
 } from "lucide-react";
 
 /* ============================================================
@@ -3038,6 +3038,134 @@ const copyTextToClipboard = async (text: string): Promise<boolean> => {
   } catch { return false; }
 };
 
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const daysInMonth = (iso: string): number => {
+  const y = Number(iso.slice(0, 4));
+  const m = Number(iso.slice(5, 7));
+  if (!y || !m) return 30;
+  return new Date(y, m, 0).getDate();
+};
+
+// Monthly revenue goal. The stylist sets a target for the month; we show
+// progress against the same month-revenue figure the AI coach narrates, so
+// the card and the briefing always agree. Editable inline; clearing the
+// amount removes the goal (which prompts the coach's top-of-month check-in
+// to suggest a fresh one).
+const MonthlyGoalCard = ({
+  goal,
+  earned,
+  currency,
+  monthLabel,
+  daysLeft,
+  onSave,
+}: {
+  goal: number | null;
+  earned: number;
+  currency: string;
+  monthLabel: string;
+  daysLeft: number;
+  onSave: (amount: number | null) => void | Promise<void>;
+}) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const startEdit = () => {
+    setDraft(goal != null ? String(goal) : "");
+    setEditing(true);
+  };
+  const commit = async () => {
+    const n = Math.round(Number(draft.replace(/[^0-9.]/g, "")) || 0);
+    await onSave(n > 0 ? n : null);
+    setEditing(false);
+  };
+
+  const pct = goal && goal > 0 ? Math.min(100, Math.round((earned / goal) * 100)) : 0;
+  const remaining = goal != null ? Math.max(0, goal - earned) : 0;
+  const met = goal != null && earned >= goal;
+
+  return (
+    <div>
+      <SectionTitle>Monthly goal</SectionTitle>
+      <Card className="p-4" style={{ border: `1px solid ${C.hairline}` }}>
+        {editing ? (
+          <div className="space-y-2.5">
+            <p className="text-[12px]" style={{ color: C.muted }}>
+              Set your revenue target for {monthLabel || "this month"}.
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                inputMode="numeric"
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="e.g. 2000"
+                className="flex-1 rounded-xl px-3 py-2 text-[14px]"
+                style={{ border: `1px solid ${C.hairline}`, background: C.paper, color: C.espresso }}
+              />
+              <button
+                type="button"
+                onClick={() => void commit()}
+                className="px-3.5 py-2 rounded-xl text-[12px] font-semibold active:scale-[0.98] transition"
+                style={{ background: C.espresso, color: C.cream }}
+              >
+                Save
+              </button>
+            </div>
+            {goal != null && (
+              <button
+                type="button"
+                onClick={() => { void onSave(null); setEditing(false); }}
+                className="text-[11.5px] font-semibold"
+                style={{ color: C.danger }}
+              >
+                Remove goal
+              </button>
+            )}
+          </div>
+        ) : goal == null ? (
+          <button type="button" onClick={startEdit} className="w-full text-left active:scale-[0.99] transition">
+            <div className="flex items-center gap-2.5">
+              <Target size={18} style={{ color: C.goldDeep }} />
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>Set a goal for {monthLabel || "this month"}</p>
+                <p className="text-[11.5px] mt-0.5" style={{ color: C.muted, lineHeight: 1.45 }}>
+                  Your coach will track progress and check in with you to help you hit it.
+                </p>
+              </div>
+            </div>
+          </button>
+        ) : (
+          <button type="button" onClick={startEdit} className="w-full text-left active:scale-[0.99] transition">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: C.muted, letterSpacing: "0.06em" }}>
+                {monthLabel || "This month"}
+              </span>
+              <span className="text-[12px] font-semibold" style={{ color: met ? C.success : C.goldDeep }}>
+                {fmtMoney(earned, currency)} / {fmtMoney(goal, currency)}
+              </span>
+            </div>
+            <div className="mt-2 h-2.5 rounded-full overflow-hidden" style={{ background: C.hairline }}>
+              <div
+                className="h-full rounded-full transition-all"
+                style={{ width: `${pct}%`, background: met ? C.success : `linear-gradient(90deg, ${C.gold}, ${C.goldDeep})` }}
+              />
+            </div>
+            <p className="text-[11.5px] mt-1.5" style={{ color: C.muted }}>
+              {met
+                ? `Goal smashed — ${pct}% of target. 🎉`
+                : `${pct}% there · ${fmtMoney(remaining, currency)} to go${daysLeft > 0 ? ` · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left` : ""}`}
+            </p>
+          </button>
+        )}
+      </Card>
+    </div>
+  );
+};
+
 // Premium card. Dashboard surface for the rebooking system. Empty state
 // uses the same Sparkles + cream block as the existing retention card
 // for visual consistency.
@@ -3050,12 +3178,14 @@ const BusinessCoachCard = ({
   today,
   currency,
   ownerName,
+  monthlyGoal,
 }: {
   clients: any[];
   appointments: any[];
   today: string;
   currency: string;
   ownerName: string | null;
+  monthlyGoal?: number | null;
 }) => {
   const [busy, setBusy] = useState(false);
   const [briefing, setBriefing] = useState<CoachBriefing | null>(null);
@@ -3071,7 +3201,7 @@ const BusinessCoachCard = ({
       const { data: sess } = await getSupabase().auth.getSession();
       const token = sess?.session?.access_token;
       if (!token) { setError("Please sign in again."); return; }
-      const snapshot = buildCoachSnapshot(clients, appointments, today, currency);
+      const snapshot = buildCoachSnapshot(clients, appointments, today, currency, undefined, monthlyGoal ?? null);
       const res = await fetch("/api/business-coach", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -3141,6 +3271,14 @@ const BusinessCoachCard = ({
 
             {expanded && (
               <div className="space-y-3">
+                {briefing.monthlyCheckIn && (
+                  <div className="rounded-xl p-3" style={{ background: "rgba(124,58,237,0.08)", border: `1px solid rgba(124,58,237,0.28)` }}>
+                    <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: C.goldDeep, letterSpacing: "0.08em" }}>
+                      Monthly check-in
+                    </p>
+                    <p className="text-[12.5px] mt-1" style={{ color: C.coffee, lineHeight: 1.5 }}>{briefing.monthlyCheckIn}</p>
+                  </div>
+                )}
                 {briefing.summary && (
                   <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.55 }}>{briefing.summary}</p>
                 )}
@@ -3158,6 +3296,17 @@ const BusinessCoachCard = ({
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+                {briefing.wellbeing && (
+                  <div className="rounded-xl p-3 flex gap-2.5" style={{ background: "rgba(92,124,74,0.08)", border: `1px solid rgba(92,124,74,0.22)` }}>
+                    <Heart size={15} className="shrink-0 mt-0.5" style={{ color: C.success }} />
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: C.success, letterSpacing: "0.08em" }}>
+                        Your wellbeing
+                      </p>
+                      <p className="text-[12px] mt-0.5" style={{ color: C.coffee, lineHeight: 1.5 }}>{briefing.wellbeing}</p>
+                    </div>
                   </div>
                 )}
                 {briefing.encouragement && (
@@ -5353,6 +5502,38 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
     [pendingBalanceAppts, today],
   );
 
+  // ---- Monthly revenue goal (saved locally, scoped to the month) -------
+  // The stylist sets a dollar target for the month; the AI coach tracks
+  // progress toward it and runs a top-of-month check-in. Stored as
+  // { amount, month } so a goal naturally lapses when a new month starts,
+  // prompting a fresh one. Progress uses the SAME month-revenue figure the
+  // coach narrates (appointment service revenue), so the card and the
+  // briefing can never disagree.
+  const currentMonth = today.slice(0, 7);
+  const [goalRecord, setGoalRecord] = useState<{ amount: number; month: string } | null>(null);
+  useEffect(() => {
+    (async () => {
+      const raw = await safeStorage.get("settings:monthlyGoal");
+      const parsed = safeParse<{ amount: number; month: string } | null>(raw, null);
+      setGoalRecord(parsed && typeof parsed.amount === "number" && parsed.amount > 0 ? parsed : null);
+    })();
+  }, []);
+  const monthlyGoalAmount = goalRecord && goalRecord.month === currentMonth ? goalRecord.amount : null;
+  const monthRevenueForGoal = useMemo(
+    () => calculateRevenueAnalytics(appointments, today).thisMonth,
+    [appointments, today],
+  );
+  const saveMonthlyGoal = useCallback(async (amount: number | null) => {
+    if (amount == null || !(amount > 0)) {
+      setGoalRecord(null);
+      await safeStorage.delete("settings:monthlyGoal");
+      return;
+    }
+    const rec = { amount: Math.round(amount), month: today.slice(0, 7) };
+    setGoalRecord(rec);
+    await safeStorage.set("settings:monthlyGoal", rec);
+  }, [today]);
+
   const markApptPaid = async (appt: any) => {
     const apptDate = appt.date || todayISO();
     const isPastOrToday = apptDate <= today;
@@ -5500,6 +5681,18 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
           today={today}
           currency={business.currency}
           ownerName={business.ownerName?.split(" ")[0] || null}
+          monthlyGoal={monthlyGoalAmount}
+        />
+
+        {/* Monthly goal — sits right under the coach so the goal the coach
+            talks about is also the goal the stylist can set/track here. */}
+        <MonthlyGoalCard
+          goal={monthlyGoalAmount}
+          earned={monthRevenueForGoal}
+          currency={business.currency}
+          monthLabel={MONTH_NAMES[Number(today.slice(5, 7)) - 1] || ""}
+          daysLeft={Math.max(0, daysInMonth(today) - Number(today.slice(8, 10)))}
+          onSave={saveMonthlyGoal}
         />
 
         {/* Hierarchy: money-critical cards get a dedicated headline
