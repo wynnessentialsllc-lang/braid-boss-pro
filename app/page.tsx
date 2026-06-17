@@ -5502,37 +5502,37 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
     [pendingBalanceAppts, today],
   );
 
-  // ---- Monthly revenue goal (saved locally, scoped to the month) -------
-  // The stylist sets a dollar target for the month; the AI coach tracks
-  // progress toward it and runs a top-of-month check-in. Stored as
+  // ---- Monthly revenue goal (rides the existing synced settings) -------
+  // The goal lives on the `business` settings object (settings.data.business),
+  // which already syncs across every device via the Sync & Backup engine —
+  // so it follows the stylist without a new synced field. Stored as
   // { amount, month } so a goal naturally lapses when a new month starts,
-  // prompting a fresh one. Progress uses the SAME month-revenue figure the
-  // coach narrates (appointment service revenue), so the card and the
-  // briefing can never disagree.
+  // prompting a fresh top-of-month check-in. Progress uses the SAME
+  // month-revenue figure the coach narrates (appointment service revenue),
+  // so the card and the briefing can never disagree.
   const currentMonth = today.slice(0, 7);
-  const [goalRecord, setGoalRecord] = useState<{ amount: number; month: string } | null>(null);
-  useEffect(() => {
-    (async () => {
-      const raw = await safeStorage.get("settings:monthlyGoal");
-      const parsed = safeParse<{ amount: number; month: string } | null>(raw, null);
-      setGoalRecord(parsed && typeof parsed.amount === "number" && parsed.amount > 0 ? parsed : null);
-    })();
-  }, []);
-  const monthlyGoalAmount = goalRecord && goalRecord.month === currentMonth ? goalRecord.amount : null;
+  const savedGoal =
+    business?.monthlyGoal && typeof business.monthlyGoal === "object"
+      ? (business.monthlyGoal as { amount?: number; month?: string })
+      : null;
+  const monthlyGoalAmount =
+    savedGoal && savedGoal.month === currentMonth && typeof savedGoal.amount === "number" && savedGoal.amount > 0
+      ? savedGoal.amount
+      : null;
   const monthRevenueForGoal = useMemo(
     () => calculateRevenueAnalytics(appointments, today).thisMonth,
     [appointments, today],
   );
-  const saveMonthlyGoal = useCallback(async (amount: number | null) => {
-    if (amount == null || !(amount > 0)) {
-      setGoalRecord(null);
-      await safeStorage.delete("settings:monthlyGoal");
-      return;
-    }
-    const rec = { amount: Math.round(amount), month: today.slice(0, 7) };
-    setGoalRecord(rec);
-    await safeStorage.set("settings:monthlyGoal", rec);
-  }, [today]);
+  const saveMonthlyGoal = useCallback(
+    async (amount: number | null) => {
+      const next = { ...business };
+      next.monthlyGoal = amount == null || !(amount > 0)
+        ? null
+        : { amount: Math.round(amount), month: today.slice(0, 7) };
+      await store.saveBusiness?.(next);
+    },
+    [business, store, today],
+  );
 
   const markApptPaid = async (appt: any) => {
     const apptDate = appt.date || todayISO();
