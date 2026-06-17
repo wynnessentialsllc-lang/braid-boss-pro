@@ -65,6 +65,143 @@ const classifyBalances = (
   return { earnedUnpaid, dueToday, upcoming };
 };
 
+// ---- calendar / wellbeing ---------------------------------------------
+// Braiding is physically punishing and long-form — a stylist can quietly
+// book themselves into weeks of back-to-back all-day sessions with no day
+// off. The coach needs a day-by-day read of the calendar so it can speak
+// to workload and rest, not just revenue.
+
+const DOW_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const dowShort = (iso: string): string => {
+  const d = new Date(iso + "T00:00:00");
+  return DOW_SHORT[d.getDay()] || "";
+};
+const apptHours = (a: any): number => {
+  const h = toNum(a?.durationHours ?? a?.duration_hours ?? a?.duration);
+  return h > 0 ? h : 0;
+};
+// Personal events / blocked time live in the appointments array but aren't
+// real bookings. A day with one of these (and no clients) is the stylist
+// deliberately protecting time off.
+const isRealBooking = (a: any): boolean => !a?.kind || a.kind === "appointment";
+const isTimeOffEntry = (a: any): boolean => a?.kind === "personal" || a?.kind === "blocked";
+
+export interface CoachDayLoad {
+  date: string;
+  dow: string;
+  apptCount: number;
+  hours: number;
+  isOff: boolean;       // no client bookings that day
+  hasTimeOff: boolean;  // a personal / blocked entry is on the calendar
+}
+
+export interface CoachWorkload {
+  todayCount: number;
+  todayHours: number;
+  next7: CoachDayLoad[];
+  daysOffNext7: number;
+  longestStretch: number;        // longest run of back-to-back working days near today
+  heaviestDayHours: number;
+  timeOffScheduledNext7: boolean;
+}
+
+const computeWorkload = (appts: any[], todayIso: string): CoachWorkload => {
+  const byDate: Record<string, { count: number; hours: number; timeOff: boolean }> = {};
+  for (const a of appts) {
+    if (!a || isCancelled(a)) continue;
+    const date = typeof a?.date === "string" ? a.date : "";
+    if (!date) continue;
+    const slot = (byDate[date] ||= { count: 0, hours: 0, timeOff: false });
+    if (isTimeOffEntry(a)) { slot.timeOff = true; continue; }
+    if (!isRealBooking(a)) continue;
+    slot.count += 1;
+    slot.hours += apptHours(a);
+  }
+
+  const round1 = (n: number) => Math.round((n + Number.EPSILON) * 10) / 10;
+  const next7: CoachDayLoad[] = [];
+  for (let i = 0; i < 7; i++) {
+    const date = addDaysIso(todayIso, i);
+    const slot = byDate[date];
+    next7.push({
+      date,
+      dow: dowShort(date),
+      apptCount: slot?.count || 0,
+      hours: round1(slot?.hours || 0),
+      isOff: !slot || slot.count === 0,
+      hasTimeOff: !!slot?.timeOff,
+    });
+  }
+
+  // Longest run of consecutive working days in a window spanning the past
+  // week through the next week — the real burnout signal is a long unbroken
+  // stretch with no day off, which a single-week view can miss.
+  let longestStretch = 0;
+  let run = 0;
+  for (let i = -7; i <= 7; i++) {
+    const working = (byDate[addDaysIso(todayIso, i)]?.count || 0) > 0;
+    if (working) { run += 1; longestStretch = Math.max(longestStretch, run); }
+    else run = 0;
+  }
+
+  const todaySlot = byDate[todayIso];
+  return {
+    todayCount: todaySlot?.count || 0,
+    todayHours: round1(todaySlot?.hours || 0),
+    next7,
+    daysOffNext7: next7.filter(d => d.isOff).length,
+    longestStretch,
+    heaviestDayHours: round1(next7.reduce((m, d) => Math.max(m, d.hours), 0)),
+    timeOffScheduledNext7: next7.some(d => d.hasTimeOff),
+  };
+};
+
+// ---- monthly goal + period --------------------------------------------
+
+export interface CoachGoal {
+  amount: number | null;        // saved monthly revenue goal (null = not set)
+  revenueThisMonth: number;     // progress so far this month
+  remaining: number;            // amount still to earn (0 if met / no goal)
+  progressPct: number | null;   // 0-100, null when no goal is set
+}
+
+export interface CoachPeriod {
+  isTopOfMonth: boolean;        // within the first days of the month
+  monthLabel: string;           // e.g. "June"
+  dayOfMonth: number;
+  daysLeftInMonth: number;
+}
+
+const buildGoal = (monthlyGoal: number | null, revenueThisMonth: number): CoachGoal => {
+  const amount =
+    monthlyGoal != null && Number.isFinite(monthlyGoal) && monthlyGoal > 0
+      ? Math.round(monthlyGoal)
+      : null;
+  const rev = Math.round(revenueThisMonth);
+  return {
+    amount,
+    revenueThisMonth: rev,
+    remaining: amount != null ? Math.max(0, amount - rev) : 0,
+    progressPct: amount != null && amount > 0 ? Math.round((rev / amount) * 100) : null,
+  };
+};
+
+const buildPeriod = (todayIso: string): CoachPeriod => {
+  const d = new Date(todayIso + "T00:00:00");
+  const dayOfMonth = d.getDate();
+  const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  return {
+    isTopOfMonth: dayOfMonth <= 5,
+    monthLabel: MONTHS[d.getMonth()] || "",
+    dayOfMonth,
+    daysLeftInMonth: Math.max(0, daysInMonth - dayOfMonth),
+  };
+};
+
 // ---- snapshot ----------------------------------------------------------
 
 export interface CoachOpportunity {
@@ -112,6 +249,9 @@ export interface CoachSnapshot {
     estimatedRevenue: number;
   };
   topOpportunities: CoachOpportunity[];
+  workload: CoachWorkload;
+  goal: CoachGoal;
+  period: CoachPeriod;
 }
 
 export const buildCoachSnapshot = (
@@ -120,6 +260,7 @@ export const buildCoachSnapshot = (
   todayIso: string,
   currency = "USD",
   vipThreshold = 800,
+  monthlyGoal: number | null = null,
 ): CoachSnapshot => {
   const appts = Array.isArray(appointments) ? appointments : [];
   const rev = calculateRevenueAnalytics(appts, todayIso);
@@ -180,6 +321,9 @@ export const buildCoachSnapshot = (
       estimatedRevenue: sum.estimated_returning_revenue,
     },
     topOpportunities,
+    workload: computeWorkload(appts, todayIso),
+    goal: buildGoal(monthlyGoal, rev.thisMonth),
+    period: buildPeriod(todayIso),
   };
 };
 
@@ -193,6 +337,8 @@ export interface CoachBriefing {
   headline: string;
   summary: string;
   actions: CoachAction[];
+  wellbeing: string;
+  monthlyCheckIn: string;
   encouragement: string;
 }
 
@@ -260,6 +406,38 @@ export const cleanSnapshot = (raw: unknown): CoachSnapshot => {
           value: num(t?.value),
         }))
       : [],
+    workload: {
+      todayCount: num(o?.workload?.todayCount),
+      todayHours: num(o?.workload?.todayHours),
+      next7: Array.isArray(o?.workload?.next7)
+        ? o.workload.next7.slice(0, 7).map((d: any) => ({
+            date: s(d?.date, 10) || "",
+            dow: s(d?.dow, 3) || "",
+            apptCount: num(d?.apptCount),
+            hours: num(d?.hours),
+            isOff: !!d?.isOff,
+            hasTimeOff: !!d?.hasTimeOff,
+          }))
+        : [],
+      daysOffNext7: num(o?.workload?.daysOffNext7),
+      longestStretch: num(o?.workload?.longestStretch),
+      heaviestDayHours: num(o?.workload?.heaviestDayHours),
+      timeOffScheduledNext7: !!o?.workload?.timeOffScheduledNext7,
+    },
+    goal: {
+      // Preserve an unset goal as null — numOrNull would coerce JSON null to
+      // 0 (Number(null) === 0), which would look like a real $0 goal.
+      amount: o?.goal?.amount == null ? null : numOrNull(o.goal.amount),
+      revenueThisMonth: num(o?.goal?.revenueThisMonth),
+      remaining: num(o?.goal?.remaining),
+      progressPct: o?.goal?.progressPct == null ? null : numOrNull(o.goal.progressPct),
+    },
+    period: {
+      isTopOfMonth: !!o?.period?.isTopOfMonth,
+      monthLabel: s(o?.period?.monthLabel, 12) || "",
+      dayOfMonth: num(o?.period?.dayOfMonth),
+      daysLeftInMonth: num(o?.period?.daysLeftInMonth),
+    },
   };
 };
 
@@ -311,6 +489,39 @@ export const snapshotFacts = (snap: CoachSnapshot): string => {
         ".",
     );
   }
+
+  // ---- Calendar / wellbeing (day-by-day load over the next 7 days) ----
+  const w = snap.workload;
+  const dayBits = w.next7.map((d) => {
+    if (d.isOff) return `${d.dow}: OFF${d.hasTimeOff ? " (time blocked)" : ""}`;
+    const hrs = d.hours > 0 ? `, ~${d.hours}h` : "";
+    return `${d.dow}: ${d.apptCount} appt${d.apptCount === 1 ? "" : "s"}${hrs}`;
+  });
+  lines.push(`Calendar next 7 days — ${dayBits.join(" | ")}.`);
+  lines.push(
+    `Workload: ${w.todayCount} appointment${w.todayCount === 1 ? "" : "s"} today${
+      w.todayHours > 0 ? ` (~${w.todayHours}h)` : ""
+    }; ${w.daysOffNext7} day${w.daysOffNext7 === 1 ? "" : "s"} off in the next 7; longest back-to-back working stretch around now: ${w.longestStretch} day${w.longestStretch === 1 ? "" : "s"}; heaviest upcoming day ~${w.heaviestDayHours}h.${
+      w.timeOffScheduledNext7 ? " Personal time off is on the calendar this week." : ""
+    }${w.daysOffNext7 === 0 ? " NO full day off is scheduled in the next 7 days." : ""}`,
+  );
+
+  // ---- Monthly goal + progress ----
+  const g = snap.goal;
+  const p = snap.period;
+  if (g.amount != null) {
+    lines.push(
+      `Monthly revenue goal: ${money(g.amount, c)}. Earned so far this month: ${money(g.revenueThisMonth, c)} (${g.progressPct}% of goal). Still to go: ${money(g.remaining, c)} with ${p.daysLeftInMonth} day${p.daysLeftInMonth === 1 ? "" : "s"} left in ${p.monthLabel}.`,
+    );
+  } else {
+    lines.push(`Monthly revenue goal: not set yet for ${p.monthLabel}.`);
+  }
+  lines.push(
+    `Date context: day ${p.dayOfMonth} of ${p.monthLabel}, ${p.daysLeftInMonth} days left.${
+      p.isTopOfMonth ? " It is the TOP OF THE MONTH — time for the monthly goal check-in." : ""
+    }`,
+  );
+
   return lines.join("\n");
 };
 
@@ -326,13 +537,28 @@ export const buildCoachSystem = (snap: CoachSnapshot, ctx: CoachContext): string
     "- 'Upcoming balances on future appointments' are NOT earned yet because the service hasn't happened. NEVER describe these as money owed, already-earned, or revenue waiting to be collected, and never tell the owner to chase clients for them.",
     "- If there are no already-earned unpaid balances, do not invent a 'collect your outstanding balances' action.",
     "",
+    "Care about the person, not just the numbers. Braiding is long, physical work and stylists burn out fast — mentally, physically, and emotionally. Read the day-by-day calendar and speak to their wellbeing:",
+    "- If they are working many days back-to-back (long stretch) or have NO day off scheduled in the next 7 days, gently name it and encourage them to protect a rest day or a break. Do not guilt them; be warm and protective.",
+    "- If a day is especially heavy (long hours / many appointments), suggest practical recovery: hydration, stretching, a real lunch, spacing future bookings.",
+    "- If they already have time off or a day off scheduled, affirm it — that's healthy.",
+    "- Speak to mental and emotional wellbeing too, not only physical. A sustainable pace protects the business.",
+    "",
+    "Growing the book matters: when bookings are light, the calendar has gaps, or new clients this month are few, give at least one concrete strategy to attract NEW clientele — not just rebooking existing clients. Be specific and realistic for a solo braider (e.g. post a before/after of the top style on social with a booking link, a limited new-client offer, asking happy clients for a referral or a tagged photo, partnering with a local business, showing fresh availability). Tie it to a number above when you can.",
+    "",
+    "Monthly goal:",
+    "- If a monthly revenue goal is set, hold them to it kindly: state progress, what's left, and a concrete pace to get there (e.g. how many bookings at their average ticket), using the days left in the month.",
+    "- If it is the TOP OF THE MONTH (flagged in the facts), make the monthly check-in the centerpiece: reflect briefly on last month, and either celebrate/adjust the goal or — if no goal is set — warmly prompt them to set one and suggest a realistic target based on last month and their average ticket. Put this in the monthlyCheckIn field.",
+    "- If it is NOT the top of the month, leave monthlyCheckIn empty.",
+    "",
     "Today's numbers:",
     snapshotFacts(snap),
     "",
     "Write a short daily briefing:",
     "- headline: one upbeat, specific line about how things stand.",
     "- summary: 2-3 sentences interpreting the numbers in plain English.",
-    "- actions: 2-3 concrete, high-leverage things to do today/this week, each tied to a number above (e.g. rebooking overdue clients, following up on already-earned unpaid balances, collecting today's balances at the chair, filling a quiet day). Name specific clients only if they appear in the briefing.",
+    "- actions: 2-3 concrete, high-leverage things to do today/this week, each tied to a number above (e.g. rebooking overdue clients, following up on already-earned unpaid balances, collecting today's balances at the chair, filling a quiet day, a new-client outreach move). Name specific clients only if they appear in the briefing.",
+    "- wellbeing: one or two sentences on workload and rest, grounded in the calendar facts above. Always provide this.",
+    "- monthlyCheckIn: ONLY at the top of the month — the goal reflection + advice described above. Otherwise leave it empty.",
     "- encouragement: one warm closing line.",
     "Be concrete and motivating, not generic. No fake statistics.",
   ].join("\n");
@@ -346,7 +572,7 @@ export const coachTool = () => ({
   input_schema: {
     type: "object" as const,
     additionalProperties: false,
-    required: ["headline", "summary", "actions", "encouragement"],
+    required: ["headline", "summary", "actions", "wellbeing", "monthlyCheckIn", "encouragement"],
     properties: {
       headline: { type: "string", description: "One upbeat, specific line." },
       summary: { type: "string", description: "2-3 sentences interpreting the numbers." },
@@ -362,6 +588,16 @@ export const coachTool = () => ({
             detail: { type: "string", description: "One sentence on why / how, tied to a number." },
           },
         },
+      },
+      wellbeing: {
+        type: "string",
+        description:
+          "1-2 sentences on workload and rest, grounded in the calendar facts (back-to-back stretch, days off, heavy days). Warm and protective, never guilt-inducing. Always provide this.",
+      },
+      monthlyCheckIn: {
+        type: "string",
+        description:
+          "ONLY at the top of the month: reflect on last month and set/adjust or prompt the monthly revenue goal with concrete advice. Empty string otherwise.",
       },
       encouragement: { type: "string", description: "One warm closing line." },
     },
@@ -388,6 +624,8 @@ export const parseCoachBriefing = (input: unknown): CoachBriefing | null => {
     headline: headline || "Here's your day at a glance",
     summary,
     actions,
+    wellbeing: str(o.wellbeing, 320),
+    monthlyCheckIn: str(o.monthlyCheckIn, 600),
     encouragement: str(o.encouragement, 200),
   };
 };
