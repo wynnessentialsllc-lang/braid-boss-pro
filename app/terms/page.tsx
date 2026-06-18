@@ -46,6 +46,36 @@ export default function TermsPage() {
         ]} />
       </LegalSection>
 
+      <LegalSection title="SMS messaging">
+        <p>
+          If a client opts in on a stylist&rsquo;s public booking form, Braid Boss Pro sends the following text messages on the stylist&rsquo;s behalf:
+        </p>
+        <LegalList items={[
+          <>Appointment reminders</>,
+          <>Booking notifications</>,
+          <>Payment reminders</>,
+          <>Contract reminders</>,
+          <>Review requests</>,
+          <>Customer support communications</>,
+          <>Promotional messages when users have opted in</>,
+        ]} />
+        <p>
+          <strong>Message frequency.</strong> Message frequency varies based on account activity and bookings.
+        </p>
+        <p>
+          <strong>Pricing.</strong> Message and data rates may apply.
+        </p>
+        <p>
+          <strong>To stop messages.</strong> Reply <strong>STOP</strong> to cancel SMS messages. A confirmation message will be sent after opting out.
+        </p>
+        <p>
+          <strong>For help.</strong> Reply <strong>HELP</strong> for assistance.
+        </p>
+        <p>
+          <strong>Carrier disclaimer.</strong> Mobile carriers are not liable for delayed or undelivered messages.
+        </p>
+      </LegalSection>
+
       <LegalSection title="Account deletion">
         <p>
           You can delete your account at any time from Account & Sync → Delete account. Deletion is permanent and cascades through every per-user database row we keep. Local device data needs to be cleared by you (uninstall or clear browser storage).

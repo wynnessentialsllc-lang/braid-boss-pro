@@ -71,17 +71,47 @@ export default function PrivacyPage() {
         ]} />
       </LegalSection>
 
-      <LegalSection title="SMS messaging">
+      <LegalSection title="SMS Messaging">
         <p>
-          When a stylist books a client through Braid Boss Pro and the client opts in to receive text messages, Braid Boss Pro sends transactional SMS on the stylist&rsquo;s behalf — appointment confirmations, reminders before scheduled appointments, balance-due notifications, and post-appointment rebooking nudges. Frequency depends on the client&rsquo;s appointment activity (typically 1–5 messages per appointment).
+          When a client opts in on a stylist&rsquo;s public booking form, Braid Boss Pro sends text messages on the stylist&rsquo;s behalf. In connection with this SMS program, Braid Boss Pro may collect:
         </p>
         <LegalList items={[
-          <><strong>Opt-in</strong> — Clients consent by checking the SMS opt-in box on the stylist&rsquo;s public booking form before submitting their booking. Consent is logged with a timestamp on the client&rsquo;s record.</>,
-          <><strong>Opt-out</strong> — Clients can reply <strong>STOP</strong> (or STOPALL, UNSUBSCRIBE, CANCEL, END, QUIT) to any message at any time to unsubscribe immediately. Reply <strong>HELP</strong> for help.</>,
-          <><strong>Carriers &amp; rates</strong> — Message and data rates may apply depending on the recipient&rsquo;s mobile carrier and plan. Braid Boss Pro does not charge clients for SMS.</>,
-          <><strong>Sharing</strong> — Phone numbers and message content are shared only with our SMS delivery provider (Twilio) for the sole purpose of delivering the message. No SMS data is sold, rented, or shared with third parties for marketing.</>,
-          <><strong>Mobile information</strong> — Mobile opt-in data and consent is never shared with third parties or affiliates for marketing or promotional purposes.</>,
+          <>Name</>,
+          <>Email address</>,
+          <>Mobile phone number</>,
         ]} />
+        <p>We use this information to send:</p>
+        <LegalList items={[
+          <>Appointment confirmations</>,
+          <>Appointment reminders</>,
+          <>Booking approvals</>,
+          <>Booking denials</>,
+          <>Payment reminders</>,
+          <>Contract reminders</>,
+          <>Review requests</>,
+          <>Promotional offers (when consent is provided)</>,
+        ]} />
+        <p>
+          <strong>No mobile information will be shared with third parties or affiliates for marketing or promotional purposes.</strong>
+        </p>
+        <p>
+          <strong>Text messaging originator opt-in data and consent will not be shared, sold, rented, or transferred to any third parties under any circumstances.</strong>
+        </p>
+        <p>
+          Information may be shared with service providers solely for the purpose of delivering text messaging services and operating the platform.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="SMS opt-out &amp; help">
+        <p>
+          Users may opt out at any time by replying <strong>STOP</strong>. Users may request assistance by replying <strong>HELP</strong>.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="SMS message frequency &amp; rates">
+        <p>
+          Message frequency varies. Message and data rates may apply.
+        </p>
       </LegalSection>
 
       <LegalSection title="Guest mode">

@@ -476,10 +476,11 @@ export default function PublicBookingPage() {
   const [preferredDate, setPreferredDate] = useState("");
   const [preferredTime, setPreferredTime] = useState("");
   const [notes, setNotes] = useState("");
-  // SMS reminders opt-in. Default on — most clients want a text
-  // reminder; they can untick it. Threaded into the booking request
-  // so the reminder scheduler knows whether to also send SMS.
-  const [smsOptIn, setSmsOptIn] = useState(true);
+  // SMS opt-in. Unchecked by default — the client must affirmatively
+  // check it (A2P/CTIA express-consent requirement); it is never
+  // pre-checked and never bundled with Terms acceptance. Threaded into
+  // the booking request so the reminder scheduler knows whether to send.
+  const [smsOptIn, setSmsOptIn] = useState(false);
   // Style customization (hair color + curl pattern) — only shown
   // when the selected service enables them. "Custom / Other" reveals
   // a small free-text field saved to customization_summary.
@@ -3487,7 +3488,7 @@ export default function PublicBookingPage() {
                 </Field>
               </>
             )}
-            {SMS_ENABLED && phone.trim() && (
+            {phone.trim() && (
               <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
                 <input
                   type="checkbox"
@@ -3496,10 +3497,10 @@ export default function PublicBookingPage() {
                   style={{ marginTop: 2, width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }}
                 />
                 <span style={{ fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
-                  I agree to receive transactional SMS from Braid Boss Pro on behalf of my stylist about my appointment (confirmations, reminders, balance reminders, rebooking). Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out, <strong>HELP</strong> for help. Consent is not a condition of purchase. See our{" "}
+                  I agree to receive text messages from Braid Boss Pro regarding appointment reminders, booking updates, account notifications, and promotional offers. Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out or <strong>HELP</strong> for assistance. Consent is not a condition of purchase. View our{" "}
                   <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Privacy Policy</a>{" "}
                   and{" "}
-                  <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Terms</a>.
+                  <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Terms of Service</a>.
                 </span>
               </label>
             )}
@@ -3852,6 +3853,20 @@ export default function PublicBookingPage() {
           </div>
         )}
       </div>
+
+      {/* Public legal footer — Privacy + Terms reachable from the
+          booking page regardless of how far the visitor scrolls or
+          whether they've started the form. Bottom padding clears the
+          sticky Book bar. */}
+      <footer
+        className="mx-auto text-center"
+        style={{ maxWidth: 480, padding: "8px 20px calc(104px + env(safe-area-inset-bottom, 0px))", color: C.muted }}
+      >
+        <nav className="flex flex-wrap items-center justify-center" style={{ gap: 16, fontSize: 12 }}>
+          <a href="/privacy" style={{ color: C.muted }}>Privacy Policy</a>
+          <a href="/terms" style={{ color: C.muted }}>Terms of Service</a>
+        </nav>
+      </footer>
 
       {/* Sticky "Book" bar — keeps the primary action one tap away no
           matter how far the visitor has scrolled through the bio,
