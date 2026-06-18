@@ -41,9 +41,17 @@ export default function TermsPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="No payment processing inside the app">
+      <LegalSection title="Payments">
         <p>
-          Braid Boss Pro does <strong>not</strong> process payments. There is no Stripe, no card collection, no checkout, no invoicing service inside the app. Receipts and invoices are PDFs you generate locally and send to clients yourself; the actual money exchange happens off-app via whatever method you and your client agree on (cash, CashApp, Zelle, etc.). Do not enter payment-card data anywhere in the app.
+          Braid Boss Pro uses <strong>Stripe</strong>, an independent, PCI-DSS-certified payment
+          processor, to handle payments — client deposits and balance payments you collect through
+          the app, and your own Braid Boss Pro subscription. Card details are entered directly with
+          Stripe and are <strong>never seen or stored</strong> by Braid Boss Pro; we retain only the
+          payment metadata needed to display your transactions, issue refunds, and reconcile payouts
+          (amounts, status, and Stripe reference IDs). Stripe&rsquo;s handling of payment data is
+          governed by <a href="https://stripe.com/privacy">Stripe&rsquo;s Privacy Policy</a>. You may
+          also record payments you take off-app (cash, CashApp, Zelle, etc.) for your own
+          bookkeeping; you are responsible for the accuracy of those records and for any taxes due.
         </p>
       </LegalSection>
 
