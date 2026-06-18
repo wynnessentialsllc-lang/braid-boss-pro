@@ -3488,22 +3488,20 @@ export default function PublicBookingPage() {
                 </Field>
               </>
             )}
-            {phone.trim() && (
-              <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={smsOptIn}
-                  onChange={e => setSmsOptIn(e.target.checked)}
-                  style={{ marginTop: 2, width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }}
-                />
-                <span style={{ fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
-                  I agree to receive text messages from Braid Boss Pro regarding appointment reminders, booking updates, account notifications, and promotional offers. Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out or <strong>HELP</strong> for assistance. Consent is not a condition of purchase. View our{" "}
-                  <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Privacy Policy</a>{" "}
-                  and{" "}
-                  <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Terms of Service</a>.
-                </span>
-              </label>
-            )}
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={smsOptIn}
+                onChange={e => setSmsOptIn(e.target.checked)}
+                style={{ marginTop: 2, width: 18, height: 18, accentColor: C.espresso, flexShrink: 0 }}
+              />
+              <span style={{ fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
+                I agree to receive transactional SMS messages from Braid Boss Pro regarding appointment confirmations, appointment reminders, booking updates, balance reminders, contract reminders, review requests, and account notifications. Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out and <strong>HELP</strong> for assistance. Consent is not a condition of purchase. View our{" "}
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Privacy Policy</a>{" "}
+                and{" "}
+                <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.espresso, textDecoration: "underline" }}>Terms of Service</a>.
+              </span>
+            </label>
             {!hasCatalog && services.length === 0 && (
               <details
                 style={{

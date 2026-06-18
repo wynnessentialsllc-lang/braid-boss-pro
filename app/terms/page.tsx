@@ -48,31 +48,25 @@ export default function TermsPage() {
 
       <LegalSection title="SMS messaging">
         <p>
-          If a client opts in on a stylist&rsquo;s public booking form, Braid Boss Pro sends the following text messages on the stylist&rsquo;s behalf:
-        </p>
-        <LegalList items={[
-          <>Appointment reminders</>,
-          <>Booking notifications</>,
-          <>Payment reminders</>,
-          <>Contract reminders</>,
-          <>Review requests</>,
-          <>Customer support communications</>,
-          <>Promotional messages when users have opted in</>,
-        ]} />
-        <p>
-          <strong>Message frequency.</strong> Message frequency varies based on account activity and bookings.
+          <strong>SMS program.</strong> Braid Boss Pro sends appointment reminders, appointment confirmations, booking updates, balance reminders, contract reminders, review requests, customer support communications, and occasional promotional offers to users who have provided consent.
         </p>
         <p>
-          <strong>Pricing.</strong> Message and data rates may apply.
+          <strong>Message frequency &amp; rates.</strong> Message frequency varies. Message and data rates may apply.
         </p>
         <p>
-          <strong>To stop messages.</strong> Reply <strong>STOP</strong> to cancel SMS messages. A confirmation message will be sent after opting out.
+          <strong>To stop messages.</strong> You can cancel the SMS service at any time by replying <strong>STOP</strong>. After sending STOP, you will receive a confirmation message and will no longer receive SMS communications.
         </p>
         <p>
-          <strong>For help.</strong> Reply <strong>HELP</strong> for assistance.
+          <strong>To rejoin.</strong> To rejoin, opt in again through the website or reply <strong>START</strong> where supported.
         </p>
         <p>
-          <strong>Carrier disclaimer.</strong> Mobile carriers are not liable for delayed or undelivered messages.
+          <strong>For help.</strong> Reply <strong>HELP</strong> for assistance or contact support at <a href="mailto:support@braidbosspro.app">support@braidbosspro.app</a>.
+        </p>
+        <p>
+          <strong>Carrier liability.</strong> Mobile carriers are not liable for delayed or undelivered messages.
+        </p>
+        <p>
+          <strong>Privacy.</strong> Questions regarding privacy practices should be directed to our <a href="/privacy">Privacy Policy</a>.
         </p>
       </LegalSection>
 
