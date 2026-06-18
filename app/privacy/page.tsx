@@ -58,7 +58,7 @@ export default function PrivacyPage() {
 
       <LegalSection title="SMS Consent and Data Sharing">
         <p>
-          No mobile information will be shared with third parties or affiliates for marketing or promotional purposes.
+          No mobile information will be shared with third parties/affiliates for marketing/promotional purposes. All the above categories exclude text messaging originator opt-in data and consent; this information will not be shared with any third parties.
         </p>
         <p>
           Text messaging originator opt-in data and consent will not be shared, sold, rented, or transferred to any third parties under any circumstances.
