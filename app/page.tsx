@@ -3220,7 +3220,7 @@ const BusinessCoachCard = ({
 
   return (
     <div>
-      <SectionTitle>Your AI coach</SectionTitle>
+      <SectionTitle>Your Braid coach</SectionTitle>
       <Card className="p-4" style={{
         background: "linear-gradient(135deg, rgba(255,107,157,0.10), rgba(255,77,109,0.06))",
         border: `1px solid ${C.hairline}`,
@@ -5671,7 +5671,7 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
           )}
         </div>
 
-        {/* YOUR AI COACH — sits directly under Today's chair so the
+        {/* YOUR BRAID COACH — sits directly under Today's chair so the
             strategic "what should I do today" read lands above the fold,
             right after the instant who's-in-my-chair glance and ahead of
             the raw KPI cards it interprets. */}
