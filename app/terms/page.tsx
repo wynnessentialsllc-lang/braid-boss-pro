@@ -46,24 +46,37 @@ export default function TermsPage() {
         ]} />
       </LegalSection>
 
-      <LegalSection title="SMS messaging">
+      <LegalSection title="SMS Messaging Terms">
+        <p><strong>Program description.</strong> Braid Boss Pro sends:</p>
+        <LegalList items={[
+          <>Appointment confirmations</>,
+          <>Appointment reminders</>,
+          <>Booking updates</>,
+          <>Booking approvals</>,
+          <>Booking denials</>,
+          <>Contract reminders</>,
+          <>Payment reminders</>,
+          <>Review requests</>,
+          <>Customer support messages</>,
+          <>Promotional messages when consent has been provided</>,
+        ]} />
         <p>
-          <strong>SMS program.</strong> Braid Boss Pro sends appointment reminders, appointment confirmations, booking updates, balance reminders, contract reminders, review requests, customer support communications, and occasional promotional offers to users who have provided consent.
+          <strong>Message frequency.</strong> Message frequency varies based on user activity and appointments.
         </p>
         <p>
-          <strong>Message frequency &amp; rates.</strong> Message frequency varies. Message and data rates may apply.
+          <strong>Message and data rates.</strong> Message and data rates may apply.
         </p>
         <p>
-          <strong>To stop messages.</strong> You can cancel the SMS service at any time by replying <strong>STOP</strong>. After sending STOP, you will receive a confirmation message and will no longer receive SMS communications.
+          <strong>To stop messages.</strong> You may opt out of SMS communications at any time by replying <strong>STOP</strong>. After opting out, a confirmation message may be sent.
         </p>
         <p>
           <strong>To rejoin.</strong> To rejoin, opt in again through the website or reply <strong>START</strong> where supported.
         </p>
         <p>
-          <strong>For help.</strong> Reply <strong>HELP</strong> for assistance or contact support at <a href="mailto:support@braidbosspro.app">support@braidbosspro.app</a>.
+          <strong>For help.</strong> Reply <strong>HELP</strong> for assistance. You may also contact support through the website, or at <a href="mailto:hello@braidbosspro.app">hello@braidbosspro.app</a>.
         </p>
         <p>
-          <strong>Carrier liability.</strong> Mobile carriers are not liable for delayed or undelivered messages.
+          <strong>Carrier disclaimer.</strong> Mobile carriers are not liable for delayed or undelivered messages.
         </p>
         <p>
           <strong>Privacy.</strong> Questions regarding privacy practices should be directed to our <a href="/privacy">Privacy Policy</a>.

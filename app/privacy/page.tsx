@@ -10,14 +10,17 @@ export default function PrivacyPage() {
       updated="June 16, 2026">
 
       <LegalSection title="Information We Collect">
-        <p>We collect only what we need to run Braid Boss Pro for you and your clients:</p>
+        <p>Braid Boss Pro may collect:</p>
         <LegalList items={[
-          <><strong>Name</strong> — your name and the names of clients you record.</>,
-          <><strong>Email</strong> — your account email and any client email addresses you save.</>,
-          <><strong>Phone number</strong> — your clients’ mobile numbers, used for booking and, with consent, SMS.</>,
-          <><strong>Appointment information</strong> — services, dates, times, pricing, payment status, notes, contracts, and photos you attach.</>,
-          <><strong>Device information</strong> — browser type, user-agent string, and device identifiers needed to run the app.</>,
-          <><strong>Usage information</strong> — first-party, in-app product events (e.g. which screens are used), page paths, and a randomly-generated analytics ID stored on your device. We do not use third-party analytics or advertising products.</>,
+          <><strong>Name</strong></>,
+          <><strong>Email address</strong></>,
+          <><strong>Phone number</strong></>,
+          <><strong>Appointment details</strong></>,
+          <><strong>Payment information</strong></>,
+          <><strong>Device information</strong></>,
+          <><strong>IP address</strong></>,
+          <><strong>Browser information</strong></>,
+          <><strong>Cookies and tracking information</strong></>,
         ]} />
       </LegalSection>
 
@@ -31,22 +34,20 @@ export default function PrivacyPage() {
         ]} />
       </LegalSection>
 
-      <LegalSection title="How Information Is Used">
-        <p>We use the information above to provide and operate the service, including to send:</p>
+      <LegalSection title="How We Use Information">
+        <p>Information is used to:</p>
         <LegalList items={[
-          <>Appointment reminders</>,
-          <>Appointment confirmations</>,
-          <>Booking approvals</>,
-          <>Booking denials</>,
-          <>Contract reminders</>,
-          <>Balance reminders</>,
-          <>Review requests</>,
-          <>Customer support</>,
-          <>Marketing communications (only when separately consented)</>,
+          <>Schedule appointments</>,
+          <>Send appointment reminders</>,
+          <>Process payments</>,
+          <>Provide customer support</>,
+          <>Improve services</>,
+          <>Deliver SMS communications</>,
+          <>Send promotional offers when consent is provided</>,
         ]} />
       </LegalSection>
 
-      <LegalSection title="SMS Communications">
+      <LegalSection title="SMS Consent and Data Sharing">
         <p>
           No mobile information will be shared with third parties or affiliates for marketing or promotional purposes.
         </p>
@@ -54,27 +55,33 @@ export default function PrivacyPage() {
           Text messaging originator opt-in data and consent will not be shared, sold, rented, or transferred to any third parties under any circumstances.
         </p>
         <p>
-          Information sharing with subcontractors or service providers is permitted solely for the purpose of delivering SMS communications and operating the platform. These providers are bound by confidentiality obligations.
+          Information sharing with subcontractors or service providers is permitted only for the purpose of operating our platform and delivering SMS communications.
+        </p>
+        <p>
+          These service providers are contractually required to maintain the confidentiality and security of personal information.
         </p>
       </LegalSection>
 
       <LegalSection title="SMS Opt-In Information">
         <LegalList items={[
-          <><strong>How consent is obtained</strong> — Clients opt in by checking an SMS consent box on the stylist’s public booking form before submitting a booking. The box is unchecked by default, is never pre-checked or bundled with any other agreement, and consent is stored with a timestamp.</>,
-          <><strong>What messages are sent</strong> — appointment confirmations, appointment reminders, booking updates, balance reminders, contract reminders, review requests, and (only with separate consent) occasional promotional offers.</>,
+          <><strong>How consent is obtained</strong> — Clients opt in by checking an SMS consent box on the stylist’s public booking form before submitting a booking. The box is unchecked by default, is never pre-checked or bundled with any other agreement, and consent is stored with a timestamp and IP address.</>,
+          <><strong>What messages are sent</strong> — appointment confirmations, appointment reminders, booking updates, payment/balance reminders, contract reminders, review requests, customer support communications, and (only with separate consent) promotional offers.</>,
           <><strong>Frequency</strong> — message frequency varies based on your appointment activity.</>,
-          <><strong>Opt out</strong> — reply <strong>STOP</strong> at any time to stop messages; a confirmation is sent.</>,
+          <><strong>Opt out</strong> — reply <strong>STOP</strong> at any time to stop messages; a confirmation may be sent.</>,
           <><strong>Help</strong> — reply <strong>HELP</strong> for assistance.</>,
           <><strong>Rates</strong> — message and data rates may apply.</>,
         ]} />
       </LegalSection>
 
       <LegalSection title="Data Security">
+        <p>
+          We implement reasonable administrative, technical, and physical safeguards to protect personal information from unauthorized access, use, or disclosure.
+        </p>
         <LegalList items={[
           <><strong>Encryption</strong> — data is transmitted over HTTPS and stored in an encrypted, managed Postgres database.</>,
           <><strong>Secure storage</strong> — photos and records live in private storage with per-user row-level security, so your account can only ever read or write rows you own.</>,
           <><strong>Limited employee access</strong> — access to user data is restricted to authorized personnel on a need-to-know basis.</>,
-          <><strong>Industry-standard safeguards</strong> — we follow industry-standard practices to protect against unauthorized access, alteration, or disclosure.</>,
+          <><strong>Industry-standard safeguards</strong> — we follow industry-standard practices to guard against unauthorized access, alteration, or disclosure.</>,
         ]} />
       </LegalSection>
 
@@ -135,7 +142,7 @@ export default function PrivacyPage() {
 
       <LegalSection title="Contact">
         <p>
-          Questions? Contact <a href="mailto:support@braidbosspro.app">support@braidbosspro.app</a> or <a href="mailto:hello@hairwellnessslab.com">hello@hairwellnessslab.com</a>.
+          Questions? Contact <a href="mailto:hello@braidbosspro.app">hello@braidbosspro.app</a> or <a href="mailto:hello@hairwellnessslab.com">hello@hairwellnessslab.com</a>.
         </p>
       </LegalSection>
     </LegalShell>
