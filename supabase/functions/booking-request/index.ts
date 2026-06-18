@@ -53,6 +53,12 @@ serve(async (req) => {
   try { payload = await req.json(); }
   catch { return json(400, { error: "bad json" }); }
 
+  // Bot honeypot — a hidden form field real clients never fill. When it
+  // comes back populated, a script stuffed the form. Ack with a success
+  // shape so the bot moves on, but write nothing.
+  const honeypot = cleanString(payload.website, 256) || cleanString(payload.url, 256);
+  if (honeypot) return json(200, { ok: true, id: null });
+
   const slug = cleanString(payload.slug, 64);
   const clientName = cleanString(payload.clientName, 200);
   const clientPhone = cleanString(payload.clientPhone, 64);
@@ -61,6 +67,16 @@ serve(async (req) => {
   if (!slug) return json(400, { error: "slug required" });
   if (!clientName) return json(400, { error: "clientName required" });
   if (!clientPhone && !clientEmail) return json(400, { error: "phone or email required" });
+
+  // Reject obviously invalid contact info so junk never lands in the
+  // queue. Light shape checks only — anything a real client could
+  // plausibly type still passes.
+  if (clientEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clientEmail)) {
+    return json(400, { error: "Please enter a valid email address." });
+  }
+  if (clientPhone && clientPhone.replace(/\D/g, "").length < 7) {
+    return json(400, { error: "Please enter a valid phone number." });
+  }
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 

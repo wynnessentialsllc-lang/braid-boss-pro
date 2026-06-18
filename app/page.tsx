@@ -3220,7 +3220,7 @@ const BusinessCoachCard = ({
 
   return (
     <div>
-      <SectionTitle>Your AI coach</SectionTitle>
+      <SectionTitle>Your Braid coach</SectionTitle>
       <Card className="p-4" style={{
         background: "linear-gradient(135deg, rgba(255,107,157,0.10), rgba(255,77,109,0.06))",
         border: `1px solid ${C.hairline}`,
@@ -5671,7 +5671,7 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
           )}
         </div>
 
-        {/* YOUR AI COACH — sits directly under Today's chair so the
+        {/* YOUR BRAID COACH — sits directly under Today's chair so the
             strategic "what should I do today" read lands above the fold,
             right after the instant who's-in-my-chair glance and ahead of
             the raw KPI cards it interprets. */}
@@ -18629,12 +18629,14 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                           const list: BookingRequestRecord[] = store.approvalsApi?.requests || [];
                           const paidPendingApproval = list.filter(r => r.approval_status === "deposit_paid_pending_approval").length;
                           const review = list.filter(r => r.approval_status === "pending_review").length;
-                          const awaitingDeposit = list.filter(r => r.approval_status === "awaiting_deposit" || r.approval_status === "approved_pending_deposit").length;
-                          if (paidPendingApproval === 0 && review === 0 && awaitingDeposit === 0) return "Review requests, set deposits";
+                          // Unpaid (awaiting-deposit) requests are intentionally
+                          // left out of this nudge — they're waiting on the
+                          // client, not the stylist, so they shouldn't read as
+                          // something needing attention.
+                          if (paidPendingApproval === 0 && review === 0) return "Review requests, set deposits";
                           const parts: string[] = [];
                           if (paidPendingApproval > 0) parts.push(`${paidPendingApproval} deposit paid · needs you`);
                           if (review > 0) parts.push(`${review} to review`);
-                          if (awaitingDeposit > 0) parts.push(`${awaitingDeposit} awaiting deposit`);
                           return parts.join(" · ");
                         })()}
                       </p>
@@ -28919,13 +28921,23 @@ const ACTIVE_STATES: ApprovalStatus[] = [
 const HISTORY_STATES: ApprovalStatus[] = [
   "approved", "confirmed", "denied", "declined", "cancelled", "expired",
 ];
-// Count of requests in the "Active" bucket — the same number the
-// Approvals queue shows under its Active filter, so the shop-page
-// "Booking requests" badge reads consistently with the queue.
+// States that actually need the stylist to DO something. Distinct from
+// ACTIVE_STATES: a request still waiting on the client to pay a deposit
+// (`awaiting_deposit` / `approved_pending_deposit`) stays in the Active
+// tab so the stylist can mark a cash deposit paid, but it must NOT light
+// up the "pending requests" badge — nobody has paid for it yet, and
+// email/push already hold until the deposit clears.
+const ATTENTION_STATES: ApprovalStatus[] = [
+  "pending_review",
+  "deposit_paid_pending_approval",
+];
+// Count of requests that need the stylist's attention — drives the
+// "Booking requests" badge. Counts only paid / actionable requests so
+// unpaid (and fake) deposit-first submissions never ping the owner.
 const countActiveApprovals = (
   requests: readonly BookingRequestRecord[] | null | undefined,
 ): number =>
-  (requests || []).filter(r => ACTIVE_STATES.includes(r.approval_status as ApprovalStatus)).length;
+  (requests || []).filter(r => ATTENTION_STATES.includes(r.approval_status as ApprovalStatus)).length;
 
 const APPROVAL_FILTERS: { id: "active" | "all" | "history"; label: (n: { active: number; all: number; history: number }) => string }[] = [
   { id: "active",  label: n => `Active · ${n.active}` },
