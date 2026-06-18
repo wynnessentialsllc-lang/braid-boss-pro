@@ -305,6 +305,10 @@ export const StorefrontShell = ({
         className="max-w-[640px] mx-auto px-5 py-8 text-center"
         style={{ color: C.mutedSoft }}
       >
+        <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[12px] mb-2">
+          <a href="/privacy" style={{ color: C.muted }}>Privacy Policy</a>
+          <a href="/terms" style={{ color: C.muted }}>Terms of Service</a>
+        </nav>
         <p className="text-[11px]">
           Powered by{" "}
           <span style={{ color: C.brandPrimary, fontWeight: 700 }}>
