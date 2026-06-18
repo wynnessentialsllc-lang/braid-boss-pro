@@ -580,6 +580,10 @@ export default function PublicBookingPage() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  // Bot honeypot. A real client never sees or fills this hidden field;
+  // automated form-stuffers fill every input they find. When it comes
+  // back non-empty we treat the submission as spam and silently drop it.
+  const [website, setWebsite] = useState("");
   // Who's this appointment for. Defaults to the booker themselves so
   // adults breeze through; only when they pick "someone else" do we
   // ask for the recipient's name (+ optional note like age).
@@ -1344,6 +1348,11 @@ export default function PublicBookingPage() {
     e.preventDefault();
     if (submitting) return;
     setSubmitError(null);
+    // Bot honeypot — a hidden field real users never see or fill. If it
+    // arrives populated, a script stuffed the form. Show the same success
+    // screen the bot expects but write nothing, so spam never reaches the
+    // stylist's Approvals queue.
+    if (website.trim()) { setSubmitted(true); return; }
     if (!name.trim()) { setSubmitError("Please enter your name."); return; }
     if (!phone.trim() && !email.trim()) { setSubmitError("Phone or email is required."); return; }
     // Catch a typo'd email before submit — it's often the stylist's only
@@ -1351,6 +1360,13 @@ export default function PublicBookingPage() {
     // booking. Light shape check only (don't reject unusual-but-valid).
     if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       setSubmitError("That email doesn't look right — please double-check it.");
+      return;
+    }
+    // A real phone number has at least 7 digits. Reject obvious junk
+    // (e.g. "123") while still accepting any reasonable format the
+    // client types, with or without separators.
+    if (phone.trim() && phone.replace(/\D/g, "").length < 7) {
+      setSubmitError("That phone number doesn't look right — please double-check it.");
       return;
     }
     if (!preferredDate) { setSubmitError("Please pick a date for your appointment."); return; }
@@ -1495,6 +1511,8 @@ export default function PublicBookingPage() {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             slug,
+            // Honeypot mirror so the edge function can drop bots too.
+            website: website.trim() || null,
             clientName: name.trim(),
             clientPhone: phone.trim() || null,
             clientEmail: email.trim() || null,
@@ -4167,6 +4185,22 @@ export default function PublicBookingPage() {
               <Field label="Email">
                 <Input type="email" inputMode="email" autoCapitalize="none" spellCheck={false} value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" autoComplete="email" />
               </Field>
+            </div>
+            {/* Honeypot — hidden from real users (off-screen, no tab stop,
+                hidden from screen readers), but bots that auto-fill every
+                field will populate it. handleSubmit drops any submission
+                where this is non-empty. */}
+            <div aria-hidden="true" style={{ position: "absolute", left: "-9999px", top: "auto", width: 1, height: 1, overflow: "hidden" }}>
+              <label htmlFor="bbp-company-website">Website</label>
+              <input
+                id="bbp-company-website"
+                type="text"
+                name="website"
+                tabIndex={-1}
+                autoComplete="off"
+                value={website}
+                onChange={e => setWebsite(e.target.value)}
+              />
             </div>
             {/* Who's this appointment for — defaults to the booker.
                 Picking "Someone else" reveals the recipient's name so
