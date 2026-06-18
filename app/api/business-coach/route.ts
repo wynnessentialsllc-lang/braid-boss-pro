@@ -50,7 +50,7 @@ export async function POST(req: Request) {
   try {
     anthropicKey = env("ANTHROPIC_API_KEY");
   } catch {
-    return fail(503, "The AI coach is temporarily unavailable.");
+    return fail(503, "The Braid coach is temporarily unavailable.");
   }
   try {
     supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || env("SUPABASE_URL");
