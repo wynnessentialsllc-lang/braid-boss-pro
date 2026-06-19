@@ -91,6 +91,18 @@ export default function TourClient() {
     return () => window.removeEventListener("keydown", onKey);
   }, [next, prev]);
 
+  // MarketingShell's IntersectionObserver only runs once on mount, so
+  // showcase mockups injected by later slides never get .is-visible and
+  // stay invisible. Force-reveal them every time the active slide changes.
+  useEffect(() => {
+    const t = requestAnimationFrame(() => {
+      document
+        .querySelectorAll<HTMLElement>(".bbp-tour-slide .bbp-reveal")
+        .forEach((el) => el.classList.add("is-visible"));
+    });
+    return () => cancelAnimationFrame(t);
+  }, [index]);
+
   const slide = SLIDES[index];
 
   return (
@@ -139,6 +151,7 @@ export default function TourClient() {
       >
         <div
           key={index}
+          className="bbp-tour-slide"
           style={{
             animation: "bbp-tour-fade 480ms cubic-bezier(.2,.8,.2,1) both",
           }}
