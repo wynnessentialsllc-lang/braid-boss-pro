@@ -145,7 +145,7 @@ export default function PricingPage() {
               "No action needed",
               "Same account, same data, same login",
             ]}
-            cta={{ label: "Open the app", href: "/" }}
+            cta={{ label: "Open the app", href: "/tour" }}
           />
         </div>
 
