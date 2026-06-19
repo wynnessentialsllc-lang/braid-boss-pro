@@ -98,6 +98,7 @@ import {
 } from "./lib/credits";
 import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
 import FeaturesContent from "./components/marketing/FeaturesContent";
+import AuthScreen from "./components/AuthScreen";
 import { ProductImageUploader } from "./components/ProductImageUploader";
 import {
   PreviewStyleCard,
@@ -21538,79 +21539,55 @@ const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center px-5" style={{ minHeight: "100dvh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso }}>
+    <AuthScreen mode={tab} onBack={onBack}>
       <GlobalStyle />
-      <div className="w-full max-w-[400px]">
-        {onBack && (
-          <button
-            type="button"
-            onClick={onBack}
-            className="inline-flex items-center gap-1 text-[12px] mb-3"
-            style={{ color: C.coffee }}
-            aria-label="Back to welcome screen"
-          >
-            <ChevronLeft size={14} />
-            <span>Back</span>
-          </button>
-        )}
-        <p className="text-center text-[10px] font-bold tracking-[0.22em] uppercase" style={{ color: C.gold }}>Braid Boss Pro</p>
-        <h1 className="text-center mt-2 mb-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 600, color: C.espresso }}>
-          {tab === "signin" ? "Welcome back" : tab === "signup" ? "Create your account" : "Reset password"}
-        </h1>
-        <p className="text-center text-sm mb-2" style={{ color: C.muted }}>
-          {tab === "signin" ? "Sign in to sync your clients across devices." : tab === "signup" ? "Built specifically for braid stylists. Cloud-synced from day one." : "Enter your email and we&apos;ll send a reset link."}
-        </p>
-        {tab === "signup" && (
-          <p className="text-center text-[12px] font-semibold mb-5" style={{ color: C.goldDeep }}>
-            {SUBSCRIPTION_TRIAL_DAYS}-day free trial · then {SUBSCRIPTION_PRICE_LABEL} · Cancel anytime
-          </p>
-        )}
-        {tab !== "signup" && <div className="mb-5" />}
-        <Card className="p-5 space-y-3">
-          <Field label="Email">
-            <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@studio.com" />
+      {/* Form card — the branded hero, trial pill, and preview carousel
+          around it are owned by AuthScreen so the auth logic stays here. */}
+      <Card className="p-5 space-y-3" style={{ boxShadow: SHADOWS.cardLifted }}>
+        <Field label="Email">
+          <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@studio.com" />
+        </Field>
+        {tab !== "reset" && (
+          <Field label="Password">
+            <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
           </Field>
-          {tab !== "reset" && (
-            <Field label="Password">
-              <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
-            </Field>
+        )}
+        {err && <p className="text-xs" style={{ color: C.danger }}>{err}</p>}
+        {msg && <p className="text-xs" style={{ color: C.success }}>{msg}</p>}
+        <Button variant="primary" fullWidth disabled={busy || !email || (tab !== "reset" && !password)} onClick={submit}>
+          {busy ? "Working…" : tab === "signin" ? "Sign in" : tab === "signup" ? "Create account" : "Send reset email"}
+        </Button>
+        <div className="flex items-center justify-between text-[12px] pt-1">
+          {tab === "signin" ? (
+            <>
+              <button type="button" onClick={() => { setTab("reset"); setErr(null); setMsg(null); }} style={{ color: C.coffee }}>Forgot password?</button>
+              <button type="button" onClick={() => { setTab("signup"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Create account</button>
+            </>
+          ) : tab === "signup" ? (
+            <button type="button" onClick={() => { setTab("signin"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Already have an account? Sign in</button>
+          ) : (
+            <button type="button" onClick={() => { setTab("signin"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Back to sign in</button>
           )}
-          {err && <p className="text-xs" style={{ color: C.danger }}>{err}</p>}
-          {msg && <p className="text-xs" style={{ color: C.success }}>{msg}</p>}
-          <Button variant="primary" fullWidth disabled={busy || !email || (tab !== "reset" && !password)} onClick={submit}>
-            {busy ? "Working…" : tab === "signin" ? "Sign in" : tab === "signup" ? "Create account" : "Send reset email"}
-          </Button>
-          <div className="flex items-center justify-between text-[12px] pt-1">
-            {tab === "signin" ? (
-              <>
-                <button type="button" onClick={() => { setTab("reset"); setErr(null); setMsg(null); }} style={{ color: C.coffee }}>Forgot password?</button>
-                <button type="button" onClick={() => { setTab("signup"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Create account</button>
-              </>
-            ) : (
-              <button type="button" onClick={() => { setTab("signin"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Back to sign in</button>
-            )}
-          </div>
-        </Card>
-        <button type="button" onClick={onContinueGuest}
-          className="w-full text-center text-[12px] mt-5 py-3"
-          style={{ color: C.muted }}>
-          Continue as guest · data stays on this device
-        </button>
-        {/* Public marketing + legal links. Keeps a path to a full
-            description of the product (what it is, what it costs) and
-            the privacy/terms pages reachable even from the bare sign-in
-            screen — so the homepage never reads as just a login wall. */}
-        <nav
-          aria-label="Learn more"
-          className="flex items-center justify-center flex-wrap gap-x-4 gap-y-1 mt-4 text-[12px]"
-        >
-          <a href="/features" style={{ color: C.coffee }}>Features</a>
-          <a href="/pricing" style={{ color: C.coffee }}>Pricing</a>
-          <a href="/privacy" style={{ color: C.coffee }}>Privacy</a>
-          <a href="/terms" style={{ color: C.coffee }}>Terms</a>
-        </nav>
-      </div>
-    </div>
+        </div>
+      </Card>
+      <button type="button" onClick={onContinueGuest}
+        className="w-full text-center text-[12px] mt-4 py-3"
+        style={{ color: C.muted }}>
+        Continue as guest · data stays on this device
+      </button>
+      {/* Public marketing + legal links. Keeps a path to a full
+          description of the product (what it is, what it costs) and
+          the privacy/terms pages reachable even from the auth screen. */}
+      <nav
+        aria-label="Learn more"
+        className="flex items-center justify-center flex-wrap gap-x-4 gap-y-1 mt-2 text-[12px]"
+      >
+        <a href="/features" style={{ color: C.coffee }}>Features</a>
+        <a href="/pricing" style={{ color: C.coffee }}>Pricing</a>
+        <a href="/privacy" style={{ color: C.coffee }}>Privacy</a>
+        <a href="/terms" style={{ color: C.coffee }}>Terms</a>
+      </nav>
+    </AuthScreen>
   );
 };
 
