@@ -47,3 +47,13 @@ html {
      enough on Android PWA. */
   overscroll-behavior-y: contain;
 }
+
+/* Form placeholders ship very light on iOS Safari (and with reduced
+   opacity), which made the "what to enter here" hints — e.g. the
+   client-supplied hair fields — hard to read. Pin them to the design's
+   muted ink at full opacity so the guidance stays legible everywhere. */
+input::placeholder,
+textarea::placeholder {
+  color: #6F6477;
+  opacity: 1;
+}

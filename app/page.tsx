@@ -23177,6 +23177,10 @@ const ServicesScreen = ({
     allow_style_notes: true,
     allow_inspiration_photos: true,
     included_details: null,
+    // Hair sourcing — seed here too, or the editor opens with these
+    // undefined and a later save normalizes them back to the defaults.
+    hair_sourcing: "included",
+    hair_spec: {},
     mobile_service: false,
     mobile_fee_model: "flat",
     mobile_flat_fee: 0,
@@ -23234,6 +23238,15 @@ const ServicesScreen = ({
     allow_style_notes: (s as any).allow_style_notes ?? true,
     allow_inspiration_photos: (s as any).allow_inspiration_photos ?? true,
     included_details: (s as any).included_details ?? null,
+    // Hair sourcing — load the saved sourcing mode + shopping-list spec
+    // so the client-supplied panel re-populates on edit. Omitting these
+    // made the editor reopen blank AND let a re-save wipe the spec.
+    hair_sourcing: (["included", "client", "choice"].includes((s as any).hair_sourcing)
+      ? (s as any).hair_sourcing
+      : "included") as Service["hair_sourcing"],
+    hair_spec: ((s as any).hair_spec && typeof (s as any).hair_spec === "object"
+      ? (s as any).hair_spec
+      : {}) as Service["hair_spec"],
     mobile_service: !!(s as any).mobile_service,
     mobile_fee_model: ((s as any).mobile_fee_model ?? "flat") as Service["mobile_fee_model"],
     mobile_flat_fee: Number((s as any).mobile_flat_fee) || 0,
