@@ -74,7 +74,7 @@ export default function PrivacyPage() {
       <LegalSection title="SMS Opt-In Information">
         <LegalList items={[
           <><strong>How consent is obtained</strong> — Clients opt in by checking an SMS consent box on the stylist’s public booking form before submitting a booking. The box is unchecked by default, is never pre-checked or bundled with any other agreement, and consent is stored with a timestamp and IP address.</>,
-          <><strong>What messages are sent</strong> — appointment confirmations, appointment reminders, booking updates, payment/balance reminders, contract reminders, review requests, customer support communications, and (only with separate consent) promotional offers.</>,
+          <><strong>What messages are sent</strong> — appointment confirmations, appointment reminders, booking updates, payment/balance reminders, contract reminders, review requests, and customer support communications. These are transactional messages tied to a client’s appointment; Braid Boss Pro does not send promotional or marketing SMS.</>,
           <><strong>Frequency</strong> — message frequency varies based on your appointment activity.</>,
           <><strong>Opt out</strong> — reply <strong>STOP</strong> at any time to stop messages; a confirmation may be sent.</>,
           <><strong>Help</strong> — reply <strong>HELP</strong> for assistance.</>,

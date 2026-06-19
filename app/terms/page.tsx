@@ -77,8 +77,10 @@ export default function TermsPage() {
           <>Payment reminders</>,
           <>Review requests</>,
           <>Customer support messages</>,
-          <>Promotional messages when consent has been provided</>,
         ]} />
+        <p>
+          These are transactional messages tied to a client’s appointment. Braid Boss Pro does not send promotional or marketing text messages.
+        </p>
         <p>
           <strong>Message frequency.</strong> Message frequency varies based on user activity and appointments.
         </p>
