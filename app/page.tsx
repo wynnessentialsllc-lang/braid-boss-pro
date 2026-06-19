@@ -5384,7 +5384,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   );
 };
 
-const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient, openQuickTx, openSettings, openInventory, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, cloudReady = true, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openInventory?: () => void; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; cloudReady?: boolean; openAppointmentRecord?: (a: any) => void }) => {
+const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, openQuickClient, openQuickTx, openSettings, openInventory, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, cloudReady = true, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openReports?: (focus?: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openInventory?: () => void; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; cloudReady?: boolean; openAppointmentRecord?: (a: any) => void }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
@@ -5762,7 +5762,7 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
             {/* Shop sales — in-person Checkout + online store, this month.
                 Sits beside "Services earned" so the two money streams read
                 side by side. Taps through to the Money tab. */}
-            <KpiCard label="Shop sales (mo)" value={money(shopSales.month)} icon={<ShoppingBag size={16} />} tone={shopSales.month > 0 ? "gold" : "neutral"} onClick={() => goToMoney("month")} compact riseDelay={160} />
+            <KpiCard label="Shop sales (mo)" value={money(shopSales.month)} icon={<ShoppingBag size={16} />} tone={shopSales.month > 0 ? "gold" : "neutral"} onClick={() => (openReports ? openReports("shopSales") : goToMoney("month"))} compact riseDelay={160} />
             <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={money(revenueStats.yearMade + shopSales.year)} icon={<Sparkles size={16} />} tone={(revenueStats.yearMade + shopSales.year) > 0 ? "gold" : "neutral"} onClick={() => goToMoney("all")} compact riseDelay={200} />
             <KpiCard label={`${new Date().getFullYear()} clients`} value={stats.yearClients} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("yearClients")} compact riseDelay={240} />
           </div>
@@ -24754,11 +24754,24 @@ const TaxPackScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
 // ============================================================
 //  REPORTS V1 — revenue · top styles · repeat clients
 // ============================================================
-const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+const ReportsScreen = ({ store, onBack, focus, onFocusConsumed }: { store: any; onBack: () => void; focus?: string | null; onFocusConsumed?: () => void }) => {
   const appointments = (store.appointments as any[]) || [];
   const currency = store.business?.currency || "USD";
   const userId: string | null = store.userId || null;
   const [range, setRange] = useState<ReportRange>("1M");
+  // Deep-link focus (e.g. dashboard "Shop sales" card): jump to the
+  // monthly range and scroll the matching section into view on open.
+  const shopSalesRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focus !== "shopSales") return;
+    setRange("1M");
+    const t = setTimeout(() => {
+      shopSalesRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+    onFocusConsumed?.();
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per focus signal
+  }, [focus]);
   const [itemMode, setItemMode] = useState<"gross" | "count">("gross");
   const [catMode, setCatMode] = useState<"gross" | "count">("gross");
   // Tap-to-drill-down: any summary card, Top item/category, or payment
@@ -24956,21 +24969,25 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
         </div>
 
         {/* SHOP SALES — retail money (in-person Checkout + online store),
-            reported apart from the service sales summary above. */}
-        {shopSales > 0 && (
-          <div>
-            <SectionTitle>Shop sales · {report.rangeLabel.toLowerCase()}</SectionTitle>
-            <Card className="p-3.5 flex items-center gap-3">
-              <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: "rgba(176,141,87,0.14)" }}>
-                <ShoppingBag size={18} style={{ color: C.goldDeep }} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>{fmtMoney(shopSales, currency)}</p>
-                <p className="text-[11px]" style={{ color: C.muted }}>In-person Checkout sales + online store orders</p>
-              </div>
-            </Card>
-          </div>
-        )}
+            reported apart from the service sales summary above. Always
+            rendered (even at $0) so the dashboard "Shop sales" card has a
+            consistent place to land and scroll to. */}
+        <div ref={shopSalesRef}>
+          <SectionTitle>Shop sales · {report.rangeLabel.toLowerCase()}</SectionTitle>
+          <Card className="p-3.5 flex items-center gap-3">
+            <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: "rgba(176,141,87,0.14)" }}>
+              <ShoppingBag size={18} style={{ color: C.goldDeep }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>{fmtMoney(shopSales, currency)}</p>
+              <p className="text-[11px]" style={{ color: C.muted }}>
+                {shopSales > 0
+                  ? "In-person Checkout sales + online store orders"
+                  : "No shop sales this period — in-person Checkout + online store orders show here."}
+              </p>
+            </div>
+          </Card>
+        </div>
 
         {/* GROSS SALES CHART */}
         <div>
@@ -38816,6 +38833,13 @@ export default function App() {
   // instead of all of them dumping to the same overview.
   const [expensesView, setExpensesView] = useState<ProfitDetailView>("overview");
   const [expensesCategory, setExpensesCategory] = useState<string | null>(null);
+  // Deep-link focus for the Reports screen (e.g. dashboard "Shop sales"
+  // card → jump to the Shop sales section). Cleared once Reports reads it.
+  const [reportsFocus, setReportsFocus] = useState<string | null>(null);
+  const openReports = useCallback((focus?: string) => {
+    setReportsFocus(focus ?? null);
+    setSecondary("reports");
+  }, []);
   const openProfitDetail = useCallback((view: ProfitDetailView, category?: string) => {
     if (view === "revenue") {
       // Gross revenue lives on the Reports screen — no need to
@@ -39080,6 +39104,7 @@ export default function App() {
             <Dashboard store={store}
               setActive={setActive}
               goToMoney={goToMoney}
+              openReports={openReports}
               openQuickAppt={openQuickAppt}
               openQuickClient={openQuickClient}
               openQuickTx={openQuickTx}
@@ -39274,7 +39299,7 @@ export default function App() {
         />
       )}
       {secondary === "services" && <ServicesScreen store={store} onBack={() => setSecondary("settings")} />}
-      {secondary === "reports" && <ReportsScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "reports" && <ReportsScreen store={store} onBack={() => setSecondary("settings")} focus={reportsFocus} onFocusConsumed={() => setReportsFocus(null)} />}
       {secondary === "taxPack" && <TaxPackScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "expenses" && (
         <ExpensesScreen
