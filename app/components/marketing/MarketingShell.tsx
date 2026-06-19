@@ -48,6 +48,8 @@ export const MarketingShell = ({ children }: { children: ReactNode }) => {
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600;700;800&display=swap');
+        html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+        @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
         .bbp-reveal { opacity: 0; transform: translateY(18px); transition: opacity 600ms cubic-bezier(.2,.8,.2,1), transform 600ms cubic-bezier(.2,.8,.2,1); }
         .bbp-reveal.is-visible { opacity: 1; transform: translateY(0); }
         .bbp-reveal[data-delay="100"] { transition-delay: 100ms; }
@@ -73,7 +75,7 @@ export const MarketingShell = ({ children }: { children: ReactNode }) => {
 };
 
 const MARKETING_NAV_LINKS: Array<{ href: string; label: string }> = [
-  { href: "/features", label: "Features" },
+  { href: "/#booking-scheduling", label: "Features" },
   { href: "/how-it-works", label: "How it works" },
   { href: "/pricing", label: "Pricing" },
   { href: "/faq", label: "FAQ" },

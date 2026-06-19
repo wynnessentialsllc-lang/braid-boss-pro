@@ -38529,11 +38529,15 @@ export default function App() {
   };
   const [authIntent, setAuthIntent] = useState<"signin" | "signup" | null>(readAuthIntent);
   const returnToIntro = useCallback(() => setAuthIntent(null), []);
-  // Once the visitor is inside the app (signed in or guest), drop any
-  // pending auth intent so a later sign-out within the same session
-  // returns them to the home page — not straight back to the gate.
+  // Once the visitor is signed in, drop any pending auth intent so a
+  // later sign-out within the same session returns them to the home
+  // page — not straight back to the gate. We intentionally do NOT
+  // clear on mode === "guest": a returning guest visitor who clicks
+  // "Start free trial" / "Sign in" on a marketing page must still see
+  // the auth gate; otherwise the CTA looks broken (the gate guard at
+  // auth.mode === "loading" never renders for them).
   useEffect(() => {
-    if (auth.mode !== "loading" && authIntent !== null) {
+    if (auth.mode === "authed" && authIntent !== null) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing a one-shot intent after auth resolves
       setAuthIntent(null);
     }
@@ -39030,6 +39034,14 @@ export default function App() {
     // Default logged-out view: the full features marketing home page. Its
     // CTAs route to /?signup=1 and /?signin=1, which authIntent reads.
     return <FeaturesContent />;
+  }
+
+  // Returning guest visitor (no session, but the guest flag is set) who
+  // navigated to /?signup=1 or /?signin=1 from a marketing CTA — show
+  // them the auth gate before the dashboard. Without this, the CTA
+  // silently lands them on the home / dashboard and looks broken.
+  if (auth.mode === "guest" && authIntent) {
+    return <AuthGate onContinueGuest={auth.continueAsGuest} onBack={returnToIntro} initialTab={authIntent} />;
   }
 
   if (store.loading) {

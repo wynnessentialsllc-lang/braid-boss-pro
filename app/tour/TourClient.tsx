@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, ExternalLink, Pause, Play } from "lucide-react";
+import { ArrowLeft, ArrowRight, Pause, Play } from "lucide-react";
 import { MarketingShell } from "../components/marketing/MarketingShell";
 import {
   AppointmentActionShowcase,
@@ -217,26 +217,6 @@ export default function TourClient() {
             <CtrlButton aria="Next slide" onClick={next}>
               <ArrowRight size={16} />
             </CtrlButton>
-            <Link
-              href="/"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "8px 14px",
-                borderRadius: 999,
-                background: GRADIENTS.primary,
-                color: "#FFFFFF",
-                fontSize: 12,
-                fontWeight: 800,
-                letterSpacing: "0.12em",
-                textTransform: "uppercase",
-                textDecoration: "none",
-                boxShadow: SHADOWS.primaryGlow,
-              }}
-            >
-              Open the app <ExternalLink size={12} />
-            </Link>
           </div>
         </div>
       </div>

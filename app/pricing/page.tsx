@@ -75,7 +75,7 @@ export default function PricingPage() {
         }
         body="Braid Boss Pro is built specifically for braid stylists — bookings, deposits, contracts, retail storefronts, analytics, and modern creator-economy tools designed around how braiders actually run their chairs. Every feature included. Start free for 14 days, then just $14.99/month — or $149/year (save $30.88). Less than every major salon app, with no per-staff fees."
         primaryCta={{ label: "Start Your Free Trial", href: "/?signup=1" }}
-        secondaryCta={{ label: "See the platform", href: "/features" }}
+        secondaryCta={{ label: "See the platform", href: "/tour" }}
       />
 
       {/* Pricing */}
@@ -145,7 +145,7 @@ export default function PricingPage() {
               "No action needed",
               "Same account, same data, same login",
             ]}
-            cta={{ label: "Open the app", href: "/tour" }}
+            cta={{ label: "Open the app", href: "/?signin=1" }}
           />
         </div>
 

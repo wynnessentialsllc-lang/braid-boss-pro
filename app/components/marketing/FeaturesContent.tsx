@@ -80,6 +80,7 @@ export default function FeaturesContent() {
 
       {/* Booking & Scheduling */}
       <Section
+        id="booking-scheduling"
         eyebrow="Booking & Scheduling"
         title="A booking link your clients actually want to use."
         intro="Your own /@handle URL with a branded booking page, real-time calendar, deposits, and a waitlist that converts cancellations into bookings."
