@@ -6,7 +6,7 @@
 // chrome without each page redeclaring it.
 
 import Link from "next/link";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { C, FONT_BODY, FONT_DISPLAY, GRADIENTS, SHADOWS } from "./tokens";
 
 export const MarketingShell = ({ children }: { children: ReactNode }) => {
@@ -132,8 +132,14 @@ const MarketingHeader = () => {
               {l.label}
             </Link>
           ))}
-          <Link
-            href="/"
+          {/* Plain <a> (not Link) so it hard-navigates to the app root
+              — the home page reads ?signin=1 on mount to open the
+              sign-in gate; a client-side Link from "/" (this shell now
+              also renders as the logged-out home view) wouldn't remount
+              it. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- intentional full reload to remount the app gate */}
+          <a
+            href="/?signin=1"
             style={{
               ...marketingNavLink,
               padding: "8px 14px",
@@ -143,7 +149,7 @@ const MarketingHeader = () => {
             }}
           >
             Sign in
-          </Link>
+          </a>
         </nav>
 
         {/* Mobile hamburger trigger. */}
@@ -220,8 +226,11 @@ const MarketingHeader = () => {
               </Link>
             ))}
             <div style={{ height: 1, background: C.brandBorder, margin: "8px 4px" }} />
-            <Link
-              href="/"
+            {/* Plain <a> so it hard-navigates to the app root, where
+                ?signin=1 opens the sign-in gate on mount. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- intentional full reload to remount the app gate */}
+            <a
+              href="/?signin=1"
               onClick={() => setOpen(false)}
               style={{
                 ...mobileDrawerLink,
@@ -232,7 +241,7 @@ const MarketingHeader = () => {
               }}
             >
               Sign in
-            </Link>
+            </a>
           </nav>
         </div>
       </div>
@@ -378,12 +387,17 @@ export const MarketingHero = ({
   body,
   primaryCta,
   secondaryCta,
+  signInHref,
 }: {
   eyebrow: string;
   title: ReactNode;
   body: string;
   primaryCta: { label: string; href: string };
   secondaryCta?: { label: string; href: string };
+  // When set, renders an "Already have an account? Sign in" link under
+  // the CTAs. Used on the logged-out home landing so returning users
+  // have an obvious sign-in path next to the primary "start trial" CTA.
+  signInHref?: string;
 }) => (
   <section
     style={{
@@ -489,6 +503,20 @@ export const MarketingHero = ({
           </a>
         )}
       </div>
+      {signInHref && (
+        // Dynamic href, so the no-html-link-for-pages rule doesn't fire.
+        // Plain <a> is intentional — a hard reload remounts the app so it
+        // reads ?signin=1 and opens the sign-in gate.
+        <p style={{ marginTop: 18, fontSize: 14, color: C.coffee }}>
+          Already have an account?{" "}
+          <a
+            href={signInHref}
+            style={{ color: C.brandPrimary, fontWeight: 700, textDecoration: "underline" }}
+          >
+            Sign in
+          </a>
+        </p>
+      )}
     </div>
   </section>
 );

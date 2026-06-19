@@ -97,7 +97,7 @@ import {
   applyCreditToAppointment,
 } from "./lib/credits";
 import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
-import WelcomeIntro from "./components/WelcomeIntro";
+import FeaturesContent from "./components/marketing/FeaturesContent";
 import { ProductImageUploader } from "./components/ProductImageUploader";
 import {
   PreviewStyleCard,
@@ -38528,36 +38528,39 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentReco
 
 export default function App() {
   const auth = useAuth();
-  // First-launch welcome screen — gates AuthGate until the user
-  // has seen (or skipped) the intro. SSR-safe: introSeen starts as
-  // null and the localStorage probe runs in useEffect on mount.
-  const [introSeen, setIntroSeen] = useState<boolean | null>(null);
-  const [authInitialTab, setAuthInitialTab] = useState<"signin" | "signup">("signin");
+  // Logged-out visitors ALWAYS see the features home page first — there
+  // is no "seen it once, skip it forever" flag anymore. The sign-in /
+  // sign-up gate only appears when the visitor actively asks for it,
+  // which they signal via the ?signup=1 / ?signin=1 query the marketing
+  // CTAs link to. authIntent is therefore session-scoped (not
+  // persisted): null = show the home page, "signin"/"signup" = show the
+  // auth gate on that tab.
+  //
+  // Initialized lazily from the URL so a hard navigation to /?signin=1
+  // opens the gate without a flash of the home page first. SSR-safe:
+  // window is guarded, and the initial render is the cream splash (gated
+  // on auth.ready below) on both server and client, so there's no
+  // hydration mismatch regardless of this value.
+  const readAuthIntent = (): "signin" | "signup" | null => {
+    if (typeof window === "undefined") return null;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("signup") === "1") return "signup";
+      if (params.get("signin") === "1") return "signin";
+    } catch { /* malformed query — show home */ }
+    return null;
+  };
+  const [authIntent, setAuthIntent] = useState<"signin" | "signup" | null>(readAuthIntent);
+  const returnToIntro = useCallback(() => setAuthIntent(null), []);
+  // Once the visitor is inside the app (signed in or guest), drop any
+  // pending auth intent so a later sign-out within the same session
+  // returns them to the home page — not straight back to the gate.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      setIntroSeen(window.localStorage.getItem("bbp-intro-seen-v1") === "1");
-    } catch {
-      setIntroSeen(true);
+    if (auth.mode !== "loading" && authIntent !== null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing a one-shot intent after auth resolves
+      setAuthIntent(null);
     }
-  }, []);
-  const markIntroSeen = useCallback((nextTab: "signin" | "signup") => {
-    setAuthInitialTab(nextTab);
-    setIntroSeen(true);
-    try {
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem("bbp-intro-seen-v1", "1");
-      }
-    } catch { /* private mode — gate still works in-memory this session */ }
-  }, []);
-  const returnToIntro = useCallback(() => {
-    setIntroSeen(false);
-    try {
-      if (typeof window !== "undefined") {
-        window.localStorage.removeItem("bbp-intro-seen-v1");
-      }
-    } catch { /* private mode — silent */ }
-  }, []);
+  }, [auth.mode, authIntent]);
   const rawStore = useStorage();
   const { premium } = usePremiumStatus(auth.userId);
   const discountsApi = useDiscounts(auth.userId);
@@ -39025,13 +39028,12 @@ export default function App() {
   // hasn't opted into guest mode. All hooks above this guard so the
   // hook order is stable across renders.
   if (auth.mode === "loading") {
-    // Show a cream splash until the intro state has resolved on the
-    // client (one tick post-mount) AND the initial session check has
-    // finished. The `!auth.ready` guard is what keeps a returning
-    // signed-in user from seeing a flash of the sign-in screen on cold
-    // start / PWA resume — we wait until we actually know whether
-    // there's a session before deciding between Home and the AuthGate.
-    if (introSeen === null || !auth.ready) {
+    // Show a cream splash until the initial session check has finished.
+    // The `!auth.ready` guard is what keeps a returning signed-in user
+    // from seeing a flash of the home / sign-in screen on cold start /
+    // PWA resume — we wait until we actually know whether there's a
+    // session before deciding between the dashboard and this branch.
+    if (!auth.ready) {
       return (
         <div className="flex items-center justify-center" style={{ minHeight: "100dvh", background: C.cream }}>
           <GlobalStyle />
@@ -39041,16 +39043,16 @@ export default function App() {
         </div>
       );
     }
-    if (introSeen === false) {
-      return (
-        <WelcomeIntro
-          onGetStarted={() => markIntroSeen("signup")}
-          onSignIn={() => markIntroSeen("signin")}
-          onSkip={() => markIntroSeen("signin")}
-        />
-      );
+    // Only show the auth gate when the visitor actively asked for it
+    // (via the marketing CTAs → /?signup=1 / /?signin=1). Otherwise every
+    // logged-out visitor sees the features home page first, whether or
+    // not they already have an account.
+    if (authIntent) {
+      return <AuthGate onContinueGuest={auth.continueAsGuest} onBack={returnToIntro} initialTab={authIntent} />;
     }
-    return <AuthGate onContinueGuest={auth.continueAsGuest} onBack={returnToIntro} initialTab={authInitialTab} />;
+    // Default logged-out view: the full features marketing home page. Its
+    // CTAs route to /?signup=1 and /?signin=1, which authIntent reads.
+    return <FeaturesContent />;
   }
 
   if (store.loading) {
