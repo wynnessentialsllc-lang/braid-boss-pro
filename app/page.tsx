@@ -8339,11 +8339,13 @@ const BreakRow = ({ label, value, bold }: { label: string; value: string; bold?:
 // ============================================================
 //  SCHEDULE
 // ============================================================
-// Day timeline runs 6 AM through 9 PM. Each row is HOUR_PX tall so
-// blocks can be absolutely positioned by start time and duration.
-const TIMELINE_START_HOUR = 6;
-const TIMELINE_END_HOUR = 21;
+// Day timeline ALWAYS spans the full 24-hour day (12 AM → 12 AM). Each
+// row is HOUR_PX tall so blocks can be absolutely positioned by start
+// time and duration. The grid is taller than the screen, so it lives in
+// its own scroll container TIMELINE_VIEWPORT_PX tall and auto-scrolls to
+// a sensible focus (current time / opening hour) on load.
 const HOUR_PX = 60;
+const TIMELINE_VIEWPORT_PX = HOUR_PX * 10; // ~10 hours visible; scroll for the rest
 
 const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, openCommunication, openReceipt, openQuickClient, openAvailability }: { store: any; prefillNewAppt: any; clearApptPrefill: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void; openReceipt?: (rcp: ReceiptRecord) => void; openQuickClient?: () => void; openAvailability?: (focus?: "exception" | "weekly") => void }) => {
   const { appointments, business, recurringSeries } = store;
@@ -8695,6 +8697,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
             dayAvailability={dayAvailability}
             colorMode={prefs.colorMode}
             today={today}
+            selectedDate={selectedDate}
             business={business}
             onTap={(a) => setEditing(a)}
             onAdd={() => setEditing({ date: selectedDate })}
@@ -8774,13 +8777,14 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
 // ---- Day Calendar -----------------------------------------------------
 
 const DayCalendarView = ({
-  appts, dayStatus, dayAvailability, colorMode, today, business, onTap, onAdd, onSwipeDay,
+  appts, dayStatus, dayAvailability, colorMode, today, selectedDate, business, onTap, onAdd, onSwipeDay,
 }: {
   appts: any[];
   dayStatus: { status: string; label: string };
   dayAvailability?: { windows?: { start: string; end: string }[]; open?: boolean };
   colorMode: ColorMode;
   today: string;
+  selectedDate: string;
   business: any;
   onTap: (a: any) => void;
   onAdd: () => void;
@@ -8821,35 +8825,64 @@ const DayCalendarView = ({
     onSwipeDay(dx < 0 ? 1 : -1);
   };
 
-  // Timeline window = the stylist's working hours for the day, expanded
-  // to fit any appointment that runs outside them. Falls back to 9 AM–6 PM
-  // when no hours are configured — so the FULL day grid is always visible
-  // (even on an off day, or with a single booking).
-  const { startHour, endHour } = useMemo(() => {
-    let startMin = 24 * 60, endMin = 0;
+  // The timeline ALWAYS spans the full 24-hour day. Business hours no
+  // longer drive the visible window — they only gate when clients can
+  // BOOK (handled by the availability engine). The stylist can scroll to
+  // any hour, on or off the clock. Working hours are spotlighted and the
+  // rest is lightly greyed (see the overlays below) so the full day is
+  // always in view without losing the "this is my shift" emphasis.
+  const startHour = 0;
+  const endHour = 24;
+
+  // Business-hour bands (minutes from midnight), purely visual — derived
+  // from the day's availability windows to drive the spotlight overlay.
+  const businessBands = useMemo(() => {
+    const bands: { start: number; end: number }[] = [];
     for (const w of (dayAvailability?.windows || [])) {
       const [sh, sm] = String(w.start).split(":").map(Number);
       const [eh, em] = String(w.end).split(":").map(Number);
-      startMin = Math.min(startMin, (sh || 0) * 60 + (sm || 0));
-      endMin = Math.max(endMin, (eh || 0) * 60 + (em || 0));
+      const s = (sh || 0) * 60 + (sm || 0);
+      const e = (eh || 0) * 60 + (em || 0);
+      if (e > s) bands.push({ start: s, end: e });
     }
-    for (const a of appts) {
-      if (!a?.time || a?.isAllDay) continue;
-      const { s, e } = apptMinutes(a);
-      startMin = Math.min(startMin, s);
-      endMin = Math.max(endMin, e);
+    return bands.sort((a, b) => a.start - b.start);
+  }, [dayAvailability]);
+
+  // The complement of the business bands across the 24-hour day. These
+  // off-hour segments get a light grey wash so the working hours pop.
+  const offHourBands = useMemo(() => {
+    const dayEnd = 24 * 60;
+    if (businessBands.length === 0) return [{ start: 0, end: dayEnd }];
+    const gaps: { start: number; end: number }[] = [];
+    let cursor = 0;
+    for (const b of businessBands) {
+      if (b.start > cursor) gaps.push({ start: cursor, end: b.start });
+      cursor = Math.max(cursor, b.end);
     }
-    if (startMin >= endMin) { startMin = 9 * 60; endMin = 18 * 60; }
-    const sh = Math.max(0, Math.floor(startMin / 60));
-    const eh = Math.min(24, Math.ceil(endMin / 60));
-    return { startHour: sh, endHour: Math.max(sh + 1, eh) };
-  }, [dayAvailability, appts]);
+    if (cursor < dayEnd) gaps.push({ start: cursor, end: dayEnd });
+    return gaps;
+  }, [businessBands]);
+
+  // On load (and whenever the day changes) scroll the timeline to a
+  // sensible focus: the current time when viewing today, otherwise the
+  // opening hour. Scrolling earlier/later stays fully available.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const isToday = selectedDate === today;
+    const now = new Date();
+    const openMin = businessBands.length ? businessBands[0].start : 9 * 60;
+    const focusMin = isToday ? now.getHours() * 60 + now.getMinutes() : openMin;
+    const target = (focusMin / 60) * HOUR_PX - el.clientHeight / 2;
+    el.scrollTop = Math.max(0, target);
+  }, [selectedDate, today, businessBands]);
 
   const HOURS = useMemo(
     () => Array.from({ length: endHour - startHour + 1 }, (_, i) => startHour + i),
     [startHour, endHour],
   );
-  const formatHourLabel = (h: number) => `${((h + 11) % 12) + 1} ${h >= 12 ? "PM" : "AM"}`;
+  const formatHourLabel = (h: number) => `${((h + 11) % 12) + 1} ${h >= 12 && h < 24 ? "PM" : "AM"}`;
 
   // Greedy column-packing so overlapping appointments render side-by-side
   // instead of stacking. Excludes the all-day block (drawn as an overlay).
@@ -8960,13 +8993,39 @@ const DayCalendarView = ({
         </Card>
       )}
 
-      {/* FULL-DAY TIMELINE — working-hours grid with proportional,
-          duration-blocking cards. Always shown (even on an off day or
-          with a single booking) so empty gaps stay visible. */}
+      {/* FULL-DAY TIMELINE — the grid ALWAYS runs 12 AM → 12 AM. It lives
+          in its own scroll container (taller than the screen) that
+          auto-scrolls to the current time / opening hour on load. Working
+          hours are spotlighted; off-hours are lightly greyed — never
+          hidden — so the stylist always sees the whole day. */}
       <div
+        ref={scrollRef}
         className="relative"
-        style={{ height: (endHour - startHour) * HOUR_PX + 8, background: C.paper, border: `1px solid ${C.hairline}`, borderRadius: 16, overflow: "hidden" }}
+        style={{ maxHeight: TIMELINE_VIEWPORT_PX, overflowY: "auto", overscrollBehavior: "contain", background: C.paper, border: `1px solid ${C.hairline}`, borderRadius: 16 }}
       >
+        <div className="relative" style={{ height: (endHour - startHour) * HOUR_PX + 8 }}>
+        {/* Off-hour grey wash — lightly dims hours outside the working
+            day without hiding them. */}
+        {offHourBands.map((b, i) => (
+          <div
+            key={`off-${i}`}
+            aria-hidden
+            className="absolute left-0 right-0"
+            style={{ top: (b.start / 60) * HOUR_PX, height: ((b.end - b.start) / 60) * HOUR_PX, background: "rgba(21,17,26,0.05)", pointerEvents: "none" }}
+          />
+        ))}
+
+        {/* Business-hour spotlight — a soft warm tint so the working
+            hours pop like a spotlight on center stage. */}
+        {businessBands.map((b, i) => (
+          <div
+            key={`biz-${i}`}
+            aria-hidden
+            className="absolute left-0 right-0"
+            style={{ top: (b.start / 60) * HOUR_PX, height: ((b.end - b.start) / 60) * HOUR_PX, background: "rgba(177,75,224,0.06)", pointerEvents: "none" }}
+          />
+        ))}
+
         {HOURS.map((h, idx) => (
           <div key={h} className="absolute left-0 right-0 flex items-start" style={{ top: idx * HOUR_PX, height: HOUR_PX, borderTop: idx === 0 ? "none" : `1px dashed ${C.hairline}` }}>
             <span className="text-[10px] font-semibold tracking-widest pl-3 pt-1" style={{ color: C.muted, width: 56, letterSpacing: "0.08em" }}>{formatHourLabel(h)}</span>
@@ -9038,6 +9097,7 @@ const DayCalendarView = ({
             </button>
           );
         })}
+        </div>
       </div>
     </div>
   );
