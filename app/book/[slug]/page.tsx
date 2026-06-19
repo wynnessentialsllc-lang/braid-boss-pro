@@ -2935,7 +2935,6 @@ export default function PublicBookingPage() {
                 <li>Contract reminders</li>
                 <li>Review requests</li>
                 <li>Rebooking reminders</li>
-                <li>Occasional promotional offers</li>
               </ul>
               <p style={{ margin: 0, fontSize: 11.5, color: C.muted, lineHeight: 1.5 }}>
                 Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out or <strong>HELP</strong> for assistance. Consent is not a condition of purchase.
