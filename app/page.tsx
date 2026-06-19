@@ -10728,8 +10728,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       const changedCurl = wasExisting && oldCust.curlPattern !== newCust.curlPattern;
       const changedNotes = wasExisting && oldCust.styleNotes !== newCust.styleNotes;
       const changedCustomization = changedHairColor || changedCurl || changedNotes;
+      const oldStyle = String((original as any)?.style ?? "").trim();
+      const changedStyle = wasExisting && oldStyle !== String(newServiceName ?? "").trim();
       const dateOrTimeChanged = changedDate || changedTime;
-      const anyChanged = dateOrTimeChanged || changedPrice || changedAddons || changedOption || changedCustomization;
+      const anyChanged = dateOrTimeChanged || changedPrice || changedAddons || changedOption || changedCustomization || changedStyle;
 
       // Keep the linked booking_request in sync with the edit. The
       // client portal (public_get_booking_portal_state) and the
@@ -10770,6 +10772,65 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             update_customization: changedCustomization,
           });
         } catch { /* portal sync is best-effort */ }
+      }
+
+      // Style swapped on an existing appointment — the original contract
+      // (if any) was for a different service, so void anything unsigned
+      // and reissue against the new service so the client signs for what
+      // they're actually booked into.
+      if (wasExisting && isRealAppt && changedStyle && notCancelled && store.userId) {
+        try {
+          const supabase = getSupabase();
+          await supabase
+            .from("booking_contracts")
+            .update({ status: "voided" })
+            .eq("appointment_id", saved.id)
+            .is("signed_at", null)
+            .in("status", ["sent", "pending", "pending_signature", "viewed"]);
+          await supabase.rpc("generate_appointment_contracts", { appointment_id_in: saved.id });
+          if (clientEmail) {
+            const { data: bcs } = await supabase
+              .from("booking_contracts")
+              .select("id, title, public_token, status, client_email")
+              .eq("appointment_id", saved.id)
+              .is("signed_at", null)
+              .in("status", ["sent", "pending", "pending_signature", "viewed"]);
+            const list = (bcs as any[]) || [];
+            if (list.length > 0) {
+              let studioName = "your stylist";
+              try {
+                const { data: studio } = await supabase.rpc("public_get_studio_name", { user_id_in: store.userId });
+                if (typeof studio === "string" && studio.trim()) studioName = studio.trim();
+              } catch { /* studio name best-effort */ }
+              const origin = typeof window !== "undefined" ? window.location.origin : "https://braidbosspro.app";
+              for (const bc of list) {
+                if (!bc?.public_token) continue;
+                const email = String(bc.client_email || clientEmail).trim();
+                if (!email) continue;
+                await supabase.rpc("queue_notification", {
+                  user_id_in: store.userId,
+                  channel_in: "email",
+                  notification_type_in: "contract_signing",
+                  body_in: "Please review and sign your updated appointment agreement.",
+                  recipient_email_in: email,
+                  recipient_name_in: form.clientName || saved.clientName || null,
+                  payload_in: {
+                    clientName: form.clientName || saved.clientName || "there",
+                    studioName,
+                    contractTitle: bc.title || "Appointment agreement",
+                    serviceName: newServiceName,
+                    contractUrl: `${origin}/sign/contract/${bc.public_token}`,
+                  },
+                  dedupe_key_in: `contract_signing:${bc.id}`,
+                  appointment_id_in: saved.id,
+                  client_id_in: saved.clientId || form.clientId || null,
+                });
+              }
+            }
+          }
+        } catch (e) {
+          if (typeof console !== "undefined") console.warn("[appt] contract reissue on style change failed:", e);
+        }
       }
 
       const updateGate = wasExisting && isRealAppt && anyChanged && notCancelled &&
