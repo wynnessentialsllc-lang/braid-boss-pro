@@ -2799,62 +2799,10 @@ export default function PublicBookingPage() {
                 (see the "3 · Your details" block below) so the client
                 configures their style and picks a time before being
                 asked who they are. */}
-            {/* SMS consent card — surfaced at the very top of the booking
-                flow so it is visible to anyone (including unauthenticated
-                A2P reviewers) before any service / date / time selection.
-                Unchecked by default; binds the same smsOptIn state used at
-                submit. Never pre-checked and never bundled with policy
-                acceptance — opt-in is optional and not a condition of
-                booking. */}
-            <div
-              style={{
-                background: C.paper,
-                border: `1px solid ${C.hairline}`,
-                borderRadius: 18,
-                padding: 18,
-                boxShadow: "0 4px 14px rgba(21, 17, 26, 0.06)",
-                display: "grid",
-                gap: 10,
-              }}
-            >
-              <div>
-                <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 700, color: C.brandPrimary, lineHeight: 1.15 }}>
-                  Stay Updated About Your Appointment
-                </p>
-                <p style={{ margin: "4px 0 0", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
-                  Receive appointment updates and important messages from your stylist.
-                </p>
-              </div>
-              <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={smsOptIn}
-                  onChange={e => setSmsOptIn(e.target.checked)}
-                  style={{ marginTop: 2, width: 18, height: 18, accentColor: C.brandPrimary, flexShrink: 0 }}
-                />
-                <span style={{ fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>
-                  I agree to receive text messages from Braid Boss Pro and my selected stylist regarding:
-                </span>
-              </label>
-              <ul style={{ margin: "0 0 0 30px", padding: 0, color: C.coffee, fontSize: 12.5, lineHeight: 1.7, listStyle: "disc" }}>
-                <li>Appointment confirmations</li>
-                <li>Appointment reminders</li>
-                <li>Booking updates</li>
-                <li>Payment reminders</li>
-                <li>Contract reminders</li>
-                <li>Review requests</li>
-                <li>Rebooking reminders</li>
-                <li>Occasional promotional offers</li>
-              </ul>
-              <p style={{ margin: 0, fontSize: 11.5, color: C.muted, lineHeight: 1.5 }}>
-                Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out or <strong>HELP</strong> for assistance. Consent is not a condition of purchase.
-              </p>
-              <p style={{ margin: 0, fontSize: 12 }}>
-                <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: C.brandPrimary, textDecoration: "underline" }}>Privacy Policy</a>
-                <span style={{ color: C.muted }}> | </span>
-                <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.brandPrimary, textDecoration: "underline" }}>Terms of Service</a>
-              </p>
-            </div>
+            {/* SMS consent card now renders after the "Your details"
+                section and immediately before the booking CTA — see the
+                "Stay Updated About Your Appointment" card lower in this
+                form. It is the single source of SMS consent. */}
             {hasCatalog ? (
               <>
                 {/* The "Choose a service" heading lives below (after the
@@ -4258,36 +4206,10 @@ export default function PublicBookingPage() {
                 </Field>
               </>
             )}
-            {/* Final-screen SMS consent. If the client already opted in on
-                the top consent card, show a read-only confirmation instead
-                of asking again; otherwise surface the full checkbox here so
-                they can still consent before booking. */}
-            {smsOptIn ? (
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
-                <span aria-hidden style={{ color: C.brandPrimary, fontWeight: 700 }}>✓</span>
-                <span>
-                  SMS consent provided.{" "}
-                  <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: C.brandPrimary, textDecoration: "underline" }}>Privacy Policy</a>
-                  <span style={{ color: C.muted }}> | </span>
-                  <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.brandPrimary, textDecoration: "underline" }}>Terms of Service</a>
-                </span>
-              </div>
-            ) : (
-              <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={smsOptIn}
-                  onChange={e => setSmsOptIn(e.target.checked)}
-                  style={{ marginTop: 2, width: 18, height: 18, accentColor: C.brandPrimary, flexShrink: 0 }}
-                />
-                <span style={{ fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
-                  I agree to receive text messages from Braid Boss Pro and my selected stylist regarding appointment confirmations, appointment reminders, booking updates, payment reminders, contract reminders, review requests, rebooking reminders, and occasional promotional offers. Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out or <strong>HELP</strong> for assistance. Consent is not a condition of purchase. View our{" "}
-                  <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: C.brandPrimary, textDecoration: "underline" }}>Privacy Policy</a>{" "}
-                  and{" "}
-                  <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.brandPrimary, textDecoration: "underline" }}>Terms of Service</a>.
-                </span>
-              </label>
-            )}
+            {/* The duplicate inline SMS consent checkbox that used to live
+                here has been removed. SMS consent is collected once, in the
+                "Stay Updated About Your Appointment" card rendered below
+                (after these details, before the booking CTA). */}
             {!hasCatalog && services.length === 0 && (
               <details
                 style={{
@@ -4493,6 +4415,64 @@ export default function PublicBookingPage() {
                 </label>
               );
             })()}
+            {/* SMS consent card — the single source of SMS consent on the
+                booking form. Rendered after the "Your details" section and
+                immediately before the booking CTA. Unchecked by default so
+                the client gives affirmative, express opt-in (a pre-checked
+                box is not valid consent under CTIA/TCPA). Binds the same
+                smsOptIn state read at submit, so consent + timestamp are
+                stored exactly as before. Never bundled with policy
+                acceptance — opt-in is optional and not a condition of
+                booking. */}
+            <div
+              style={{
+                background: C.paper,
+                border: `1px solid ${C.hairline}`,
+                borderRadius: 18,
+                padding: 18,
+                boxShadow: "0 4px 14px rgba(21, 17, 26, 0.06)",
+                display: "grid",
+                gap: 10,
+              }}
+            >
+              <div>
+                <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 700, color: C.brandPrimary, lineHeight: 1.15 }}>
+                  Stay Updated About Your Appointment
+                </p>
+                <p style={{ margin: "4px 0 0", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
+                  Receive appointment updates and important messages from your stylist.
+                </p>
+              </div>
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={smsOptIn}
+                  onChange={e => setSmsOptIn(e.target.checked)}
+                  style={{ marginTop: 2, width: 18, height: 18, accentColor: C.brandPrimary, flexShrink: 0 }}
+                />
+                <span style={{ fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>
+                  I agree to receive SMS messages from Braid Boss Pro and my selected stylist regarding:
+                </span>
+              </label>
+              <ul style={{ margin: "0 0 0 30px", padding: 0, color: C.coffee, fontSize: 12.5, lineHeight: 1.7, listStyle: "disc" }}>
+                <li>Appointment confirmations</li>
+                <li>Appointment reminders</li>
+                <li>Booking updates</li>
+                <li>Payment reminders</li>
+                <li>Contract reminders</li>
+                <li>Review requests</li>
+                <li>Rebooking reminders</li>
+                <li>Occasional promotional offers</li>
+              </ul>
+              <p style={{ margin: 0, fontSize: 11.5, color: C.muted, lineHeight: 1.5 }}>
+                Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out or <strong>HELP</strong> for assistance. Consent is not a condition of purchase.
+              </p>
+              <p style={{ margin: 0, fontSize: 12 }}>
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: C.brandPrimary, textDecoration: "underline" }}>Privacy Policy</a>
+                <span style={{ color: C.muted }}> | </span>
+                <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.brandPrimary, textDecoration: "underline" }}>Terms of Service</a>
+              </p>
+            </div>
             {submitError && (
               <p role="alert" aria-live="assertive" style={{ fontSize: 12, color: C.danger }}>{submitError}</p>
             )}
