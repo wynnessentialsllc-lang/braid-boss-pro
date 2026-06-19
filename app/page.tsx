@@ -21541,51 +21541,74 @@ const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
   return (
     <AuthScreen mode={tab} onBack={onBack}>
       <GlobalStyle />
-      {/* Form card — the branded hero, trial pill, and preview carousel
-          around it are owned by AuthScreen so the auth logic stays here. */}
-      <Card className="p-5 space-y-3" style={{ boxShadow: SHADOWS.cardLifted }}>
-        <Field label="Email">
-          <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@studio.com" />
-        </Field>
+      {/* Form card — the branded hero + trial pill around it are owned by
+          AuthScreen; the auth logic + the .bbpa-* styled markup stay here. */}
+      <form
+        className="bbpa-card"
+        onSubmit={(e) => { e.preventDefault(); submit(); }}
+      >
+        <div className="bbpa-fieldgroup">
+          <label htmlFor="auth-email" className="bbpa-label">Email</label>
+          <input
+            id="auth-email"
+            className="bbpa-input"
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            autoCapitalize="none"
+            spellCheck={false}
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="you@studio.com"
+          />
+        </div>
         {tab !== "reset" && (
-          <Field label="Password">
-            <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
-          </Field>
+          <div className="bbpa-fieldgroup">
+            <label htmlFor="auth-password" className="bbpa-label">Password</label>
+            <input
+              id="auth-password"
+              className="bbpa-input"
+              type="password"
+              autoComplete={tab === "signup" ? "new-password" : "current-password"}
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
+            />
+          </div>
         )}
-        {err && <p className="text-xs" style={{ color: C.danger }}>{err}</p>}
-        {msg && <p className="text-xs" style={{ color: C.success }}>{msg}</p>}
-        <Button variant="primary" fullWidth disabled={busy || !email || (tab !== "reset" && !password)} onClick={submit}>
+        {err && <p className="bbpa-msg err">{err}</p>}
+        {msg && <p className="bbpa-msg ok">{msg}</p>}
+        <button
+          type="submit"
+          className="bbpa-btn-primary"
+          disabled={busy || !email || (tab !== "reset" && !password)}
+        >
           {busy ? "Working…" : tab === "signin" ? "Sign in" : tab === "signup" ? "Create account" : "Send reset email"}
-        </Button>
-        <div className="flex items-center justify-between text-[12px] pt-1">
+        </button>
+        <div className="bbpa-actions">
           {tab === "signin" ? (
             <>
-              <button type="button" onClick={() => { setTab("reset"); setErr(null); setMsg(null); }} style={{ color: C.coffee }}>Forgot password?</button>
-              <button type="button" onClick={() => { setTab("signup"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Create account</button>
+              <button type="button" className="bbpa-textbtn muted" onClick={() => { setTab("reset"); setErr(null); setMsg(null); }}>Forgot password?</button>
+              <button type="button" className="bbpa-textbtn link" onClick={() => { setTab("signup"); setErr(null); setMsg(null); }}>Create account</button>
             </>
           ) : tab === "signup" ? (
-            <button type="button" onClick={() => { setTab("signin"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Already have an account? Sign in</button>
+            <button type="button" className="bbpa-textbtn link" onClick={() => { setTab("signin"); setErr(null); setMsg(null); }}>Already have an account? Sign in</button>
           ) : (
-            <button type="button" onClick={() => { setTab("signin"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Back to sign in</button>
+            <button type="button" className="bbpa-textbtn link" onClick={() => { setTab("signin"); setErr(null); setMsg(null); }}>Back to sign in</button>
           )}
         </div>
-      </Card>
-      <button type="button" onClick={onContinueGuest}
-        className="w-full text-center text-[12px] mt-4 py-3"
-        style={{ color: C.muted }}>
+      </form>
+      <button type="button" className="bbpa-guest" onClick={onContinueGuest}>
         Continue as guest · data stays on this device
       </button>
       {/* Public marketing + legal links. Keeps a path to a full
           description of the product (what it is, what it costs) and
           the privacy/terms pages reachable even from the auth screen. */}
-      <nav
-        aria-label="Learn more"
-        className="flex items-center justify-center flex-wrap gap-x-4 gap-y-1 mt-2 text-[12px]"
-      >
-        <a href="/features" style={{ color: C.coffee }}>Features</a>
-        <a href="/pricing" style={{ color: C.coffee }}>Pricing</a>
-        <a href="/privacy" style={{ color: C.coffee }}>Privacy</a>
-        <a href="/terms" style={{ color: C.coffee }}>Terms</a>
+      <nav aria-label="Learn more" className="bbpa-footnav">
+        <a href="/features">Features</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
       </nav>
     </AuthScreen>
   );
