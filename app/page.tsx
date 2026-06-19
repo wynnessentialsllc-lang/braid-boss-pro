@@ -97,7 +97,7 @@ import {
   applyCreditToAppointment,
 } from "./lib/credits";
 import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
-import WelcomeIntro from "./components/WelcomeIntro";
+import FeaturesContent from "./components/marketing/FeaturesContent";
 import { ProductImageUploader } from "./components/ProductImageUploader";
 import {
   PreviewStyleCard,
@@ -38558,6 +38558,18 @@ export default function App() {
       }
     } catch { /* private mode — silent */ }
   }, []);
+  // Marketing CTAs land here with ?signup=1 / ?signin=1 (the features
+  // landing is now the logged-out home view). Honor those on mount so
+  // the visitor drops straight into the right auth tab instead of the
+  // landing again. Runs after the introSeen probe above so it wins.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("signup") === "1") markIntroSeen("signup");
+      else if (params.get("signin") === "1") markIntroSeen("signin");
+    } catch { /* malformed query — ignore, show landing */ }
+  }, [markIntroSeen]);
   const rawStore = useStorage();
   const { premium } = usePremiumStatus(auth.userId);
   const discountsApi = useDiscounts(auth.userId);
@@ -39042,13 +39054,10 @@ export default function App() {
       );
     }
     if (introSeen === false) {
-      return (
-        <WelcomeIntro
-          onGetStarted={() => markIntroSeen("signup")}
-          onSignIn={() => markIntroSeen("signin")}
-          onSkip={() => markIntroSeen("signin")}
-        />
-      );
+      // The full features marketing page is the logged-out home view —
+      // it actually shows what Braid Boss Pro does. Its CTAs route to
+      // /?signup=1 and /?signin=1, handled by the mount effect above.
+      return <FeaturesContent />;
     }
     return <AuthGate onContinueGuest={auth.continueAsGuest} onBack={returnToIntro} initialTab={authInitialTab} />;
   }
