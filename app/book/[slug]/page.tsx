@@ -2793,16 +2793,159 @@ export default function PublicBookingPage() {
 
         {!linkLoading && !linkError && !submitted && !paymentChoice && link && (
           <form ref={bookingFormRef} onSubmit={handleSubmit} style={{ marginTop: 28, display: "grid", gap: 14 }}>
-            {/* Booking funnel order: service menu → date/time → your
-                details → consultation → deposit. Contact details used to
-                sit here at the top; they now render after the calendar
-                (see the "3 · Your details" block below) so the client
-                configures their style and picks a time before being
-                asked who they are. */}
-            {/* SMS consent card now renders after the "Your details"
-                section and immediately before the booking CTA — see the
-                "Stay Updated About Your Appointment" card lower in this
-                form. It is the single source of SMS consent. */}
+            {/* Booking funnel order: your details → SMS consent → service
+                menu → date/time → consultation → deposit. Contact details and
+                the SMS consent card sit at the top of the form, above the
+                service menu. */}
+            {/* Your details — collected at the top of the form, above the
+                service menu and the SMS consent card, so the client tells us
+                who they are before configuring a style and picking a time. */}
+            {hasCatalog && <p style={{ ...stepHeaderStyle, color: accent }}>Your details</p>}
+            <Field label="Your name">
+              <Input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" autoComplete="name" required />
+            </Field>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <Field label="Phone">
+                <Input type="tel" inputMode="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="555-0123" autoComplete="tel" />
+              </Field>
+              <Field label="Email">
+                <Input type="email" inputMode="email" autoCapitalize="none" spellCheck={false} value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" autoComplete="email" />
+              </Field>
+            </div>
+            {/* Honeypot — hidden from real users (off-screen, no tab stop,
+                hidden from screen readers), but bots that auto-fill every
+                field will populate it. handleSubmit drops any submission
+                where this is non-empty. */}
+            <div aria-hidden="true" style={{ position: "absolute", left: "-9999px", top: "auto", width: 1, height: 1, overflow: "hidden" }}>
+              <label htmlFor="bbp-company-website">Website</label>
+              <input
+                id="bbp-company-website"
+                type="text"
+                name="website"
+                tabIndex={-1}
+                autoComplete="off"
+                value={website}
+                onChange={e => setWebsite(e.target.value)}
+              />
+            </div>
+            {/* Who's this appointment for — defaults to the booker.
+                Picking "Someone else" reveals the recipient's name so
+                a parent can book for their child. The booker stays the
+                contact + payer. */}
+            <Field label="Who's this appointment for?">
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[
+                  { v: true, label: "Myself" },
+                  { v: false, label: "Someone else" },
+                ].map((opt) => {
+                  const active = bookedForSelf === opt.v;
+                  return (
+                    <button
+                      key={String(opt.v)}
+                      type="button"
+                      onClick={() => {
+                        setBookedForSelf(opt.v);
+                        if (opt.v) { setRecipientName(""); setRecipientNote(""); }
+                      }}
+                      style={{
+                        padding: "12px 14px",
+                        borderRadius: 12,
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        background: active ? C.espresso : C.paper,
+                        color: active ? C.paper : C.espresso,
+                        border: `1px solid ${active ? C.espresso : C.hairline}`,
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+            {!bookedForSelf && (
+              <>
+                <Field label="Who it's for">
+                  <Input
+                    value={recipientName}
+                    onChange={e => setRecipientName(e.target.value)}
+                    placeholder="e.g. Maya (daughter)"
+                    autoComplete="off"
+                  />
+                </Field>
+                <Field label="Anything to note? (optional)">
+                  <Input
+                    value={recipientNote}
+                    onChange={e => setRecipientNote(e.target.value)}
+                    placeholder="e.g. 7 years old, fine hair"
+                    autoComplete="off"
+                  />
+                </Field>
+              </>
+            )}
+            <Field label="Notes">
+              <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+                placeholder="Hair length, anything you want me to know…"
+                style={{ ...inputStyle, padding: 12, resize: "none", lineHeight: 1.5 }} />
+            </Field>
+            {/* SMS consent card — the single source of SMS consent, shown
+                directly below the client's details and before any service /
+                date / time selection so it stays visible to everyone (including
+                unauthenticated A2P reviewers). Unchecked by default; binds the
+                smsOptIn state read at submit so consent + timestamp are stored
+                exactly as before. Never pre-checked and never bundled with
+                policy acceptance — opt-in is optional and not a condition of
+                booking. */}
+            <div
+              style={{
+                background: C.paper,
+                border: `1px solid ${C.hairline}`,
+                borderRadius: 18,
+                padding: 18,
+                boxShadow: "0 4px 14px rgba(21, 17, 26, 0.06)",
+                display: "grid",
+                gap: 10,
+              }}
+            >
+              <div>
+                <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 700, color: C.brandPrimary, lineHeight: 1.15 }}>
+                  Stay Updated About Your Appointment
+                </p>
+                <p style={{ margin: "4px 0 0", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
+                  Receive appointment updates and important messages from your stylist.
+                </p>
+              </div>
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={smsOptIn}
+                  onChange={e => setSmsOptIn(e.target.checked)}
+                  style={{ marginTop: 2, width: 18, height: 18, accentColor: C.brandPrimary, flexShrink: 0 }}
+                />
+                <span style={{ fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>
+                  I agree to receive SMS messages from Braid Boss Pro and my selected stylist regarding:
+                </span>
+              </label>
+              <ul style={{ margin: "0 0 0 30px", padding: 0, color: C.coffee, fontSize: 12.5, lineHeight: 1.7, listStyle: "disc" }}>
+                <li>Appointment confirmations</li>
+                <li>Appointment reminders</li>
+                <li>Booking updates</li>
+                <li>Payment reminders</li>
+                <li>Contract reminders</li>
+                <li>Review requests</li>
+                <li>Rebooking reminders</li>
+                <li>Occasional promotional offers</li>
+              </ul>
+              <p style={{ margin: 0, fontSize: 11.5, color: C.muted, lineHeight: 1.5 }}>
+                Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out or <strong>HELP</strong> for assistance. Consent is not a condition of purchase.
+              </p>
+              <p style={{ margin: 0, fontSize: 12 }}>
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: C.brandPrimary, textDecoration: "underline" }}>Privacy Policy</a>
+                <span style={{ color: C.muted }}> | </span>
+                <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.brandPrimary, textDecoration: "underline" }}>Terms of Service</a>
+              </p>
+            </div>
             {hasCatalog ? (
               <>
                 {/* The "Choose a service" heading lives below (after the
@@ -4119,97 +4262,6 @@ export default function PublicBookingPage() {
                 )}
               </div>
             )}
-            {/* 3 · Your details — relocated from the top of the form so
-                contact info is collected only after the client has
-                configured their style and picked a time. */}
-            {hasCatalog && <p style={{ ...stepHeaderStyle, color: accent }}>Your details</p>}
-            <Field label="Your name">
-              <Input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" autoComplete="name" required />
-            </Field>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <Field label="Phone">
-                <Input type="tel" inputMode="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="555-0123" autoComplete="tel" />
-              </Field>
-              <Field label="Email">
-                <Input type="email" inputMode="email" autoCapitalize="none" spellCheck={false} value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" autoComplete="email" />
-              </Field>
-            </div>
-            {/* Honeypot — hidden from real users (off-screen, no tab stop,
-                hidden from screen readers), but bots that auto-fill every
-                field will populate it. handleSubmit drops any submission
-                where this is non-empty. */}
-            <div aria-hidden="true" style={{ position: "absolute", left: "-9999px", top: "auto", width: 1, height: 1, overflow: "hidden" }}>
-              <label htmlFor="bbp-company-website">Website</label>
-              <input
-                id="bbp-company-website"
-                type="text"
-                name="website"
-                tabIndex={-1}
-                autoComplete="off"
-                value={website}
-                onChange={e => setWebsite(e.target.value)}
-              />
-            </div>
-            {/* Who's this appointment for — defaults to the booker.
-                Picking "Someone else" reveals the recipient's name so
-                a parent can book for their child. The booker stays the
-                contact + payer. */}
-            <Field label="Who's this appointment for?">
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {[
-                  { v: true, label: "Myself" },
-                  { v: false, label: "Someone else" },
-                ].map((opt) => {
-                  const active = bookedForSelf === opt.v;
-                  return (
-                    <button
-                      key={String(opt.v)}
-                      type="button"
-                      onClick={() => {
-                        setBookedForSelf(opt.v);
-                        if (opt.v) { setRecipientName(""); setRecipientNote(""); }
-                      }}
-                      style={{
-                        padding: "12px 14px",
-                        borderRadius: 12,
-                        fontSize: 14,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        background: active ? C.espresso : C.paper,
-                        color: active ? C.paper : C.espresso,
-                        border: `1px solid ${active ? C.espresso : C.hairline}`,
-                      }}
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </Field>
-            {!bookedForSelf && (
-              <>
-                <Field label="Who it's for">
-                  <Input
-                    value={recipientName}
-                    onChange={e => setRecipientName(e.target.value)}
-                    placeholder="e.g. Maya (daughter)"
-                    autoComplete="off"
-                  />
-                </Field>
-                <Field label="Anything to note? (optional)">
-                  <Input
-                    value={recipientNote}
-                    onChange={e => setRecipientNote(e.target.value)}
-                    placeholder="e.g. 7 years old, fine hair"
-                    autoComplete="off"
-                  />
-                </Field>
-              </>
-            )}
-            {/* The duplicate inline SMS consent checkbox that used to live
-                here has been removed. SMS consent is collected once, in the
-                "Stay Updated About Your Appointment" card rendered below
-                (after these details, before the booking CTA). */}
             {!hasCatalog && services.length === 0 && (
               <details
                 style={{
@@ -4302,11 +4354,6 @@ export default function PublicBookingPage() {
                 </div>
               );
             })()}
-            <Field label="Notes">
-              <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
-                placeholder="Hair length, anything you want me to know…"
-                style={{ ...inputStyle, padding: 12, resize: "none", lineHeight: 1.5 }} />
-            </Field>
             {(() => {
               const qs = visibleQuestions(intakeForm);
               if (qs.length === 0) return null;
@@ -4415,64 +4462,6 @@ export default function PublicBookingPage() {
                 </label>
               );
             })()}
-            {/* SMS consent card — the single source of SMS consent on the
-                booking form. Rendered after the "Your details" section and
-                immediately before the booking CTA. Unchecked by default so
-                the client gives affirmative, express opt-in (a pre-checked
-                box is not valid consent under CTIA/TCPA). Binds the same
-                smsOptIn state read at submit, so consent + timestamp are
-                stored exactly as before. Never bundled with policy
-                acceptance — opt-in is optional and not a condition of
-                booking. */}
-            <div
-              style={{
-                background: C.paper,
-                border: `1px solid ${C.hairline}`,
-                borderRadius: 18,
-                padding: 18,
-                boxShadow: "0 4px 14px rgba(21, 17, 26, 0.06)",
-                display: "grid",
-                gap: 10,
-              }}
-            >
-              <div>
-                <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 19, fontWeight: 700, color: C.brandPrimary, lineHeight: 1.15 }}>
-                  Stay Updated About Your Appointment
-                </p>
-                <p style={{ margin: "4px 0 0", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
-                  Receive appointment updates and important messages from your stylist.
-                </p>
-              </div>
-              <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={smsOptIn}
-                  onChange={e => setSmsOptIn(e.target.checked)}
-                  style={{ marginTop: 2, width: 18, height: 18, accentColor: C.brandPrimary, flexShrink: 0 }}
-                />
-                <span style={{ fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>
-                  I agree to receive SMS messages from Braid Boss Pro and my selected stylist regarding:
-                </span>
-              </label>
-              <ul style={{ margin: "0 0 0 30px", padding: 0, color: C.coffee, fontSize: 12.5, lineHeight: 1.7, listStyle: "disc" }}>
-                <li>Appointment confirmations</li>
-                <li>Appointment reminders</li>
-                <li>Booking updates</li>
-                <li>Payment reminders</li>
-                <li>Contract reminders</li>
-                <li>Review requests</li>
-                <li>Rebooking reminders</li>
-                <li>Occasional promotional offers</li>
-              </ul>
-              <p style={{ margin: 0, fontSize: 11.5, color: C.muted, lineHeight: 1.5 }}>
-                Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out or <strong>HELP</strong> for assistance. Consent is not a condition of purchase.
-              </p>
-              <p style={{ margin: 0, fontSize: 12 }}>
-                <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: C.brandPrimary, textDecoration: "underline" }}>Privacy Policy</a>
-                <span style={{ color: C.muted }}> | </span>
-                <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: C.brandPrimary, textDecoration: "underline" }}>Terms of Service</a>
-              </p>
-            </div>
             {submitError && (
               <p role="alert" aria-live="assertive" style={{ fontSize: 12, color: C.danger }}>{submitError}</p>
             )}
