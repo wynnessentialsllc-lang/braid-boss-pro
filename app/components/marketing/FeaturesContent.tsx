@@ -75,6 +75,7 @@ export default function FeaturesContent() {
         body="Braid Boss Pro is a premium business operating system for braid stylists — branded booking links, deposits, contracts, retail storefronts, analytics, and creator-economy tools built around how braiders actually run their chairs. Not generic salon software."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "How it works", href: "/how-it-works" }}
+        signInHref="/?signin=1"
       />
 
       {/* Booking & Scheduling */}

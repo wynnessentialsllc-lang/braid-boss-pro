@@ -387,12 +387,17 @@ export const MarketingHero = ({
   body,
   primaryCta,
   secondaryCta,
+  signInHref,
 }: {
   eyebrow: string;
   title: ReactNode;
   body: string;
   primaryCta: { label: string; href: string };
   secondaryCta?: { label: string; href: string };
+  // When set, renders an "Already have an account? Sign in" link under
+  // the CTAs. Used on the logged-out home landing so returning users
+  // have an obvious sign-in path next to the primary "start trial" CTA.
+  signInHref?: string;
 }) => (
   <section
     style={{
@@ -498,6 +503,20 @@ export const MarketingHero = ({
           </a>
         )}
       </div>
+      {signInHref && (
+        // Dynamic href, so the no-html-link-for-pages rule doesn't fire.
+        // Plain <a> is intentional — a hard reload remounts the app so it
+        // reads ?signin=1 and opens the sign-in gate.
+        <p style={{ marginTop: 18, fontSize: 14, color: C.coffee }}>
+          Already have an account?{" "}
+          <a
+            href={signInHref}
+            style={{ color: C.brandPrimary, fontWeight: 700, textDecoration: "underline" }}
+          >
+            Sign in
+          </a>
+        </p>
+      )}
     </div>
   </section>
 );
