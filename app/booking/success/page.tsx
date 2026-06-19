@@ -157,7 +157,7 @@ function BookingSuccessInner() {
       )}
       {status && status.approval_status === "deposit_paid_pending_approval" && (
         <p style={{ marginTop: 16, fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
-          {paidInFull ? "Payment" : "Deposit payment"} doesn&apos;t guarantee approval until your stylist confirms.
+          {paidInFull ? "Payment " : "Deposit payment "}doesn&apos;t guarantee approval until your stylist confirms.
           You&apos;ll get a message once they review.
         </p>
       )}

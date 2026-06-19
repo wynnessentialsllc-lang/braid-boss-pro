@@ -506,7 +506,7 @@ const renderDepositReceived = (p: Record<string, any>) => {
         : "We received your deposit for your"}${serviceName ? ` <strong>${escape(serviceName)}</strong>` : ""} request${when ? ` on <strong>${escape(when)}</strong>` : ""}.
     </p>
     <p style="font-size:14px;line-height:22px;color:${C.coffee};">
-      <strong>Your appointment isn't confirmed yet.</strong> ${escape(studioName)} still needs to review and approve it — we'll email you to confirm as soon as that happens.
+      <strong>Your appointment isn't confirmed yet.</strong> ${escape(studioName).replace(/^./, (c) => c.toUpperCase())} still needs to review and approve it — we'll email you to confirm as soon as that happens.
     </p>
     ${customizationBlock(p)}
     ${contractBlock(p)}

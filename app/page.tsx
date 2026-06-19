@@ -29463,10 +29463,11 @@ const ApprovalQueueScreen = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequestId]);
 
-  // active / history buckets are module-level (ACTIVE_STATES /
-  // HISTORY_STATES) so the shop-page badge shares the same definition.
+  // Active tab uses ATTENTION_STATES (pending_review / deposit_paid_pending_approval)
+  // so requests still waiting on the client to pay a deposit don't clutter
+  // the stylist's queue. They remain reachable via the All tab.
   const counts = useMemo(() => {
-    const active = requests.filter(r => ACTIVE_STATES.includes(r.approval_status)).length;
+    const active = requests.filter(r => ATTENTION_STATES.includes(r.approval_status)).length;
     const history = requests.filter(r => HISTORY_STATES.includes(r.approval_status)).length;
     return { active, all: requests.length, history };
   }, [requests]);
@@ -29474,7 +29475,7 @@ const ApprovalQueueScreen = ({
   const filtered = useMemo(() => {
     if (filter === "all") return requests;
     if (filter === "history") return requests.filter(r => HISTORY_STATES.includes(r.approval_status));
-    return requests.filter(r => ACTIVE_STATES.includes(r.approval_status));
+    return requests.filter(r => ATTENTION_STATES.includes(r.approval_status));
   }, [requests, filter]);
 
   const handleApprove = async (req: BookingRequestRecord) => {
