@@ -96,7 +96,7 @@ export default function HowItWorksPage() {
                 unlocked from day one.
               </>
             }
-            cta={{ label: "Sign up", href: "/" }}
+            cta={{ label: "Sign up", href: "/?signup=1" }}
             delay={0}
           />
           <StepCard
