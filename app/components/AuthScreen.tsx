@@ -275,7 +275,6 @@ export default function AuthScreen({ mode, onBack, children }: AuthScreenProps) 
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
       }}
     >
       <style>{`
@@ -289,7 +288,10 @@ export default function AuthScreen({ mode, onBack, children }: AuthScreenProps) 
         .bbpa-anim { animation-fill-mode: both; animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1); }
 
         /* ---- Layout ---- */
-        .bbpa-shell { width: 100%; max-width: 1060px; margin: 0 auto; display: flex; flex-direction: column; gap: 36px; position: relative; z-index: 1; }
+        /* margin: auto (not justify-content: center on the parent) so the
+           shell centers when it fits but releases the top edge for normal
+           scrolling once the content is taller than the viewport. */
+        .bbpa-shell { width: 100%; max-width: 1060px; margin: auto; display: flex; flex-direction: column; gap: 36px; position: relative; z-index: 1; }
         .bbpa-formcol { width: 100%; max-width: 416px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
         .bbpa-marketing { width: 100%; max-width: 460px; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 22px; text-align: center; }
 
