@@ -267,7 +267,11 @@ export default function AuthScreen({ mode, onBack, children }: AuthScreenProps) 
         color: P.espresso,
         fontFamily: FONT_BODY,
         position: "relative",
-        overflowX: "hidden",
+        // NOTE: no overflow-x here. Setting overflow-x:hidden forces
+        // overflow-y to compute to `auto`, turning this full-height box
+        // into its own nested scroll container — which fights the page
+        // scroll on iOS and makes the page feel "stuck". The decorative
+        // accents below are clipped by their own wrapper instead.
         paddingTop: "max(20px, env(safe-area-inset-top))",
         paddingBottom: "max(28px, calc(env(safe-area-inset-bottom) + 20px))",
         paddingLeft: 18,
@@ -352,10 +356,15 @@ export default function AuthScreen({ mode, onBack, children }: AuthScreenProps) 
         }
       `}</style>
 
-      {/* Subtle luxury background accents — predominantly white. */}
-      <div aria-hidden style={{ position: "absolute", top: "-10%", right: "-8%", width: 420, height: 420, borderRadius: 999, background: "radial-gradient(circle, rgba(124,58,237,0.10) 0%, rgba(124,58,237,0) 70%)", filter: "blur(20px)", pointerEvents: "none", zIndex: 0 }} />
-      <div aria-hidden style={{ position: "absolute", bottom: "-12%", left: "-10%", width: 460, height: 460, borderRadius: 999, background: "radial-gradient(circle, rgba(255,77,109,0.09) 0%, rgba(255,77,109,0) 70%)", filter: "blur(24px)", pointerEvents: "none", zIndex: 0 }} />
-      <div aria-hidden style={{ position: "absolute", top: "46%", left: "50%", width: 360, height: 360, background: GRADIENTS.heroHalo, filter: "blur(10px)", pointerEvents: "none", animation: reduced ? "none" : "bbpa-glow 7s ease-in-out infinite", zIndex: 0 }} />
+      {/* Subtle luxury background accents — predominantly white. Wrapped
+          in an absolutely-positioned, overflow-clipped layer so the
+          off-edge blobs never create horizontal scroll, without putting
+          overflow on the scrolling container itself. */}
+      <div aria-hidden style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 0 }}>
+        <div style={{ position: "absolute", top: "-10%", right: "-8%", width: 420, height: 420, borderRadius: 999, background: "radial-gradient(circle, rgba(124,58,237,0.10) 0%, rgba(124,58,237,0) 70%)", filter: "blur(20px)" }} />
+        <div style={{ position: "absolute", bottom: "-12%", left: "-10%", width: 460, height: 460, borderRadius: 999, background: "radial-gradient(circle, rgba(255,77,109,0.09) 0%, rgba(255,77,109,0) 70%)", filter: "blur(24px)" }} />
+        <div style={{ position: "absolute", top: "46%", left: "50%", width: 360, height: 360, background: GRADIENTS.heroHalo, filter: "blur(10px)", animation: reduced ? "none" : "bbpa-glow 7s ease-in-out infinite" }} />
+      </div>
 
       {/* Back — top left. */}
       {onBack && (
