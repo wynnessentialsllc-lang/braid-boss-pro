@@ -18963,6 +18963,35 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                 </div>
               </Card>
             )}
+            <SectionTitle>Pricing tools</SectionTitle>
+            <Card
+              className="p-4 active:scale-[0.99]"
+              onClick={() => {
+                if (typeof window !== "undefined") window.location.assign("/settings/product-profit");
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div
+                    aria-hidden
+                    style={{
+                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                      background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
+                    }}
+                  >
+                    <CalcIcon size={15} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold" style={{ color: C.espresso }}>Product Profit Calculator</p>
+                    <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
+                      True cost per unit, smart pricing, profit & break-even
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight size={18} style={{ color: C.muted }} />
+              </div>
+            </Card>
+
             <SectionTitle>Payments</SectionTitle>
             <Card
               className="p-4 active:scale-[0.99]"
