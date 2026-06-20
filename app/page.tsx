@@ -21585,7 +21585,12 @@ const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
         >
           {busy ? "Working…" : tab === "signin" ? "Sign in" : tab === "signup" ? "Create account" : "Send reset email"}
         </button>
-        <div className="bbpa-actions">
+        {/* key={tab} forces this row to fully remount when the tab
+            changes, so a toggle button from the previous tab can never
+            linger and overlap (the conditional swaps a Fragment for a
+            single element at the same position, which can otherwise
+            leave a stale node in some engines). */}
+        <div className="bbpa-actions" key={tab}>
           {tab === "signin" ? (
             <>
               <button type="button" className="bbpa-textbtn muted" onClick={() => { setTab("reset"); setErr(null); setMsg(null); }}>Forgot password?</button>
