@@ -39031,39 +39031,75 @@ export default function App() {
     });
   }, [notifications, store.appointments]);
 
-  // Push-notification deep-link consumer. The OS push for a reminder
-  // navigates the PWA to /?focus=client&id=...(&action=rebooking); the
-  // service worker only focuses/opens the window, so the app reads the
-  // params here. A retention ("due for rebooking") push carries
-  // action=rebooking and pops the Pause sheet so snooze / stop is one tap
-  // from the notification; any other client link just opens the profile.
-  // One-shot: we strip the params after consuming so a refresh or a later
-  // re-render can't re-open the sheet.
-  const deepLinkConsumedRef = useRef(false);
-  useEffect(() => {
-    if (auth.mode !== "authed") return;
-    if (deepLinkConsumedRef.current || typeof window === "undefined") return;
+  // Shared push-notification deep-link router. Parses a notification's
+  // target URL (/?focus=client&id=...(&action=rebooking)) and routes:
+  // a retention ("due for rebooking") link pops the Pause sheet so
+  // snooze / stop is one tap from the push; any other client link opens
+  // the profile. Used by both the web URL consumer and the native iOS
+  // tap listener so the two transports behave identically. Accepts a
+  // relative or absolute URL. Returns true when it handled a client link.
+  const routeDeepLinkUrl = useCallback((rawUrl: string): boolean => {
+    if (typeof window === "undefined" || !rawUrl) return false;
     let params: URLSearchParams;
-    try { params = new URLSearchParams(window.location.search); }
-    catch { return; }
+    try { params = new URL(rawUrl, window.location.origin).searchParams; }
+    catch { return false; }
     const id = params.get("id");
-    if (params.get("focus") !== "client" || !id) return;
-    deepLinkConsumedRef.current = true;
-    // One-shot consume of a push deep link on mount — intentional setState.
-    /* eslint-disable react-hooks/set-state-in-effect */
+    if (params.get("focus") !== "client" || !id) return false;
     if (params.get("action") === "rebooking") {
       setPauseRemindersId(id);
     } else {
       setActive("clients");
       setClientToOpenId(id);
     }
-    /* eslint-enable react-hooks/set-state-in-effect */
+    return true;
+  }, []);
+
+  // Web push deep-link consumer. The OS push for a reminder navigates the
+  // PWA to /?focus=client&id=...; the service worker only focuses/opens
+  // the window, so the app reads the params here. One-shot: we strip the
+  // params after consuming so a refresh or a later re-render can't re-open
+  // the sheet.
+  const deepLinkConsumedRef = useRef(false);
+  useEffect(() => {
+    if (auth.mode !== "authed") return;
+    if (deepLinkConsumedRef.current || typeof window === "undefined") return;
+    deepLinkConsumedRef.current = true;
+    const handled = routeDeepLinkUrl(window.location.href);
+    if (!handled) { deepLinkConsumedRef.current = false; return; }
     try {
       const url = new URL(window.location.href);
       ["focus", "id", "action"].forEach((k) => url.searchParams.delete(k));
       window.history.replaceState({}, "", url.pathname + url.search + url.hash);
     } catch { /* leave the URL as-is */ }
-  }, [auth.mode]);
+  }, [auth.mode, routeDeepLinkUrl]);
+
+  // Native iOS (Capacitor) push tap. WKWebView has no service worker, so
+  // the @capacitor/push-notifications plugin delivers taps in-process via
+  // pushNotificationActionPerformed. We read the same data.url the web
+  // payload carries and route through the shared handler, so tapping a
+  // native "due for rebooking" push opens the Pause sheet too. The
+  // dynamic import keeps native code out of the web bundle.
+  useEffect(() => {
+    if (typeof window === "undefined" || !isNativePlatform()) return;
+    let alive = true;
+    let handle: { remove: () => Promise<void> } | null = null;
+    void (async () => {
+      try {
+        const { PushNotifications } = await import("@capacitor/push-notifications");
+        const h = await PushNotifications.addListener(
+          "pushNotificationActionPerformed",
+          (action: { notification?: { data?: Record<string, unknown> } }) => {
+            const data = action?.notification?.data;
+            const url = typeof data?.url === "string" ? data.url : null;
+            if (url) routeDeepLinkUrl(url);
+          },
+        );
+        if (!alive) { await h.remove(); return; }
+        handle = h;
+      } catch { /* plugin unavailable / web build — no-op */ }
+    })();
+    return () => { alive = false; void handle?.remove(); };
+  }, [routeDeepLinkUrl]);
 
   // Dashboard quick actions
   const openQuickAppt = (prefill: any = {}) => {
