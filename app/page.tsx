@@ -18131,7 +18131,7 @@ const SupportCenterScreen = ({
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openStyleRequests, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openSupport, openTapToPay }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openStyleRequests?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openSupport?: () => void; openTapToPay?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openSupport, openTapToPay }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openSupport?: () => void; openTapToPay?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -18745,7 +18745,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                       <CheckCircle2 size={15} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Approvals</p>
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Requests</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
                         {(() => {
                           const list: BookingRequestRecord[] = store.approvalsApi?.requests || [];
@@ -18755,29 +18755,13 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                           // left out of this nudge — they're waiting on the
                           // client, not the stylist, so they shouldn't read as
                           // something needing attention.
-                          if (paidPendingApproval === 0 && review === 0) return "Review requests, set deposits";
+                          if (paidPendingApproval === 0 && review === 0) return "Style ideas & booking approvals · set deposits";
                           const parts: string[] = [];
                           if (paidPendingApproval > 0) parts.push(`${paidPendingApproval} deposit paid · needs you`);
                           if (review > 0) parts.push(`${review} to review`);
                           return parts.join(" · ");
                         })()}
                       </p>
-                    </div>
-                  </div>
-                  <ChevronRight size={18} style={{ color: C.muted }} />
-                </div>
-              </Card>
-            )}
-            {openStyleRequests && (
-              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openStyleRequests}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div aria-hidden style={{ width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center", background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)" }}>
-                      <Sparkles size={15} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Style requests</p>
-                      <p className="text-[11px]" style={{ color: C.muted }}>Custom &quot;Build your style&quot; requests from your booking page</p>
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
@@ -28476,7 +28460,7 @@ const WAITLIST_STATUS_TONE: Record<WaitlistStatus, "warning" | "gold" | "success
 // "Build your style" review queue — custom AI-consultation requests from
 // the public booking page. The stylist reviews the intake + AI ballpark,
 // then approves (follow up for a deposit) or denies with a reason.
-const StyleRequestsScreen = ({ store, onBack, onOpenApproval }: { store: any; onBack: () => void; onOpenApproval?: (bookingRequestId: string) => void }) => {
+const StyleRequestsScreen = ({ store, onBack, onOpenApproval, embedded, onCount }: { store: any; onBack: () => void; onOpenApproval?: (bookingRequestId: string) => void; embedded?: boolean; onCount?: (n: number) => void }) => {
   const userId = store?.userId || null;
   const currency = store?.business?.currency || "USD";
   const [rows, setRows] = useState<any[]>([]);
@@ -28517,6 +28501,9 @@ const StyleRequestsScreen = ({ store, onBack, onOpenApproval }: { store: any; on
   }, [rows, filter]);
 
   const openCount = rows.filter(r => r.status === "submitted").length;
+  // Bubble the unreviewed count up so the unified Requests inbox can badge
+  // the "Style ideas" tab without loading style_requests a second time.
+  useEffect(() => { onCount?.(openCount); }, [openCount, onCount]);
 
   const submitReview = async (status: "approved" | "denied" | "archived") => {
     if (!reviewing) return;
@@ -28576,11 +28563,13 @@ const StyleRequestsScreen = ({ store, onBack, onOpenApproval }: { store: any; on
 
   return (
     <div className="bbp-fade pb-32">
-      <Header
-        title="Style requests"
-        subtitle="Custom “Build your style” requests"
-        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
-      />
+      {!embedded && (
+        <Header
+          title="Style requests"
+          subtitle="Custom “Build your style” requests"
+          leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        />
+      )}
       <div className="px-5 pt-2 space-y-3">
         {err && (
           <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
@@ -29609,12 +29598,13 @@ const ApprovalContractsBlock = ({
 };
 
 const ApprovalQueueScreen = ({
-  store, onBack, focusRequestId, clearFocusRequestId,
+  store, onBack, focusRequestId, clearFocusRequestId, embedded,
 }: {
   store: any;
   onBack: () => void;
   focusRequestId?: string | null;
   clearFocusRequestId?: () => void;
+  embedded?: boolean;
 }) => {
   const api = store.approvalsApi;
   // Stable reference so the counts/filtered memos below don't see a
@@ -29892,11 +29882,13 @@ const ApprovalQueueScreen = ({
 
   return (
     <div className="bbp-fade pb-32">
-      <Header
-        title="Approvals"
-        subtitle="Review requests, set deposits, lock confirmations"
-        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
-      />
+      {!embedded && (
+        <Header
+          title="Approvals"
+          subtitle="Review requests, set deposits, lock confirmations"
+          leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        />
+      )}
       <div className="px-5 pt-2 space-y-3">
         {api?.error && (
           <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
@@ -30278,6 +30270,101 @@ const ApprovalQueueScreen = ({
             </Card>
           );
         })}
+      </div>
+    </div>
+  );
+};
+
+// Unified "Requests" inbox — one screen for the whole inbound-demand
+// pipeline. The two tabs are sequential stages of the same flow:
+//   • Style ideas    — custom "Build your style" requests to review/quote
+//                      (StyleRequestsScreen). Approving one converts it
+//                      into a booking_request and flips to the next tab.
+//   • Ready to approve — booking requests where the stylist sets the
+//                      deposit and locks the confirmation (ApprovalQueueScreen).
+// Both inner screens render header-less (embedded) so this wrapper owns the
+// single header + tab bar. Both stay mounted (visibility-toggled) so their
+// badge counts stay live and filter/scroll state survives a tab switch.
+const REQUEST_TABS = [
+  { id: "style", label: "Style ideas" },
+  { id: "approvals", label: "Ready to approve" },
+] as const;
+
+const RequestsInbox = ({
+  store, onBack, initialTab = "approvals", focusRequestId, clearFocusRequestId,
+}: {
+  store: any;
+  onBack: () => void;
+  initialTab?: "style" | "approvals";
+  focusRequestId?: string | null;
+  clearFocusRequestId?: () => void;
+}) => {
+  const [tab, setTab] = useState<"style" | "approvals">(initialTab);
+  const [styleCount, setStyleCount] = useState(0);
+  const [focusId, setFocusId] = useState<string | null>(focusRequestId || null);
+
+  const approvalsCount = useMemo(
+    () => countActiveApprovals(store?.approvalsApi?.requests),
+    [store?.approvalsApi?.requests],
+  );
+
+  const handleStyleCount = useCallback((n: number) => setStyleCount(n), []);
+  // Style request just became a booking_request → jump to the approvals
+  // tab focused on the new row (the same hand-off the old flow did across
+  // two screens, now a single in-place tab switch).
+  const handleStyleToApproval = useCallback((bookingRequestId: string) => {
+    setFocusId(bookingRequestId);
+    setTab("approvals");
+  }, []);
+  const clearFocus = useCallback(() => {
+    setFocusId(null);
+    clearFocusRequestId?.();
+  }, [clearFocusRequestId]);
+
+  const counts: Record<string, number> = { style: styleCount, approvals: approvalsCount };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Requests"
+        subtitle="Style ideas & booking approvals — all in one place"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2">
+        <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          {REQUEST_TABS.map(t => {
+            const on = tab === t.id;
+            const n = counts[t.id] || 0;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                className="flex-1 py-2 rounded-lg text-[12px] font-semibold flex items-center justify-center gap-1.5"
+                style={{
+                  background: on ? C.paper : "transparent",
+                  color: on ? C.espresso : C.muted,
+                  boxShadow: on ? "0 1px 2px rgba(21,17,26,0.06)" : "none",
+                }}
+              >
+                {t.label}
+                {n > 0 && (
+                  <span style={{ minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999, background: C.gold, color: "#fff", fontSize: 10, fontWeight: 700, display: "inline-grid", placeItems: "center" }}>
+                    {n}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {/* Both mounted, visibility-toggled — keeps the Style-ideas badge live
+          and preserves each tab's filter/scroll state across switches. */}
+      <div style={{ display: tab === "style" ? "block" : "none" }}>
+        <StyleRequestsScreen store={store} onBack={onBack} embedded onCount={handleStyleCount} onOpenApproval={handleStyleToApproval} />
+      </div>
+      <div style={{ display: tab === "approvals" ? "block" : "none" }}>
+        <ApprovalQueueScreen store={store} onBack={onBack} embedded focusRequestId={focusId} clearFocusRequestId={clearFocus} />
       </div>
     </div>
   );
@@ -39141,16 +39228,6 @@ export default function App() {
     setActive("schedule");
   };
 
-  // Approved "Build your style" request -> the StyleRequestsScreen has
-  // already converted it into a booking_request (deposit-first), so just
-  // open the Approvals queue focused on that booking. From there the
-  // stylist sets the deposit and the client gets the pay link — the same
-  // proven flow every other booking uses.
-  const handleStyleRequestToApproval = (bookingRequestId: string) => {
-    setApprovalFocusId(bookingRequestId);
-    setSecondary("approvals");
-  };
-
   const handleUsePreset = (p) => {
     setCalcPresetPrefill(p);
     setSecondary(null);
@@ -39359,7 +39436,7 @@ export default function App() {
       )}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openStyleRequests={() => setSecondary("styleRequests")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} openTapToPay={() => setSecondary("tapToPay")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} openTapToPay={() => setSecondary("tapToPay")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} openSocialTemplates={() => setSecondary("socialTemplates")} />}
       {secondary === "socialTemplates" && <SocialTemplatesScreen store={store} onBack={() => setSecondary("marketing")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
@@ -39383,8 +39460,8 @@ export default function App() {
       )}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "intelligence" && <BookingIntelligenceScreen store={store} onBack={() => setSecondary("settings")} />}
-      {secondary === "approvals" && <ApprovalQueueScreen store={store} onBack={() => setSecondary("settings")} focusRequestId={approvalFocusId} clearFocusRequestId={() => setApprovalFocusId(null)} />}
-      {secondary === "styleRequests" && <StyleRequestsScreen store={store} onBack={() => setSecondary("settings")} onOpenApproval={handleStyleRequestToApproval} />}
+      {secondary === "approvals" && <RequestsInbox store={store} onBack={() => setSecondary("settings")} initialTab="approvals" focusRequestId={approvalFocusId} clearFocusRequestId={() => setApprovalFocusId(null)} />}
+      {secondary === "styleRequests" && <RequestsInbox store={store} onBack={() => setSecondary("settings")} initialTab="style" focusRequestId={approvalFocusId} clearFocusRequestId={() => setApprovalFocusId(null)} />}
       {secondary === "waitlist" && (
         <WaitlistScreen
           store={store}
@@ -39522,14 +39599,15 @@ export default function App() {
           onBack={() => setSecondary(null)}
         />
       )}
-      {/* The shop page's "Booking requests" shortcut and Settings →
-          Approvals are the same feature, so both now open the single
-          ApprovalQueueScreen. This entry point only differs in its
-          back target (returns to the shop/account screen). */}
+      {/* The shop/account "Booking requests" shortcut and Settings →
+          Requests are the same inbox, so both open RequestsInbox. This
+          entry point only differs in its back target (returns to the
+          shop/account screen) and lands on the approvals tab. */}
       {secondary === "bookingRequests" && (
-        <ApprovalQueueScreen
+        <RequestsInbox
           store={store}
           onBack={() => setSecondary("account")}
+          initialTab="approvals"
           focusRequestId={approvalFocusId}
           clearFocusRequestId={() => setApprovalFocusId(null)}
         />
