@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   getAppointmentReminderNotifications,
+  getRetentionNotifications,
+  shouldSendNotification,
   DEFAULT_NOTIFICATION_PREFERENCES,
+  type NotificationRule,
 } from "./notification-rules";
 
 // Fixed "now" so deltas are deterministic. 2026-06-07T09:00 local.
@@ -106,6 +109,92 @@ describe("getAppointmentReminderNotifications — client name required", () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].title).toBe("Chanda Picott in 2 days");
+  });
+});
+
+describe("getRetentionNotifications — respects the Pause reminders mute", () => {
+  // A client whose last visit was 50 days ago lands in the
+  // retention_due window (42–89 days) — matching the real "due for
+  // rebooking" pop-up that wouldn't stay dismissed.
+  const TODAY = "2026-06-21";
+  const overdueClient = (overrides: Record<string, unknown> = {}) => ({
+    id: "client-1",
+    name: "Tracie",
+    ...overrides,
+  });
+  const overdueAppt = {
+    id: "appt-1",
+    clientId: "client-1",
+    date: "2026-05-02", // 50 days before TODAY
+    status: "completed",
+    totalPrice: 180,
+  };
+
+  it("fires a due-for-rebooking nudge for an overdue client", () => {
+    const out = getRetentionNotifications(
+      [overdueClient()],
+      [overdueAppt],
+      TODAY,
+      DEFAULT_NOTIFICATION_PREFERENCES,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe("retention_due");
+  });
+
+  it("suppresses the nudge once the client is opted out", () => {
+    const out = getRetentionNotifications(
+      [overdueClient({ rebookingOptOut: true })],
+      [overdueAppt],
+      TODAY,
+      DEFAULT_NOTIFICATION_PREFERENCES,
+    );
+    expect(out).toHaveLength(0);
+  });
+
+  it("suppresses the nudge while a snooze is still active", () => {
+    const out = getRetentionNotifications(
+      [overdueClient({ rebookingSnoozedUntil: "2026-07-15" })],
+      [overdueAppt],
+      TODAY,
+      DEFAULT_NOTIFICATION_PREFERENCES,
+    );
+    expect(out).toHaveLength(0);
+  });
+
+  it("resumes the nudge once the snooze has elapsed", () => {
+    const out = getRetentionNotifications(
+      [overdueClient({ rebookingSnoozedUntil: "2026-06-01" })],
+      [overdueAppt],
+      TODAY,
+      DEFAULT_NOTIFICATION_PREFERENCES,
+    );
+    expect(out).toHaveLength(1);
+  });
+});
+
+describe("shouldSendNotification — retention re-fire cadence", () => {
+  const retentionRule: NotificationRule = {
+    id: "retention_due:client-1",
+    kind: "retention_due",
+    category: "retention",
+    priority: "medium",
+    title: "Tracie due for rebooking",
+    body: "50 days since their last visit — likely time for a touch-up.",
+  };
+  const now = new Date("2026-06-21T12:00:00Z");
+
+  it("does not re-fire a retention nudge sent 13 hours ago", () => {
+    const last = new Date(now.getTime() - 13 * 3600_000).toISOString();
+    expect(
+      shouldSendNotification(retentionRule, { [retentionRule.id]: last }, now),
+    ).toBe(false);
+  });
+
+  it("re-fires a retention nudge only after a week", () => {
+    const last = new Date(now.getTime() - 8 * 24 * 3600_000).toISOString();
+    expect(
+      shouldSendNotification(retentionRule, { [retentionRule.id]: last }, now),
+    ).toBe(true);
   });
 });
 
