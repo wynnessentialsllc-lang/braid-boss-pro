@@ -38560,6 +38560,34 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentReco
   );
 };
 
+// App-level "Pause reminders" sheet — opened when the owner taps a
+// "due for rebooking" push notification. Surfaces the same snooze / stop
+// controls the in-app rebooking cards use, so a reminder can be silenced
+// in one tap straight from the notification (rather than just landing on
+// a screen). Resolves the live client record by id from the caller.
+const RebookingPauseSheet = ({ client, today, onMute, onOpenProfile, onClose }: {
+  client: any | null;
+  today: string;
+  onMute: (patch: { rebookingOptOut?: boolean; rebookingSnoozedUntil?: string | null }) => void;
+  onOpenProfile: () => void;
+  onClose: () => void;
+}) => (
+  <Sheet open={!!client} onClose={onClose} title="Pause reminders">
+    {client && (
+      <div className="space-y-2.5">
+        <p className="text-[13px]" style={{ color: C.coffee }}>
+          Stop reminding you to rebook <span className="font-semibold" style={{ color: C.espresso }}>{client.name}</span>?
+        </p>
+        <Button variant="outline" fullWidth onClick={() => onMute({ rebookingSnoozedUntil: rebookingSnoozeUntil(today, 4), rebookingOptOut: false })}>Snooze 4 weeks</Button>
+        <Button variant="outline" fullWidth onClick={() => onMute({ rebookingSnoozedUntil: rebookingSnoozeUntil(today, 12), rebookingOptOut: false })}>Snooze 3 months</Button>
+        <Button variant="outline" fullWidth icon={<BellOff size={16} />} onClick={() => onMute({ rebookingOptOut: true, rebookingSnoozedUntil: null })}>Stop reminders (taking a break)</Button>
+        <Button variant="ghost" fullWidth onClick={onOpenProfile}>Open {String(client.name || "").split(" ")[0] || "client"}&apos;s profile</Button>
+        <p className="text-[11px] pt-1" style={{ color: C.muted }}>You can resume reminders anytime from {String(client.name || "").split(" ")[0] || "the client"}&apos;s profile.</p>
+      </div>
+    )}
+  </Sheet>
+);
+
 export default function App() {
   const auth = useAuth();
   // Logged-out visitors ALWAYS see the features home page first — there
@@ -38920,6 +38948,9 @@ export default function App() {
   // Notification deep-link plumbing: when a notification routes to a
   // client, App stamps the id and Clients pops the matching profile.
   const [clientToOpenId, setClientToOpenId] = useState<string | null>(null);
+  // Push deep-link → rebooking Pause sheet. Holds the client id a "due
+  // for rebooking" push tapped into; the sheet resolves the live record.
+  const [pauseRemindersId, setPauseRemindersId] = useState<string | null>(null);
   const [approvalFocusId, setApprovalFocusId] = useState<string | null>(null);
   // Notification-tap deep link: a "Contract sign-link emailed" /
   // "Confirmation emailed" / etc. row opens this sheet showing the
@@ -38999,6 +39030,40 @@ export default function App() {
       setContractViewId,
     });
   }, [notifications, store.appointments]);
+
+  // Push-notification deep-link consumer. The OS push for a reminder
+  // navigates the PWA to /?focus=client&id=...(&action=rebooking); the
+  // service worker only focuses/opens the window, so the app reads the
+  // params here. A retention ("due for rebooking") push carries
+  // action=rebooking and pops the Pause sheet so snooze / stop is one tap
+  // from the notification; any other client link just opens the profile.
+  // One-shot: we strip the params after consuming so a refresh or a later
+  // re-render can't re-open the sheet.
+  const deepLinkConsumedRef = useRef(false);
+  useEffect(() => {
+    if (auth.mode !== "authed") return;
+    if (deepLinkConsumedRef.current || typeof window === "undefined") return;
+    let params: URLSearchParams;
+    try { params = new URLSearchParams(window.location.search); }
+    catch { return; }
+    const id = params.get("id");
+    if (params.get("focus") !== "client" || !id) return;
+    deepLinkConsumedRef.current = true;
+    // One-shot consume of a push deep link on mount — intentional setState.
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (params.get("action") === "rebooking") {
+      setPauseRemindersId(id);
+    } else {
+      setActive("clients");
+      setClientToOpenId(id);
+    }
+    /* eslint-enable react-hooks/set-state-in-effect */
+    try {
+      const url = new URL(window.location.href);
+      ["focus", "id", "action"].forEach((k) => url.searchParams.delete(k));
+      window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+    } catch { /* leave the URL as-is */ }
+  }, [auth.mode]);
 
   // Dashboard quick actions
   const openQuickAppt = (prefill: any = {}) => {
@@ -39488,6 +39553,24 @@ export default function App() {
         markAllRead={notifications.markAllRead}
         onTap={handleNotificationTap}
         readIds={notifications.readIds}
+      />
+      {/* Rebooking Pause sheet — opened by tapping a "due for rebooking"
+          push so snooze / stop is one tap from the notification. */}
+      <RebookingPauseSheet
+        client={pauseRemindersId ? (((store.clients as any[]) || []).find((c: any) => c?.id === pauseRemindersId) || null) : null}
+        today={todayISO()}
+        onClose={() => setPauseRemindersId(null)}
+        onMute={(patch) => {
+          const c = ((store.clients as any[]) || []).find((x: any) => x?.id === pauseRemindersId);
+          if (c) void store.upsertClient({ ...c, ...patch });
+          setPauseRemindersId(null);
+        }}
+        onOpenProfile={() => {
+          const id = pauseRemindersId;
+          setPauseRemindersId(null);
+          setActive("clients");
+          setClientToOpenId(id);
+        }}
       />
       <EmailDetailSheet
         queueId={emailLogId}

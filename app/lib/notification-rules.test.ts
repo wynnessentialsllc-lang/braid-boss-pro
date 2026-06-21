@@ -3,6 +3,7 @@ import {
   getAppointmentReminderNotifications,
   getRetentionNotifications,
   shouldSendNotification,
+  formatNotificationPayload,
   DEFAULT_NOTIFICATION_PREFERENCES,
   type NotificationRule,
 } from "./notification-rules";
@@ -195,6 +196,32 @@ describe("shouldSendNotification — retention re-fire cadence", () => {
     expect(
       shouldSendNotification(retentionRule, { [retentionRule.id]: last }, now),
     ).toBe(true);
+  });
+});
+
+describe("formatNotificationPayload — rebooking deep link", () => {
+  const retentionRule: NotificationRule = {
+    id: "retention_due:client-1",
+    kind: "retention_due",
+    category: "retention",
+    priority: "medium",
+    title: "Tracie due for rebooking",
+    body: "50 days since their last visit — likely time for a touch-up.",
+    clientId: "client-1",
+    action: { label: "Send rebooking reminder", target: "client:client-1" },
+  };
+
+  it("deep-links a retention push to the rebooking Pause sheet", () => {
+    const payload = formatNotificationPayload(retentionRule);
+    expect(payload.data.url).toBe("/?focus=client&id=client-1&action=rebooking");
+  });
+
+  it("opens the plain profile for a non-retention client push", () => {
+    const payload = formatNotificationPayload({
+      ...retentionRule,
+      category: "appointment",
+    });
+    expect(payload.data.url).toBe("/?focus=client&id=client-1");
   });
 });
 

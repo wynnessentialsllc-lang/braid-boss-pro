@@ -358,7 +358,14 @@ export const formatNotificationPayload = (rule: NotificationRule): {
 } => {
   let url = "/";
   if (rule.action?.target?.startsWith("appointment:")) url = `/?focus=appointment&id=${rule.appointmentId || ""}`;
-  else if (rule.action?.target?.startsWith("client:")) url = `/?focus=client&id=${rule.clientId || ""}`;
+  else if (rule.action?.target?.startsWith("client:")) {
+    // Retention nudges deep-link straight to the rebooking Pause sheet so
+    // "snooze / stop reminders" is one tap from the push — the way to make
+    // a "due for rebooking" pop-up actually stay dismissed. Other
+    // client-targeted pushes just open the profile.
+    const base = `/?focus=client&id=${rule.clientId || ""}`;
+    url = rule.category === "retention" ? `${base}&action=rebooking` : base;
+  }
   else if (rule.action?.target === "tab:schedule") url = "/?tab=schedule";
   else if (rule.action?.target === "tab:clients") url = "/?tab=clients";
   return {
