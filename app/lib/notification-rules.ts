@@ -6,6 +6,8 @@
 // These are *internal* alerts for the salon owner, NOT outbound
 // client communications — those still live exclusively in commLog.
 
+import { isRebookingMuted } from "./rebooking/rebooking-intelligence";
+
 export type NotificationCategory = "appointment" | "balance" | "retention" | "business";
 export type NotificationPriority = "low" | "medium" | "high";
 
@@ -227,6 +229,12 @@ export const getRetentionNotifications = (
 
   for (const c of safeArr(clients)) {
     if (!c?.id) continue;
+    // Honor the same "Pause reminders" controls the in-app rebooking
+    // surface respects (rebookingOptOut / rebookingSnoozedUntil). Without
+    // this the push pipeline kept re-firing "due for rebooking" pop-ups
+    // for a client the owner had explicitly snoozed or stopped — the
+    // notification that wouldn't stay dismissed.
+    if (isRebookingMuted(c, todayIso)) continue;
     const mine = apptsByClient[c.id] || [];
     if (mine.length === 0) continue;
     const completed = mine.filter(a => a.status === "completed" || a.paymentStatus === "paid");
@@ -330,10 +338,16 @@ export const shouldSendNotification = (
   if (!isFinite_(lastMs)) return true;
   const elapsedMs = now.getTime() - lastMs;
   // Re-fire windows by category — appointment timing reminders should
-  // never re-fire (until the appt itself moves), retention/business
-  // alerts can re-fire once a day.
+  // never re-fire (until the appt itself moves). A retention nudge is a
+  // gentle "this client is overdue" heads-up, not a time-critical alert:
+  // re-firing it every 12h made the same "due for rebooking" pop-up
+  // reappear twice a day and feel impossible to dismiss, so it gets a
+  // weekly cadence. Business insights still refresh daily.
   if (rule.category === "appointment") return false;
-  return elapsedMs > 12 * 3600_000;
+  const reFireMs = rule.category === "retention"
+    ? 7 * 24 * 3600_000
+    : 12 * 3600_000;
+  return elapsedMs > reFireMs;
 };
 
 export const formatNotificationPayload = (rule: NotificationRule): {
@@ -344,7 +358,14 @@ export const formatNotificationPayload = (rule: NotificationRule): {
 } => {
   let url = "/";
   if (rule.action?.target?.startsWith("appointment:")) url = `/?focus=appointment&id=${rule.appointmentId || ""}`;
-  else if (rule.action?.target?.startsWith("client:")) url = `/?focus=client&id=${rule.clientId || ""}`;
+  else if (rule.action?.target?.startsWith("client:")) {
+    // Retention nudges deep-link straight to the rebooking Pause sheet so
+    // "snooze / stop reminders" is one tap from the push — the way to make
+    // a "due for rebooking" pop-up actually stay dismissed. Other
+    // client-targeted pushes just open the profile.
+    const base = `/?focus=client&id=${rule.clientId || ""}`;
+    url = rule.category === "retention" ? `${base}&action=rebooking` : base;
+  }
   else if (rule.action?.target === "tab:schedule") url = "/?tab=schedule";
   else if (rule.action?.target === "tab:clients") url = "/?tab=clients";
   return {

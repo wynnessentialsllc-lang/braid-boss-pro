@@ -38560,6 +38560,34 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentReco
   );
 };
 
+// App-level "Pause reminders" sheet — opened when the owner taps a
+// "due for rebooking" push notification. Surfaces the same snooze / stop
+// controls the in-app rebooking cards use, so a reminder can be silenced
+// in one tap straight from the notification (rather than just landing on
+// a screen). Resolves the live client record by id from the caller.
+const RebookingPauseSheet = ({ client, today, onMute, onOpenProfile, onClose }: {
+  client: any | null;
+  today: string;
+  onMute: (patch: { rebookingOptOut?: boolean; rebookingSnoozedUntil?: string | null }) => void;
+  onOpenProfile: () => void;
+  onClose: () => void;
+}) => (
+  <Sheet open={!!client} onClose={onClose} title="Pause reminders">
+    {client && (
+      <div className="space-y-2.5">
+        <p className="text-[13px]" style={{ color: C.coffee }}>
+          Stop reminding you to rebook <span className="font-semibold" style={{ color: C.espresso }}>{client.name}</span>?
+        </p>
+        <Button variant="outline" fullWidth onClick={() => onMute({ rebookingSnoozedUntil: rebookingSnoozeUntil(today, 4), rebookingOptOut: false })}>Snooze 4 weeks</Button>
+        <Button variant="outline" fullWidth onClick={() => onMute({ rebookingSnoozedUntil: rebookingSnoozeUntil(today, 12), rebookingOptOut: false })}>Snooze 3 months</Button>
+        <Button variant="outline" fullWidth icon={<BellOff size={16} />} onClick={() => onMute({ rebookingOptOut: true, rebookingSnoozedUntil: null })}>Stop reminders (taking a break)</Button>
+        <Button variant="ghost" fullWidth onClick={onOpenProfile}>Open {String(client.name || "").split(" ")[0] || "client"}&apos;s profile</Button>
+        <p className="text-[11px] pt-1" style={{ color: C.muted }}>You can resume reminders anytime from {String(client.name || "").split(" ")[0] || "the client"}&apos;s profile.</p>
+      </div>
+    )}
+  </Sheet>
+);
+
 export default function App() {
   const auth = useAuth();
   // Logged-out visitors ALWAYS see the features home page first — there
@@ -38920,6 +38948,9 @@ export default function App() {
   // Notification deep-link plumbing: when a notification routes to a
   // client, App stamps the id and Clients pops the matching profile.
   const [clientToOpenId, setClientToOpenId] = useState<string | null>(null);
+  // Push deep-link → rebooking Pause sheet. Holds the client id a "due
+  // for rebooking" push tapped into; the sheet resolves the live record.
+  const [pauseRemindersId, setPauseRemindersId] = useState<string | null>(null);
   const [approvalFocusId, setApprovalFocusId] = useState<string | null>(null);
   // Notification-tap deep link: a "Contract sign-link emailed" /
   // "Confirmation emailed" / etc. row opens this sheet showing the
@@ -38999,6 +39030,76 @@ export default function App() {
       setContractViewId,
     });
   }, [notifications, store.appointments]);
+
+  // Shared push-notification deep-link router. Parses a notification's
+  // target URL (/?focus=client&id=...(&action=rebooking)) and routes:
+  // a retention ("due for rebooking") link pops the Pause sheet so
+  // snooze / stop is one tap from the push; any other client link opens
+  // the profile. Used by both the web URL consumer and the native iOS
+  // tap listener so the two transports behave identically. Accepts a
+  // relative or absolute URL. Returns true when it handled a client link.
+  const routeDeepLinkUrl = useCallback((rawUrl: string): boolean => {
+    if (typeof window === "undefined" || !rawUrl) return false;
+    let params: URLSearchParams;
+    try { params = new URL(rawUrl, window.location.origin).searchParams; }
+    catch { return false; }
+    const id = params.get("id");
+    if (params.get("focus") !== "client" || !id) return false;
+    if (params.get("action") === "rebooking") {
+      setPauseRemindersId(id);
+    } else {
+      setActive("clients");
+      setClientToOpenId(id);
+    }
+    return true;
+  }, []);
+
+  // Web push deep-link consumer. The OS push for a reminder navigates the
+  // PWA to /?focus=client&id=...; the service worker only focuses/opens
+  // the window, so the app reads the params here. One-shot: we strip the
+  // params after consuming so a refresh or a later re-render can't re-open
+  // the sheet.
+  const deepLinkConsumedRef = useRef(false);
+  useEffect(() => {
+    if (auth.mode !== "authed") return;
+    if (deepLinkConsumedRef.current || typeof window === "undefined") return;
+    deepLinkConsumedRef.current = true;
+    const handled = routeDeepLinkUrl(window.location.href);
+    if (!handled) { deepLinkConsumedRef.current = false; return; }
+    try {
+      const url = new URL(window.location.href);
+      ["focus", "id", "action"].forEach((k) => url.searchParams.delete(k));
+      window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+    } catch { /* leave the URL as-is */ }
+  }, [auth.mode, routeDeepLinkUrl]);
+
+  // Native iOS (Capacitor) push tap. WKWebView has no service worker, so
+  // the @capacitor/push-notifications plugin delivers taps in-process via
+  // pushNotificationActionPerformed. We read the same data.url the web
+  // payload carries and route through the shared handler, so tapping a
+  // native "due for rebooking" push opens the Pause sheet too. The
+  // dynamic import keeps native code out of the web bundle.
+  useEffect(() => {
+    if (typeof window === "undefined" || !isNativePlatform()) return;
+    let alive = true;
+    let handle: { remove: () => Promise<void> } | null = null;
+    void (async () => {
+      try {
+        const { PushNotifications } = await import("@capacitor/push-notifications");
+        const h = await PushNotifications.addListener(
+          "pushNotificationActionPerformed",
+          (action: { notification?: { data?: Record<string, unknown> } }) => {
+            const data = action?.notification?.data;
+            const url = typeof data?.url === "string" ? data.url : null;
+            if (url) routeDeepLinkUrl(url);
+          },
+        );
+        if (!alive) { await h.remove(); return; }
+        handle = h;
+      } catch { /* plugin unavailable / web build — no-op */ }
+    })();
+    return () => { alive = false; void handle?.remove(); };
+  }, [routeDeepLinkUrl]);
 
   // Dashboard quick actions
   const openQuickAppt = (prefill: any = {}) => {
@@ -39488,6 +39589,24 @@ export default function App() {
         markAllRead={notifications.markAllRead}
         onTap={handleNotificationTap}
         readIds={notifications.readIds}
+      />
+      {/* Rebooking Pause sheet — opened by tapping a "due for rebooking"
+          push so snooze / stop is one tap from the notification. */}
+      <RebookingPauseSheet
+        client={pauseRemindersId ? (((store.clients as any[]) || []).find((c: any) => c?.id === pauseRemindersId) || null) : null}
+        today={todayISO()}
+        onClose={() => setPauseRemindersId(null)}
+        onMute={(patch) => {
+          const c = ((store.clients as any[]) || []).find((x: any) => x?.id === pauseRemindersId);
+          if (c) void store.upsertClient({ ...c, ...patch });
+          setPauseRemindersId(null);
+        }}
+        onOpenProfile={() => {
+          const id = pauseRemindersId;
+          setPauseRemindersId(null);
+          setActive("clients");
+          setClientToOpenId(id);
+        }}
       />
       <EmailDetailSheet
         queueId={emailLogId}
