@@ -97,7 +97,8 @@ import {
   applyCreditToAppointment,
 } from "./lib/credits";
 import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
-import WelcomeIntro from "./components/WelcomeIntro";
+import FeaturesContent from "./components/marketing/FeaturesContent";
+import AuthScreen from "./components/AuthScreen";
 import { ProductImageUploader } from "./components/ProductImageUploader";
 import {
   PreviewStyleCard,
@@ -5386,7 +5387,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   );
 };
 
-const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient, openQuickTx, openSettings, openInventory, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, cloudReady = true, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openInventory?: () => void; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; cloudReady?: boolean; openAppointmentRecord?: (a: any) => void }) => {
+const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, openQuickClient, openQuickTx, openSettings, openInventory, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, cloudReady = true, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openReports?: (focus?: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openInventory?: () => void; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; cloudReady?: boolean; openAppointmentRecord?: (a: any) => void }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
@@ -5764,7 +5765,7 @@ const Dashboard = ({ store, setActive, goToMoney, openQuickAppt, openQuickClient
             {/* Shop sales — in-person Checkout + online store, this month.
                 Sits beside "Services earned" so the two money streams read
                 side by side. Taps through to the Money tab. */}
-            <KpiCard label="Shop sales (mo)" value={money(shopSales.month)} icon={<ShoppingBag size={16} />} tone={shopSales.month > 0 ? "gold" : "neutral"} onClick={() => goToMoney("month")} compact riseDelay={160} />
+            <KpiCard label="Shop sales (mo)" value={money(shopSales.month)} icon={<ShoppingBag size={16} />} tone={shopSales.month > 0 ? "gold" : "neutral"} onClick={() => (openReports ? openReports("shopSales") : goToMoney("month"))} compact riseDelay={160} />
             <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={money(revenueStats.yearMade + shopSales.year)} icon={<Sparkles size={16} />} tone={(revenueStats.yearMade + shopSales.year) > 0 ? "gold" : "neutral"} onClick={() => goToMoney("all")} compact riseDelay={200} />
             <KpiCard label={`${new Date().getFullYear()} clients`} value={stats.yearClients} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("yearClients")} compact riseDelay={240} />
           </div>
@@ -8341,11 +8342,13 @@ const BreakRow = ({ label, value, bold }: { label: string; value: string; bold?:
 // ============================================================
 //  SCHEDULE
 // ============================================================
-// Day timeline runs 6 AM through 9 PM. Each row is HOUR_PX tall so
-// blocks can be absolutely positioned by start time and duration.
-const TIMELINE_START_HOUR = 6;
-const TIMELINE_END_HOUR = 21;
+// Day timeline ALWAYS spans the full 24-hour day (12 AM → 12 AM). Each
+// row is HOUR_PX tall so blocks can be absolutely positioned by start
+// time and duration. The grid is taller than the screen, so it lives in
+// its own scroll container TIMELINE_VIEWPORT_PX tall and auto-scrolls to
+// a sensible focus (current time / opening hour) on load.
 const HOUR_PX = 60;
+const TIMELINE_VIEWPORT_PX = HOUR_PX * 10; // ~10 hours visible; scroll for the rest
 
 const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, openCommunication, openReceipt, openQuickClient, openAvailability }: { store: any; prefillNewAppt: any; clearApptPrefill: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void; openReceipt?: (rcp: ReceiptRecord) => void; openQuickClient?: () => void; openAvailability?: (focus?: "exception" | "weekly") => void }) => {
   const { appointments, business, recurringSeries } = store;
@@ -8697,6 +8700,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
             dayAvailability={dayAvailability}
             colorMode={prefs.colorMode}
             today={today}
+            selectedDate={selectedDate}
             business={business}
             onTap={(a) => setEditing(a)}
             onAdd={() => setEditing({ date: selectedDate })}
@@ -8776,13 +8780,14 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
 // ---- Day Calendar -----------------------------------------------------
 
 const DayCalendarView = ({
-  appts, dayStatus, dayAvailability, colorMode, today, business, onTap, onAdd, onSwipeDay,
+  appts, dayStatus, dayAvailability, colorMode, today, selectedDate, business, onTap, onAdd, onSwipeDay,
 }: {
   appts: any[];
   dayStatus: { status: string; label: string };
   dayAvailability?: { windows?: { start: string; end: string }[]; open?: boolean };
   colorMode: ColorMode;
   today: string;
+  selectedDate: string;
   business: any;
   onTap: (a: any) => void;
   onAdd: () => void;
@@ -8823,35 +8828,64 @@ const DayCalendarView = ({
     onSwipeDay(dx < 0 ? 1 : -1);
   };
 
-  // Timeline window = the stylist's working hours for the day, expanded
-  // to fit any appointment that runs outside them. Falls back to 9 AM–6 PM
-  // when no hours are configured — so the FULL day grid is always visible
-  // (even on an off day, or with a single booking).
-  const { startHour, endHour } = useMemo(() => {
-    let startMin = 24 * 60, endMin = 0;
+  // The timeline ALWAYS spans the full 24-hour day. Business hours no
+  // longer drive the visible window — they only gate when clients can
+  // BOOK (handled by the availability engine). The stylist can scroll to
+  // any hour, on or off the clock. Working hours are spotlighted and the
+  // rest is lightly greyed (see the overlays below) so the full day is
+  // always in view without losing the "this is my shift" emphasis.
+  const startHour = 0;
+  const endHour = 24;
+
+  // Business-hour bands (minutes from midnight), purely visual — derived
+  // from the day's availability windows to drive the spotlight overlay.
+  const businessBands = useMemo(() => {
+    const bands: { start: number; end: number }[] = [];
     for (const w of (dayAvailability?.windows || [])) {
       const [sh, sm] = String(w.start).split(":").map(Number);
       const [eh, em] = String(w.end).split(":").map(Number);
-      startMin = Math.min(startMin, (sh || 0) * 60 + (sm || 0));
-      endMin = Math.max(endMin, (eh || 0) * 60 + (em || 0));
+      const s = (sh || 0) * 60 + (sm || 0);
+      const e = (eh || 0) * 60 + (em || 0);
+      if (e > s) bands.push({ start: s, end: e });
     }
-    for (const a of appts) {
-      if (!a?.time || a?.isAllDay) continue;
-      const { s, e } = apptMinutes(a);
-      startMin = Math.min(startMin, s);
-      endMin = Math.max(endMin, e);
+    return bands.sort((a, b) => a.start - b.start);
+  }, [dayAvailability]);
+
+  // The complement of the business bands across the 24-hour day. These
+  // off-hour segments get a light grey wash so the working hours pop.
+  const offHourBands = useMemo(() => {
+    const dayEnd = 24 * 60;
+    if (businessBands.length === 0) return [{ start: 0, end: dayEnd }];
+    const gaps: { start: number; end: number }[] = [];
+    let cursor = 0;
+    for (const b of businessBands) {
+      if (b.start > cursor) gaps.push({ start: cursor, end: b.start });
+      cursor = Math.max(cursor, b.end);
     }
-    if (startMin >= endMin) { startMin = 9 * 60; endMin = 18 * 60; }
-    const sh = Math.max(0, Math.floor(startMin / 60));
-    const eh = Math.min(24, Math.ceil(endMin / 60));
-    return { startHour: sh, endHour: Math.max(sh + 1, eh) };
-  }, [dayAvailability, appts]);
+    if (cursor < dayEnd) gaps.push({ start: cursor, end: dayEnd });
+    return gaps;
+  }, [businessBands]);
+
+  // On load (and whenever the day changes) scroll the timeline to a
+  // sensible focus: the current time when viewing today, otherwise the
+  // opening hour. Scrolling earlier/later stays fully available.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const isToday = selectedDate === today;
+    const now = new Date();
+    const openMin = businessBands.length ? businessBands[0].start : 9 * 60;
+    const focusMin = isToday ? now.getHours() * 60 + now.getMinutes() : openMin;
+    const target = (focusMin / 60) * HOUR_PX - el.clientHeight / 2;
+    el.scrollTop = Math.max(0, target);
+  }, [selectedDate, today, businessBands]);
 
   const HOURS = useMemo(
     () => Array.from({ length: endHour - startHour + 1 }, (_, i) => startHour + i),
     [startHour, endHour],
   );
-  const formatHourLabel = (h: number) => `${((h + 11) % 12) + 1} ${h >= 12 ? "PM" : "AM"}`;
+  const formatHourLabel = (h: number) => `${((h + 11) % 12) + 1} ${h >= 12 && h < 24 ? "PM" : "AM"}`;
 
   // Greedy column-packing so overlapping appointments render side-by-side
   // instead of stacking. Excludes the all-day block (drawn as an overlay).
@@ -8962,13 +8996,39 @@ const DayCalendarView = ({
         </Card>
       )}
 
-      {/* FULL-DAY TIMELINE — working-hours grid with proportional,
-          duration-blocking cards. Always shown (even on an off day or
-          with a single booking) so empty gaps stay visible. */}
+      {/* FULL-DAY TIMELINE — the grid ALWAYS runs 12 AM → 12 AM. It lives
+          in its own scroll container (taller than the screen) that
+          auto-scrolls to the current time / opening hour on load. Working
+          hours are spotlighted; off-hours are lightly greyed — never
+          hidden — so the stylist always sees the whole day. */}
       <div
+        ref={scrollRef}
         className="relative"
-        style={{ height: (endHour - startHour) * HOUR_PX + 8, background: C.paper, border: `1px solid ${C.hairline}`, borderRadius: 16, overflow: "hidden" }}
+        style={{ maxHeight: TIMELINE_VIEWPORT_PX, overflowY: "auto", overscrollBehavior: "contain", background: C.paper, border: `1px solid ${C.hairline}`, borderRadius: 16 }}
       >
+        <div className="relative" style={{ height: (endHour - startHour) * HOUR_PX + 8 }}>
+        {/* Off-hour grey wash — lightly dims hours outside the working
+            day without hiding them. */}
+        {offHourBands.map((b, i) => (
+          <div
+            key={`off-${i}`}
+            aria-hidden
+            className="absolute left-0 right-0"
+            style={{ top: (b.start / 60) * HOUR_PX, height: ((b.end - b.start) / 60) * HOUR_PX, background: "rgba(21,17,26,0.05)", pointerEvents: "none" }}
+          />
+        ))}
+
+        {/* Business-hour spotlight — a soft warm tint so the working
+            hours pop like a spotlight on center stage. */}
+        {businessBands.map((b, i) => (
+          <div
+            key={`biz-${i}`}
+            aria-hidden
+            className="absolute left-0 right-0"
+            style={{ top: (b.start / 60) * HOUR_PX, height: ((b.end - b.start) / 60) * HOUR_PX, background: "rgba(177,75,224,0.06)", pointerEvents: "none" }}
+          />
+        ))}
+
         {HOURS.map((h, idx) => (
           <div key={h} className="absolute left-0 right-0 flex items-start" style={{ top: idx * HOUR_PX, height: HOUR_PX, borderTop: idx === 0 ? "none" : `1px dashed ${C.hairline}` }}>
             <span className="text-[10px] font-semibold tracking-widest pl-3 pt-1" style={{ color: C.muted, width: 56, letterSpacing: "0.08em" }}>{formatHourLabel(h)}</span>
@@ -9040,6 +9100,7 @@ const DayCalendarView = ({
             </button>
           );
         })}
+        </div>
       </div>
     </div>
   );
@@ -10730,8 +10791,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       const changedCurl = wasExisting && oldCust.curlPattern !== newCust.curlPattern;
       const changedNotes = wasExisting && oldCust.styleNotes !== newCust.styleNotes;
       const changedCustomization = changedHairColor || changedCurl || changedNotes;
+      const oldStyle = String((original as any)?.style ?? "").trim();
+      const changedStyle = wasExisting && oldStyle !== String(newServiceName ?? "").trim();
       const dateOrTimeChanged = changedDate || changedTime;
-      const anyChanged = dateOrTimeChanged || changedPrice || changedAddons || changedOption || changedCustomization;
+      const anyChanged = dateOrTimeChanged || changedPrice || changedAddons || changedOption || changedCustomization || changedStyle;
 
       // Keep the linked booking_request in sync with the edit. The
       // client portal (public_get_booking_portal_state) and the
@@ -10772,6 +10835,65 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             update_customization: changedCustomization,
           });
         } catch { /* portal sync is best-effort */ }
+      }
+
+      // Style swapped on an existing appointment — the original contract
+      // (if any) was for a different service, so void anything unsigned
+      // and reissue against the new service so the client signs for what
+      // they're actually booked into.
+      if (wasExisting && isRealAppt && changedStyle && notCancelled && store.userId) {
+        try {
+          const supabase = getSupabase();
+          await supabase
+            .from("booking_contracts")
+            .update({ status: "voided" })
+            .eq("appointment_id", saved.id)
+            .is("signed_at", null)
+            .in("status", ["sent", "pending", "pending_signature", "viewed"]);
+          await supabase.rpc("generate_appointment_contracts", { appointment_id_in: saved.id });
+          if (clientEmail) {
+            const { data: bcs } = await supabase
+              .from("booking_contracts")
+              .select("id, title, public_token, status, client_email")
+              .eq("appointment_id", saved.id)
+              .is("signed_at", null)
+              .in("status", ["sent", "pending", "pending_signature", "viewed"]);
+            const list = (bcs as any[]) || [];
+            if (list.length > 0) {
+              let studioName = "your stylist";
+              try {
+                const { data: studio } = await supabase.rpc("public_get_studio_name", { user_id_in: store.userId });
+                if (typeof studio === "string" && studio.trim()) studioName = studio.trim();
+              } catch { /* studio name best-effort */ }
+              const origin = typeof window !== "undefined" ? window.location.origin : "https://braidbosspro.app";
+              for (const bc of list) {
+                if (!bc?.public_token) continue;
+                const email = String(bc.client_email || clientEmail).trim();
+                if (!email) continue;
+                await supabase.rpc("queue_notification", {
+                  user_id_in: store.userId,
+                  channel_in: "email",
+                  notification_type_in: "contract_signing",
+                  body_in: "Please review and sign your updated appointment agreement.",
+                  recipient_email_in: email,
+                  recipient_name_in: form.clientName || saved.clientName || null,
+                  payload_in: {
+                    clientName: form.clientName || saved.clientName || "there",
+                    studioName,
+                    contractTitle: bc.title || "Appointment agreement",
+                    serviceName: newServiceName,
+                    contractUrl: `${origin}/sign/contract/${bc.public_token}`,
+                  },
+                  dedupe_key_in: `contract_signing:${bc.id}`,
+                  appointment_id_in: saved.id,
+                  client_id_in: saved.clientId || form.clientId || null,
+                });
+              }
+            }
+          }
+        } catch (e) {
+          if (typeof console !== "undefined") console.warn("[appt] contract reissue on style change failed:", e);
+        }
       }
 
       const updateGate = wasExisting && isRealAppt && anyChanged && notCancelled &&
@@ -18011,7 +18133,7 @@ const SupportCenterScreen = ({
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openStyleRequests, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openSupport, openTapToPay }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openStyleRequests?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openSupport?: () => void; openTapToPay?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openSupport, openTapToPay }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openSupport?: () => void; openTapToPay?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -18625,7 +18747,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                       <CheckCircle2 size={15} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Approvals</p>
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Requests</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
                         {(() => {
                           const list: BookingRequestRecord[] = store.approvalsApi?.requests || [];
@@ -18635,29 +18757,13 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                           // left out of this nudge — they're waiting on the
                           // client, not the stylist, so they shouldn't read as
                           // something needing attention.
-                          if (paidPendingApproval === 0 && review === 0) return "Review requests, set deposits";
+                          if (paidPendingApproval === 0 && review === 0) return "Style ideas & booking approvals · set deposits";
                           const parts: string[] = [];
                           if (paidPendingApproval > 0) parts.push(`${paidPendingApproval} deposit paid · needs you`);
                           if (review > 0) parts.push(`${review} to review`);
                           return parts.join(" · ");
                         })()}
                       </p>
-                    </div>
-                  </div>
-                  <ChevronRight size={18} style={{ color: C.muted }} />
-                </div>
-              </Card>
-            )}
-            {openStyleRequests && (
-              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openStyleRequests}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div aria-hidden style={{ width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center", background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)" }}>
-                      <Sparkles size={15} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Style requests</p>
-                      <p className="text-[11px]" style={{ color: C.muted }}>Custom &quot;Build your style&quot; requests from your booking page</p>
                     </div>
                   </div>
                   <ChevronRight size={18} style={{ color: C.muted }} />
@@ -18843,6 +18949,35 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                 </div>
               </Card>
             )}
+            <SectionTitle>Pricing tools</SectionTitle>
+            <Card
+              className="p-4 active:scale-[0.99]"
+              onClick={() => {
+                if (typeof window !== "undefined") window.location.assign("/settings/product-profit");
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div
+                    aria-hidden
+                    style={{
+                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                      background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
+                    }}
+                  >
+                    <CalcIcon size={15} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold" style={{ color: C.espresso }}>Product Profit Calculator</p>
+                    <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
+                      True cost per unit, smart pricing, profit & break-even
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight size={18} style={{ color: C.muted }} />
+              </div>
+            </Card>
+
             <SectionTitle>Payments</SectionTitle>
             <Card
               className="p-4 active:scale-[0.99]"
@@ -21419,79 +21554,83 @@ const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center px-5" style={{ minHeight: "100dvh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso }}>
+    <AuthScreen mode={tab} onBack={onBack}>
       <GlobalStyle />
-      <div className="w-full max-w-[400px]">
-        {onBack && (
-          <button
-            type="button"
-            onClick={onBack}
-            className="inline-flex items-center gap-1 text-[12px] mb-3"
-            style={{ color: C.coffee }}
-            aria-label="Back to welcome screen"
-          >
-            <ChevronLeft size={14} />
-            <span>Back</span>
-          </button>
-        )}
-        <p className="text-center text-[10px] font-bold tracking-[0.22em] uppercase" style={{ color: C.gold }}>Braid Boss Pro</p>
-        <h1 className="text-center mt-2 mb-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 32, fontWeight: 600, color: C.espresso }}>
-          {tab === "signin" ? "Welcome back" : tab === "signup" ? "Create your account" : "Reset password"}
-        </h1>
-        <p className="text-center text-sm mb-2" style={{ color: C.muted }}>
-          {tab === "signin" ? "Sign in to sync your clients across devices." : tab === "signup" ? "Built specifically for braid stylists. Cloud-synced from day one." : "Enter your email and we&apos;ll send a reset link."}
-        </p>
-        {tab === "signup" && (
-          <p className="text-center text-[12px] font-semibold mb-5" style={{ color: C.goldDeep }}>
-            {SUBSCRIPTION_TRIAL_DAYS}-day free trial · then {SUBSCRIPTION_PRICE_LABEL} · Cancel anytime
-          </p>
-        )}
-        {tab !== "signup" && <div className="mb-5" />}
-        <Card className="p-5 space-y-3">
-          <Field label="Email">
-            <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@studio.com" />
-          </Field>
-          {tab !== "reset" && (
-            <Field label="Password">
-              <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
-            </Field>
-          )}
-          {err && <p className="text-xs" style={{ color: C.danger }}>{err}</p>}
-          {msg && <p className="text-xs" style={{ color: C.success }}>{msg}</p>}
-          <Button variant="primary" fullWidth disabled={busy || !email || (tab !== "reset" && !password)} onClick={submit}>
-            {busy ? "Working…" : tab === "signin" ? "Sign in" : tab === "signup" ? "Create account" : "Send reset email"}
-          </Button>
-          <div className="flex items-center justify-between text-[12px] pt-1">
-            {tab === "signin" ? (
-              <>
-                <button type="button" onClick={() => { setTab("reset"); setErr(null); setMsg(null); }} style={{ color: C.coffee }}>Forgot password?</button>
-                <button type="button" onClick={() => { setTab("signup"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Create account</button>
-              </>
-            ) : (
-              <button type="button" onClick={() => { setTab("signin"); setErr(null); setMsg(null); }} style={{ color: C.goldDeep, fontWeight: 600 }}>Back to sign in</button>
-            )}
+      {/* Form card — the branded hero + trial pill around it are owned by
+          AuthScreen; the auth logic + the .bbpa-* styled markup stay here. */}
+      <form
+        className="bbpa-card"
+        onSubmit={(e) => { e.preventDefault(); submit(); }}
+      >
+        <div className="bbpa-fieldgroup">
+          <label htmlFor="auth-email" className="bbpa-label">Email</label>
+          <input
+            id="auth-email"
+            className="bbpa-input"
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            autoCapitalize="none"
+            spellCheck={false}
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="you@studio.com"
+          />
+        </div>
+        {tab !== "reset" && (
+          <div className="bbpa-fieldgroup">
+            <label htmlFor="auth-password" className="bbpa-label">Password</label>
+            <input
+              id="auth-password"
+              className="bbpa-input"
+              type="password"
+              autoComplete={tab === "signup" ? "new-password" : "current-password"}
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
+            />
           </div>
-        </Card>
-        <button type="button" onClick={onContinueGuest}
-          className="w-full text-center text-[12px] mt-5 py-3"
-          style={{ color: C.muted }}>
-          Continue as guest · data stays on this device
-        </button>
-        {/* Public marketing + legal links. Keeps a path to a full
-            description of the product (what it is, what it costs) and
-            the privacy/terms pages reachable even from the bare sign-in
-            screen — so the homepage never reads as just a login wall. */}
-        <nav
-          aria-label="Learn more"
-          className="flex items-center justify-center flex-wrap gap-x-4 gap-y-1 mt-4 text-[12px]"
+        )}
+        {err && <p className="bbpa-msg err">{err}</p>}
+        {msg && <p className="bbpa-msg ok">{msg}</p>}
+        <button
+          type="submit"
+          className="bbpa-btn-primary"
+          disabled={busy || !email || (tab !== "reset" && !password)}
         >
-          <a href="/features" style={{ color: C.coffee }}>Features</a>
-          <a href="/pricing" style={{ color: C.coffee }}>Pricing</a>
-          <a href="/privacy" style={{ color: C.coffee }}>Privacy</a>
-          <a href="/terms" style={{ color: C.coffee }}>Terms</a>
-        </nav>
-      </div>
-    </div>
+          {busy ? "Working…" : tab === "signin" ? "Sign in" : tab === "signup" ? "Create account" : "Send reset email"}
+        </button>
+        {/* key={tab} forces this row to fully remount when the tab
+            changes, so a toggle button from the previous tab can never
+            linger and overlap (the conditional swaps a Fragment for a
+            single element at the same position, which can otherwise
+            leave a stale node in some engines). */}
+        <div className="bbpa-actions" key={tab}>
+          {tab === "signin" ? (
+            <>
+              <button type="button" className="bbpa-textbtn muted" onClick={() => { setTab("reset"); setErr(null); setMsg(null); }}>Forgot password?</button>
+              <button type="button" className="bbpa-textbtn link" onClick={() => { setTab("signup"); setErr(null); setMsg(null); }}>Create account</button>
+            </>
+          ) : tab === "signup" ? (
+            <button type="button" className="bbpa-textbtn link" onClick={() => { setTab("signin"); setErr(null); setMsg(null); }}>Already have an account? Sign in</button>
+          ) : (
+            <button type="button" className="bbpa-textbtn link" onClick={() => { setTab("signin"); setErr(null); setMsg(null); }}>Back to sign in</button>
+          )}
+        </div>
+      </form>
+      <button type="button" className="bbpa-guest" onClick={onContinueGuest}>
+        Continue as guest · data stays on this device
+      </button>
+      {/* Public marketing + legal links. Keeps a path to a full
+          description of the product (what it is, what it costs) and
+          the privacy/terms pages reachable even from the auth screen. */}
+      <nav aria-label="Learn more" className="bbpa-footnav">
+        <a href="/features">Features</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+      </nav>
+    </AuthScreen>
   );
 };
 
@@ -23207,6 +23346,10 @@ const ServicesScreen = ({
     allow_style_notes: true,
     allow_inspiration_photos: true,
     included_details: null,
+    // Hair sourcing — seed here too, or the editor opens with these
+    // undefined and a later save normalizes them back to the defaults.
+    hair_sourcing: "included",
+    hair_spec: {},
     mobile_service: false,
     mobile_fee_model: "flat",
     mobile_flat_fee: 0,
@@ -23264,6 +23407,15 @@ const ServicesScreen = ({
     allow_style_notes: (s as any).allow_style_notes ?? true,
     allow_inspiration_photos: (s as any).allow_inspiration_photos ?? true,
     included_details: (s as any).included_details ?? null,
+    // Hair sourcing — load the saved sourcing mode + shopping-list spec
+    // so the client-supplied panel re-populates on edit. Omitting these
+    // made the editor reopen blank AND let a re-save wipe the spec.
+    hair_sourcing: (["included", "client", "choice"].includes((s as any).hair_sourcing)
+      ? (s as any).hair_sourcing
+      : "included") as Service["hair_sourcing"],
+    hair_spec: ((s as any).hair_spec && typeof (s as any).hair_spec === "object"
+      ? (s as any).hair_spec
+      : {}) as Service["hair_spec"],
     mobile_service: !!(s as any).mobile_service,
     mobile_fee_model: ((s as any).mobile_fee_model ?? "flat") as Service["mobile_fee_model"],
     mobile_flat_fee: Number((s as any).mobile_flat_fee) || 0,
@@ -24650,11 +24802,24 @@ const TaxPackScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
 // ============================================================
 //  REPORTS V1 — revenue · top styles · repeat clients
 // ============================================================
-const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+const ReportsScreen = ({ store, onBack, focus, onFocusConsumed }: { store: any; onBack: () => void; focus?: string | null; onFocusConsumed?: () => void }) => {
   const appointments = (store.appointments as any[]) || [];
   const currency = store.business?.currency || "USD";
   const userId: string | null = store.userId || null;
   const [range, setRange] = useState<ReportRange>("1M");
+  // Deep-link focus (e.g. dashboard "Shop sales" card): jump to the
+  // monthly range and scroll the matching section into view on open.
+  const shopSalesRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focus !== "shopSales") return;
+    setRange("1M");
+    const t = setTimeout(() => {
+      shopSalesRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+    onFocusConsumed?.();
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per focus signal
+  }, [focus]);
   const [itemMode, setItemMode] = useState<"gross" | "count">("gross");
   const [catMode, setCatMode] = useState<"gross" | "count">("gross");
   // Tap-to-drill-down: any summary card, Top item/category, or payment
@@ -24852,21 +25017,25 @@ const ReportsScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
         </div>
 
         {/* SHOP SALES — retail money (in-person Checkout + online store),
-            reported apart from the service sales summary above. */}
-        {shopSales > 0 && (
-          <div>
-            <SectionTitle>Shop sales · {report.rangeLabel.toLowerCase()}</SectionTitle>
-            <Card className="p-3.5 flex items-center gap-3">
-              <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: "rgba(176,141,87,0.14)" }}>
-                <ShoppingBag size={18} style={{ color: C.goldDeep }} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>{fmtMoney(shopSales, currency)}</p>
-                <p className="text-[11px]" style={{ color: C.muted }}>In-person Checkout sales + online store orders</p>
-              </div>
-            </Card>
-          </div>
-        )}
+            reported apart from the service sales summary above. Always
+            rendered (even at $0) so the dashboard "Shop sales" card has a
+            consistent place to land and scroll to. */}
+        <div ref={shopSalesRef}>
+          <SectionTitle>Shop sales · {report.rangeLabel.toLowerCase()}</SectionTitle>
+          <Card className="p-3.5 flex items-center gap-3">
+            <div className="rounded-xl p-2.5 flex-shrink-0" style={{ background: "rgba(176,141,87,0.14)" }}>
+              <ShoppingBag size={18} style={{ color: C.goldDeep }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.espresso }}>{fmtMoney(shopSales, currency)}</p>
+              <p className="text-[11px]" style={{ color: C.muted }}>
+                {shopSales > 0
+                  ? "In-person Checkout sales + online store orders"
+                  : "No shop sales this period — in-person Checkout + online store orders show here."}
+              </p>
+            </div>
+          </Card>
+        </div>
 
         {/* GROSS SALES CHART */}
         <div>
@@ -28321,7 +28490,7 @@ const WAITLIST_STATUS_TONE: Record<WaitlistStatus, "warning" | "gold" | "success
 // "Build your style" review queue — custom AI-consultation requests from
 // the public booking page. The stylist reviews the intake + AI ballpark,
 // then approves (follow up for a deposit) or denies with a reason.
-const StyleRequestsScreen = ({ store, onBack, onOpenApproval }: { store: any; onBack: () => void; onOpenApproval?: (bookingRequestId: string) => void }) => {
+const StyleRequestsScreen = ({ store, onBack, onOpenApproval, embedded, onCount }: { store: any; onBack: () => void; onOpenApproval?: (bookingRequestId: string) => void; embedded?: boolean; onCount?: (n: number) => void }) => {
   const userId = store?.userId || null;
   const currency = store?.business?.currency || "USD";
   const [rows, setRows] = useState<any[]>([]);
@@ -28362,6 +28531,9 @@ const StyleRequestsScreen = ({ store, onBack, onOpenApproval }: { store: any; on
   }, [rows, filter]);
 
   const openCount = rows.filter(r => r.status === "submitted").length;
+  // Bubble the unreviewed count up so the unified Requests inbox can badge
+  // the "Style ideas" tab without loading style_requests a second time.
+  useEffect(() => { onCount?.(openCount); }, [openCount, onCount]);
 
   const submitReview = async (status: "approved" | "denied" | "archived") => {
     if (!reviewing) return;
@@ -28421,11 +28593,13 @@ const StyleRequestsScreen = ({ store, onBack, onOpenApproval }: { store: any; on
 
   return (
     <div className="bbp-fade pb-32">
-      <Header
-        title="Style requests"
-        subtitle="Custom “Build your style” requests"
-        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
-      />
+      {!embedded && (
+        <Header
+          title="Style requests"
+          subtitle="Custom “Build your style” requests"
+          leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        />
+      )}
       <div className="px-5 pt-2 space-y-3">
         {err && (
           <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
@@ -29454,12 +29628,13 @@ const ApprovalContractsBlock = ({
 };
 
 const ApprovalQueueScreen = ({
-  store, onBack, focusRequestId, clearFocusRequestId,
+  store, onBack, focusRequestId, clearFocusRequestId, embedded,
 }: {
   store: any;
   onBack: () => void;
   focusRequestId?: string | null;
   clearFocusRequestId?: () => void;
+  embedded?: boolean;
 }) => {
   const api = store.approvalsApi;
   // Stable reference so the counts/filtered memos below don't see a
@@ -29493,10 +29668,11 @@ const ApprovalQueueScreen = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequestId]);
 
-  // active / history buckets are module-level (ACTIVE_STATES /
-  // HISTORY_STATES) so the shop-page badge shares the same definition.
+  // Active tab uses ATTENTION_STATES (pending_review / deposit_paid_pending_approval)
+  // so requests still waiting on the client to pay a deposit don't clutter
+  // the stylist's queue. They remain reachable via the All tab.
   const counts = useMemo(() => {
-    const active = requests.filter(r => ACTIVE_STATES.includes(r.approval_status)).length;
+    const active = requests.filter(r => ATTENTION_STATES.includes(r.approval_status)).length;
     const history = requests.filter(r => HISTORY_STATES.includes(r.approval_status)).length;
     return { active, all: requests.length, history };
   }, [requests]);
@@ -29504,7 +29680,7 @@ const ApprovalQueueScreen = ({
   const filtered = useMemo(() => {
     if (filter === "all") return requests;
     if (filter === "history") return requests.filter(r => HISTORY_STATES.includes(r.approval_status));
-    return requests.filter(r => ACTIVE_STATES.includes(r.approval_status));
+    return requests.filter(r => ATTENTION_STATES.includes(r.approval_status));
   }, [requests, filter]);
 
   const handleApprove = async (req: BookingRequestRecord) => {
@@ -29736,11 +29912,13 @@ const ApprovalQueueScreen = ({
 
   return (
     <div className="bbp-fade pb-32">
-      <Header
-        title="Approvals"
-        subtitle="Review requests, set deposits, lock confirmations"
-        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
-      />
+      {!embedded && (
+        <Header
+          title="Approvals"
+          subtitle="Review requests, set deposits, lock confirmations"
+          leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        />
+      )}
       <div className="px-5 pt-2 space-y-3">
         {api?.error && (
           <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
@@ -30122,6 +30300,101 @@ const ApprovalQueueScreen = ({
             </Card>
           );
         })}
+      </div>
+    </div>
+  );
+};
+
+// Unified "Requests" inbox — one screen for the whole inbound-demand
+// pipeline. The two tabs are sequential stages of the same flow:
+//   • Style ideas    — custom "Build your style" requests to review/quote
+//                      (StyleRequestsScreen). Approving one converts it
+//                      into a booking_request and flips to the next tab.
+//   • Ready to approve — booking requests where the stylist sets the
+//                      deposit and locks the confirmation (ApprovalQueueScreen).
+// Both inner screens render header-less (embedded) so this wrapper owns the
+// single header + tab bar. Both stay mounted (visibility-toggled) so their
+// badge counts stay live and filter/scroll state survives a tab switch.
+const REQUEST_TABS = [
+  { id: "style", label: "Style ideas" },
+  { id: "approvals", label: "Ready to approve" },
+] as const;
+
+const RequestsInbox = ({
+  store, onBack, initialTab = "approvals", focusRequestId, clearFocusRequestId,
+}: {
+  store: any;
+  onBack: () => void;
+  initialTab?: "style" | "approvals";
+  focusRequestId?: string | null;
+  clearFocusRequestId?: () => void;
+}) => {
+  const [tab, setTab] = useState<"style" | "approvals">(initialTab);
+  const [styleCount, setStyleCount] = useState(0);
+  const [focusId, setFocusId] = useState<string | null>(focusRequestId || null);
+
+  const approvalsCount = useMemo(
+    () => countActiveApprovals(store?.approvalsApi?.requests),
+    [store?.approvalsApi?.requests],
+  );
+
+  const handleStyleCount = useCallback((n: number) => setStyleCount(n), []);
+  // Style request just became a booking_request → jump to the approvals
+  // tab focused on the new row (the same hand-off the old flow did across
+  // two screens, now a single in-place tab switch).
+  const handleStyleToApproval = useCallback((bookingRequestId: string) => {
+    setFocusId(bookingRequestId);
+    setTab("approvals");
+  }, []);
+  const clearFocus = useCallback(() => {
+    setFocusId(null);
+    clearFocusRequestId?.();
+  }, [clearFocusRequestId]);
+
+  const counts: Record<string, number> = { style: styleCount, approvals: approvalsCount };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Requests"
+        subtitle="Style ideas & booking approvals — all in one place"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2">
+        <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          {REQUEST_TABS.map(t => {
+            const on = tab === t.id;
+            const n = counts[t.id] || 0;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setTab(t.id)}
+                className="flex-1 py-2 rounded-lg text-[12px] font-semibold flex items-center justify-center gap-1.5"
+                style={{
+                  background: on ? C.paper : "transparent",
+                  color: on ? C.espresso : C.muted,
+                  boxShadow: on ? "0 1px 2px rgba(21,17,26,0.06)" : "none",
+                }}
+              >
+                {t.label}
+                {n > 0 && (
+                  <span style={{ minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999, background: C.gold, color: "#fff", fontSize: 10, fontWeight: 700, display: "inline-grid", placeItems: "center" }}>
+                    {n}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {/* Both mounted, visibility-toggled — keeps the Style-ideas badge live
+          and preserves each tab's filter/scroll state across switches. */}
+      <div style={{ display: tab === "style" ? "block" : "none" }}>
+        <StyleRequestsScreen store={store} onBack={onBack} embedded onCount={handleStyleCount} onOpenApproval={handleStyleToApproval} />
+      </div>
+      <div style={{ display: tab === "approvals" ? "block" : "none" }}>
+        <ApprovalQueueScreen store={store} onBack={onBack} embedded focusRequestId={focusId} clearFocusRequestId={clearFocus} />
       </div>
     </div>
   );
@@ -38450,38 +38723,73 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentReco
   );
 };
 
+// App-level "Pause reminders" sheet — opened when the owner taps a
+// "due for rebooking" push notification. Surfaces the same snooze / stop
+// controls the in-app rebooking cards use, so a reminder can be silenced
+// in one tap straight from the notification (rather than just landing on
+// a screen). Resolves the live client record by id from the caller.
+const RebookingPauseSheet = ({ client, today, onMute, onOpenProfile, onClose }: {
+  client: any | null;
+  today: string;
+  onMute: (patch: { rebookingOptOut?: boolean; rebookingSnoozedUntil?: string | null }) => void;
+  onOpenProfile: () => void;
+  onClose: () => void;
+}) => (
+  <Sheet open={!!client} onClose={onClose} title="Pause reminders">
+    {client && (
+      <div className="space-y-2.5">
+        <p className="text-[13px]" style={{ color: C.coffee }}>
+          Stop reminding you to rebook <span className="font-semibold" style={{ color: C.espresso }}>{client.name}</span>?
+        </p>
+        <Button variant="outline" fullWidth onClick={() => onMute({ rebookingSnoozedUntil: rebookingSnoozeUntil(today, 4), rebookingOptOut: false })}>Snooze 4 weeks</Button>
+        <Button variant="outline" fullWidth onClick={() => onMute({ rebookingSnoozedUntil: rebookingSnoozeUntil(today, 12), rebookingOptOut: false })}>Snooze 3 months</Button>
+        <Button variant="outline" fullWidth icon={<BellOff size={16} />} onClick={() => onMute({ rebookingOptOut: true, rebookingSnoozedUntil: null })}>Stop reminders (taking a break)</Button>
+        <Button variant="ghost" fullWidth onClick={onOpenProfile}>Open {String(client.name || "").split(" ")[0] || "client"}&apos;s profile</Button>
+        <p className="text-[11px] pt-1" style={{ color: C.muted }}>You can resume reminders anytime from {String(client.name || "").split(" ")[0] || "the client"}&apos;s profile.</p>
+      </div>
+    )}
+  </Sheet>
+);
+
 export default function App() {
   const auth = useAuth();
-  // First-launch welcome screen — gates AuthGate until the user
-  // has seen (or skipped) the intro. SSR-safe: introSeen starts as
-  // null and the localStorage probe runs in useEffect on mount.
-  const [introSeen, setIntroSeen] = useState<boolean | null>(null);
-  const [authInitialTab, setAuthInitialTab] = useState<"signin" | "signup">("signin");
+  // Logged-out visitors ALWAYS see the features home page first — there
+  // is no "seen it once, skip it forever" flag anymore. The sign-in /
+  // sign-up gate only appears when the visitor actively asks for it,
+  // which they signal via the ?signup=1 / ?signin=1 query the marketing
+  // CTAs link to. authIntent is therefore session-scoped (not
+  // persisted): null = show the home page, "signin"/"signup" = show the
+  // auth gate on that tab.
+  //
+  // Initialized lazily from the URL so a hard navigation to /?signin=1
+  // opens the gate without a flash of the home page first. SSR-safe:
+  // window is guarded, and the initial render is the cream splash (gated
+  // on auth.ready below) on both server and client, so there's no
+  // hydration mismatch regardless of this value.
+  const readAuthIntent = (): "signin" | "signup" | null => {
+    if (typeof window === "undefined") return null;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("signup") === "1") return "signup";
+      if (params.get("signin") === "1") return "signin";
+    } catch { /* malformed query — show home */ }
+    return null;
+  };
+  const [authIntent, setAuthIntent] = useState<"signin" | "signup" | null>(readAuthIntent);
+  const returnToIntro = useCallback(() => setAuthIntent(null), []);
+  // Once the visitor is signed in, drop any pending auth intent so a
+  // later sign-out within the same session returns them to the home
+  // page — not straight back to the gate. We intentionally do NOT
+  // clear on mode === "guest": a returning guest visitor who clicks
+  // "Start free trial" / "Sign in" on a marketing page must still see
+  // the auth gate; otherwise the CTA looks broken (the gate guard at
+  // auth.mode === "loading" never renders for them).
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      setIntroSeen(window.localStorage.getItem("bbp-intro-seen-v1") === "1");
-    } catch {
-      setIntroSeen(true);
+    if (auth.mode === "authed" && authIntent !== null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing a one-shot intent after auth resolves
+      setAuthIntent(null);
     }
-  }, []);
-  const markIntroSeen = useCallback((nextTab: "signin" | "signup") => {
-    setAuthInitialTab(nextTab);
-    setIntroSeen(true);
-    try {
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem("bbp-intro-seen-v1", "1");
-      }
-    } catch { /* private mode — gate still works in-memory this session */ }
-  }, []);
-  const returnToIntro = useCallback(() => {
-    setIntroSeen(false);
-    try {
-      if (typeof window !== "undefined") {
-        window.localStorage.removeItem("bbp-intro-seen-v1");
-      }
-    } catch { /* private mode — silent */ }
-  }, []);
+  }, [auth.mode, authIntent]);
   const rawStore = useStorage();
   const { premium } = usePremiumStatus(auth.userId);
   const discountsApi = useDiscounts(auth.userId);
@@ -38757,6 +39065,13 @@ export default function App() {
   // instead of all of them dumping to the same overview.
   const [expensesView, setExpensesView] = useState<ProfitDetailView>("overview");
   const [expensesCategory, setExpensesCategory] = useState<string | null>(null);
+  // Deep-link focus for the Reports screen (e.g. dashboard "Shop sales"
+  // card → jump to the Shop sales section). Cleared once Reports reads it.
+  const [reportsFocus, setReportsFocus] = useState<string | null>(null);
+  const openReports = useCallback((focus?: string) => {
+    setReportsFocus(focus ?? null);
+    setSecondary("reports");
+  }, []);
   const openProfitDetail = useCallback((view: ProfitDetailView, category?: string) => {
     if (view === "revenue") {
       // Gross revenue lives on the Reports screen — no need to
@@ -38796,6 +39111,9 @@ export default function App() {
   // Notification deep-link plumbing: when a notification routes to a
   // client, App stamps the id and Clients pops the matching profile.
   const [clientToOpenId, setClientToOpenId] = useState<string | null>(null);
+  // Push deep-link → rebooking Pause sheet. Holds the client id a "due
+  // for rebooking" push tapped into; the sheet resolves the live record.
+  const [pauseRemindersId, setPauseRemindersId] = useState<string | null>(null);
   const [approvalFocusId, setApprovalFocusId] = useState<string | null>(null);
   // Notification-tap deep link: a "Contract sign-link emailed" /
   // "Confirmation emailed" / etc. row opens this sheet showing the
@@ -38876,6 +39194,76 @@ export default function App() {
     });
   }, [notifications, store.appointments]);
 
+  // Shared push-notification deep-link router. Parses a notification's
+  // target URL (/?focus=client&id=...(&action=rebooking)) and routes:
+  // a retention ("due for rebooking") link pops the Pause sheet so
+  // snooze / stop is one tap from the push; any other client link opens
+  // the profile. Used by both the web URL consumer and the native iOS
+  // tap listener so the two transports behave identically. Accepts a
+  // relative or absolute URL. Returns true when it handled a client link.
+  const routeDeepLinkUrl = useCallback((rawUrl: string): boolean => {
+    if (typeof window === "undefined" || !rawUrl) return false;
+    let params: URLSearchParams;
+    try { params = new URL(rawUrl, window.location.origin).searchParams; }
+    catch { return false; }
+    const id = params.get("id");
+    if (params.get("focus") !== "client" || !id) return false;
+    if (params.get("action") === "rebooking") {
+      setPauseRemindersId(id);
+    } else {
+      setActive("clients");
+      setClientToOpenId(id);
+    }
+    return true;
+  }, []);
+
+  // Web push deep-link consumer. The OS push for a reminder navigates the
+  // PWA to /?focus=client&id=...; the service worker only focuses/opens
+  // the window, so the app reads the params here. One-shot: we strip the
+  // params after consuming so a refresh or a later re-render can't re-open
+  // the sheet.
+  const deepLinkConsumedRef = useRef(false);
+  useEffect(() => {
+    if (auth.mode !== "authed") return;
+    if (deepLinkConsumedRef.current || typeof window === "undefined") return;
+    deepLinkConsumedRef.current = true;
+    const handled = routeDeepLinkUrl(window.location.href);
+    if (!handled) { deepLinkConsumedRef.current = false; return; }
+    try {
+      const url = new URL(window.location.href);
+      ["focus", "id", "action"].forEach((k) => url.searchParams.delete(k));
+      window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+    } catch { /* leave the URL as-is */ }
+  }, [auth.mode, routeDeepLinkUrl]);
+
+  // Native iOS (Capacitor) push tap. WKWebView has no service worker, so
+  // the @capacitor/push-notifications plugin delivers taps in-process via
+  // pushNotificationActionPerformed. We read the same data.url the web
+  // payload carries and route through the shared handler, so tapping a
+  // native "due for rebooking" push opens the Pause sheet too. The
+  // dynamic import keeps native code out of the web bundle.
+  useEffect(() => {
+    if (typeof window === "undefined" || !isNativePlatform()) return;
+    let alive = true;
+    let handle: { remove: () => Promise<void> } | null = null;
+    void (async () => {
+      try {
+        const { PushNotifications } = await import("@capacitor/push-notifications");
+        const h = await PushNotifications.addListener(
+          "pushNotificationActionPerformed",
+          (action: { notification?: { data?: Record<string, unknown> } }) => {
+            const data = action?.notification?.data;
+            const url = typeof data?.url === "string" ? data.url : null;
+            if (url) routeDeepLinkUrl(url);
+          },
+        );
+        if (!alive) { await h.remove(); return; }
+        handle = h;
+      } catch { /* plugin unavailable / web build — no-op */ }
+    })();
+    return () => { alive = false; void handle?.remove(); };
+  }, [routeDeepLinkUrl]);
+
   // Dashboard quick actions
   const openQuickAppt = (prefill: any = {}) => {
     setApptPrefill(prefill || {});
@@ -38916,16 +39304,6 @@ export default function App() {
     setActive("schedule");
   };
 
-  // Approved "Build your style" request -> the StyleRequestsScreen has
-  // already converted it into a booking_request (deposit-first), so just
-  // open the Approvals queue focused on that booking. From there the
-  // stylist sets the deposit and the client gets the pay link — the same
-  // proven flow every other booking uses.
-  const handleStyleRequestToApproval = (bookingRequestId: string) => {
-    setApprovalFocusId(bookingRequestId);
-    setSecondary("approvals");
-  };
-
   const handleUsePreset = (p) => {
     setCalcPresetPrefill(p);
     setSecondary(null);
@@ -38942,13 +39320,12 @@ export default function App() {
   // hasn't opted into guest mode. All hooks above this guard so the
   // hook order is stable across renders.
   if (auth.mode === "loading") {
-    // Show a cream splash until the intro state has resolved on the
-    // client (one tick post-mount) AND the initial session check has
-    // finished. The `!auth.ready` guard is what keeps a returning
-    // signed-in user from seeing a flash of the sign-in screen on cold
-    // start / PWA resume — we wait until we actually know whether
-    // there's a session before deciding between Home and the AuthGate.
-    if (introSeen === null || !auth.ready) {
+    // Show a cream splash until the initial session check has finished.
+    // The `!auth.ready` guard is what keeps a returning signed-in user
+    // from seeing a flash of the home / sign-in screen on cold start /
+    // PWA resume — we wait until we actually know whether there's a
+    // session before deciding between the dashboard and this branch.
+    if (!auth.ready) {
       return (
         <div className="flex items-center justify-center" style={{ minHeight: "100dvh", background: C.cream }}>
           <GlobalStyle />
@@ -38958,16 +39335,24 @@ export default function App() {
         </div>
       );
     }
-    if (introSeen === false) {
-      return (
-        <WelcomeIntro
-          onGetStarted={() => markIntroSeen("signup")}
-          onSignIn={() => markIntroSeen("signin")}
-          onSkip={() => markIntroSeen("signin")}
-        />
-      );
+    // Only show the auth gate when the visitor actively asked for it
+    // (via the marketing CTAs → /?signup=1 / /?signin=1). Otherwise every
+    // logged-out visitor sees the features home page first, whether or
+    // not they already have an account.
+    if (authIntent) {
+      return <AuthGate onContinueGuest={auth.continueAsGuest} onBack={returnToIntro} initialTab={authIntent} />;
     }
-    return <AuthGate onContinueGuest={auth.continueAsGuest} onBack={returnToIntro} initialTab={authInitialTab} />;
+    // Default logged-out view: the full features marketing home page. Its
+    // CTAs route to /?signup=1 and /?signin=1, which authIntent reads.
+    return <FeaturesContent />;
+  }
+
+  // Returning guest visitor (no session, but the guest flag is set) who
+  // navigated to /?signup=1 or /?signin=1 from a marketing CTA — show
+  // them the auth gate before the dashboard. Without this, the CTA
+  // silently lands them on the home / dashboard and looks broken.
+  if (auth.mode === "guest" && authIntent) {
+    return <AuthGate onContinueGuest={auth.continueAsGuest} onBack={returnToIntro} initialTab={authIntent} />;
   }
 
   if (store.loading) {
@@ -39021,6 +39406,7 @@ export default function App() {
             <Dashboard store={store}
               setActive={setActive}
               goToMoney={goToMoney}
+              openReports={openReports}
               openQuickAppt={openQuickAppt}
               openQuickClient={openQuickClient}
               openQuickTx={openQuickTx}
@@ -39126,7 +39512,7 @@ export default function App() {
       )}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openStyleRequests={() => setSecondary("styleRequests")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} openTapToPay={() => setSecondary("tapToPay")} />}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} openTapToPay={() => setSecondary("tapToPay")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} openSocialTemplates={() => setSecondary("socialTemplates")} />}
       {secondary === "socialTemplates" && <SocialTemplatesScreen store={store} onBack={() => setSecondary("marketing")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
@@ -39150,8 +39536,8 @@ export default function App() {
       )}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "intelligence" && <BookingIntelligenceScreen store={store} onBack={() => setSecondary("settings")} />}
-      {secondary === "approvals" && <ApprovalQueueScreen store={store} onBack={() => setSecondary("settings")} focusRequestId={approvalFocusId} clearFocusRequestId={() => setApprovalFocusId(null)} />}
-      {secondary === "styleRequests" && <StyleRequestsScreen store={store} onBack={() => setSecondary("settings")} onOpenApproval={handleStyleRequestToApproval} />}
+      {secondary === "approvals" && <RequestsInbox store={store} onBack={() => setSecondary("settings")} initialTab="approvals" focusRequestId={approvalFocusId} clearFocusRequestId={() => setApprovalFocusId(null)} />}
+      {secondary === "styleRequests" && <RequestsInbox store={store} onBack={() => setSecondary("settings")} initialTab="style" focusRequestId={approvalFocusId} clearFocusRequestId={() => setApprovalFocusId(null)} />}
       {secondary === "waitlist" && (
         <WaitlistScreen
           store={store}
@@ -39215,7 +39601,7 @@ export default function App() {
         />
       )}
       {secondary === "services" && <ServicesScreen store={store} onBack={() => setSecondary("settings")} />}
-      {secondary === "reports" && <ReportsScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "reports" && <ReportsScreen store={store} onBack={() => setSecondary("settings")} focus={reportsFocus} onFocusConsumed={() => setReportsFocus(null)} />}
       {secondary === "taxPack" && <TaxPackScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "expenses" && (
         <ExpensesScreen
@@ -39289,14 +39675,15 @@ export default function App() {
           onBack={() => setSecondary(null)}
         />
       )}
-      {/* The shop page's "Booking requests" shortcut and Settings →
-          Approvals are the same feature, so both now open the single
-          ApprovalQueueScreen. This entry point only differs in its
-          back target (returns to the shop/account screen). */}
+      {/* The shop/account "Booking requests" shortcut and Settings →
+          Requests are the same inbox, so both open RequestsInbox. This
+          entry point only differs in its back target (returns to the
+          shop/account screen) and lands on the approvals tab. */}
       {secondary === "bookingRequests" && (
-        <ApprovalQueueScreen
+        <RequestsInbox
           store={store}
           onBack={() => setSecondary("account")}
+          initialTab="approvals"
           focusRequestId={approvalFocusId}
           clearFocusRequestId={() => setApprovalFocusId(null)}
         />
@@ -39356,6 +39743,24 @@ export default function App() {
         markAllRead={notifications.markAllRead}
         onTap={handleNotificationTap}
         readIds={notifications.readIds}
+      />
+      {/* Rebooking Pause sheet — opened by tapping a "due for rebooking"
+          push so snooze / stop is one tap from the notification. */}
+      <RebookingPauseSheet
+        client={pauseRemindersId ? (((store.clients as any[]) || []).find((c: any) => c?.id === pauseRemindersId) || null) : null}
+        today={todayISO()}
+        onClose={() => setPauseRemindersId(null)}
+        onMute={(patch) => {
+          const c = ((store.clients as any[]) || []).find((x: any) => x?.id === pauseRemindersId);
+          if (c) void store.upsertClient({ ...c, ...patch });
+          setPauseRemindersId(null);
+        }}
+        onOpenProfile={() => {
+          const id = pauseRemindersId;
+          setPauseRemindersId(null);
+          setActive("clients");
+          setClientToOpenId(id);
+        }}
       />
       <EmailDetailSheet
         queueId={emailLogId}

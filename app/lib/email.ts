@@ -137,7 +137,7 @@ export const buildDepositReceivedEmail = (args: {
       We received your deposit for your${args.serviceName ? ` ${escapeHtml(args.serviceName)}` : ""} request${when ? ` on <strong>${escapeHtml(when)}</strong>` : ""}.
     </p>
     <p style="font-size:14px;line-height:22px;">
-      <strong>Your appointment isn't confirmed yet.</strong> ${escapeHtml(args.studioName)} still needs to review and approve it — we'll email you to confirm as soon as that happens.
+      <strong>Your appointment isn't confirmed yet.</strong> ${escapeHtml(args.studioName).replace(/^./, (c) => c.toUpperCase())} still needs to review and approve it — we'll email you to confirm as soon as that happens.
     </p>
     <p style="font-size:12px;color:#9A8B72;line-height:18px;">
       No action needed right now. Reach out if anything changes.

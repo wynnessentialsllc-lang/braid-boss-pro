@@ -48,8 +48,6 @@ export const metadata: Metadata = {
 };
 
 const MONTHLY_PRICE_DOLLARS = 14.99;
-const ANNUAL_PRICE_DOLLARS = 149;
-const ANNUAL_SAVINGS_DOLLARS = 30.88; // $14.99 × 12 = $179.88 → save $30.88
 const TRIAL_DAYS = 14;
 
 export default function PricingPage() {
@@ -73,13 +71,13 @@ export default function PricingPage() {
             </em>
           </>
         }
-        body="Braid Boss Pro is built specifically for braid stylists — bookings, deposits, contracts, retail storefronts, analytics, and modern creator-economy tools designed around how braiders actually run their chairs. Every feature included. Start free for 14 days, then just $14.99/month — or $149/year (save $30.88). Less than every major salon app, with no per-staff fees."
+        body="Braid Boss Pro is built specifically for braid stylists — bookings, deposits, contracts, retail storefronts, analytics, and modern creator-economy tools designed around how braiders actually run their chairs. Every feature included. Start free for 14 days, then just $14.99/month. Less than every major salon app, with no per-staff fees."
         primaryCta={{ label: "Start Your Free Trial", href: "/?signup=1" }}
-        secondaryCta={{ label: "See the platform", href: "/features" }}
+        secondaryCta={{ label: "See the platform", href: "/tour" }}
       />
 
       {/* Pricing */}
-      <Section eyebrow="One simple plan" title="Everything included. $14.99/mo or $149/yr.">
+      <Section eyebrow="One simple plan" title="Everything included. $14.99/mo.">
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
           <span
             className="bbp-reveal"
@@ -113,10 +111,10 @@ export default function PricingPage() {
             tone="founding"
             badge="14-Day Free Trial"
             title="Braid Boss Pro"
-            subtitle={`$${ANNUAL_PRICE_DOLLARS}/year option · save $${ANNUAL_SAVINGS_DOLLARS.toFixed(2)}`}
+            subtitle="14-day free trial · cancel anytime"
             price={`$${MONTHLY_PRICE_DOLLARS.toFixed(2)}`}
             cadence="/month"
-            description={`Try every feature free for ${TRIAL_DAYS} days — no charge until your trial ends. Or go annual at $${ANNUAL_PRICE_DOLLARS}/year and save $${ANNUAL_SAVINGS_DOLLARS.toFixed(2)} (about 2 months free). No contracts. Cancel anytime.`}
+            description={`Try every feature free for ${TRIAL_DAYS} days — no charge until your trial ends. Then $${MONTHLY_PRICE_DOLLARS.toFixed(2)}/month. No contracts. Cancel anytime.`}
             features={[
               "Online Booking",
               "Deposits & Payments",
@@ -145,7 +143,7 @@ export default function PricingPage() {
               "No action needed",
               "Same account, same data, same login",
             ]}
-            cta={{ label: "Open the app", href: "/" }}
+            cta={{ label: "Open the app", href: "/?signin=1" }}
           />
         </div>
 
@@ -210,7 +208,7 @@ export default function PricingPage() {
 
       <CtaFooter
         title="Start free. Pay when you're ready."
-        body={`Create your account in under 10 minutes and try every feature free for ${TRIAL_DAYS} days. Then it's just $14.99/month — or $149/year. No contracts. Cancel anytime.`}
+        body={`Create your account in under 10 minutes and try every feature free for ${TRIAL_DAYS} days. Then it's just $14.99/month. No contracts. Cancel anytime.`}
         primaryCta={{ label: "Start Your Free Trial", href: "/?signup=1" }}
         secondaryCta={{ label: "Read the FAQ", href: "/faq" }}
       />

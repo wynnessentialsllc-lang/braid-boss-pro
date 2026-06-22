@@ -63,6 +63,28 @@ describe("buildCoachSnapshot", () => {
     expect(snap2.revenue.balances.dueToday).toBe(0);
   });
 
+  it("scopes the month pipeline to today→end-of-month, net of discounts, and excludes already-paid/out-of-month rows", () => {
+    const snap2 = buildCoachSnapshot(
+      clients,
+      [
+        // In month, still to come, $200 net (250 - 50 discount) -> counts.
+        { id: "m1", clientId: "a", date: "2026-06-20", status: "scheduled", totalPrice: 250, discountAmount: 50, balanceDue: 250 },
+        // Today, scheduled, not paid -> counts ($120).
+        { id: "m2", clientId: "b", date: "2026-06-15", status: "scheduled", totalPrice: 120, balanceDue: 120 },
+        // Next month -> excluded.
+        { id: "m3", clientId: "a", date: "2026-07-02", status: "scheduled", totalPrice: 300, balanceDue: 300 },
+        // Already paid this month -> excluded (earned, not pipeline).
+        { id: "m4", clientId: "b", date: "2026-06-22", status: "scheduled", paymentStatus: "paid", totalPrice: 200, balanceDue: 0 },
+        // Personal/blocked time -> excluded.
+        { id: "m5", date: "2026-06-18", kind: "blocked" },
+      ],
+      TODAY,
+      "USD",
+    );
+    expect(snap2.appts.bookedThisMonthCount).toBe(2);
+    expect(snap2.appts.bookedThisMonthValue).toBe(320); // 200 + 120
+  });
+
   it("surfaces overdue clients as rebooking opportunities, newest-overdue first", () => {
     expect(snap.rebooking.due).toBeGreaterThanOrEqual(1);
     expect(snap.topOpportunities[0]?.firstName).toBe("Amara");

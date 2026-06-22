@@ -77,8 +77,12 @@ export default function TermsPage() {
           <>Payment reminders</>,
           <>Review requests</>,
           <>Customer support messages</>,
-          <>Promotional messages when consent has been provided</>,
+          <>Rebooking reminders</>,
+          <>Promotional offers (only with separate opt-in)</>,
         ]} />
+        <p>
+          Clients consent to transactional appointment messages and promotional messages through two separate, optional checkboxes on the booking form. Promotional texts are sent only to clients who separately opt in; clients can receive transactional messages without any promotional texts.
+        </p>
         <p>
           <strong>Message frequency.</strong> Message frequency varies based on user activity and appointments.
         </p>

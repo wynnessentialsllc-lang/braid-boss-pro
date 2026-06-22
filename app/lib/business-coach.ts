@@ -234,6 +234,13 @@ export interface CoachSnapshot {
     todayCount: number;
     next7Count: number;
     busiestDay: string | null;
+    // Forward-looking, MONTH-scoped pipeline: appointments still on the
+    // books from today through the end of THIS calendar month, and their
+    // expected net value (realized at the chair when each service
+    // happens). Pairs with the monthly goal so the coach can talk about
+    // the month without conflating it with the all-future balance total.
+    bookedThisMonthCount: number;
+    bookedThisMonthValue: number;
   };
   clients: {
     total: number;
@@ -268,13 +275,35 @@ export const buildCoachSnapshot = (
   const appt = calculateAppointmentAnalytics(appts, todayIso);
 
   const weekEnd = addDaysIso(todayIso, 7);
+  // Last calendar day of the current month (e.g. "2026-06-30").
+  const [gy, gm] = todayIso.split("-").map(Number);
+  const monthEndIso = `${gy}-${String(gm).padStart(2, "0")}-${String(
+    new Date(gy, gm, 0).getDate(),
+  ).padStart(2, "0")}`;
   let todayCount = 0;
   let next7Count = 0;
+  let bookedThisMonthCount = 0;
+  let bookedThisMonthValue = 0;
   for (const a of appts) {
     const date = a?.date;
     if (!date || isCancelled(a) || a?.status === "completed") continue;
     if (date === todayIso) todayCount += 1;
     if (date >= todayIso && date < weekEnd) next7Count += 1;
+    // Month-scoped pipeline: real bookings still to come this month that
+    // haven't been collected yet. Net of any discount; excludes
+    // personal/blocked time and already-paid rows (those are earned).
+    if (
+      isRealBooking(a) &&
+      a?.paymentStatus !== "paid" &&
+      date >= todayIso &&
+      date <= monthEndIso
+    ) {
+      bookedThisMonthCount += 1;
+      bookedThisMonthValue += Math.max(
+        0,
+        toNum(a?.totalPrice) - toNum(a?.discountAmount),
+      );
+    }
   }
 
   const balances = classifyBalances(appts, todayIso);
@@ -306,6 +335,8 @@ export const buildCoachSnapshot = (
       todayCount,
       next7Count,
       busiestDay: appt.busiestDow?.name || null,
+      bookedThisMonthCount,
+      bookedThisMonthValue: Math.round((bookedThisMonthValue + Number.EPSILON) * 100) / 100,
     },
     clients: {
       total: cli.total,
@@ -384,6 +415,8 @@ export const cleanSnapshot = (raw: unknown): CoachSnapshot => {
       todayCount: num(o?.appts?.todayCount),
       next7Count: num(o?.appts?.next7Count),
       busiestDay: s(o?.appts?.busiestDay),
+      bookedThisMonthCount: num(o?.appts?.bookedThisMonthCount),
+      bookedThisMonthValue: num(o?.appts?.bookedThisMonthValue),
     },
     clients: {
       total: num(o?.clients?.total),
@@ -466,11 +499,20 @@ export const snapshotFacts = (snap: CoachSnapshot): string => {
   }
   if (r.balances.upcoming > 0) {
     lines.push(
-      `Upcoming balances on future appointments (NOT yet earned — paid at the time of service, nothing to chase): ${money(r.balances.upcoming, c)}.`,
+      `Upcoming balances across ALL future appointments combined (every future date, NOT just this week or this month; NOT yet earned — paid at the time of service, nothing to chase): ${money(r.balances.upcoming, c)}. Do NOT describe this total as a weekly or monthly figure.`,
     );
   }
   if (r.topStyle) lines.push(`Top-earning style this month: ${r.topStyle}.`);
   lines.push(`Appointments today: ${snap.appts.todayCount}; next 7 days: ${snap.appts.next7Count}.`);
+  // Month-scoped pipeline — the correct number to cite when talking about
+  // "this month". Distinct from the all-future upcoming-balances total.
+  if (snap.appts.bookedThisMonthCount > 0) {
+    lines.push(
+      `Still booked THIS month (today through end of ${snap.period.monthLabel}): ${snap.appts.bookedThisMonthCount} appointment${snap.appts.bookedThisMonthCount === 1 ? "" : "s"}, expected value ~${money(snap.appts.bookedThisMonthValue, c)} (realized at the chair as each service happens). This — not the all-future upcoming-balances total — is the figure to use for what's coming THIS month.`,
+    );
+  } else {
+    lines.push(`Still booked THIS month (today through end of ${snap.period.monthLabel}): none on the books yet.`);
+  }
   if (snap.appts.busiestDay) lines.push(`Busiest day of week: ${snap.appts.busiestDay}.`);
   lines.push(
     `Clients: ${snap.clients.total} total, ${snap.clients.newThisMonth} new this month, ${snap.clients.repeatRatePct}% repeat rate, ${snap.clients.vip} VIP.`,
@@ -536,6 +578,7 @@ export const buildCoachSystem = (snap: CoachSnapshot, ctx: CoachContext): string
     "- 'Balance expected at today's appointments' is collected at the chair today — you may remind the owner to collect it when the client is in the seat, but it is not a debt to chase.",
     "- 'Upcoming balances on future appointments' are NOT earned yet because the service hasn't happened. NEVER describe these as money owed, already-earned, or revenue waiting to be collected, and never tell the owner to chase clients for them.",
     "- If there are no already-earned unpaid balances, do not invent a 'collect your outstanding balances' action.",
+    "- Timeframes must match: whenever you attach a money figure to a period (today / this week / this month), use a figure the briefing scopes to that SAME period. The 'upcoming balances across all future appointments' total spans every future date — NEVER present it as a weekly or monthly amount, and never glue it to a count like 'X appointments this week/month'. For what's coming this month, use the 'Still booked THIS month' value.",
     "",
     "Care about the person, not just the numbers. Braiding is long, physical work and stylists burn out fast — mentally, physically, and emotionally. Read the day-by-day calendar and speak to their wellbeing:",
     "- If they are working many days back-to-back (long stretch) or have NO day off scheduled in the next 7 days, gently name it and encourage them to protect a rest day or a break. Do not guilt them; be warm and protective.",

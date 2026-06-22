@@ -75,7 +75,7 @@ export default function HowItWorksPage() {
         }
         body="Braid Boss Pro is the business operating system for braiders — branded booking links, deposits, contracts, retail storefronts, and a mobile dashboard built around how braid stylists run their chairs. This is the path from a new account to a shareable booking link."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
-        secondaryCta={{ label: "See the platform", href: "/features" }}
+        secondaryCta={{ label: "See the platform", href: "/tour" }}
       />
 
       {/* Steps 1-5 */}
@@ -96,7 +96,7 @@ export default function HowItWorksPage() {
                 unlocked from day one.
               </>
             }
-            cta={{ label: "Sign up", href: "/" }}
+            cta={{ label: "Sign up", href: "/?signup=1" }}
             delay={0}
           />
           <StepCard

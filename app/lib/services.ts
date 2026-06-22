@@ -699,10 +699,10 @@ export const useServices = (
           return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
         })();
         return {
-          brand: clip(s.brand, 80),
-          color: clip(s.color, 60),
-          packs: clip(s.packs, 40),
-          prep: clip(s.prep, 280),
+          brand: clip(s.brand, 280),
+          color: clip(s.color, 160),
+          packs: clip(s.packs, 120),
+          prep: clip(s.prep, 500),
           buyUrl: clip(s.buyUrl, 500),
           sellPrice: sell,
           inventoryItemId: clip(s.inventoryItemId, 64),

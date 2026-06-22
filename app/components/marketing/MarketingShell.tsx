@@ -6,7 +6,7 @@
 // chrome without each page redeclaring it.
 
 import Link from "next/link";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { C, FONT_BODY, FONT_DISPLAY, GRADIENTS, SHADOWS } from "./tokens";
 
 export const MarketingShell = ({ children }: { children: ReactNode }) => {
@@ -48,6 +48,8 @@ export const MarketingShell = ({ children }: { children: ReactNode }) => {
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600;700;800&display=swap');
+        html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+        @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
         .bbp-reveal { opacity: 0; transform: translateY(18px); transition: opacity 600ms cubic-bezier(.2,.8,.2,1), transform 600ms cubic-bezier(.2,.8,.2,1); }
         .bbp-reveal.is-visible { opacity: 1; transform: translateY(0); }
         .bbp-reveal[data-delay="100"] { transition-delay: 100ms; }
@@ -73,7 +75,7 @@ export const MarketingShell = ({ children }: { children: ReactNode }) => {
 };
 
 const MARKETING_NAV_LINKS: Array<{ href: string; label: string }> = [
-  { href: "/features", label: "Features" },
+  { href: "/#booking-scheduling", label: "Features" },
   { href: "/how-it-works", label: "How it works" },
   { href: "/pricing", label: "Pricing" },
   { href: "/faq", label: "FAQ" },
@@ -132,8 +134,14 @@ const MarketingHeader = () => {
               {l.label}
             </Link>
           ))}
-          <Link
-            href="/"
+          {/* Plain <a> (not Link) so it hard-navigates to the app root
+              — the home page reads ?signin=1 on mount to open the
+              sign-in gate; a client-side Link from "/" (this shell now
+              also renders as the logged-out home view) wouldn't remount
+              it. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- intentional full reload to remount the app gate */}
+          <a
+            href="/?signin=1"
             style={{
               ...marketingNavLink,
               padding: "8px 14px",
@@ -143,7 +151,7 @@ const MarketingHeader = () => {
             }}
           >
             Sign in
-          </Link>
+          </a>
         </nav>
 
         {/* Mobile hamburger trigger. */}
@@ -220,8 +228,11 @@ const MarketingHeader = () => {
               </Link>
             ))}
             <div style={{ height: 1, background: C.brandBorder, margin: "8px 4px" }} />
-            <Link
-              href="/"
+            {/* Plain <a> so it hard-navigates to the app root, where
+                ?signin=1 opens the sign-in gate on mount. */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- intentional full reload to remount the app gate */}
+            <a
+              href="/?signin=1"
               onClick={() => setOpen(false)}
               style={{
                 ...mobileDrawerLink,
@@ -232,7 +243,7 @@ const MarketingHeader = () => {
               }}
             >
               Sign in
-            </Link>
+            </a>
           </nav>
         </div>
       </div>
@@ -392,12 +403,17 @@ export const MarketingHero = ({
   body,
   primaryCta,
   secondaryCta,
+  signInHref,
 }: {
   eyebrow: string;
   title: ReactNode;
   body: string;
   primaryCta: { label: string; href: string };
   secondaryCta?: { label: string; href: string };
+  // When set, renders an "Already have an account? Sign in" link under
+  // the CTAs. Used on the logged-out home landing so returning users
+  // have an obvious sign-in path next to the primary "start trial" CTA.
+  signInHref?: string;
 }) => (
   <section
     style={{
@@ -503,6 +519,20 @@ export const MarketingHero = ({
           </a>
         )}
       </div>
+      {signInHref && (
+        // Dynamic href, so the no-html-link-for-pages rule doesn't fire.
+        // Plain <a> is intentional — a hard reload remounts the app so it
+        // reads ?signin=1 and opens the sign-in gate.
+        <p style={{ marginTop: 18, fontSize: 14, color: C.coffee }}>
+          Already have an account?{" "}
+          <a
+            href={signInHref}
+            style={{ color: C.brandPrimary, fontWeight: 700, textDecoration: "underline" }}
+          >
+            Sign in
+          </a>
+        </p>
+      )}
     </div>
   </section>
 );
