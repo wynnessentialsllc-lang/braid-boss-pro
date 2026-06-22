@@ -151,8 +151,12 @@ export default function PrivacyPage() {
 
       <LegalSection title="Contact">
         <p>
-          Questions? Contact <strong>Wynn Essentials, LLC</strong> at{" "}
-          <a href="mailto:hello@braidbosspro.app">hello@braidbosspro.app</a>.
+          Questions? Contact <strong>Wynn Essentials, LLC</strong> (DBA Braid Boss Pro):
+        </p>
+        <p>
+          3680 Wilshire Blvd, Ste P04 #A118, Los Angeles, CA 90010<br />
+          <a href="tel:+12132670825">(213) 267-0825</a> ·{" "}
+          <a href="mailto:hello@braidbosspro.app">hello@braidbosspro.app</a>
         </p>
       </LegalSection>
     </LegalShell>
