@@ -97,6 +97,22 @@ export const recordNoShowConsent = async (requestId: string): Promise<boolean> =
   }
 };
 
+// Stamp the client's separate marketing/promotional SMS consent on their
+// booking request (anon). Mirrors recordNoShowConsent: called only when the
+// optional marketing checkbox was ticked. The transactional SMS opt-in is
+// stamped server-side by the booking RPC; this records the distinct A2P /
+// CTIA-required marketing consent (boolean + timestamp + IP/UA) as proof.
+export const recordSmsMarketingConsent = async (requestId: string): Promise<boolean> => {
+  if (!requestId) return false;
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase.rpc("public_record_sms_marketing_consent", { request_id_in: requestId });
+    return !error && !!data && (data as any).ok === true;
+  } catch {
+    return false;
+  }
+};
+
 // Calm presets the UI surfaces as quick-fill chips. The user can
 // always override with their own copy.
 export const POLICY_PRESETS = {

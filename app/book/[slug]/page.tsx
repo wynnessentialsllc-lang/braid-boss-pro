@@ -12,6 +12,7 @@ import {
   type PublicNoShowFee,
   fetchPublicNoShowFee,
   recordNoShowConsent,
+  recordSmsMarketingConsent,
 } from "../../lib/policies";
 import {
   type IntakeForm,
@@ -600,6 +601,14 @@ export default function PublicBookingPage() {
   // rejection reason. Threaded into the booking request so the reminder
   // scheduler knows whether to also send SMS.
   const [smsOptIn, setSmsOptIn] = useState(false);
+  // Marketing/promotional SMS opt-in. Kept SEPARATE from the
+  // transactional opt-in above per A2P 10DLC / CTIA: bundling
+  // transactional + marketing consent in one checkbox is a common
+  // campaign-rejection reason. Default OFF (affirmative, optional
+  // opt-in). Recorded after submit via recordSmsMarketingConsent so it
+  // can gate any future promotional SMS without affecting transactional
+  // sends. No promotional SMS is sent today — this captures consent.
+  const [smsMarketingOptIn, setSmsMarketingOptIn] = useState(false);
   // Style customization (hair color + curl pattern) — only shown
   // when the selected service enables them. "Custom / Other" reveals
   // a small free-text field saved to customization_summary.
@@ -1675,6 +1684,17 @@ export default function PublicBookingPage() {
         if (noShowConsent && noShowFee?.enabled) {
           try {
             await recordNoShowConsent(newRequestId);
+          } catch {
+            /* booking already saved — consent stamp is non-fatal */
+          }
+        }
+
+        // Stamp the separate marketing/promotional SMS consent as proof.
+        // Only called when the optional marketing box was ticked; the
+        // transactional opt-in is stamped server-side by the booking RPC.
+        if (smsMarketingOptIn) {
+          try {
+            await recordSmsMarketingConsent(newRequestId);
           } catch {
             /* booking already saved — consent stamp is non-fatal */
           }
@@ -2913,9 +2933,13 @@ export default function PublicBookingPage() {
                   Stay Updated About Your Appointment
                 </p>
                 <p style={{ margin: "4px 0 0", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
-                  Receive appointment updates and important messages from your stylist.
+                  Choose how Braid Boss Pro and your stylist can text you. Both are optional.
                 </p>
               </div>
+              {/* Transactional consent — appointment / service messages only.
+                  Kept SEPARATE from the marketing opt-in below per A2P 10DLC /
+                  CTIA: a single bundled opt-in mixing transactional + marketing
+                  is a common campaign-rejection reason. Unchecked by default. */}
               <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
                 <input
                   type="checkbox"
@@ -2924,7 +2948,7 @@ export default function PublicBookingPage() {
                   style={{ marginTop: 2, width: 18, height: 18, accentColor: C.brandPrimary, flexShrink: 0 }}
                 />
                 <span style={{ fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>
-                  I agree to receive SMS messages from Braid Boss Pro and my selected stylist regarding:
+                  I agree to receive transactional SMS messages from Braid Boss Pro and my selected stylist about my appointment:
                 </span>
               </label>
               <ul style={{ margin: "0 0 0 30px", padding: 0, color: C.coffee, fontSize: 12.5, lineHeight: 1.7, listStyle: "disc" }}>
@@ -2935,8 +2959,22 @@ export default function PublicBookingPage() {
                 <li>Contract reminders</li>
                 <li>Review requests</li>
                 <li>Rebooking reminders</li>
-                <li>Occasional promotional offers</li>
               </ul>
+              {/* Marketing consent — separate, optional opt-in for
+                  promotional offers. Captured independently on submit (see
+                  recordSmsMarketingConsent) so it can gate any future
+                  promotional SMS without touching transactional sends. */}
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={smsMarketingOptIn}
+                  onChange={e => setSmsMarketingOptIn(e.target.checked)}
+                  style={{ marginTop: 2, width: 18, height: 18, accentColor: C.brandPrimary, flexShrink: 0 }}
+                />
+                <span style={{ fontSize: 13, color: C.coffee, lineHeight: 1.5 }}>
+                  <strong style={{ fontWeight: 700 }}>Optional:</strong> I also agree to receive promotional offers and marketing SMS messages from Braid Boss Pro and my selected stylist.
+                </span>
+              </label>
               <p style={{ margin: 0, fontSize: 11.5, color: C.muted, lineHeight: 1.5 }}>
                 Message frequency varies. Message and data rates may apply. Reply <strong>STOP</strong> to opt out or <strong>HELP</strong> for assistance. Consent is not a condition of purchase.
               </p>
