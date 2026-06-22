@@ -365,12 +365,26 @@ const MarketingFooter = () => (
       <p style={{ fontSize: 11, color: C.mutedSoft }}>
         © {new Date().getFullYear()} <strong style={{ color: C.coffee }}>Wynn Essentials, LLC</strong>. Braid Boss Pro is built for stylists, by stylists.
       </p>
-      <p style={{ fontSize: 11, color: C.mutedSoft }}>
-        braidbosspro.app is operated by Wynn Essentials, LLC ·{" "}
-        <a href="mailto:hello@braidbosspro.app" style={{ color: C.mutedSoft, textDecoration: "underline" }}>
-          hello@braidbosspro.app
-        </a>
-      </p>
+      {/* Business information — surfaced on every marketing page so the
+          legal entity, description, and contact details (address, phone,
+          email) are clearly identifiable, as required for A2P 10DLC /
+          carrier business vetting. */}
+      <div style={{ fontSize: 11, color: C.mutedSoft, lineHeight: 1.6, maxWidth: 560 }}>
+        <p style={{ margin: 0 }}>
+          braidbosspro.app and the Braid Boss Pro appointment-booking platform are operated by{" "}
+          <strong style={{ color: C.coffee }}>Wynn Essentials, LLC</strong> (DBA Braid Boss Pro).
+        </p>
+        <p style={{ margin: "4px 0 0" }}>
+          3680 Wilshire Blvd, Ste P04 #A118, Los Angeles, CA 90010
+        </p>
+        <p style={{ margin: "4px 0 0" }}>
+          <a href="tel:+12132670825" style={{ color: C.mutedSoft, textDecoration: "underline" }}>(213) 267-0825</a>
+          {" · "}
+          <a href="mailto:hello@braidbosspro.app" style={{ color: C.mutedSoft, textDecoration: "underline" }}>
+            hello@braidbosspro.app
+          </a>
+        </p>
+      </div>
     </div>
   </footer>
 );

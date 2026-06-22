@@ -9,6 +9,11 @@ import { getSupabase } from "./supabase";
 
 export type CampaignStatus = "draft" | "scheduled" | "sending" | "sent" | "failed";
 
+// Delivery channel. Email is the default; "sms" sends the body as a text
+// to clients who gave marketing SMS consent (requires the stylist's
+// promotional-SMS opt-in + credits).
+export type CampaignChannel = "email" | "sms";
+
 // Segment definition. Mirrors the JSON shape the process_marketing_
 // campaign RPC consumes. Keep the union narrow — adding a kind here
 // requires extending the SQL processor too.
@@ -24,6 +29,7 @@ export type MarketingCampaign = {
   name: string;
   subject: string;
   body_text: string;
+  channel: CampaignChannel;
   segment: CampaignSegment;
   status: CampaignStatus;
   scheduled_for: string | null;
@@ -40,6 +46,7 @@ export type CampaignDraft = {
   name: string;
   subject: string;
   body_text: string;
+  channel: CampaignChannel;
   segment: CampaignSegment;
 };
 
@@ -83,6 +90,7 @@ export const saveCampaign = async (
     name: draft.name.trim(),
     subject: draft.subject.trim(),
     body_text: draft.body_text,
+    channel: draft.channel,
     segment: draft.segment,
     updated_at: new Date().toISOString(),
   };
@@ -139,11 +147,17 @@ export const sendCampaignNow = async (campaignId: string): Promise<number> => {
   return Number(data) || 0;
 };
 
-// Preview helper for the composer's "Send to N clients" pill.
-export const countSegment = async (segment: CampaignSegment): Promise<number> => {
+// Preview helper for the composer's "Send to N clients" pill. The channel
+// decides which eligibility filter the count uses (email opt-in vs. marketing
+// SMS consent + phone).
+export const countSegment = async (
+  segment: CampaignSegment,
+  channel: CampaignChannel = "email",
+): Promise<number> => {
   const supabase = getSupabase();
   const { data, error } = await supabase.rpc("count_marketing_segment", {
     segment_in: segment,
+    channel_in: channel,
   });
   if (error) throw error;
   return Number(data) || 0;

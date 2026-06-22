@@ -73,8 +73,9 @@ export default function PrivacyPage() {
 
       <LegalSection title="SMS Opt-In Information">
         <LegalList items={[
-          <><strong>How consent is obtained</strong> — Clients opt in by checking an SMS consent box on the stylist’s public booking form before submitting a booking. The box is unchecked by default, is never pre-checked or bundled with any other agreement, and consent is stored with a timestamp and IP address.</>,
-          <><strong>What messages are sent</strong> — appointment confirmations, appointment reminders, booking updates, payment/balance reminders, contract reminders, review requests, and customer support communications. These are transactional messages tied to a client’s appointment; Braid Boss Pro does not send promotional or marketing SMS.</>,
+          <><strong>How consent is obtained</strong> — Clients opt in on the stylist’s public booking form using two separate, unchecked checkboxes: one for transactional appointment messages and a distinct, optional one for promotional messages. Neither box is pre-checked, bundled with any other agreement, or required to book, and each consent is stored with a timestamp and IP address.</>,
+          <><strong>What transactional messages are sent</strong> — appointment confirmations, appointment reminders, booking updates, payment/balance reminders, contract reminders, review requests, rebooking reminders, and customer support communications.</>,
+          <><strong>Promotional messages</strong> — sent only to clients who separately opt in to promotional SMS; these are occasional offers from the client’s stylist. Clients can opt into transactional messages without receiving any promotional texts.</>,
           <><strong>Frequency</strong> — message frequency varies based on your appointment activity.</>,
           <><strong>Opt out</strong> — reply <strong>STOP</strong> at any time to stop messages; a confirmation may be sent.</>,
           <><strong>Help</strong> — reply <strong>HELP</strong> for assistance.</>,
@@ -151,8 +152,12 @@ export default function PrivacyPage() {
 
       <LegalSection title="Contact">
         <p>
-          Questions? Contact <strong>Wynn Essentials, LLC</strong> at{" "}
-          <a href="mailto:hello@braidbosspro.app">hello@braidbosspro.app</a>.
+          Questions? Contact <strong>Wynn Essentials, LLC</strong> (DBA Braid Boss Pro):
+        </p>
+        <p>
+          3680 Wilshire Blvd, Ste P04 #A118, Los Angeles, CA 90010<br />
+          <a href="tel:+12132670825">(213) 267-0825</a> ·{" "}
+          <a href="mailto:hello@braidbosspro.app">hello@braidbosspro.app</a>
         </p>
       </LegalSection>
     </LegalShell>

@@ -204,6 +204,7 @@ import {
 import {
   type MarketingCampaign,
   type CampaignSegment,
+  type CampaignChannel,
   type CampaignDraft,
   describeSegment,
   listCampaigns,
@@ -2331,13 +2332,14 @@ const Pill = ({ children, tone = "neutral" }: {
   );
 };
 
-const Toggle = ({ checked, onChange }: {
+const Toggle = ({ checked, onChange, disabled = false }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
+  disabled?: boolean;
 }) => (
-  <button type="button" onClick={() => onChange(!checked)}
+  <button type="button" disabled={disabled} onClick={() => { if (!disabled) onChange(!checked); }}
     className="relative inline-flex items-center w-12 h-7 rounded-full transition shrink-0"
-    style={{ background: checked ? C.gold : C.mutedSoft, border: `1px solid ${checked ? C.goldDeep : C.hairline}` }}>
+    style={{ background: checked ? C.gold : C.mutedSoft, border: `1px solid ${checked ? C.goldDeep : C.hairline}`, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1 }}>
     <span className="inline-block w-5 h-5 rounded-full bg-white shadow transition-transform"
       style={{ transform: checked ? "translateX(22px)" : "translateX(2px)" }} />
   </button>
@@ -22241,6 +22243,10 @@ const ServerPushTogglesSection = ({ userId }: { userId: string }) => {
 // (queue_notification) enforces this server-side regardless of the UI.
 const SmsNotificationsToggleSection = ({ userId }: { userId: string }) => {
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  // Separate promotional-SMS opt-in. Default OFF; only relevant once the
+  // master switch is on. Gates whether a stylist-composed campaign can be
+  // sent over SMS (see process_marketing_campaign).
+  const [marketingEnabled, setMarketingEnabled] = useState<boolean>(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -22249,11 +22255,12 @@ const SmsNotificationsToggleSection = ({ userId }: { userId: string }) => {
       const supabase = getSupabase();
       const { data } = await supabase
         .from("profiles")
-        .select("sms_notifications_enabled")
+        .select("sms_notifications_enabled, sms_marketing_enabled")
         .eq("id", userId)
         .maybeSingle();
       if (cancelled) return;
       setEnabled(!!data?.sms_notifications_enabled);
+      setMarketingEnabled(!!data?.sms_marketing_enabled);
     })();
     return () => { cancelled = true; };
   }, [userId]);
@@ -22261,9 +22268,23 @@ const SmsNotificationsToggleSection = ({ userId }: { userId: string }) => {
   const persist = useCallback(async (next: boolean) => {
     setBusy(true);
     setEnabled(next);
+    // Turning the master switch off implicitly disables marketing SMS too.
+    if (!next) setMarketingEnabled(false);
     try {
       const supabase = getSupabase();
       await supabase.rpc("set_sms_notifications_enabled", { enabled_in: next });
+      if (!next) await supabase.rpc("set_sms_marketing_enabled", { enabled_in: false });
+    } finally {
+      setBusy(false);
+    }
+  }, [userId]);
+
+  const persistMarketing = useCallback(async (next: boolean) => {
+    setBusy(true);
+    setMarketingEnabled(next);
+    try {
+      const supabase = getSupabase();
+      await supabase.rpc("set_sms_marketing_enabled", { enabled_in: next });
     } finally {
       setBusy(false);
     }
@@ -22285,6 +22306,15 @@ const SmsNotificationsToggleSection = ({ userId }: { userId: string }) => {
           <p className="text-[11px]" style={{ color: C.muted }}>Master switch for all client text messages</p>
         </div>
         <Toggle checked={enabled} onChange={(v) => void persist(v)} />
+      </div>
+      <div className="flex items-center justify-between py-1" style={{ opacity: enabled ? 1 : 0.5 }}>
+        <div className="min-w-0 pr-3">
+          <p className="text-sm font-semibold" style={{ color: C.espresso }}>Promotional texts</p>
+          <p className="text-[11px]" style={{ color: C.muted }}>
+            Let marketing campaigns send by SMS to clients who opted into promotions. Each text uses one credit.
+          </p>
+        </div>
+        <Toggle checked={marketingEnabled} disabled={!enabled} onChange={(v) => void persistMarketing(v)} />
       </div>
       {busy && <p className="text-[11px] text-right" style={{ color: C.muted }}>Saving…</p>}
     </div>
@@ -36938,6 +36968,10 @@ const CampaignComposerSheet = ({
   const [name, setName]       = useState(campaign?.name || prefill?.name || "");
   const [subject, setSubject] = useState(campaign?.subject || prefill?.subject || "");
   const [body, setBody]       = useState(campaign?.body_text || prefill?.body || "");
+  // Delivery channel. SMS sends `body` as a text to clients with marketing
+  // SMS consent; email keeps the subject + body behaviour.
+  const [channel, setChannel] = useState<CampaignChannel>(campaign?.channel || "email");
+  const isSms = channel === "sms";
   const initialSegment: CampaignSegment =
     (campaign?.segment as CampaignSegment) || prefill?.segment || { kind: "all" };
   const [segmentKind, setSegmentKind] = useState<CampaignSegment["kind"]>(initialSegment.kind);
@@ -36981,21 +37015,24 @@ const CampaignComposerSheet = ({
     return () => { cancelled = true; };
   }, [isReadOnly, campaign?.id]);
 
-  // Only clients with an email can receive a campaign; the picker
-  // hides the rest so the stylist isn't confused by a checked client
-  // who silently never gets the email.
-  const emailableClients = useMemo(
+  // Only clients reachable on the chosen channel can receive a campaign;
+  // the picker hides the rest so the stylist isn't confused by a checked
+  // client who silently never gets the message. Email needs an address;
+  // SMS needs a phone (marketing consent is enforced server-side at send).
+  const eligibleClients = useMemo(
     () => (clients || [])
-      .filter(c => c?.email && String(c.email).trim().length > 3)
+      .filter(c => isSms
+        ? (c?.phone && String(c.phone).replace(/\D/g, "").length >= 7)
+        : (c?.email && String(c.email).trim().length > 3))
       .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""))),
-    [clients],
+    [clients, isSms],
   );
   const visibleClients = useMemo(() => {
     const q = clientSearch.trim().toLowerCase();
-    if (!q) return emailableClients;
-    return emailableClients.filter(c =>
-      [c.name, c.email].filter(Boolean).some(v => String(v).toLowerCase().includes(q)));
-  }, [emailableClients, clientSearch]);
+    if (!q) return eligibleClients;
+    return eligibleClients.filter(c =>
+      [c.name, c.email, c.phone].filter(Boolean).some(v => String(v).toLowerCase().includes(q)));
+  }, [eligibleClients, clientSearch]);
 
   const togglePicked = (id: string) => {
     setPickedIds(prev => {
@@ -37018,26 +37055,29 @@ const CampaignComposerSheet = ({
     let cancelled = false;
     const t = window.setTimeout(async () => {
       try {
-        const n = await countSegment(segment);
+        const n = await countSegment(segment, channel);
         if (!cancelled) setRecipientCount(n);
       } catch {
         if (!cancelled) setRecipientCount(null);
       }
     }, 350);
     return () => { cancelled = true; window.clearTimeout(t); };
-  }, [segment]);
+  }, [segment, channel]);
 
   const persistDraft = async (): Promise<MarketingCampaign | null> => {
     if (!userId) return null;
     if (!name.trim()) { setMsg({ kind: "error", text: "Give the campaign a name." }); return null; }
-    if (!subject.trim()) { setMsg({ kind: "error", text: "Subject is required." }); return null; }
-    if (!body.trim()) { setMsg({ kind: "error", text: "Write a message body." }); return null; }
+    if (!isSms && !subject.trim()) { setMsg({ kind: "error", text: "Subject is required." }); return null; }
+    if (!body.trim()) { setMsg({ kind: "error", text: isSms ? "Write the text message." : "Write a message body." }); return null; }
     try {
       const saved = await saveCampaign(userId, {
         id: campaign?.id,
         name: name,
-        subject: subject,
+        // SMS has no subject line; store the internal name so the
+        // not-null column is satisfied without leaking into the text.
+        subject: isSms ? (subject || name) : subject,
         body_text: body,
+        channel,
         segment,
       });
       return saved;
@@ -37171,6 +37211,30 @@ const CampaignComposerSheet = ({
           />
         </Field>
 
+        <Field label="Send by" hint={isSms ? "Texts go only to clients who opted into promotional SMS. Each text uses one SMS credit." : undefined}>
+          <div className="grid grid-cols-2 gap-2">
+            {([["email", "Email"], ["sms", "Text (SMS)"]] as Array<[CampaignChannel, string]>).map(([val, label]) => {
+              const active = channel === val;
+              return (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => !isReadOnly && setChannel(val)}
+                  disabled={isReadOnly}
+                  className="px-3 py-2.5 rounded-xl text-[13px] font-semibold transition"
+                  style={{
+                    background: active ? C.espresso : C.cream,
+                    color: active ? "#fff" : C.espresso,
+                    border: `1px solid ${active ? C.espresso : C.hairline}`,
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+
         <Field label="Who gets it">
           <select
             value={segmentKind}
@@ -37222,9 +37286,11 @@ const CampaignComposerSheet = ({
                 <p className="text-[12px]" style={{ color: C.muted }}>
                   {pickedIds.size} client{pickedIds.size === 1 ? "" : "s"} were picked for this campaign.
                 </p>
-              ) : emailableClients.length === 0 ? (
+              ) : eligibleClients.length === 0 ? (
                 <p className="text-[12px]" style={{ color: C.muted }}>
-                  No clients with an email address yet. Add an email to a client to include them.
+                  {isSms
+                    ? "No clients with a phone number yet. Add a phone to a client to include them."
+                    : "No clients with an email address yet. Add an email to a client to include them."}
                 </p>
               ) : (
                 <>
@@ -37269,7 +37335,7 @@ const CampaignComposerSheet = ({
                               <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>
                                 {c.name || "Unnamed client"}
                               </p>
-                              <p className="text-[11px] truncate" style={{ color: C.muted }}>{c.email}</p>
+                              <p className="text-[11px] truncate" style={{ color: C.muted }}>{isSms ? c.phone : c.email}</p>
                             </div>
                           </button>
                         );
@@ -37300,23 +37366,33 @@ const CampaignComposerSheet = ({
           </p>
         </Field>
 
-        <Field label="Subject line">
-          <Input
-            value={subject}
-            onChange={e => setSubject(e.target.value)}
-            placeholder="A little something for our regulars"
-            disabled={isReadOnly}
-          />
-        </Field>
+        {!isSms && (
+          <Field label="Subject line">
+            <Input
+              value={subject}
+              onChange={e => setSubject(e.target.value)}
+              placeholder="A little something for our regulars"
+              disabled={isReadOnly}
+            />
+          </Field>
+        )}
 
-        <Field label="Message" hint="Use {{client_name}}, {{studio_name}}, {{book_url}} to personalize.">
+        <Field
+          label={isSms ? "Text message" : "Message"}
+          hint="Use {{client_name}}, {{studio_name}}, {{book_url}} to personalize."
+        >
           <Textarea
             value={body}
             onChange={e => setBody(e.target.value)}
             placeholder={"Hey {{client_name}}!\n\nA quick note from {{studio_name}}…"}
-            rows={9}
+            rows={isSms ? 5 : 9}
             disabled={isReadOnly}
           />
+          {isSms && !isReadOnly && (
+            <p className="text-[11px] mt-1" style={{ color: body.length > 320 ? C.danger : C.muted }}>
+              {body.length} characters · &ldquo;Reply STOP to opt out&rdquo; is added automatically. Keep it short to use fewer credits.
+            </p>
+          )}
         </Field>
 
         {!isReadOnly && (
