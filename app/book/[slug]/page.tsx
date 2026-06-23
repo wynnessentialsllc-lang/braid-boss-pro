@@ -1556,7 +1556,10 @@ export default function PublicBookingPage() {
         // stylist) get pinged about a request that was never paid for.
         // The deposit webhook (app/api/booking-deposit/webhook) fires
         // the post-payment notifications instead. No-deposit bookings
-        // have no payment gate, so we acknowledge immediately as before.
+        // have no payment gate, so they're a real booking on arrival:
+        // enqueue_public_booking_emails acknowledges the client AND
+        // alerts the stylist (email + push) right away so the request
+        // doesn't sit unseen in the Approvals queue.
         if (!needsDeposit) {
           try {
             const base = typeof window !== "undefined" ? window.location.origin : null;

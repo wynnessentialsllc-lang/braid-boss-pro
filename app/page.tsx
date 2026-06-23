@@ -19681,6 +19681,32 @@ const buildNotifications = (store: any): NotifItem[] => {
     });
   }
 
+  // APPOINTMENT — a no-deposit booking landed and is waiting for your
+  // review. The block above only alerts on deposit-first requests
+  // AFTER the deposit clears; a request in `pending_review` has no
+  // deposit gate, so it's a real booking the moment it arrives and the
+  // stylist should hear about it right away. Routes straight to the
+  // Approvals queue (which already lists pending_review with
+  // approve/decline actions) so there's a clear place to act on it.
+  const newReviewRequests = safeApprovals.filter((r: any) =>
+    r && r.approval_status === "pending_review"
+  );
+  for (const r of newReviewRequests) {
+    const dateLabel = r.preferred_date ? fmtDate(r.preferred_date) : "no date";
+    const timeLabel = r.preferred_time ? ` at ${fmtTime(r.preferred_time)}` : "";
+    items.push({
+      id: `newreq_${r.id}`,
+      category: "appointment",
+      kind: "booking_request_new",
+      tone: "gold",
+      icon: <CalendarPlus size={16} style={{ color: C.goldDeep }} />,
+      title: `${r.client_name || "Client"} booked · needs review`,
+      body: `${r.service_name || "Service"} · ${dateLabel}${timeLabel}. Approve to add it to your calendar, or decline.`,
+      meta: "Tap to review",
+      target: { kind: "booking_approval", requestId: r.id },
+    });
+  }
+
   // APPOINTMENT — a client cancelled via their self-service link.
   // The booking + calendar slot are already released server-side;
   // this is the heads-up so the stylist isn't blindsided. Only
