@@ -96,6 +96,44 @@ export const monthlyEquivalent = (e: ExpenseLike): number => {
   }
 };
 
+// ---- Reporting-period expense total ---------------------------------
+// The Money card shows an "Expenses"/"Net" pair against a selected
+// window (7d / 30d / 90d / All). One-off expenses count when their date
+// lands in the window; recurring expenses are an ongoing monthly cost,
+// so we scale the monthly burn to the window's length. "all" deliberately
+// shows a single month's burn rather than an unbounded projection —
+// recurring items carry no start date to multiply from, so projecting
+// across years would be meaningless.
+
+export type ReportingPeriod = "week" | "month" | "quarter" | "all";
+
+// How many months of recurring burn each window represents. 30d maps to
+// exactly 1 so the card's Net lines up with the "Expenses (mo)" tile.
+export const RECURRING_PERIOD_MONTHS: Record<ReportingPeriod, number> = {
+  week: 7 / 30,
+  month: 1,
+  quarter: 3,
+  all: 1,
+};
+
+export const expensesForPeriod = (
+  expenses: ExpenseLike[] | null | undefined,
+  period: ReportingPeriod,
+  rangeStart: string,
+  rangeEnd: string,
+): number => {
+  const months = RECURRING_PERIOD_MONTHS[period] ?? 1;
+  let total = 0;
+  for (const e of expenses || []) {
+    if (e.isRecurring) {
+      total += monthlyEquivalent(e) * months;
+    } else if (e.expenseDate && e.expenseDate >= rangeStart && e.expenseDate <= rangeEnd) {
+      total += expenseAmount(e);
+    }
+  }
+  return round2(total);
+};
+
 // ---- Aggregates ------------------------------------------------------
 
 export type ExpenseTotals = {

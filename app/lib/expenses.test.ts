@@ -3,6 +3,7 @@ import {
   computeExpenseTotals,
   groupExpensesForList,
   estimateProfit,
+  expensesForPeriod,
   monthlyEquivalent,
   type ExpenseLike,
 } from "./expenses";
@@ -74,6 +75,36 @@ describe("estimateProfit reflects recurring expenses", () => {
     ];
     const t = computeExpenseTotals(expenses, REF);
     expect(estimateProfit(1000, t.monthTotal)).toBe(654.62);
+  });
+});
+
+describe("expensesForPeriod — Money card Expenses/Net row", () => {
+  const recurring: ExpenseLike[] = [
+    { id: "sub", amount: 345.38, isRecurring: true, recurringInterval: "monthly" },
+  ];
+
+  it("shows a full month of recurring burn for the 30d window", () => {
+    // Lines up with the 'Expenses (mo)' tile so the card's Net matches.
+    expect(expensesForPeriod(recurring, "month", "2026-05-24", "2026-06-23")).toBe(345.38);
+  });
+
+  it("scales recurring burn down for a 7d window and up for 90d", () => {
+    expect(expensesForPeriod(recurring, "week", "2026-06-17", "2026-06-23")).toBe(80.59);
+    expect(expensesForPeriod(recurring, "quarter", "2026-03-25", "2026-06-23")).toBe(1036.14);
+  });
+
+  it("shows a single month's burn for 'all' rather than an unbounded projection", () => {
+    expect(expensesForPeriod(recurring, "all", "2000-01-01", "2026-06-23")).toBe(345.38);
+  });
+
+  it("adds one-off expenses only when their date falls inside the window", () => {
+    const mixed: ExpenseLike[] = [
+      { id: "sub", amount: 100, isRecurring: true, recurringInterval: "monthly" },
+      { id: "in", amount: 40, expenseDate: "2026-06-10" },
+      { id: "out", amount: 25, expenseDate: "2026-04-01" },
+    ];
+    // month window: $100 recurring + $40 in-window one-off, $25 excluded.
+    expect(expensesForPeriod(mixed, "month", "2026-05-24", "2026-06-23")).toBe(140);
   });
 });
 
