@@ -537,6 +537,26 @@ const renderStylistDepositPaid = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- client_message_owner_alert (notify stylist: client wrote in) ---
+// The in-app bell + web push already fire from public_post_client_message
+// the instant a client posts. This is the email half so the stylist
+// still hears about a new client message when the app is closed.
+// Recipient is the stylist, so no client-facing studio framing.
+const renderClientMessageOwnerAlert = (p: Record<string, any>) => {
+  const clientName = p.clientName || "A client";
+  const preview = String(p.messagePreview || "").trim();
+  const appUrl = String(p.appUrl || "https://braidbosspro.app").trim() || "https://braidbosspro.app";
+  const subject = `New message from ${clientName}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">New message</p>
+    <h1 style="font-size:20px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">${escape(clientName)} sent you a message.</h1>
+    ${preview ? `<p style="font-size:14px;line-height:22px;margin:0 0 16px;color:${C.coffee};border-left:3px solid ${C.hairline};padding-left:12px;">${escape(preview)}</p>` : ""}
+    <p style="font-size:14px;line-height:22px;margin:0 0 4px;color:${C.coffee};">Open Braid Boss Pro to read the full message and reply.</p>
+    ${ctaButton("Open messages", appUrl)}
+  `);
+  return { subject, html };
+};
+
 // ---- balance_paid (with review link) -------------------------------
 const renderBalancePaid = (p: Record<string, any>) => {
   const clientName  = p.clientName  || "there";
@@ -1677,6 +1697,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderDepositReceived(row.payload || {});
     case "stylist_deposit_paid":
       return renderStylistDepositPaid(row.payload || {});
+    case "client_message_owner_alert":
+      return renderClientMessageOwnerAlert(row.payload || {});
     case "balance_paid":
       return renderBalancePaid(row.payload || {});
     case "review_request":
@@ -1746,6 +1768,7 @@ const renderForRow = (row: ClaimedRow): Rendered => {
 const sendViaResend = async (
   row: ClaimedRow,
   rendered: Rendered,
+  replyTo: string | null = null,
 ): Promise<
   | { ok: true; providerMessageId: string | null }
   | { ok: false; retryable: boolean; error: string }
@@ -1773,6 +1796,7 @@ const sendViaResend = async (
       body: JSON.stringify({
         from: fromEmail,
         to: row.recipient_email,
+        reply_to: replyTo || undefined,
         subject: rendered.subject,
         html: rendered.html,
         text: row.body,
@@ -2076,6 +2100,46 @@ const enrichStudioName = async (
   }
 };
 
+// Reply-To enrichment — client-facing emails go out from the platform's
+// verified send address (so DKIM/SPF/DMARC pass), but a client hitting
+// "reply" should reach the stylist, not the platform inbox. We resolve
+// the stylist's login email once per user_id (cached for the batch) and
+// set it as Reply-To. Stylist-addressed alerts (recipient == the stylist)
+// and marketing blasts are excluded.
+const ownerEmailCache = new Map<string, string | null>();
+
+const resolveOwnerEmail = async (
+  admin: ReturnType<typeof createClient>,
+  userId: string | null,
+): Promise<string | null> => {
+  if (!userId) return null;
+  if (ownerEmailCache.has(userId)) return ownerEmailCache.get(userId) ?? null;
+  let email: string | null = null;
+  try {
+    const { data } = await admin.auth.admin.getUserById(userId);
+    email = (data?.user?.email ?? null) || null;
+  } catch {
+    email = null; // best-effort — fall back to no Reply-To
+  }
+  ownerEmailCache.set(userId, email);
+  return email;
+};
+
+const resolveReplyTo = async (
+  admin: ReturnType<typeof createClient>,
+  row: ClaimedRow,
+): Promise<string | null> => {
+  if (row.channel !== "email") return null;
+  if (MARKETING_NOTIFICATION_TYPES.has(row.notification_type)) return null;
+  const owner = await resolveOwnerEmail(admin, row.user_id);
+  if (!owner) return null;
+  // Don't point a stylist-addressed alert's Reply-To back at the stylist.
+  if (row.recipient_email && row.recipient_email.toLowerCase() === owner.toLowerCase()) {
+    return null;
+  }
+  return owner;
+};
+
 // =====================================================================
 // HTTP handler
 // =====================================================================
@@ -2208,7 +2272,8 @@ serve(async (req) => {
         await enrichCustomization(admin, row);
         await enrichStudioName(admin, row);
         const rendered = renderForRow(row);
-        result = await sendViaResend(row, rendered);
+        const replyTo = await resolveReplyTo(admin, row);
+        result = await sendViaResend(row, rendered, replyTo);
         provider = "resend";
       }
 
