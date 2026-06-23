@@ -142,6 +142,15 @@ describe("buildCoachSnapshot", () => {
     expect(s.goal.remaining).toBe(420);
   });
 
+  it("folds shop sales into monthly goal progress", () => {
+    // service thisMonth revenue is 180; + 120 shop sales = 300 of a 600 goal
+    // -> 50%, 300 to go.
+    const s = buildCoachSnapshot(clients, appointments, TODAY, "USD", 800, 600, 120);
+    expect(s.goal.revenueThisMonth).toBe(300);
+    expect(s.goal.progressPct).toBe(50);
+    expect(s.goal.remaining).toBe(300);
+  });
+
   it("leaves the goal null when none is set", () => {
     expect(snap.goal.amount).toBeNull();
     expect(snap.goal.progressPct).toBeNull();
