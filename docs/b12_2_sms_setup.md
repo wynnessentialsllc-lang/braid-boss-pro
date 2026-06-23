@@ -77,8 +77,20 @@ exist), these send a client SMS through the queue:
 | 24-hour reminder | `appointment_reminder` | `enqueue_due_appointment_reminders` (cron */30) |
 | 2-hour reminder | `appointment_reminder_2h` (SMS only) | `enqueue_due_2h_sms_reminders` (cron */15) |
 | Review request | `review_request` | `enqueue_due_review_requests` (post-visit) |
+| Appointment cancelled | `client_booking_cancelled` | mirrored from the email by `mirror_client_email_to_sms` |
+| Stylist rescheduled a confirmed appt | `appointment_rescheduled` | mirrored from the email |
+| Reschedule request received | `client_booking_rescheduled` | mirrored from the email |
+| Request declined (no charge / refunded / manual refund) | `booking_denied_no_charge` · `booking_denied_refunded` · `booking_denied_refund_manual` | mirrored from the email |
 
 Every outbound SMS gets `Reply STOP to opt out.` appended by the worker.
+
+The cancellation / reschedule / denial texts are **mirrored at the queue**:
+an `AFTER INSERT` trigger on `notification_queue`
+(`mirror_client_email_to_sms`, migration `20261106000000`) enqueues a
+parallel SMS whenever one of those client-facing emails is inserted —
+covering every enqueue path (app routes + SQL self-service) without
+threading SMS through each one. Same opt-in / credits / opt-out gating as
+the other client SMS.
 
 ## 2. A2P 10DLC registration (required for US sending)
 
