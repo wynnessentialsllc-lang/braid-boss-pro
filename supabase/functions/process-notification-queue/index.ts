@@ -57,16 +57,19 @@ const MARKETING_NOTIFICATION_TYPES = new Set<string>([
   "marketing_campaign",
   "reorder_nudge",
 ]);
-const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID") || "";
-const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN") || "";
-const TWILIO_PHONE_NUMBER = Deno.env.get("TWILIO_PHONE_NUMBER") || "";
+// .trim() every Twilio credential: dashboard paste regularly tacks a
+// trailing newline/space onto a secret, and Twilio rejects e.g. a
+// MessagingServiceSid with a stray "\n" as error 21705 (invalid SID).
+const TWILIO_ACCOUNT_SID = (Deno.env.get("TWILIO_ACCOUNT_SID") || "").trim();
+const TWILIO_AUTH_TOKEN = (Deno.env.get("TWILIO_AUTH_TOKEN") || "").trim();
+const TWILIO_PHONE_NUMBER = (Deno.env.get("TWILIO_PHONE_NUMBER") || "").trim();
 // Preferred sender. A Messaging Service (MG...) lets Twilio pick the
 // right number from its sender pool and carries the toll-free / A2P
 // registration. When set we send with MessagingServiceSid instead of a
 // bare From number; TWILIO_PHONE_NUMBER stays as the fallback so an
 // older single-number deploy keeps working.
 const TWILIO_MESSAGING_SERVICE_SID =
-  Deno.env.get("TWILIO_MESSAGING_SERVICE_SID") || "";
+  (Deno.env.get("TWILIO_MESSAGING_SERVICE_SID") || "").trim();
 // Where Twilio POSTs delivery receipts (twilio-status edge function),
 // which flip the queue row to delivered/failed and refund undelivered
 // sends. Defaults to this project's functions domain; override if needed.
