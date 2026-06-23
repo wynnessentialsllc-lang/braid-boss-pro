@@ -25518,7 +25518,11 @@ const ExpensesScreen = ({ store, onBack, initialView = "overview", initialCatego
     const start = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
     const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);
     const end = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-01`;
-    return (expenses || []).filter(e => e.expenseDate && e.expenseDate >= start && e.expenseDate < end)
+    // Recurring expenses bill every month, so they're always part of
+    // "this month" regardless of the date they were first logged —
+    // matching the way they're folded into the month total + profit.
+    return (expenses || []).filter(e =>
+      e.isRecurring || (e.expenseDate && e.expenseDate >= start && e.expenseDate < end))
       .sort((a, b) => (b.expenseDate || "").localeCompare(a.expenseDate || ""));
   }, [expenses]);
 

@@ -121,19 +121,41 @@ export const computeExpenseTotals = (
   let monthlySubscriptions = 0;
   const cat = new Map<string, { amount: number; count: number }>();
 
+  const addCategory = (e: ExpenseLike, amount: number) => {
+    const k = (e.category || "Other").trim() || "Other";
+    const cur = cat.get(k) || { amount: 0, count: 0 };
+    cur.amount += amount;
+    cur.count += 1;
+    cat.set(k, cur);
+  };
+
   for (const e of list) {
     const a = expenseAmount(e);
     const d = e.expenseDate || "";
+
+    // Recurring expenses are part of the monthly budget regardless of
+    // when they were entered — a $20/mo subscription costs $20 every
+    // month, not just the month it was added. Fold the monthly
+    // equivalent into the month total + category breakdown so profit
+    // tracks the true monthly burn automatically, and keep the
+    // subscriptions line as its own number. We deliberately count the
+    // monthly equivalent (not the row's `expenseDate` amount) so
+    // weekly/yearly subs normalise and a recurring item is never
+    // double-counted via its date.
+    if (e.isRecurring) {
+      const me = monthlyEquivalent(e);
+      monthlySubscriptions += me;
+      monthTotal += me;
+      addCategory(e, me);
+      continue;
+    }
+
+    // One-off expenses count against the day/week/month they happened.
     if (d === reference) todayTotal += a;
     if (d && d >= weekStart && d <= reference) weekTotal += a;
-    if (d && d >= month.start && d < month.end) monthTotal += a;
-    if (e.isRecurring) monthlySubscriptions += monthlyEquivalent(e);
     if (d && d >= month.start && d < month.end) {
-      const k = (e.category || "Other").trim() || "Other";
-      const cur = cat.get(k) || { amount: 0, count: 0 };
-      cur.amount += a;
-      cur.count += 1;
-      cat.set(k, cur);
+      monthTotal += a;
+      addCategory(e, a);
     }
   }
 
@@ -195,9 +217,14 @@ export const groupExpensesForList = (
 
   for (const e of list) {
     const d = e.expenseDate || "";
-    const a = expenseAmount(e);
+    // Recurring costs belong to "this month" no matter when they were
+    // first entered — they bill every month — and contribute their
+    // monthly equivalent to the group total so it matches the headline
+    // month total.
+    const a = e.isRecurring ? monthlyEquivalent(e) : expenseAmount(e);
     let bucket: ExpenseGroup["key"] = "older";
-    if (d === reference) bucket = "today";
+    if (e.isRecurring) bucket = "month";
+    else if (d === reference) bucket = "today";
     else if (d && d >= weekStart && d <= reference) bucket = "week";
     else if (d && d >= month.start && d < month.end) bucket = "month";
     groups[bucket].items.push(e);
