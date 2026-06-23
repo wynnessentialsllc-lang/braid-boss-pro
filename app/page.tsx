@@ -292,8 +292,10 @@ import {
   groupExpensesForList,
   buildExpenseInsights,
   expenseAmount,
+  expensesForPeriod,
   type ExpenseLike,
   type RecurringInterval,
+  type ReportingPeriod,
 } from "./lib/expenses";
 import { computeProfit, rankStyleProfitability } from "./lib/pricing-profit";
 import { recipeCost, lineFromInventoryItem, type RecipeLine } from "./lib/recipe-cost";
@@ -15469,7 +15471,17 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
   const income = incomeRows.reduce((s, t) => s + (Number(t.amount) || 0), 0);
   const shopIncome = incomeRows.filter(t => t.stream === "shop").reduce((s, t) => s + (Number(t.amount) || 0), 0);
   const serviceIncome = income - shopIncome;
-  const expenses = all.filter(t => t.type === "expense").reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  // Ledger expenses (manual sheet rows + checkout) for the window.
+  const txExpenses = all.filter(t => t.type === "expense").reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  // Fold in business expenses so the card's Expenses/Net reflect the
+  // recurring monthly burn (scaled to the window) the same way the
+  // Profit KPIs do — otherwise the card reads $0.00 while "Expenses (mo)"
+  // below it shows the real number.
+  const businessExpensePeriod = useMemo(
+    () => expensesForPeriod(store.businessExpenses || [], period as ReportingPeriod, range.start, range.end),
+    [store.businessExpenses, period, range],
+  );
+  const expenses = roundCents(txExpenses + businessExpensePeriod);
   const net = income - expenses;
 
   const sessionsInRange = useMemo(() =>
