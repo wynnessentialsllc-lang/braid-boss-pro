@@ -57,16 +57,19 @@ const MARKETING_NOTIFICATION_TYPES = new Set<string>([
   "marketing_campaign",
   "reorder_nudge",
 ]);
-const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID") || "";
-const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN") || "";
-const TWILIO_PHONE_NUMBER = Deno.env.get("TWILIO_PHONE_NUMBER") || "";
+// .trim() every Twilio credential: dashboard paste regularly tacks a
+// trailing newline/space onto a secret, and Twilio rejects e.g. a
+// MessagingServiceSid with a stray "\n" as error 21705 (invalid SID).
+const TWILIO_ACCOUNT_SID = (Deno.env.get("TWILIO_ACCOUNT_SID") || "").trim();
+const TWILIO_AUTH_TOKEN = (Deno.env.get("TWILIO_AUTH_TOKEN") || "").trim();
+const TWILIO_PHONE_NUMBER = (Deno.env.get("TWILIO_PHONE_NUMBER") || "").trim();
 // Preferred sender. A Messaging Service (MG...) lets Twilio pick the
 // right number from its sender pool and carries the toll-free / A2P
 // registration. When set we send with MessagingServiceSid instead of a
 // bare From number; TWILIO_PHONE_NUMBER stays as the fallback so an
 // older single-number deploy keeps working.
 const TWILIO_MESSAGING_SERVICE_SID =
-  Deno.env.get("TWILIO_MESSAGING_SERVICE_SID") || "";
+  (Deno.env.get("TWILIO_MESSAGING_SERVICE_SID") || "").trim();
 // Where Twilio POSTs delivery receipts (twilio-status edge function),
 // which flip the queue row to delivered/failed and refund undelivered
 // sends. Defaults to this project's functions domain; override if needed.
@@ -2167,6 +2170,48 @@ const resolveReplyTo = async (
 };
 
 // =====================================================================
+// Shop name enrichment — product/order emails are storefront purchases,
+// which carry their own brand (booking_links.shop_name, e.g. a boutique
+// name distinct from the booking/studio name). Enqueue paths thread the
+// studio/business name into payload.studioName; for order types we
+// override it with the shop name so the receipt reads "Your order from
+// <shop>". Resolution mirrors the storefront (app/lib/storefront-meta):
+// booking_links.shop_name → booking_links.business_name. When neither
+// exists we leave the enqueuer's value (renderer falls back to
+// "your boutique").
+const SHOP_NAME_TYPES = new Set([
+  "order_confirmation",
+  "order_ready_for_pickup",
+  "order_shipped",
+  // Reorder nudge ("time to restock your <product>") is a storefront/
+  // product email, so it carries the shop brand too.
+  "reorder_nudge",
+]);
+
+const enrichShopName = async (
+  admin: ReturnType<typeof createClient>,
+  row: ClaimedRow,
+): Promise<void> => {
+  if (!SHOP_NAME_TYPES.has(row.notification_type)) return;
+  if (!row.user_id) return;
+  const p: Record<string, any> =
+    (row.payload && typeof row.payload === "object") ? row.payload : (row.payload = {});
+  try {
+    const { data } = await admin
+      .from("booking_links").select("shop_name, business_name")
+      .eq("user_id", row.user_id)
+      .order("created_at", { ascending: false })
+      .limit(1).maybeSingle();
+    const resolved =
+      String((data as any)?.shop_name ?? "").trim() ||
+      String((data as any)?.business_name ?? "").trim();
+    if (resolved) p.studioName = resolved;
+  } catch {
+    // best-effort — renderer fallback ("your boutique") still applies
+  }
+};
+
+// =====================================================================
 // HTTP handler
 // =====================================================================
 const json = (status: number, body: unknown) =>
@@ -2297,6 +2342,7 @@ serve(async (req) => {
       } else {
         await enrichCustomization(admin, row);
         await enrichStudioName(admin, row);
+        await enrichShopName(admin, row);
         const rendered = renderForRow(row);
         const replyTo = await resolveReplyTo(admin, row);
         result = await sendViaResend(row, rendered, replyTo);

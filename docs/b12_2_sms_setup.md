@@ -12,9 +12,17 @@ doc is purely operational.
 
 ## 1. Twilio account + sending number (required)
 
-**Live config (toll-free, verified):**
-- Messaging Service SID: `MG72a42abd8c856af96835c99c49ba5fe7`
-- Toll-Free Number: `+18556298377` (attached to the Messaging Service)
+**Live config (10DLC, A2P-registered):**
+- Messaging Service SID: `MGe4be6ed030e475d804d051f2b61ebf6c`
+- 10DLC Number: `+15755677776` (in the Messaging Service sender pool)
+- A2P Campaign SID: `CM9cc91134f5af2d0592c2087e8dadee87` (use case
+  `LOW_VOLUME`) — approved 2026-06-15
+- A2P Brand Registration SID: `BNce39419e9641287898a463d044044f5e`
+
+> **Migrated off toll-free (2026-06):** the previous setup used toll-free
+> number `+18556298377` on Messaging Service
+> `MG72a42abd8c856af96835c99c49ba5fe7`. Those are retired — the function
+> secrets and the inbound webhook now point at the 10DLC service above.
 
 1. Create / sign in to a Twilio account.
 2. Provision a Messaging Service and attach a sending number (done — see
@@ -27,7 +35,8 @@ doc is purely operational.
    supabase secrets set \
      TWILIO_ACCOUNT_SID=AC_xxx \
      TWILIO_AUTH_TOKEN=xxx \
-     TWILIO_MESSAGING_SERVICE_SID=MG72a42abd8c856af96835c99c49ba5fe7 \
+     TWILIO_MESSAGING_SERVICE_SID=MGe4be6ed030e475d804d051f2b61ebf6c \
+     TWILIO_PHONE_NUMBER=+15755677776 \
      --project-ref bjqazhplxqqhftekspfl
    ```
    - The worker (`process-notification-queue`) prefers
