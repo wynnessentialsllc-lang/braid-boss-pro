@@ -537,6 +537,27 @@ const renderStylistDepositPaid = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- stylist_new_booking (notify stylist: no-deposit request) ------
+// Fires from enqueue_public_booking_emails the moment a NO-DEPOSIT
+// request lands. Deposit-first requests stay quiet until their deposit
+// clears (renderStylistDepositPaid handles those); a no-deposit request
+// is a real booking on arrival, so the stylist hears about it now.
+const renderStylistNewBooking = (p: Record<string, any>) => {
+  const clientName  = p.clientName  || "A client";
+  const serviceName = p.serviceName || null;
+  const date        = p.preferredDate || null;
+  const time        = p.preferredTime || null;
+  const when        = [date, time].filter(Boolean).join(" · ");
+  const subject = `New booking request — ${clientName}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">New request</p>
+    <h1 style="font-size:20px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">${escape(clientName)} requested a booking.</h1>
+    <p style="font-size:14px;line-height:22px;margin:0 0 10px;color:${C.coffee};">${serviceName ? `<strong>${escape(serviceName)}</strong>` : ""}${serviceName && when ? " · " : ""}${when ? `<strong>${escape(when)}</strong>` : ""}</p>
+    <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">This request doesn't require a deposit, so it's waiting on you. Open Braid Boss Pro to review and confirm it onto your calendar — or decline.</p>
+  `);
+  return { subject, html };
+};
+
 // ---- client_message_owner_alert (notify stylist: client wrote in) ---
 // The in-app bell + web push already fire from public_post_client_message
 // the instant a client posts. This is the email half so the stylist
@@ -1700,6 +1721,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderDepositReceived(row.payload || {});
     case "stylist_deposit_paid":
       return renderStylistDepositPaid(row.payload || {});
+    case "stylist_new_booking":
+      return renderStylistNewBooking(row.payload || {});
     case "client_message_owner_alert":
       return renderClientMessageOwnerAlert(row.payload || {});
     case "balance_paid":
