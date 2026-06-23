@@ -30023,6 +30023,10 @@ const ApprovalQueueScreen = ({
           const fallbackDeposit = req.service_deposit_required && req.service_deposit_amount
             ? Number(req.service_deposit_amount).toFixed(2)
             : "";
+          // No-deposit requests have nothing to collect, so approving
+          // them shouldn't run the "set a deposit + hold the slot" flow.
+          // They confirm straight onto the calendar instead.
+          const noDeposit = !req.deposit_required;
           return (
             <Card
               id={`approval-row-${req.id}`}
@@ -30134,7 +30138,34 @@ const ApprovalQueueScreen = ({
               )}
 
               {/* Actions */}
-              {status === "pending_review" && (
+              {status === "pending_review" && noDeposit && (
+                <>
+                  <p className="text-[11px]" style={{ color: C.muted }}>
+                    No deposit required — confirming adds this straight to your calendar.
+                  </p>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={busyId === req.id}
+                      onClick={() => handleApproveAndCreate(req)}
+                      className="flex-1 py-2 rounded-lg text-[12px] font-semibold"
+                      style={{ background: C.espresso, color: C.cream, border: `1px solid ${C.espresso}` }}
+                    >
+                      {busyId === req.id ? "Confirming…" : "Confirm booking"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === req.id}
+                      onClick={() => setExpanded(`decline:${req.id}`)}
+                      className="px-3 py-2 rounded-lg text-[12px] font-semibold"
+                      style={{ background: C.ivory, color: C.coffee, border: `1px solid ${C.hairline}` }}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </>
+              )}
+              {status === "pending_review" && !noDeposit && (
                 <>
                   {!isOpen && (
                     <div className="flex gap-2 pt-1">
