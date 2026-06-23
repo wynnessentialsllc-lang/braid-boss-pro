@@ -2093,6 +2093,9 @@ const SHOP_NAME_TYPES = new Set([
   "order_confirmation",
   "order_ready_for_pickup",
   "order_shipped",
+  // Reorder nudge ("time to restock your <product>") is a storefront/
+  // product email, so it carries the shop brand too.
+  "reorder_nudge",
 ]);
 
 const enrichShopName = async (
