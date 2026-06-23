@@ -545,14 +545,17 @@ const renderStylistDepositPaid = (p: Record<string, any>) => {
 const renderClientMessageOwnerAlert = (p: Record<string, any>) => {
   const clientName = p.clientName || "A client";
   const preview = String(p.messagePreview || "").trim();
-  const appUrl = String(p.appUrl || "https://braidbosspro.app").trim() || "https://braidbosspro.app";
+  // Deep-link straight to the Inbox (?focus=inbox) instead of the bare
+  // site root, which would land the stylist on the marketing page.
+  const base = (Deno.env.get("NEXT_PUBLIC_SITE_URL") || String(p.appUrl || "") || "https://braidbosspro.app").replace(/\/$/, "");
+  const inboxUrl = `${base}/?focus=inbox`;
   const subject = `New message from ${clientName}`;
   const html = wrapHtml(subject, `
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">New message</p>
     <h1 style="font-size:20px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">${escape(clientName)} sent you a message.</h1>
     ${preview ? `<p style="font-size:14px;line-height:22px;margin:0 0 16px;color:${C.coffee};border-left:3px solid ${C.hairline};padding-left:12px;">${escape(preview)}</p>` : ""}
     <p style="font-size:14px;line-height:22px;margin:0 0 4px;color:${C.coffee};">Open Braid Boss Pro to read the full message and reply.</p>
-    ${ctaButton("Open messages", appUrl)}
+    ${ctaButton("Open messages", inboxUrl)}
   `);
   return { subject, html };
 };
