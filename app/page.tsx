@@ -39222,6 +39222,12 @@ export default function App() {
     let params: URLSearchParams;
     try { params = new URL(rawUrl, window.location.origin).searchParams; }
     catch { return false; }
+    // Inbox deep link — the client-message email/push CTA points at
+    // /?focus=inbox so tapping it lands on the Inbox, not the home page.
+    if (params.get("focus") === "inbox") {
+      setSecondary("inbox");
+      return true;
+    }
     const id = params.get("id");
     if (params.get("focus") !== "client" || !id) return false;
     if (params.get("action") === "rebooking") {
