@@ -13,7 +13,7 @@ doc is purely operational.
 ## 1. Twilio account + sending number (required)
 
 **Live config (10DLC, A2P-registered):**
-- Messaging Service SID: `MG4be6ed030e475d804d051f2b61ebf6c`
+- Messaging Service SID: `MGe4be6ed030e475d804d051f2b61ebf6c`
 - 10DLC Number: `+15755677776` (in the Messaging Service sender pool)
 - A2P Campaign SID: `CM9cc91134f5af2d0592c2087e8dadee87` (use case
   `LOW_VOLUME`) — approved 2026-06-15
@@ -35,7 +35,7 @@ doc is purely operational.
    supabase secrets set \
      TWILIO_ACCOUNT_SID=AC_xxx \
      TWILIO_AUTH_TOKEN=xxx \
-     TWILIO_MESSAGING_SERVICE_SID=MG4be6ed030e475d804d051f2b61ebf6c \
+     TWILIO_MESSAGING_SERVICE_SID=MGe4be6ed030e475d804d051f2b61ebf6c \
      TWILIO_PHONE_NUMBER=+15755677776 \
      --project-ref bjqazhplxqqhftekspfl
    ```
