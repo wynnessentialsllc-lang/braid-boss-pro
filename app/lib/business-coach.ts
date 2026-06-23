@@ -268,6 +268,7 @@ export const buildCoachSnapshot = (
   currency = "USD",
   vipThreshold = 800,
   monthlyGoal: number | null = null,
+  shopSalesThisMonth = 0,
 ): CoachSnapshot => {
   const appts = Array.isArray(appointments) ? appointments : [];
   const rev = calculateRevenueAnalytics(appts, todayIso);
@@ -353,7 +354,10 @@ export const buildCoachSnapshot = (
     },
     topOpportunities,
     workload: computeWorkload(appts, todayIso),
-    goal: buildGoal(monthlyGoal, rev.thisMonth),
+    // Goal progress counts total business income (service + shop sales),
+    // matching the Monthly Goal card on the dashboard so the briefing and
+    // the card can never disagree.
+    goal: buildGoal(monthlyGoal, rev.thisMonth + (Number.isFinite(shopSalesThisMonth) ? shopSalesThisMonth : 0)),
     period: buildPeriod(todayIso),
   };
 };

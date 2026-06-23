@@ -3184,6 +3184,7 @@ const BusinessCoachCard = ({
   currency,
   ownerName,
   monthlyGoal,
+  shopSalesThisMonth,
 }: {
   clients: any[];
   appointments: any[];
@@ -3191,6 +3192,7 @@ const BusinessCoachCard = ({
   currency: string;
   ownerName: string | null;
   monthlyGoal?: number | null;
+  shopSalesThisMonth?: number;
 }) => {
   const [busy, setBusy] = useState(false);
   const [briefing, setBriefing] = useState<CoachBriefing | null>(null);
@@ -3206,7 +3208,7 @@ const BusinessCoachCard = ({
       const { data: sess } = await getSupabase().auth.getSession();
       const token = sess?.session?.access_token;
       if (!token) { setError("Please sign in again."); return; }
-      const snapshot = buildCoachSnapshot(clients, appointments, today, currency, undefined, monthlyGoal ?? null);
+      const snapshot = buildCoachSnapshot(clients, appointments, today, currency, undefined, monthlyGoal ?? null, shopSalesThisMonth ?? 0);
       const res = await fetch("/api/business-coach", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -5512,9 +5514,11 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
   // which already syncs across every device via the Sync & Backup engine —
   // so it follows the stylist without a new synced field. Stored as
   // { amount, month } so a goal naturally lapses when a new month starts,
-  // prompting a fresh top-of-month check-in. Progress uses the SAME
-  // month-revenue figure the coach narrates (appointment service revenue),
-  // so the card and the briefing can never disagree.
+  // prompting a fresh top-of-month check-in. Progress counts ALL money the
+  // business brought in this month — appointment service revenue PLUS shop
+  // sales (Boss Checkout + paid online orders) — so the goal reflects total
+  // take-home. The coach is fed the same combined figure (see monthlyGoal
+  // wiring below) so the card and the briefing can never disagree.
   const currentMonth = today.slice(0, 7);
   const savedGoal =
     business?.monthlyGoal && typeof business.monthlyGoal === "object"
@@ -5525,8 +5529,8 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
       ? savedGoal.amount
       : null;
   const monthRevenueForGoal = useMemo(
-    () => calculateRevenueAnalytics(appointments, today).thisMonth,
-    [appointments, today],
+    () => calculateRevenueAnalytics(appointments, today).thisMonth + shopSales.month,
+    [appointments, today, shopSales.month],
   );
   const saveMonthlyGoal = useCallback(
     async (amount: number | null) => {
@@ -5687,6 +5691,7 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           currency={business.currency}
           ownerName={business.ownerName?.split(" ")[0] || null}
           monthlyGoal={monthlyGoalAmount}
+          shopSalesThisMonth={shopSales.month}
         />
 
         {/* Monthly goal — sits right under the coach so the goal the coach
