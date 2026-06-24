@@ -138,7 +138,7 @@ export const AvailabilityCalendar = ({
         </button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4, marginBottom: 4 }}>
         {WEEKDAY_LETTERS.map((w, i) => (
           <div
             key={`wk-${i}`}
@@ -153,7 +153,7 @@ export const AvailabilityCalendar = ({
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4 }}>
         {cells.map((cell, idx) => {
           if (!cell) return <div key={`pad-${idx}`} style={{ minHeight: 44 }} />;
           const info = dayMap.get(cell.iso);

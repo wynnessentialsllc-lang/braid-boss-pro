@@ -199,8 +199,10 @@ export default function BuildYourStyle({ slug, userId, accent = "#7C3AED", curre
   };
 
   const label: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#3D3447", marginBottom: 4 };
-  const input: React.CSSProperties = { width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(21,17,26,0.15)", fontSize: 14, background: "#fff", color: "#15111A" };
-  const row2: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 };
+  const input: React.CSSProperties = { width: "100%", maxWidth: "100%", minWidth: 0, boxSizing: "border-box", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(21,17,26,0.15)", fontSize: 14, background: "#fff", color: "#15111A" };
+  // minmax(0,1fr) so a long option/value in either cell can't stretch the
+  // 2-col row past the mobile viewport (1fr's default min is min-content).
+  const row2: React.CSSProperties = { display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10 };
 
   if (submitted) {
     return (
