@@ -161,7 +161,7 @@ export default function FaqPage() {
           </>
         }
         body="Everything stylists ask before signing up — pricing, payments, install, Stripe, deposits, storefront. If something isn't here, send us a note from the support page and we'll add it."
-        primaryCta={{ label: "Create my account", href: "/" }}
+        primaryCta={{ label: "Create my account", href: "/?signup=1" }}
         secondaryCta={{ label: "See pricing", href: "/pricing" }}
       />
 
