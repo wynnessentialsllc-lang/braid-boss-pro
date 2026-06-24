@@ -1863,7 +1863,16 @@ export default function PublicBookingPage() {
   };
 
   return (
-    <div style={{ minHeight: "100dvh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso }}>
+    <div style={{ minHeight: "100dvh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso,
+        // The full-bleed carousels (Recent work, Featured) and the brand
+        // wordmark's slide-in animation can push a few px past the viewport
+        // edge. In dark mode the <body> canvas is near-black (#0a0a0a), so
+        // that sliver of horizontal scroll exposes a black band down the
+        // right edge — the "border" that looks broken. Clip it on the page
+        // root. `clip` (not `hidden`) avoids creating a scroll container,
+        // so the fixed "Book" / price bars below keep escaping to the
+        // viewport instead of being trapped.
+        overflowX: "clip" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600;700&display=swap');
         * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
