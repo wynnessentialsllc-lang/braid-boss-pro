@@ -101,7 +101,7 @@ const fetchSubscription = async (subId: string, acctId: string, secret: string):
 // Find-or-create the membership row for a subscription. Tolerant of event
 // ordering: invoice.paid can land before checkout.session.completed.
 const ensureMembership = async (
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   sub: any,
 ): Promise<any | null> => {
   const subId: string | undefined = typeof sub?.id === "string" ? sub.id : undefined;
@@ -167,7 +167,7 @@ const ensureMembership = async (
 // per invoice: the membership_invoices unique(stripe_invoice_id) gate means
 // a Stripe retry can't double-credit.
 const grantCycle = async (
-  admin: ReturnType<typeof createClient>,
+  admin: any,
   membership: any,
   invoiceId: string,
   amountPaid: number,
