@@ -395,8 +395,11 @@ import {
   type ClientPackage,
   type PackageTemplate,
   type PackageKind,
+  type ClientMembership,
   useClientPackages,
   packageRemainingLabel,
+  membershipGrantLabel,
+  intervalPriceLabel,
 } from "./lib/packages";
 import { SMS_ENABLED } from "./lib/features";
 import {
@@ -18884,9 +18887,9 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                       <Gift size={15} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Packages</p>
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Packages & Memberships</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
-                        Prepaid visit & credit bundles
+                        Prepaid bundles & recurring plans
                       </p>
                     </div>
                   </div>
@@ -31881,7 +31884,10 @@ const ClientReviewCard = ({ r, api }: { r: ClientReview; api: any }) => {
 //  Issuing to a client happens from the client profile.
 //  See app/lib/packages.ts.
 // ============================================================
-const blankTemplate = (): any => ({ name: "", kind: "visits", visits: 5, credit_amount: 100, price: 0, service_label: "", active: true });
+const blankTemplate = (mode: "one_time" | "recurring" = "one_time"): any =>
+  mode === "recurring"
+    ? { name: "", kind: "visits", visits: 1, credit_amount: 100, price: 0, service_label: "", active: true, billing_mode: "recurring", billing_interval: "month" }
+    : { name: "", kind: "visits", visits: 5, credit_amount: 100, price: 0, service_label: "", active: true, billing_mode: "one_time", billing_interval: null };
 
 const PackagesScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const api = store?.packagesApi;
@@ -31899,11 +31905,14 @@ const PackagesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
     return c?.name || "Client";
   };
 
-  const copyBuyLink = async (templateId: string) => {
-    const url = `${typeof window !== "undefined" ? window.location.origin : ""}/buy/package/${templateId}`;
+  const copyBuyLink = async (template: PackageTemplate) => {
+    // Recurring templates go through the subscription buy page; one-time
+    // packages use the existing package buy page.
+    const path = template.billing_mode === "recurring" ? "buy/membership" : "buy/package";
+    const url = `${typeof window !== "undefined" ? window.location.origin : ""}/${path}/${template.id}`;
     try { await navigator.clipboard.writeText(url); } catch { /* clipboard blocked */ }
-    setCopiedId(templateId);
-    window.setTimeout(() => setCopiedId((c) => (c === templateId ? null : c)), 1600);
+    setCopiedId(template.id);
+    window.setTimeout(() => setCopiedId((c) => (c === template.id ? null : c)), 1600);
   };
 
   const assign = async (pkgId: string) => {
@@ -31915,7 +31924,11 @@ const PackagesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
     setBusy(false);
   };
 
-  const unassigned = packages.filter((p) => !p.client_id && p.status === "active");
+  // Membership-fed rolling packages are surfaced under their membership,
+  // not as standalone sales, so exclude them from the package lists.
+  const standalonePackages = packages.filter((p) => !p.membership_id);
+  const memberships: ClientMembership[] = api?.memberships || [];
+  const unassigned = standalonePackages.filter((p) => !p.client_id && p.status === "active");
 
   const saveTemplate = async () => {
     if (!editing || busy || !editing.name?.trim()) return;
@@ -31925,17 +31938,17 @@ const PackagesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
     setEditing(null);
   };
 
-  const active = packages.filter((p) => p.status === "active");
-  const inactive = packages.filter((p) => p.status !== "active");
+  const active = standalonePackages.filter((p) => p.status === "active");
+  const inactive = standalonePackages.filter((p) => p.status !== "active");
 
   return (
     <div className="bbp-fade pb-32">
       <Header
-        title="Packages"
-        subtitle="Prepaid visit & credit bundles"
+        title="Packages & Memberships"
+        subtitle="Prepaid bundles & recurring plans"
         leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
         rightAction={
-          <button type="button" onClick={() => setEditing(blankTemplate())}
+          <button type="button" onClick={() => setEditing(blankTemplate("one_time"))}
             className="p-2 rounded-full" style={{ background: C.gold, color: C.espresso, border: 0 }} aria-label="Add package">
             <Plus size={20} />
           </button>
@@ -31948,77 +31961,157 @@ const PackagesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
           </Card>
         )}
 
-        {editing && (
+        {editing && (() => {
+          const recurring = editing.billing_mode === "recurring";
+          const cadence = editing.billing_interval === "week" ? "week"
+            : editing.billing_interval === "year" ? "year" : "month";
+          return (
           <Card className="p-4 space-y-2.5" style={{ border: `1px solid ${C.gold}` }}>
-            <p className="text-sm font-semibold" style={{ color: C.espresso }}>{editing.id ? "Edit package" : "New package"}</p>
+            <p className="text-sm font-semibold" style={{ color: C.espresso }}>
+              {editing.id ? (recurring ? "Edit membership" : "Edit package") : (recurring ? "New membership" : "New package")}
+            </p>
+            {/* Billing mode — one-time package vs recurring membership.
+                Locked once saved so a live Stripe plan can't change shape:
+                editing an existing template shows it as read-only. */}
+            {editing.id ? (
+              <Field label="Billing">
+                <p className="text-[13px] font-medium" style={{ color: C.espresso }}>
+                  {recurring ? "Membership (bills automatically)" : "One-time package (pay once)"}
+                </p>
+              </Field>
+            ) : (
+              <Field label="Billing">
+                <Select
+                  value={recurring ? "recurring" : "one_time"}
+                  onChange={(e) => setEditing({
+                    ...editing,
+                    billing_mode: e.target.value,
+                    billing_interval: e.target.value === "recurring" ? (editing.billing_interval || "month") : null,
+                    // A membership defaults to 1 visit/cycle; a package to a bundle.
+                    visits: e.target.value === "recurring" ? (editing.visits ?? 1) : (editing.visits ?? 5),
+                  })}
+                  options={[
+                    { value: "one_time", label: "One-time package (pay once)" },
+                    { value: "recurring", label: "Membership (bills automatically)" },
+                  ]} />
+              </Field>
+            )}
+            {recurring && (
+              <Field label="Bills every">
+                <Select value={editing.billing_interval || "month"}
+                  onChange={(e) => setEditing({ ...editing, billing_interval: e.target.value })}
+                  options={[
+                    { value: "week", label: "Week" },
+                    { value: "month", label: "Month" },
+                    { value: "year", label: "Year" },
+                  ]} />
+              </Field>
+            )}
             <Field label="Name">
-              <Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="5 Knotless Maintenance" />
+              <Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                placeholder={recurring ? "Monthly Retwist Club" : "5 Knotless Maintenance"} />
             </Field>
             <Field label="Type">
               <Select value={editing.kind} onChange={(e) => setEditing({ ...editing, kind: e.target.value })}
                 options={[{ value: "visits", label: "Visits (a count of appointments)" }, { value: "credit", label: "Credit (a dollar balance)" }]} />
             </Field>
             {editing.kind === "visits" ? (
-              <Field label="Number of visits">
+              <Field label={recurring ? `Visits granted each ${cadence}` : "Number of visits"}>
                 <MoneyInput prefix="" suffix="visits" allowDecimal={false}
                   value={String(editing.visits ?? "")} onChange={(v) => setEditing({ ...editing, visits: parseMoney(v) || 0 })} />
               </Field>
             ) : (
-              <Field label="Credit amount">
+              <Field label={recurring ? `Credit granted each ${cadence}` : "Credit amount"}>
                 <MoneyInput value={String(editing.credit_amount ?? "")} onChange={(v) => setEditing({ ...editing, credit_amount: parseMoney(v) || 0 })} />
               </Field>
             )}
-            <Field label="Price" hint="What the client pays for this bundle.">
+            <Field label={recurring ? `Price per ${cadence}` : "Price"}
+              hint={recurring ? "Charged automatically to the client's card each cycle." : "What the client pays for this bundle."}>
               <MoneyInput value={String(editing.price ?? "")} onChange={(v) => setEditing({ ...editing, price: parseMoney(v) || 0 })} />
             </Field>
-            <Field label="Service / style" hint="Optional — e.g. the style this bundle is for.">
+            <Field label="Service / style" hint="Optional — e.g. the style this is for.">
               <Input value={editing.service_label || ""} onChange={(e) => setEditing({ ...editing, service_label: e.target.value })} placeholder="Knotless maintenance" />
             </Field>
             <div className="flex gap-2 pt-1">
               <Button onClick={saveTemplate} disabled={busy || !editing.name?.trim()} fullWidth>
-                {busy ? "Saving…" : "Save package"}
+                {busy ? "Saving…" : recurring ? "Save membership" : "Save package"}
               </Button>
               <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
             </div>
           </Card>
-        )}
+          );
+        })()}
 
-        <p className="text-[11px] font-semibold uppercase tracking-wide pt-1" style={{ color: C.muted }}>Packages you offer</p>
-        {templates.length === 0 && !editing && (
-          <Card className="p-5 text-center">
-            <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>No packages yet</p>
-            <p className="text-[12px] mt-1" style={{ color: C.muted, lineHeight: 1.5 }}>
-              Create a bundle (like &quot;5 maintenance visits&quot;), then sell it to a client from their profile.
-            </p>
-          </Card>
-        )}
-        {templates.map((t) => (
-          <Card key={t.id} className="p-3.5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{t.name}</p>
-                <p className="text-[11px]" style={{ color: C.muted }}>
-                  {t.kind === "visits" ? `${t.visits} visits` : `${fmtMoney(Number(t.credit_amount) || 0, currency)} credit`}
-                  {" · "}{fmtMoney(Number(t.price) || 0, currency)}
-                  {t.service_label ? ` · ${t.service_label}` : ""}
-                  {!t.active ? " · hidden" : ""}
-                </p>
+        {(() => {
+          const renderTemplate = (t: PackageTemplate) => {
+            const recurring = t.billing_mode === "recurring";
+            const interval = (t.billing_interval || "month") as "week" | "month" | "year";
+            const grant = t.kind === "visits"
+              ? `${t.visits} visit${Number(t.visits) === 1 ? "" : "s"}`
+              : `${fmtMoney(Number(t.credit_amount) || 0, currency)} credit`;
+            return (
+              <Card key={t.id} className="p-3.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{t.name}</p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      {recurring
+                        ? `${grant} each ${interval} · ${intervalPriceLabel(Number(t.price) || 0, interval, currency)}`
+                        : `${grant} · ${fmtMoney(Number(t.price) || 0, currency)}`}
+                      {t.service_label ? ` · ${t.service_label}` : ""}
+                      {!t.active ? " · hidden" : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button type="button" onClick={() => setEditing({ ...t })} className="p-1.5 rounded-full" style={{ color: C.muted }} aria-label="Edit"><Edit3 size={15} /></button>
+                    <button type="button" onClick={() => api.deleteTemplate(t.id)} className="p-1.5 rounded-full" style={{ color: C.muted }} aria-label="Delete"><Trash2 size={15} /></button>
+                  </div>
+                </div>
+                {Number(t.price) > 0 && (
+                  <button type="button" onClick={() => copyBuyLink(t)}
+                    className="mt-2 w-full py-2 rounded-lg text-[12px] font-semibold flex items-center justify-center gap-1.5"
+                    style={{ background: C.ivory, color: C.espresso, border: `1px solid ${C.hairline}` }}>
+                    {copiedId === t.id ? <Check size={13} /> : <Copy size={13} />}
+                    {copiedId === t.id ? "Link copied" : recurring ? "Copy signup link" : "Copy buy link"}
+                  </button>
+                )}
+              </Card>
+            );
+          };
+          const pkgTemplates = templates.filter((t) => t.billing_mode !== "recurring");
+          const memTemplates = templates.filter((t) => t.billing_mode === "recurring");
+          return (
+            <>
+              <p className="text-[11px] font-semibold uppercase tracking-wide pt-1" style={{ color: C.muted }}>Packages you offer</p>
+              {pkgTemplates.length === 0 && !editing && (
+                <Card className="p-5 text-center">
+                  <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>No packages yet</p>
+                  <p className="text-[12px] mt-1" style={{ color: C.muted, lineHeight: 1.5 }}>
+                    Create a bundle (like &quot;5 maintenance visits&quot;), then sell it to a client from their profile.
+                  </p>
+                </Card>
+              )}
+              {pkgTemplates.map(renderTemplate)}
+
+              <div className="flex items-center justify-between pt-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.muted }}>Memberships you offer</p>
+                <button type="button" onClick={() => setEditing(blankTemplate("recurring"))}
+                  className="text-[11px] font-bold uppercase tracking-wider flex items-center gap-1" style={{ color: C.goldDeep }}>
+                  <Plus size={13} /> Membership
+                </button>
               </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button type="button" onClick={() => setEditing({ ...t })} className="p-1.5 rounded-full" style={{ color: C.muted }} aria-label="Edit"><Edit3 size={15} /></button>
-                <button type="button" onClick={() => api.deleteTemplate(t.id)} className="p-1.5 rounded-full" style={{ color: C.muted }} aria-label="Delete"><Trash2 size={15} /></button>
-              </div>
-            </div>
-            {Number(t.price) > 0 && (
-              <button type="button" onClick={() => copyBuyLink(t.id)}
-                className="mt-2 w-full py-2 rounded-lg text-[12px] font-semibold flex items-center justify-center gap-1.5"
-                style={{ background: C.ivory, color: C.espresso, border: `1px solid ${C.hairline}` }}>
-                {copiedId === t.id ? <Check size={13} /> : <Copy size={13} />}
-                {copiedId === t.id ? "Link copied" : "Copy buy link"}
-              </button>
-            )}
-          </Card>
-        ))}
+              {memTemplates.length === 0 && !editing && (
+                <Card className="p-5 text-center">
+                  <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>No memberships yet</p>
+                  <p className="text-[12px] mt-1" style={{ color: C.muted, lineHeight: 1.5 }}>
+                    Offer a recurring plan (like &quot;$120/mo — one retwist a month&quot;). Clients are billed automatically and get fresh visits or credit every cycle.
+                  </p>
+                </Card>
+              )}
+              {memTemplates.map(renderTemplate)}
+            </>
+          );
+        })()}
 
         {unassigned.length > 0 && (
           <>
@@ -32049,7 +32142,7 @@ const PackagesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
           </>
         )}
 
-        {packages.length > 0 && (
+        {standalonePackages.length > 0 && (
           <>
             <p className="text-[11px] font-semibold uppercase tracking-wide pt-2" style={{ color: C.muted }}>Sold packages</p>
             {[...active, ...inactive].map((p) => (
@@ -32067,6 +32160,83 @@ const PackagesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =
                 </div>
               </Card>
             ))}
+          </>
+        )}
+
+        {/* Active members — clients on a recurring plan. */}
+        {memberships.length > 0 && (
+          <>
+            <p className="text-[11px] font-semibold uppercase tracking-wide pt-2" style={{ color: C.muted }}>Members</p>
+            {memberships.map((m) => {
+              const periodEnd = m.current_period_end
+                ? new Date(m.current_period_end).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+                : null;
+              const statusPill = m.status === "active"
+                ? <Pill tone="success">Active</Pill>
+                : m.status === "past_due"
+                  ? <Pill tone="danger">Past due</Pill>
+                  : m.status === "canceled"
+                    ? <Pill tone="neutral">Canceled</Pill>
+                    : <Pill tone="neutral">Pending</Pill>;
+              const linked = m.package_id ? packages.find((p) => p.id === m.package_id) : null;
+              return (
+                <Card key={m.id} className="p-3.5 space-y-1.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{m.name}</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        {m.client_id ? clientName(m.client_id) : (m.purchaser_name || m.purchaser_email || "Unassigned")}
+                        {" · "}{membershipGrantLabel(m, currency)}
+                      </p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        {intervalPriceLabel(Number(m.price) || 0, m.billing_interval, currency)}
+                        {linked ? ` · ${packageRemainingLabel(linked, currency)}` : ""}
+                        {periodEnd && m.status !== "canceled" ? ` · renews ${periodEnd}` : ""}
+                      </p>
+                    </div>
+                    {statusPill}
+                  </div>
+                  {/* Assign an online signup to a client. */}
+                  {!m.client_id && m.status !== "canceled" && (
+                    <div className="flex gap-2 items-center pt-1">
+                      <div className="flex-1">
+                        <Select
+                          value={assignDraft[m.id] || ""}
+                          onChange={(e) => setAssignDraft((d) => ({ ...d, [m.id]: e.target.value }))}
+                          options={[{ value: "", label: "Choose a client…" },
+                            ...(((store.clients as any[]) || []).map((c) => ({ value: String(c.id), label: c.name || "Client" })))]}
+                        />
+                      </div>
+                      <Button
+                        onClick={async () => {
+                          const clientId = assignDraft[m.id];
+                          if (!clientId || busy) return;
+                          const c = (store.clients as any[])?.find((x) => x?.id === clientId);
+                          setBusy(true);
+                          await api.assignMembership(m.id, clientId, c?.name || null);
+                          setBusy(false);
+                        }}
+                        disabled={busy || !assignDraft[m.id]}>Assign</Button>
+                    </div>
+                  )}
+                  {(m.status === "active" || m.status === "past_due") && (
+                    <button type="button"
+                      onClick={async () => {
+                        if (busy) return;
+                        if (typeof window !== "undefined" && !window.confirm(`Cancel ${m.name}? They keep what they've already paid for; no further charges.`)) return;
+                        setBusy(true);
+                        const res = await api.cancelMembership(m.id);
+                        setBusy(false);
+                        if (!res.ok && typeof window !== "undefined") window.alert(`Couldn't cancel: ${res.reason || "unknown error"}`);
+                      }}
+                      className="w-full py-2 rounded-lg text-[12px] font-semibold"
+                      style={{ background: C.ivory, color: C.danger, border: `1px solid ${C.hairline}` }}>
+                      Cancel membership
+                    </button>
+                  )}
+                </Card>
+              );
+            })}
           </>
         )}
       </div>
