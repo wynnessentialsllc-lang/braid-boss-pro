@@ -29,28 +29,22 @@ export default function manifest(): MetadataRoute.Manifest {
     // too so the install + cold-start sequence is uniform.
     background_color: "#FFFFFF",
     theme_color: "#FFFFFF",
+    // The sparkle emblem as a scalable SVG — Android Chrome accepts SVG
+    // manifest icons, so the installed PWA Home Screen icon renders the
+    // brand mark at any density. iOS ignores manifest icons and uses the
+    // generated app/apple-icon.tsx instead. "any" + "maskable" so Android
+    // install banners get a valid maskable candidate.
     icons: [
       {
-        src: "/icons/icon-192.png",
-        sizes: "192x192",
-        type: "image/png",
+        src: "/icon.svg",
+        sizes: "any",
+        type: "image/svg+xml",
         purpose: "any",
       },
       {
-        src: "/icons/icon-512.png",
-        sizes: "512x512",
-        type: "image/png",
-        purpose: "any",
-      },
-      // Same source flagged "maskable" so Android install banners
-      // (Samsung, Pixel) get a valid maskable candidate instead of
-      // skipping the install prompt. A dedicated icon with a 50px
-      // safe zone can replace this entry later without changing the
-      // manifest contract.
-      {
-        src: "/icons/icon-512.png",
-        sizes: "512x512",
-        type: "image/png",
+        src: "/icon.svg",
+        sizes: "any",
+        type: "image/svg+xml",
         purpose: "maskable",
       },
     ],
