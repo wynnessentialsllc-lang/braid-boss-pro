@@ -18,7 +18,8 @@ import {
   Section,
   CtaFooter,
 } from "../components/marketing/MarketingShell";
-import { StepCard, PhoneMockup } from "../components/marketing/StepCard";
+import { StepCard } from "../components/marketing/StepCard";
+import { PhoneInstallSim } from "../components/marketing/PhoneInstallSim";
 import { C, FONT_DISPLAY, GRADIENTS, SHADOWS } from "../components/marketing/tokens";
 
 export const metadata: Metadata = {
@@ -324,8 +325,9 @@ export default function HowItWorksPage() {
 
 // ---- Local-only components -------------------------------------------------
 
-// Install card — phone mockup + numbered substeps. Different label
-// for the PhoneMockup notch shape (iOS pill vs Android dot).
+// Install card — animated install simulator + numbered substeps. The
+// `tone` drives the iOS (Safari/share-sheet) vs Android (Chrome/menu)
+// walkthrough inside PhoneInstallSim.
 const InstallCard = ({
   tone,
   label,
@@ -349,8 +351,8 @@ const InstallCard = ({
       flexWrap: "wrap",
     }}
   >
-    <div style={{ width: 140, flexShrink: 0 }}>
-      <PhoneMockup tone={tone} label={label} />
+    <div style={{ width: 176, flexShrink: 0, marginInline: "auto" }}>
+      <PhoneInstallSim tone={tone} label={label} />
     </div>
     <div style={{ flex: 1, minWidth: 220 }}>
       <p
