@@ -32172,6 +32172,21 @@ const InboxScreen = ({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "unread">("all");
+
+  const unreadThreadCount = useMemo(
+    () => threads.reduce((s, t) => s + (t.unread > 0 ? 1 : 0), 0),
+    [threads],
+  );
+  const visibleThreads = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return threads.filter((t) => {
+      if (filter === "unread" && !(t.unread > 0)) return false;
+      if (q && !(t.clientName || "").toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [threads, query, filter]);
 
   const openThread = threads.find((t) => t.bookingRequestId === openId) || null;
 
@@ -32246,7 +32261,7 @@ const InboxScreen = ({
             </Button>
           </div>
           <p className="text-[11px] text-center pt-3" style={{ color: C.muted, lineHeight: 1.5 }}>
-            {openThread.clientName.split(" ")[0]} sees your replies on their appointment link.
+            Replies are texted to {openThread.clientName.split(" ")[0]} when they have SMS on, and always saved here.
           </p>
         </div>
       </div>
@@ -32257,11 +32272,51 @@ const InboxScreen = ({
   return (
     <div className="bbp-fade pb-32">
       <Header
-        title="Inbox"
-        subtitle="Messages from your clients"
+        title="Messages"
+        subtitle="Your client conversations"
         leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
       />
-      <div className="px-5 pt-2 space-y-3">
+
+      {threads.length > 0 && (
+        <div className="px-5 pt-2">
+          {/* Search */}
+          <div className="relative mb-3">
+            <Search size={16} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: C.muted }} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search messages"
+              className="w-full rounded-xl text-[15px] outline-none"
+              style={{ background: C.ivory, border: `1px solid ${C.hairline}`, color: C.ink, padding: "10px 12px 10px 36px" }}
+            />
+          </div>
+          {/* Filter chips */}
+          <div className="flex gap-2">
+            {([["all", "Inbox"], ["unread", "Unread"]] as const).map(([key, label]) => {
+              const active = filter === key;
+              const count = key === "unread" ? unreadThreadCount : 0;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setFilter(key)}
+                  className="text-[13px] font-semibold rounded-full transition"
+                  style={{
+                    padding: "6px 14px",
+                    background: active ? C.gold : "transparent",
+                    color: active ? "#FFFFFF" : C.coffee,
+                    border: `1px solid ${active ? C.gold : C.hairline}`,
+                  }}
+                >
+                  {label}{count > 0 ? ` · ${count}` : ""}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="px-5 pt-3">
         {threads.length === 0 ? (
           <Card className="p-6 text-center">
             <div className="mx-auto mb-3 flex items-center justify-center" style={{ width: 52, height: 52, borderRadius: 99, background: C.ivory, color: C.gold }}>
@@ -32271,38 +32326,48 @@ const InboxScreen = ({
               No messages yet
             </p>
             <p className="text-[13px] mt-1" style={{ color: C.muted, lineHeight: 1.55 }}>
-              When a client sends you a message from their appointment link, it&apos;ll show up here — with a bell and a push notification.
+              When a client messages you — from their appointment link or by replying to a text — it&apos;ll show up here, with a bell and a push notification.
             </p>
           </Card>
+        ) : visibleThreads.length === 0 ? (
+          <p className="text-center text-[13px] pt-10" style={{ color: C.muted }}>
+            {filter === "unread" ? "No unread messages." : "No matches."}
+          </p>
         ) : (
-          threads.map((t) => (
-            <button
-              key={t.bookingRequestId}
-              type="button"
-              onClick={() => setOpenId(t.bookingRequestId)}
-              className="w-full text-left rounded-2xl p-4"
-              style={{ background: C.paper, border: `1px solid ${C.hairline}` }}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 min-w-0">
-                  <p className="font-semibold truncate" style={{ color: C.espresso, fontSize: 15 }}>{t.clientName}</p>
-                  {t.unread > 0 && (
-                    <span style={{
-                      flexShrink: 0, background: C.gold, color: "#FFFFFF", fontSize: 11, fontWeight: 700,
-                      borderRadius: 99, minWidth: 18, height: 18, padding: "0 6px",
-                      display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    }}>
-                      {t.unread}
-                    </span>
-                  )}
-                </div>
-                <span className="text-[11px] flex-shrink-0" style={{ color: C.muted }}>{fmtRelative(t.lastMessageAt)}</span>
-              </div>
-              <p className="text-[13px] mt-1 truncate" style={{ color: t.unread > 0 ? C.espresso : C.muted, fontWeight: t.unread > 0 ? 600 : 400 }}>
-                {t.lastSender === "stylist" ? "You: " : ""}{t.lastMessageBody}
-              </p>
-            </button>
-          ))
+          <div style={{ background: C.paper, border: `1px solid ${C.hairline}`, borderRadius: 16, overflow: "hidden" }}>
+            {visibleThreads.map((t, i) => {
+              const unread = t.unread > 0;
+              return (
+                <button
+                  key={t.bookingRequestId}
+                  type="button"
+                  onClick={() => setOpenId(t.bookingRequestId)}
+                  className="w-full text-left transition"
+                  style={{ display: "block", background: "transparent", borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
+                >
+                  <div className="flex items-center gap-3" style={{ padding: "12px 14px" }}>
+                    {/* Avatar */}
+                    <div style={{ flexShrink: 0, width: 44, height: 44, borderRadius: 12, background: C.ivory, color: C.gold, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, letterSpacing: "0.02em" }}>
+                      {initials(t.clientName)}
+                    </div>
+                    {/* Body */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate" style={{ color: C.espresso, fontSize: 15, fontWeight: unread ? 700 : 600 }}>{t.clientName}</p>
+                        <span className="text-[11px] flex-shrink-0" style={{ color: unread ? C.gold : C.muted, fontWeight: unread ? 700 : 400 }}>{fmtRelative(t.lastMessageAt)}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5" style={{ marginTop: 2 }}>
+                        {unread && <span style={{ flexShrink: 0, width: 7, height: 7, borderRadius: 99, background: C.gold }} />}
+                        <p className="text-[13px] truncate" style={{ color: unread ? C.espresso : C.muted, fontWeight: unread ? 600 : 400 }}>
+                          {t.lastSender === "stylist" ? "You: " : ""}{t.lastMessageBody}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>
