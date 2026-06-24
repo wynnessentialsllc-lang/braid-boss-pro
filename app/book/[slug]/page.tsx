@@ -104,7 +104,7 @@ function ClientLoveCard({ r, accent }: { r: PublicReview; accent: string }) {
     <div
       role="listitem"
       style={{
-        flex: "0 0 280px",
+        flex: "0 0 min(85vw, 280px)",
         scrollSnapAlign: "start",
         padding: 16,
         borderRadius: 16,
@@ -1913,6 +1913,17 @@ export default function PublicBookingPage() {
           background: linear-gradient(90deg, #7C3AED, #FF4D6D);
           border-radius: 99px;
         }
+        /* Soft right-edge fade for the horizontal card carousels
+           (Featured, testimonials, Recent work). The page root clips
+           horizontal overflow, so a peeking card used to look hard-cut
+           against the screen edge. Fading the trailing edge instead
+           reads as "there's more — swipe" rather than a layout bug.
+           Vertical (top/bottom) stays fully opaque so card shadows and
+           the featured glow aren't touched. */
+        .bbp-rail-fade {
+          -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+          mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+        }
         /* Branded-hero entrance — the editorial / spotlight headers
            rise + fade their identity stack on first paint so the
            stylist's brand makes an entrance instead of snapping in.
@@ -2509,6 +2520,7 @@ export default function PublicBookingPage() {
               Recent work
             </p>
             <div
+              className="bbp-rail-fade"
               style={{
                 display: "flex",
                 gap: 10,
@@ -2703,6 +2715,7 @@ export default function PublicBookingPage() {
             <div
               role="list"
               aria-label="Client testimonials"
+              className="bbp-rail-fade"
               style={{
                 marginTop: 12,
                 display: "flex",
@@ -3012,6 +3025,7 @@ export default function PublicBookingPage() {
                   return (
                     <Field label="Featured">
                       <div
+                        className="bbp-rail-fade"
                         style={{
                           display: "flex",
                           gap: 14,
@@ -3023,6 +3037,9 @@ export default function PublicBookingPage() {
                           padding: "10px 12px 14px",
                           margin: "0 -12px",
                           scrollbarWidth: "none",
+                          // Snap each card to the start as you swipe so the
+                          // carousel settles on a card instead of mid-peek.
+                          scrollSnapType: "x mandatory",
                         }}
                       >
                         {featured.map(s => (
@@ -3032,7 +3049,7 @@ export default function PublicBookingPage() {
                             // Drives the spotlight aura color (see the
                             // .bbp-featured rule) off the storefront
                             // accent so it tracks the theme.
-                            style={{ flex: "0 0 240px", ["--bbp-accent" as string]: accent } as React.CSSProperties}
+                            style={{ flex: "0 0 min(78vw, 240px)", scrollSnapAlign: "start", ["--bbp-accent" as string]: accent } as React.CSSProperties}
                           >
                           <button
                             type="button"
