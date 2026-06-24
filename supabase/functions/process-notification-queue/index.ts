@@ -1834,6 +1834,14 @@ const smsText = (row: ClaimedRow): string => {
       : "";
   let txt = String(fromPayload || row.body || "").trim();
   if (!txt) return "";
+  // A2P 10DLC brand identification: the campaign is registered under the
+  // "Braid Boss Pro" brand, so every message must identify that brand to
+  // stay consistent with the registration (the message body still names
+  // the stylist's business for the client's benefit). Prepend unless the
+  // text already references the brand so we don't double up.
+  if (!/braid\s*boss\s*pro/i.test(txt)) {
+    txt = `Braid Boss Pro: ${txt}`;
+  }
   // Carrier compliance (A2P 10DLC / CTIA): every outbound message must
   // carry opt-out instructions, and content filters look for them. Append
   // unless the body already references STOP so we don't double up.
