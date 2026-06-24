@@ -198,8 +198,8 @@ serve(async (req) => {
         if (data.auto_reply) {
           const studio = String(data.studio_name || "your stylist");
           return messageTwiml(
-            `Braid Boss Pro: thanks! ${studio} got your message and will follow up. ` +
-              `This number only sends appointment updates. Reply STOP to opt out.`,
+            `Braid Boss Pro: thanks! ${studio} got your message and will reply soon. ` +
+              `Reply STOP to opt out.`,
           );
         }
       }
