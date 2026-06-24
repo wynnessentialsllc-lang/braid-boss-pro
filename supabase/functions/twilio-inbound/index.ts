@@ -41,6 +41,9 @@ const STOP_WORDS = new Set([
   "STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT",
 ]);
 const START_WORDS = new Set(["START", "UNSTOP", "YES"]);
+// HELP/INFO are answered by Twilio's Advanced Opt-Out (carrier-compliant
+// wording) — we don't forward them as client messages.
+const HELP_WORDS = new Set(["HELP", "INFO"]);
 
 // Empty TwiML — acknowledges receipt, sends no message of our own.
 const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
@@ -49,6 +52,20 @@ const twiml = (status = 200) =>
     status,
     headers: { "content-type": "text/xml; charset=utf-8" },
   });
+
+const xmlEscape = (s: string): string =>
+  s.replace(/[<>&'"]/g, (c) =>
+    c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === "&" ? "&amp;"
+      : c === "'" ? "&apos;" : "&quot;");
+
+// TwiML that sends one auto-reply back to the texter. Used only for
+// non-keyword inbound (STOP/HELP/START stay on Twilio's Advanced Opt-Out,
+// which doesn't touch other inbound, so there's no double-reply).
+const messageTwiml = (text: string, status = 200) =>
+  new Response(
+    `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${xmlEscape(text)}</Message></Response>`,
+    { status, headers: { "content-type": "text/xml; charset=utf-8" } },
+  );
 
 // Twilio request signature. Algorithm: take the full request URL, then
 // append every POST param as key+value in alphabetical key order, HMAC-
@@ -166,9 +183,28 @@ serve(async (req) => {
       const { error } = await admin.rpc("sms_clear_opt_out", { phone_in: from });
       if (error) console.error("[twilio-inbound] clear_opt_out:", error.message);
       else console.info(`[twilio-inbound] opted back in ${from.slice(-4)} (${keyword})`);
+    } else if (!HELP_WORDS.has(keyword)) {
+      // A real reply (not STOP/START/HELP). Route it to the stylist's
+      // client_messages thread; auto-reply once per 12h so the client
+      // knows it landed and the line isn't actively monitored.
+      const { data, error } = await admin.rpc("record_inbound_sms_reply", {
+        phone_in: from,
+        body_in: body,
+      });
+      if (error) {
+        console.error("[twilio-inbound] forward reply:", error.message);
+      } else if (data?.ok) {
+        console.info(`[twilio-inbound] forwarded reply from ${from.slice(-4)}`);
+        if (data.auto_reply) {
+          const studio = String(data.studio_name || "your stylist");
+          return messageTwiml(
+            `Braid Boss Pro: thanks! ${studio} got your message and will follow up. ` +
+              `This number only sends appointment updates. Reply STOP to opt out.`,
+          );
+        }
+      }
     }
-    // HELP and everything else: no state change. Twilio's Advanced
-    // Opt-Out sends the compliance reply.
+    // HELP: no state change. Twilio's Advanced Opt-Out sends the reply.
   } catch (e: any) {
     console.error("[twilio-inbound] handler threw:", e?.message || e);
   }
