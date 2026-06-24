@@ -74,16 +74,11 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
   },
   icons: {
-    icon: [
-      // SVG first — modern browsers prefer it, so the tab shows the
-      // Braid Boss Pro sparkle emblem (crisp at any size). The PNGs are
-      // legacy fallbacks for browsers without SVG-favicon support.
-      { url: "/icon.svg", type: "image/svg+xml" },
-      { url: "/favicon.png", type: "image/png", sizes: "32x32" },
-      { url: "/icons/icon-192.png", type: "image/png", sizes: "192x192" },
-      { url: "/icons/icon-512.png", type: "image/png", sizes: "512x512" },
-    ],
-    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+    // /icon.svg → the crisp sparkle emblem on browsers that support SVG
+    // favicons (Chrome/Firefox/Edge). app/icon.tsx + app/apple-icon.tsx
+    // (next/og) generate PNG versions for Safari + iOS Home Screen. The
+    // Android PWA Home Screen icon comes from manifest.ts.
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
   },
 };
 
