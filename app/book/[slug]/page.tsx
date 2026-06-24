@@ -373,6 +373,42 @@ export default function PublicBookingPage() {
   // requiring those RPCs to know about branded slugs.
   const slug = link?.slug || urlSlug;
 
+  // ---- Horizontal-overflow debugger (opt-in) ---------------------------
+  // Load the page with ?debugwidth=1 on a real device to find any element
+  // that sticks out past the right edge of the viewport: each offender is
+  // logged to the console (tag, classes, width, right edge) and outlined in
+  // red on screen. Inert unless the flag is present, so it's safe to ship;
+  // remove once mobile overflow is confirmed clean. Re-scans on resize and
+  // a moment after load so lazy content (carousels, calendar) is included.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!new URLSearchParams(window.location.search).has("debugwidth")) return;
+    const scan = () => {
+      const vw = document.documentElement.clientWidth;
+      const offenders: Array<Record<string, unknown>> = [];
+      document.querySelectorAll<HTMLElement>("body *").forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) return; // skip hidden
+        if (r.right > vw + 1 || r.left < -1) {
+          el.style.outline = "2px solid red";
+          offenders.push({
+            tag: el.tagName.toLowerCase(),
+            cls: typeof el.className === "string" ? el.className : "",
+            width: Math.round(r.width),
+            left: Math.round(r.left),
+            right: Math.round(r.right),
+            text: (el.textContent || "").trim().slice(0, 40),
+          });
+        }
+      });
+      // eslint-disable-next-line no-console
+      console.log(`[debugwidth] viewport=${vw}px — ${offenders.length} element(s) past the edge`, offenders);
+    };
+    const t = window.setTimeout(scan, 900);
+    window.addEventListener("resize", scan);
+    return () => { window.clearTimeout(t); window.removeEventListener("resize", scan); };
+  }, []);
+
   // Personalize the browser tab + share title so a branded URL reads
   // like the stylist's brand instead of the generic shell. Document
   // title is the lightest-touch SEO signal we have on this client
@@ -1863,7 +1899,7 @@ export default function PublicBookingPage() {
   };
 
   return (
-    <div style={{ minHeight: "100dvh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso,
+    <div className="bbp-book-scope" style={{ minHeight: "100dvh", width: "100%", maxWidth: "100%", background: C.cream, fontFamily: FONT_BODY, color: C.espresso,
         // The full-bleed carousels (Recent work, Featured) and the brand
         // wordmark's slide-in animation can push a few px past the viewport
         // edge. In dark mode the <body> canvas is near-black (#0a0a0a), so
@@ -1871,7 +1907,10 @@ export default function PublicBookingPage() {
         // right edge — the "border" that looks broken. Clip it on the page
         // root. `clip` (not `hidden`) avoids creating a scroll container,
         // so the fixed "Book" / price bars below keep escaping to the
-        // viewport instead of being trapped.
+        // viewport instead of being trapped. This is a SAFETY NET only —
+        // the real overflow causes (long unbreakable text + grid columns
+        // that stretch to a wide child) are fixed at the source below via
+        // the .bbp-book-scope word-break rule + minmax(0,1fr) tracks.
         overflowX: "clip" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600;700&display=swap');
@@ -1923,6 +1962,29 @@ export default function PublicBookingPage() {
         .bbp-rail-fade {
           -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
           mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+        }
+        /* ROOT-CAUSE mobile-overflow fix. A single long, unbreakable token
+           in any client-entered text — a service/option description, an
+           acknowledgment, a consultation answer, a pasted URL, a long file
+           name — has a min-content width equal to that token. Because the
+           booking form is a CSS grid, that wide min-content stretches the
+           whole column, dragging every card/input/section off the right
+           edge (the uniform "bleed"). Allowing those tokens to break makes
+           their min-content shrink, so nothing forces the page wider than
+           the screen. Scoped to the booking page so it can't affect other
+           surfaces. nowrap elements (e.g. price chips) are unaffected. */
+        .bbp-book-scope p,
+        .bbp-book-scope li,
+        .bbp-book-scope span,
+        .bbp-book-scope a,
+        .bbp-book-scope label,
+        .bbp-book-scope summary,
+        .bbp-book-scope h1,
+        .bbp-book-scope h2,
+        .bbp-book-scope h3,
+        .bbp-book-scope button {
+          overflow-wrap: break-word;
+          word-break: break-word;
         }
         /* Branded-hero entrance — the editorial / spotlight headers
            rise + fade their identity stack on first paint so the
@@ -2837,7 +2899,7 @@ export default function PublicBookingPage() {
         )}
 
         {!linkLoading && !linkError && !submitted && !paymentChoice && link && (
-          <form ref={bookingFormRef} onSubmit={handleSubmit} style={{ marginTop: 28, display: "grid", gap: 14 }}>
+          <form ref={bookingFormRef} onSubmit={handleSubmit} style={{ marginTop: 28, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 14 }}>
             {/* Booking funnel order: your details → SMS consent → service
                 menu → date/time → consultation → deposit. Contact details and
                 the SMS consent card sit at the top of the form, above the
@@ -2849,7 +2911,7 @@ export default function PublicBookingPage() {
             <Field label="Your name">
               <Input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" autoComplete="name" required />
             </Field>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
               <Field label="Phone">
                 <Input type="tel" inputMode="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="555-0123" autoComplete="tel" />
               </Field>
@@ -2878,7 +2940,7 @@ export default function PublicBookingPage() {
                 a parent can book for their child. The booker stays the
                 contact + payer. */}
             <Field label="Who's this appointment for?">
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10 }}>
                 {[
                   { v: true, label: "Myself" },
                   { v: false, label: "Someone else" },
@@ -3566,7 +3628,7 @@ export default function PublicBookingPage() {
                       {/* radiogroup semantics so screen readers know
                           these cards are mutually-exclusive choices,
                           and the client can swap freely between them. */}
-                      <div role="radiogroup" aria-label="Service options" style={{ display: "grid", gap: 8 }}>
+                      <div role="radiogroup" aria-label="Service options" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8 }}>
                         {options.map(opt => {
                           // `picked` is purely derived from
                           // selectedVariationId; tapping any card
@@ -5285,6 +5347,8 @@ export default function PublicBookingPage() {
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
+  maxWidth: "100%",
+  boxSizing: "border-box",
   // Inputs/selects/textarea carry an intrinsic min-width (~the default
   // `size`, roughly 180px). Inside the Phone/Email 2-column grid and the
   // grid `<form>`, that floor stops the columns shrinking, forcing the
@@ -5619,7 +5683,7 @@ const BookingCalendar = ({
         </p>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4, marginBottom: 4 }}>
         {WEEKDAY_LETTERS.map((w, i) => (
           <div
             key={`wk-${i}`}
@@ -5634,7 +5698,7 @@ const BookingCalendar = ({
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4 }}>
         {cells.map((cell, idx) => {
           if (!cell) return <div key={`pad-${idx}`} style={{ minHeight: 44 }} />;
           const info = dayMap.get(cell.iso);
@@ -5688,7 +5752,7 @@ const BookingCalendar = ({
           <p style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
             No openings this month yet. Try the next month, or join the waitlist and we&apos;ll text you.
           </p>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 8, marginTop: 10 }}>
             <button type="button" onClick={goNext} style={ghostButtonStyle}>
               See next month
             </button>
