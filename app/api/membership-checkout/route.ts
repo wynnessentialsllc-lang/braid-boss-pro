@@ -1,13 +1,13 @@
-// Create a Stripe Checkout Session to buy a prepaid package online.
+// Create a Stripe Checkout Session to subscribe to a recurring membership.
 //
-// Mirrors /api/booking-deposit/checkout: a Stripe Connect direct charge
-// created AS the stylist's connected account. The package itself is
-// issued by the shared deposit webhook on checkout.session.completed
-// (it dispatches on the `package_template_id` metadata).
+// Mirrors /api/package-checkout, but mode=subscription: the buyer's card
+// is charged on the stylist's connected account every cycle. We use an
+// inline recurring price_data (interval from the template) so no Stripe
+// Price object has to be pre-created. The membership row + each cycle's
+// granted visits/credit are written by the membership webhook — nothing
+// is written here.
 //
-// Anon: anyone with the buy link can purchase. We read the template via
-// the service role, resolve the stylist's connected account, and create
-// the session. No package row is written here — the webhook does that.
+// Anon: anyone with the signup link can subscribe.
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -30,6 +30,8 @@ const baseUrlOf = (req: Request): string => {
   if (explicit) return explicit;
   try { return new URL(req.url).origin; } catch { return ""; }
 };
+
+const VALID_INTERVALS = new Set(["week", "month", "year"]);
 
 export async function POST(req: Request) {
   let body: { template_id?: string; buyer_name?: string; buyer_email?: string };
@@ -62,19 +64,21 @@ export async function POST(req: Request) {
 
   const { data: tpl, error: tplErr } = await admin
     .from("package_templates")
-    .select("id, user_id, name, kind, visits, credit_amount, price, service_label, active, billing_mode")
+    .select("id, user_id, name, kind, visits, credit_amount, price, service_label, active, billing_mode, billing_interval")
     .eq("id", templateId)
     .maybeSingle();
-  if (tplErr || !tpl) return fail(404, "Package not found.");
-  if (!tpl.active) return fail(409, "This package isn't available.");
-  // Recurring memberships are bought through /api/membership-checkout
-  // (subscription mode), never as a one-time charge.
-  if (tpl.billing_mode === "recurring") {
-    return fail(409, "This is a membership — use the membership signup link.");
+  if (tplErr || !tpl) return fail(404, "Membership not found.");
+  if (!tpl.active) return fail(409, "This membership isn't available.");
+  if (tpl.billing_mode !== "recurring") {
+    return fail(409, "This isn't a recurring membership.");
+  }
+  const interval = String(tpl.billing_interval || "");
+  if (!VALID_INTERVALS.has(interval)) {
+    return fail(409, "This membership has no billing interval set.");
   }
 
   const price = Number(tpl.price) || 0;
-  if (price <= 0) return fail(400, "This package isn't purchasable online.");
+  if (price <= 0) return fail(400, "This membership isn't purchasable online.");
   const cents = Math.round(price * 100);
 
   const { data: profile } = await admin
@@ -88,31 +92,41 @@ export async function POST(req: Request) {
     return fail(409, "This stylist's Stripe account isn't ready to take charges.");
   }
 
-  const feeBps = (() => {
+  // Platform fee as a percent of each cycle. Subscriptions take
+  // application_fee_percent (not a fixed amount); convert from the
+  // basis-point env used elsewhere (250 bps → 2.5%).
+  const feePercent = (() => {
     const raw = Number(process.env.PLATFORM_FEE_BPS || 0);
-    if (!Number.isFinite(raw) || raw < 0 || raw > 10_000) return 0;
-    return Math.floor(raw);
+    if (!Number.isFinite(raw) || raw <= 0 || raw > 10_000) return 0;
+    return Math.round((raw / 100) * 100) / 100; // 2-dp percent
   })();
-  const applicationFeeCents = feeBps > 0 ? Math.floor((cents * feeBps) / 10_000) : 0;
 
   const baseUrl = baseUrlOf(req);
   const form = new URLSearchParams();
-  form.set("mode", "payment");
+  form.set("mode", "subscription");
   form.set("payment_method_types[]", "card");
   form.set("line_items[0][quantity]", "1");
   form.set("line_items[0][price_data][currency]", "usd");
   form.set("line_items[0][price_data][unit_amount]", String(cents));
-  form.set("line_items[0][price_data][product_data][name]", String(tpl.name || "Package"));
-  form.set("success_url", `${baseUrl}/buy/package/${tpl.id}?status=success`);
-  form.set("cancel_url", `${baseUrl}/buy/package/${tpl.id}?status=cancel`);
+  form.set("line_items[0][price_data][recurring][interval]", interval);
+  form.set("line_items[0][price_data][product_data][name]", String(tpl.name || "Membership"));
+  form.set("success_url", `${baseUrl}/buy/membership/${tpl.id}?status=success`);
+  form.set("cancel_url", `${baseUrl}/buy/membership/${tpl.id}?status=cancel`);
   form.set("customer_email", buyerEmail);
-  form.set("metadata[package_template_id]", String(tpl.id));
+  // Session metadata — read by the webhook on checkout.session.completed.
+  form.set("metadata[membership_template_id]", String(tpl.id));
   form.set("metadata[stylist_user_id]", String(tpl.user_id));
-  if (buyerName) form.set("metadata[buyer_name]", buyerName);
   form.set("metadata[buyer_email]", buyerEmail);
-  form.set("payment_intent_data[metadata][package_template_id]", String(tpl.id));
-  if (applicationFeeCents > 0) {
-    form.set("payment_intent_data[application_fee_amount]", String(applicationFeeCents));
+  if (buyerName) form.set("metadata[buyer_name]", buyerName);
+  // Subscription metadata — rides on every future invoice.* and
+  // customer.subscription.* event so recurring cycles can be linked back
+  // to the template even if the session record is unavailable.
+  form.set("subscription_data[metadata][membership_template_id]", String(tpl.id));
+  form.set("subscription_data[metadata][stylist_user_id]", String(tpl.user_id));
+  form.set("subscription_data[metadata][buyer_email]", buyerEmail);
+  if (buyerName) form.set("subscription_data[metadata][buyer_name]", buyerName);
+  if (feePercent > 0) {
+    form.set("subscription_data[application_fee_percent]", String(feePercent));
   }
 
   const stripeRes = await fetch(`${STRIPE_API}/checkout/sessions`, {
