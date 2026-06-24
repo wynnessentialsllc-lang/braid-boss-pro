@@ -22364,7 +22364,7 @@ const SmsNotificationsToggleSection = ({ userId }: { userId: string }) => {
   );
 };
 
-const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport, openBookingRequests, pendingRequests = 0 }: {
+const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport }: {
   email: string | null;
   mode: AuthMode;
   sync: { state: SyncState; lastOk: string | null; pendingCount: number };
@@ -22372,11 +22372,6 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
   onBack: () => void;
   onSignOut: () => Promise<void>;
   onExport: () => void;
-  openBookingRequests?: () => void;
-  // Count of requests needing attention, derived from the shared
-  // approvals queue (ACTIVE_STATES) so this badge matches the
-  // Approvals screen's "Active" tab exactly.
-  pendingRequests?: number;
 }) => {
   const [pushCap, setPushCap] = useState<PushCapability>("unsupported");
   const [pushBusy, setPushBusy] = useState(false);
@@ -23143,19 +23138,6 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport,
             )}
             {bookingError && (
               <p className="text-[11px] mt-2" style={{ color: C.danger }}>{bookingError}</p>
-            )}
-            {bookingLink && openBookingRequests && (
-              <button type="button" onClick={openBookingRequests}
-                className="w-full mt-3 flex items-center justify-between rounded-xl p-3 active:scale-[0.99] transition"
-                style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
-                <div className="text-left">
-                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>
-                    {pendingRequests > 0 ? `${pendingRequests} pending request${pendingRequests === 1 ? "" : "s"}` : "Booking requests"}
-                  </p>
-                  <p className="text-[11px]" style={{ color: C.muted }}>Approve to convert into an appointment.</p>
-                </div>
-                <ChevronRight size={18} style={{ color: C.muted }} />
-              </button>
             )}
           </Card>
         )}
@@ -39717,8 +39699,6 @@ export default function App() {
           mode={auth.mode}
           sync={sync}
           userId={auth.userId}
-          openBookingRequests={() => setSecondary("bookingRequests")}
-          pendingRequests={countActiveApprovals(store.approvalsApi?.requests)}
           onBack={() => setSecondary("settings")}
           onSignOut={async () => { await auth.signOut(); setSecondary(null); }}
           onExport={() => {
@@ -39763,16 +39743,6 @@ export default function App() {
           Requests are the same inbox, so both open RequestsInbox. This
           entry point only differs in its back target (returns to the
           shop/account screen) and lands on the approvals tab. */}
-      {secondary === "bookingRequests" && (
-        <RequestsInbox
-          store={store}
-          onBack={() => setSecondary("account")}
-          initialTab="approvals"
-          focusRequestId={approvalFocusId}
-          clearFocusRequestId={() => setApprovalFocusId(null)}
-        />
-      )}
-
       {/* Tab bar — only on primary screens */}
       {secondary === null && <TabBar active={active} setActive={setActive} />}
 
