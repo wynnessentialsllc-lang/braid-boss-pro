@@ -82,7 +82,11 @@ exist), these send a client SMS through the queue:
 | Reschedule request received | `client_booking_rescheduled` | mirrored from the email |
 | Request declined (no charge / refunded / manual refund) | `booking_denied_no_charge` · `booking_denied_refunded` · `booking_denied_refund_manual` | mirrored from the email |
 
-Every outbound SMS gets `Reply STOP to opt out.` appended by the worker.
+Every outbound SMS is wrapped by the worker for A2P compliance: it is
+**prefixed with the registered brand** (`Braid Boss Pro: `, unless the
+body already names it) so live traffic matches the campaign registration,
+and `Reply STOP to opt out.` is appended. The message body still names the
+stylist's business (e.g. "…with SBW Braiding…") for the client.
 
 The cancellation / reschedule / denial texts are **mirrored at the queue**:
 an `AFTER INSERT` trigger on `notification_queue`
