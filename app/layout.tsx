@@ -75,6 +75,10 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
+      // SVG first — modern browsers prefer it, so the tab shows the
+      // Braid Boss Pro sparkle emblem (crisp at any size). The PNGs are
+      // legacy fallbacks for browsers without SVG-favicon support.
+      { url: "/icon.svg", type: "image/svg+xml" },
       { url: "/favicon.png", type: "image/png", sizes: "32x32" },
       { url: "/icons/icon-192.png", type: "image/png", sizes: "192x192" },
       { url: "/icons/icon-512.png", type: "image/png", sizes: "512x512" },
