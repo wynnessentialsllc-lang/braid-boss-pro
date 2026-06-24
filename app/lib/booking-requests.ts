@@ -30,6 +30,7 @@ export type BookingRequestRecord = {
   client_name: string;
   client_phone: string | null;
   client_email: string | null;
+  sms_opt_in: boolean | null;
   service_id: string | null;
   service_name: string | null;
   service_price: number | null;
@@ -448,6 +449,35 @@ export const useBookingApprovalQueue = (userId: string | null): {
         });
       } catch {
         // Confirmation already succeeded — email failure shouldn't surface.
+      }
+    }
+
+    // Confirmation TEXT. The rich confirmation EMAIL above is enqueued
+    // here; the gated SMS half already lives in
+    // enqueue_appointment_confirmation (the same path stylist-created
+    // appointments use). We call it with client_email_in:null so it
+    // sends ONLY the SMS — no duplicate email — while reusing that
+    // function's opt-in / opt-out / credit / master-switch gating. Its
+    // SMS dedupe key (appointment_confirmed_sms:<appt>:<date>) is shared
+    // with the appointment path, so a booking that somehow hits both can
+    // never double-text. Best-effort: never surface over a good confirm.
+    if (appointmentId && row?.sms_opt_in && row?.client_phone) {
+      try {
+        await supabase.rpc("enqueue_appointment_confirmation", {
+          appt_id_in: appointmentId,
+          user_id_in: userId,
+          client_name_in: resolvedName || row.client_name || null,
+          client_email_in: null,
+          client_phone_in: row.client_phone,
+          service_name_in: row.selected_variation_name || row.service_name || null,
+          appt_date_in: row.preferred_date || null,
+          appt_time_in: row.preferred_time || null,
+          total_price_in: null,
+          sms_opt_in_in: !!row.sms_opt_in,
+          custom_message_in: null,
+        });
+      } catch {
+        // SMS is best-effort; a failure must not block the confirmation.
       }
     }
 
