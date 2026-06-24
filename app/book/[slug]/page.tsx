@@ -5285,6 +5285,12 @@ export default function PublicBookingPage() {
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
+  // Inputs/selects/textarea carry an intrinsic min-width (~the default
+  // `size`, roughly 180px). Inside the Phone/Email 2-column grid and the
+  // grid `<form>`, that floor stops the columns shrinking, forcing the
+  // whole form wider than the phone viewport so every card/input bleeds
+  // off the right edge. min-width:0 lets them shrink to their track.
+  minWidth: 0,
   padding: "12px 14px",
   borderRadius: 12,
   border: `1px solid ${C.hairline}`,
