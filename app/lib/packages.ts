@@ -11,6 +11,12 @@ import { getSupabase } from "./supabase";
 
 export type PackageKind = "visits" | "credit";
 export type PackageStatus = "active" | "depleted" | "void";
+// A template either sells once ('one_time' — a prepaid package) or bills
+// on a schedule ('recurring' — a membership). Recurring templates grant
+// their visits/credit value every `billing_interval`.
+export type BillingMode = "one_time" | "recurring";
+export type BillingInterval = "week" | "month" | "year";
+export type MembershipStatus = "incomplete" | "active" | "past_due" | "canceled";
 
 export type PackageTemplate = {
   id: string;
@@ -22,6 +28,31 @@ export type PackageTemplate = {
   service_label: string | null;
   active: boolean;
   sort: number;
+  billing_mode: BillingMode;
+  billing_interval: BillingInterval | null;
+};
+
+// An issued membership: a Stripe subscription on the stylist's connected
+// account that tops up a single rolling client_package each paid cycle.
+export type ClientMembership = {
+  id: string;
+  client_id: string | null;
+  client_name: string | null;
+  template_id: string | null;
+  name: string;
+  kind: PackageKind;
+  per_cycle_visits: number | null;
+  per_cycle_credit: number | null;
+  price: number;
+  billing_interval: BillingInterval;
+  package_id: string | null;
+  status: MembershipStatus;
+  current_period_end: string | null;
+  purchaser_name: string | null;
+  purchaser_email: string | null;
+  started_at: string | null;
+  canceled_at: string | null;
+  created_at: string;
 };
 
 export type ClientPackage = {
@@ -43,6 +74,9 @@ export type ClientPackage = {
   purchaser_email: string | null;
   notes: string | null;
   purchased_at: string;
+  // Set when this package is the rolling balance fed by a membership;
+  // such packages are shown under the membership, not as a standalone sale.
+  membership_id: string | null;
 };
 
 export type TemplateDraft = {
@@ -55,6 +89,8 @@ export type TemplateDraft = {
   service_label?: string | null;
   active?: boolean;
   sort?: number;
+  billing_mode?: BillingMode;
+  billing_interval?: BillingInterval | null;
 };
 
 export type IssueDraft = {
@@ -91,11 +127,42 @@ export const packageRemainingLabel = (p: ClientPackage, currency = "USD"): strin
   }
 };
 
+// "every month" / "every week" / "every year" — interval as a cadence.
+export const intervalCadenceLabel = (interval: BillingInterval): string =>
+  interval === "week" ? "every week" : interval === "year" ? "every year" : "every month";
+
+// "$120/mo" style price-per-cycle label.
+export const intervalPriceLabel = (price: number, interval: BillingInterval, currency = "USD"): string => {
+  const suffix = interval === "week" ? "/wk" : interval === "year" ? "/yr" : "/mo";
+  try {
+    return `${new Intl.NumberFormat(undefined, { style: "currency", currency }).format(price)}${suffix}`;
+  } catch {
+    return `$${(Number(price) || 0).toFixed(2)}${suffix}`;
+  }
+};
+
+// What a membership grants each cycle, e.g. "1 visit every month" or
+// "$100 credit every month".
+export const membershipGrantLabel = (m: ClientMembership, currency = "USD"): string => {
+  const cadence = intervalCadenceLabel(m.billing_interval);
+  if (m.kind === "visits") {
+    const v = Number(m.per_cycle_visits) || 0;
+    return `${v} visit${v === 1 ? "" : "s"} ${cadence}`;
+  }
+  const amt = Number(m.per_cycle_credit) || 0;
+  try {
+    return `${new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amt)} credit ${cadence}`;
+  } catch {
+    return `$${amt.toFixed(2)} credit ${cadence}`;
+  }
+};
+
 export const useClientPackages = (
   userId: string | null,
 ): {
   templates: PackageTemplate[];
   packages: ClientPackage[];
+  memberships: ClientMembership[];
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -106,25 +173,32 @@ export const useClientPackages = (
   voidPackage: (id: string) => Promise<boolean>;
   assignPackage: (id: string, clientId: string, clientName: string | null) => Promise<boolean>;
   activeForClient: (clientId: string) => ClientPackage[];
+  cancelMembership: (id: string) => Promise<{ ok: boolean; reason?: string }>;
+  assignMembership: (id: string, clientId: string, clientName: string | null) => Promise<boolean>;
+  membershipsForClient: (clientId: string) => ClientMembership[];
 } => {
   const [templates, setTemplates] = useState<PackageTemplate[]>([]);
   const [packages, setPackages] = useState<ClientPackage[]>([]);
+  const [memberships, setMemberships] = useState<ClientMembership[]>([]);
   const [loading, setLoading] = useState<boolean>(!!userId);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!userId) { setTemplates([]); setPackages([]); setLoading(false); return; }
+    if (!userId) { setTemplates([]); setPackages([]); setMemberships([]); setLoading(false); return; }
     setLoading(true);
     try {
       const supabase = getSupabase();
-      const [tpl, pkg] = await Promise.all([
+      const [tpl, pkg, mem] = await Promise.all([
         supabase.from("package_templates").select("*").eq("user_id", userId).order("sort").order("created_at"),
         supabase.from("client_packages").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
+        supabase.from("client_memberships").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
       ]);
       if (tpl.error) throw tpl.error;
       if (pkg.error) throw pkg.error;
+      if (mem.error) throw mem.error;
       setTemplates((tpl.data || []) as PackageTemplate[]);
       setPackages((pkg.data || []) as ClientPackage[]);
+      setMemberships((mem.data || []) as ClientMembership[]);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "load_failed");
@@ -141,6 +215,7 @@ export const useClientPackages = (
 
   const saveTemplate = useCallback(async (draft: TemplateDraft): Promise<boolean> => {
     if (!userId) return false;
+    const isRecurring = draft.billing_mode === "recurring";
     const row = {
       ...(draft.id ? { id: draft.id } : {}),
       user_id: userId,
@@ -152,6 +227,10 @@ export const useClientPackages = (
       service_label: draft.service_label?.trim() || null,
       active: draft.active !== false,
       sort: draft.sort ?? 0,
+      billing_mode: isRecurring ? "recurring" : "one_time",
+      // A recurring template must carry an interval; a one-time one must
+      // be null (DB constraint enforces this pairing).
+      billing_interval: isRecurring ? (draft.billing_interval || "month") : null,
     };
     try {
       const supabase = getSupabase();
@@ -265,8 +344,62 @@ export const useClientPackages = (
     [packages],
   );
 
+  // Cancel a membership's Stripe subscription on the connected account.
+  // The server cancels at period end (the client keeps what they've paid
+  // for); the webhook flips status to 'canceled' when Stripe confirms.
+  const cancelMembership = useCallback(async (id: string): Promise<{ ok: boolean; reason?: string }> => {
+    if (!userId) return { ok: false, reason: "no_user" };
+    try {
+      const supabase = getSupabase();
+      const { data: sess } = await supabase.auth.getSession();
+      const accessToken = sess?.session?.access_token;
+      if (!accessToken) return { ok: false, reason: "no_session" };
+      const res = await fetch("/api/membership/cancel", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ access_token: accessToken, membership_id: id }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, reason: json?.error || `http_${res.status}` };
+      await refresh();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: e instanceof Error ? e.message : "cancel_failed" };
+    }
+  }, [userId, refresh]);
+
+  const assignMembership = useCallback(async (id: string, clientId: string, clientName: string | null): Promise<boolean> => {
+    if (!userId || !clientId) return false;
+    try {
+      const supabase = getSupabase();
+      const { error: err } = await supabase
+        .from("client_memberships")
+        .update({ client_id: clientId, client_name: clientName })
+        .eq("id", id)
+        .eq("user_id", userId);
+      if (err) throw err;
+      // Keep the rolling package tied to the same client so it shows on
+      // their profile alongside the membership.
+      const mem = memberships.find(m => m.id === id);
+      if (mem?.package_id) {
+        await supabase.from("client_packages")
+          .update({ client_id: clientId, client_name: clientName })
+          .eq("id", mem.package_id).eq("user_id", userId);
+      }
+      await refresh();
+      return true;
+    } catch { return false; }
+  }, [userId, memberships, refresh]);
+
+  const membershipsForClient = useCallback(
+    (clientId: string): ClientMembership[] =>
+      memberships.filter(m => m.client_id === clientId && (m.status === "active" || m.status === "past_due")),
+    [memberships],
+  );
+
   return useMemo(() => ({
-    templates, packages, loading, error, refresh,
+    templates, packages, memberships, loading, error, refresh,
     saveTemplate, deleteTemplate, issuePackage, redeem, voidPackage, assignPackage, activeForClient,
-  }), [templates, packages, loading, error, refresh, saveTemplate, deleteTemplate, issuePackage, redeem, voidPackage, assignPackage, activeForClient]);
+    cancelMembership, assignMembership, membershipsForClient,
+  }), [templates, packages, memberships, loading, error, refresh, saveTemplate, deleteTemplate, issuePackage, redeem, voidPackage, assignPackage, activeForClient, cancelMembership, assignMembership, membershipsForClient]);
 };
