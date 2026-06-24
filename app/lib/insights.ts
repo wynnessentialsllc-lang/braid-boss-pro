@@ -242,39 +242,14 @@ export const generateBossInsights = (input: InsightInput): Insight[] => {
     });
   }
 
-  // ---- RETENTION: top inactive client (high if VIP) -------------------
   const apptsByClient: Record<string, any[]> = {};
   for (const a of appts) if (a.clientId) (apptsByClient[a.clientId] ||= []).push(a);
-  const inactiveCandidate = clients
-    .map(c => {
-      const mine = apptsByClient[c.id] || [];
-      const completed = mine.filter(a => a.status === "completed" || a.paymentStatus === "paid");
-      const ltv = completed.reduce((s, a) => s + collected(a), 0);
-      const upcoming = mine.find(a => a.date >= today && !isCanceledAppointment(a) && a.status !== "completed");
-      if (upcoming) return null;
-      const lastDate = completed.map(a => a.date).filter(Boolean).sort().pop();
-      if (!lastDate) return null;
-      const days = Math.round((new Date(today + "T00:00:00").getTime() - new Date(lastDate + "T00:00:00").getTime()) / 86400_000);
-      return { client: c, days, ltv, completed: completed.length };
-    })
-    .filter((x): x is { client: any; days: number; ltv: number; completed: number } => !!x && x.days >= 30)
-    .sort((a, b) => (b.ltv - a.ltv) || (b.days - a.days))[0];
-  if (inactiveCandidate) {
-    const isVip = inactiveCandidate.ltv >= 800 && inactiveCandidate.completed >= 3;
-    out.push({
-      id: `inactive_top:${inactiveCandidate.client.id}`,
-      category: "retention",
-      priority: isVip ? "high" : "medium",
-      title: isVip
-        ? `VIP client inactive: ${inactiveCandidate.client.name}`
-        : `Send a rebooking reminder to ${inactiveCandidate.client.name}`,
-      body: `${inactiveCandidate.days} days since their last visit${isVip ? " — and they're a top spender." : "."}`,
-      why: "Repeat clients are 3-5x cheaper to retain than new clients are to attract. A short personal message goes a long way.",
-      actionLabel: "Send reminder",
-      actionTarget: `client:${inactiveCandidate.client.id}`,
-      createdAt: now,
-    });
-  }
+
+  // Rebooking nudges (inactive clients due to return) intentionally live
+  // only in the dedicated "Rebooking Opportunities" section, which uses a
+  // smarter style-aware cadence. Surfacing them here too was redundant and
+  // could disagree with that section, so Boss Insights no longer duplicates
+  // the "send a rebooking reminder" card.
 
   // ---- REVENUE: highest earning style this month ----------------------
   const { cur: monthStart, prev: prevMonthStart } = monthBoundaries(today);
