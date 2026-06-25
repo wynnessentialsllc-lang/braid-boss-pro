@@ -185,6 +185,7 @@ export default function RootLayout({
             </p>
             <p style={{ margin: 0 }}>
               Learn more:{" "}
+              <a href="/discover">Find a Braider</a>{" · "}
               <a href="/features">Features</a>{" · "}
               <a href="/pricing">Pricing</a>{" · "}
               <a href="/how-it-works">How it works</a>{" · "}
@@ -194,7 +195,7 @@ export default function RootLayout({
               <a href="/terms">Terms</a>
             </p>
             <p style={{ margin: "16px 0 0" }}>
-              Contact: <a href="mailto:hello@hairwellnessslab.com">hello@hairwellnessslab.com</a>
+              Contact: <a href="mailto:hello@braidbosspro.app">hello@braidbosspro.app</a>
             </p>
           </div>
         </noscript>
