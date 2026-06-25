@@ -21,7 +21,7 @@ const ROUTES: Array<{ path: string; priority: number; changeFrequency: MetadataR
   { path: "/compare/braid-boss-pro-vs-vagaro", priority: 0.8, changeFrequency: "monthly" },
   { path: "/compare/braid-boss-pro-vs-square-appointments", priority: 0.8, changeFrequency: "monthly" },
   { path: "/guides/best-booking-app-for-braiders", priority: 0.7, changeFrequency: "monthly" },
-  { path: "/discover", priority: 0.6, changeFrequency: "weekly" },
+  { path: "/discover", priority: 0.9, changeFrequency: "daily" },
   { path: "/faq", priority: 0.6, changeFrequency: "monthly" },
   { path: "/founding-access", priority: 0.6, changeFrequency: "monthly" },
   { path: "/support", priority: 0.4, changeFrequency: "yearly" },

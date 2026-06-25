@@ -66,6 +66,9 @@ import {
   type MarketplaceListing,
   loadMarketplaceListing,
   saveMarketplaceListing,
+  isListed,
+  listingGaps,
+  STYLE_TAGS,
 } from "./lib/marketplace";
 import { type GiftCard, type GiftCardLookup, listGiftCards, findGiftCardByCode, redeemGiftCardInPerson } from "./lib/gift-cards";
 import {
@@ -7752,6 +7755,36 @@ const Studio = ({ store }) => {
               <option key={c.id} value={c.id}>{c.title}</option>
             ))}
           </select>
+          {/* Marketplace style tags — power the Find a Braider filters */}
+          <div className="mb-2">
+            <p className="text-[11px] font-semibold mb-1" style={{ color: C.muted }}>
+              Marketplace styles <span style={{ fontWeight: 400 }}>— help clients find this on Find a Braider</span>
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {STYLE_TAGS.map(t => {
+                const selected = (serviceForm.style_tags || []).includes(t.slug);
+                return (
+                  <button
+                    key={t.slug}
+                    type="button"
+                    onClick={() => {
+                      const cur = serviceForm.style_tags || [];
+                      const next = selected ? cur.filter(x => x !== t.slug) : [...cur, t.slug];
+                      setServiceForm({ ...serviceForm, style_tags: next });
+                    }}
+                    className="text-[12px] font-semibold rounded-full px-3 py-1.5 active:scale-[0.99] transition"
+                    style={{
+                      border: `1px solid ${selected ? C.espresso : C.hairline}`,
+                      background: selected ? C.espresso : C.paper,
+                      color: selected ? "#FFFFFF" : C.coffee,
+                    }}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <StyleCustomizationSection form={serviceForm} onChange={setServiceForm} inventory={(store.inventoryItems || []) as InventoryItem[]} />
           <MobileServiceSection form={serviceForm} onChange={setServiceForm} />
           <DefaultMaterialsPicker
@@ -22840,6 +22873,45 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
     } catch { /* ignore */ }
   };
 
+  // Marketplace visibility (opt-out). Phase 1 auto-lists every complete +
+  // active stylist on the public Find a Braider page; this is the one-tap
+  // "hide me" control, living here in Account & Sync next to the public
+  // booking link it depends on.
+  const [mktListing, setMktListing] = useState<MarketplaceListing | null>(null);
+  const [mktBusy, setMktBusy] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears listing when auth context changes, intentional
+    if (mode !== "authed" || !userId) { setMktListing(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const l = await loadMarketplaceListing(userId);
+        if (!cancelled) setMktListing(l);
+      } catch { /* non-fatal — card just won't render */ }
+    })();
+    return () => { cancelled = true; };
+  }, [mode, userId]);
+
+  const toggleMktHidden = async (nextHidden: boolean) => {
+    if (!userId || !mktListing) return;
+    setMktBusy(true);
+    // optimistic
+    setMktListing({ ...mktListing, hidden: nextHidden });
+    try {
+      await saveMarketplaceListing(userId, {
+        hidden: nextHidden,
+        city: mktListing.city,
+        state: mktListing.state,
+      });
+      const fresh = await loadMarketplaceListing(userId);
+      setMktListing(fresh);
+    } catch {
+      setMktListing({ ...mktListing, hidden: !nextHidden }); // revert
+    } finally {
+      setMktBusy(false);
+    }
+  };
+
   return (
     <div className="bbp-fade pb-24">
       <Header title="Account" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
@@ -23153,6 +23225,39 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
             onSaved={(updated) => setBookingLink({ ...bookingLink, ...updated })}
             userId={userId}
           />
+        )}
+
+        {mode === "authed" && mktListing && (
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>Marketplace visibility</p>
+              <Pill tone={mktListing.hidden ? "neutral" : (isListed(mktListing) ? "success" : "neutral")}>
+                {mktListing.hidden ? "HIDDEN" : (isListed(mktListing) ? "LISTED" : "PENDING")}
+              </Pill>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold" style={{ color: C.espresso }}>Hide me from the marketplace</p>
+                <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
+                  {mktListing.hidden
+                    ? "You're hidden from the public Find a Braider page."
+                    : isListed(mktListing)
+                      ? "You're listed so new clients can discover and book you. Turn this on to stay private."
+                      : "You'll be listed automatically once your booking page is complete. Turn this on to opt out."}
+                </p>
+              </div>
+              <Toggle
+                checked={mktListing.hidden}
+                disabled={mktBusy}
+                onChange={(v: boolean) => { void toggleMktHidden(v); }}
+              />
+            </div>
+            {!mktListing.hidden && !isListed(mktListing) && listingGaps(mktListing).length > 0 && (
+              <ul className="space-y-1 text-[12px] mt-2 pt-2" style={{ color: C.coffee, lineHeight: 1.5, borderTop: `1px solid ${C.hairline}` }}>
+                {listingGaps(mktListing).map((g, i) => <li key={i}>• {g}</li>)}
+              </ul>
+            )}
+          </Card>
         )}
 
         {mode === "authed" && (
@@ -35809,7 +35914,7 @@ const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }
   const userId: string | null = store.userId;
   const [loading, setLoading] = useState(true);
   const [listing, setListing] = useState<MarketplaceListing | null>(null);
-  const [enabled, setEnabled] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const [city, setCity] = useState("");
   const [stateRegion, setStateRegion] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35820,7 +35925,7 @@ const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }
     try {
       const l = await loadMarketplaceListing(userId);
       setListing(l);
-      setEnabled(l.enabled);
+      setHidden(l.hidden);
       setCity(l.city);
       setStateRegion(l.state);
     } catch (e: any) {
@@ -35831,20 +35936,16 @@ const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }
   }, [userId]);
   useEffect(() => { void refresh(); }, [refresh]);
 
-  const save = async (nextEnabled: boolean) => {
+  // Persists the opt-out flag + location together. nextHidden lets the
+  // toggle write immediately without waiting on a "Save" tap.
+  const save = async (nextHidden: boolean) => {
     if (!userId) return;
-    // A listing with no city can't be found by city search — block
-    // turning it on until there's one.
-    if (nextEnabled && !city.trim()) {
-      setMsg({ kind: "error", text: "Add your city before going live — that's how clients find you." });
-      return;
-    }
     setBusy(true);
     setMsg(null);
     try {
-      await saveMarketplaceListing(userId, { enabled: nextEnabled, city, state: stateRegion });
-      setEnabled(nextEnabled);
-      setMsg({ kind: "ok", text: nextEnabled ? "You're listed on the marketplace." : "Saved." });
+      await saveMarketplaceListing(userId, { hidden: nextHidden, city, state: stateRegion });
+      setHidden(nextHidden);
+      setMsg({ kind: "ok", text: "Saved." });
       await refresh();
     } catch (e: any) {
       setMsg({ kind: "error", text: e?.message || "Couldn't save." });
@@ -35855,6 +35956,8 @@ const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }
 
   const noBookingLink = listing && !listing.slug;
   const bookingLinkOff = listing && listing.slug && !listing.bookingLinkActive;
+  const live = listing ? isListed(listing) : false;
+  const gaps = listing ? listingGaps(listing) : [];
 
   return (
     <div className="bbp-fade pb-32">
@@ -35883,20 +35986,33 @@ const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }
               </Card>
             )}
 
-            {/* Opt-in */}
-            <Card className="p-3.5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>List me on the marketplace</p>
-                  <p className="text-[11px]" style={{ color: C.muted }}>
-                    Appear on the public "Find a braider near you" page. Clients search by city and book straight from your card.
+            {/* Status — auto-listed once complete (opt-out model) */}
+            <Card className="p-3.5" style={{ border: `1px solid ${hidden ? C.hairline : (live ? C.success : C.hairline)}` }}>
+              {hidden ? (
+                <>
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Hidden from the marketplace</p>
+                  <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+                    You won't appear on the public Find a Braider page. Turn this off in Account &amp; Sync to be listed.
                   </p>
-                </div>
-                <Toggle
-                  checked={enabled}
-                  onChange={(v: boolean) => { void save(v); }}
-                />
-              </div>
+                </>
+              ) : live ? (
+                <>
+                  <p className="text-sm font-semibold" style={{ color: C.success }}>✓ You're listed</p>
+                  <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+                    New clients can find and book you on the public Find a Braider page.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Almost there</p>
+                  <p className="text-[11px] mt-1 mb-2" style={{ color: C.muted }}>
+                    You're set to be listed automatically — finish these to go live:
+                  </p>
+                  <ul className="space-y-1.5 text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                    {gaps.map((g, i) => <li key={i}>• {g}</li>)}
+                  </ul>
+                </>
+              )}
             </Card>
 
             {/* Location */}
@@ -35913,7 +36029,7 @@ const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }
               <Button
                 variant="primary"
                 fullWidth
-                onClick={() => save(enabled)}
+                onClick={() => save(hidden)}
                 disabled={busy}
                 icon={<Save size={16} />}
               >
@@ -35930,8 +36046,8 @@ const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }
             <Card className="p-3.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
               <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: C.muted, letterSpacing: "0.14em" }}>What clients see</p>
               <ul className="space-y-1.5 text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
-                <li>• Your studio name + logo</li>
-                <li>• Your city, and your service price range</li>
+                <li>• Your studio name, logo, and gallery photos</li>
+                <li>• Your city, service price range, and the braid styles you offer</li>
                 <li>• Your star rating from client reviews</li>
                 <li>• A Book button straight to your booking page</li>
               </ul>

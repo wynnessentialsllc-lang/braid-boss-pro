@@ -13,6 +13,8 @@ import {
   fetchDiscoverStylists,
   fetchStylistReviews,
   priceRangeLabel,
+  STYLE_TAGS,
+  styleLabel,
   type DiscoverStylist,
   type StylistReview,
 } from "../lib/marketplace";
@@ -110,10 +112,10 @@ const StylistCard = ({ s }: { s: DiscoverStylist }) => {
     }}>
       <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
         <a href={bookHref} style={{ flexShrink: 0, lineHeight: 0 }}>
-          {s.logoUrl ? (
+          {s.coverPhoto ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={s.logoUrl}
+              src={s.coverPhoto}
               alt=""
               style={{ width: 56, height: 56, borderRadius: 12, objectFit: "cover" }}
             />
@@ -170,6 +172,27 @@ const StylistCard = ({ s }: { s: DiscoverStylist }) => {
         </p>
       )}
 
+      {(s.styleTags.length > 0 || s.travels) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
+          {s.travels && (
+            <span style={{
+              fontSize: 11, fontWeight: 700, color: C.goldDeep, background: C.ivory,
+              border: `1px solid ${C.hairline}`, borderRadius: 999, padding: "3px 9px",
+            }}>
+              ✦ Travels to you
+            </span>
+          )}
+          {s.styleTags.map(tag => (
+            <span key={tag} style={{
+              fontSize: 11, fontWeight: 600, color: C.coffee, background: C.ivory,
+              border: `1px solid ${C.hairline}`, borderRadius: 999, padding: "3px 9px",
+            }}>
+              {styleLabel(tag)}
+            </span>
+          ))}
+        </div>
+      )}
+
       {open && <ReviewsPanel reviews={reviews} loading={loadingReviews} />}
 
       <div style={{
@@ -193,15 +216,21 @@ const StylistCard = ({ s }: { s: DiscoverStylist }) => {
 const DiscoverInner = () => {
   const [query, setQuery] = useState("");
   const [submitted, setSubmitted] = useState("");
+  const [style, setStyle] = useState<string | null>(null);
+  const [mobileOnly, setMobileOnly] = useState(false);
   const [results, setResults] = useState<DiscoverStylist[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const run = useCallback(async (city: string) => {
+  const run = useCallback(async (city: string, styleSlug: string | null, mobile: boolean) => {
     setLoading(true);
     setErr(null);
     try {
-      setResults(await fetchDiscoverStylists(city));
+      setResults(await fetchDiscoverStylists({
+        city,
+        style: styleSlug || undefined,
+        mobileOnly: mobile || undefined,
+      }));
     } catch (e: any) {
       setErr(e?.message || "Couldn't load braiders right now.");
       setResults([]);
@@ -210,13 +239,26 @@ const DiscoverInner = () => {
     }
   }, []);
 
-  // Browse-all on first load.
-  useEffect(() => { void run(""); }, [run]);
+  // Browse-all on first load. run() flips loading state synchronously,
+  // which is the intended initial fetch — same pattern the rest of the
+  // app uses for load-on-mount effects.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void run("", null, false); }, [run]);
 
   const onSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitted(query.trim());
-    void run(query);
+    void run(query, style, mobileOnly);
+  };
+
+  // Filter chips apply immediately against the current city query.
+  const applyStyle = (slug: string | null) => {
+    setStyle(slug);
+    void run(query, slug, mobileOnly);
+  };
+  const applyMobile = (next: boolean) => {
+    setMobileOnly(next);
+    void run(query, style, next);
   };
 
   return (
@@ -242,7 +284,7 @@ const DiscoverInner = () => {
             margin: "6px 0 0", fontFamily: FONT_DISPLAY, fontSize: 30, fontWeight: 600,
             color: C.espresso, lineHeight: 1.1,
           }}>
-            Find a braider near you
+            Find Your Braider
           </h1>
           <p style={{ margin: "8px 0 0", fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
             Real braiders, real reviews, instant booking.
@@ -273,6 +315,42 @@ const DiscoverInner = () => {
           </button>
         </form>
 
+        {/* Style + travel filters */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 18 }}>
+          <button
+            type="button"
+            onClick={() => applyMobile(!mobileOnly)}
+            style={{
+              fontSize: 12, fontWeight: 700, padding: "7px 13px", borderRadius: 999,
+              cursor: "pointer",
+              border: `1px solid ${mobileOnly ? C.espresso : C.hairline}`,
+              background: mobileOnly ? C.espresso : "#FFFFFF",
+              color: mobileOnly ? "#FFFFFF" : C.coffee,
+            }}
+          >
+            ✦ Travels to me
+          </button>
+          {STYLE_TAGS.map(t => {
+            const active = style === t.slug;
+            return (
+              <button
+                key={t.slug}
+                type="button"
+                onClick={() => applyStyle(active ? null : t.slug)}
+                style={{
+                  fontSize: 12, fontWeight: 600, padding: "7px 13px", borderRadius: 999,
+                  cursor: "pointer",
+                  border: `1px solid ${active ? C.espresso : C.hairline}`,
+                  background: active ? C.espresso : "#FFFFFF",
+                  color: active ? "#FFFFFF" : C.coffee,
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+
         {loading ? (
           <p style={{ textAlign: "center", color: C.muted, fontSize: 13, padding: "40px 0" }}>
             Loading braiders…
@@ -302,7 +380,7 @@ const DiscoverInner = () => {
             {submitted && (
               <button
                 type="button"
-                onClick={() => { setQuery(""); setSubmitted(""); void run(""); }}
+                onClick={() => { setQuery(""); setSubmitted(""); setStyle(null); setMobileOnly(false); void run("", null, false); }}
                 style={{
                   marginTop: 14, padding: "10px 18px", fontSize: 13, fontWeight: 600,
                   borderRadius: 999, border: `1px solid ${C.hairline}`,
