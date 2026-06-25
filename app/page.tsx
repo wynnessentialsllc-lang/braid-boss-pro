@@ -265,6 +265,8 @@ import {
   type WeekDepositBuckets,
   monthExpectedAppts,
   monthEarnedAppts,
+  nextMonthAppts,
+  nextMonthSummary,
 } from "./lib/reports";
 import {
   deriveAppointmentTransactions,
@@ -1155,21 +1157,6 @@ const getTodaysAppointments = (appointments: any[], todayIso: string, excludeIds
   // when there really is something happening today.
   const filtered = today.filter(a => !excludeIds.has(a.id));
   return filtered.length > 0 ? filtered : today;
-};
-
-const getUpcomingAppointments = (
-  appointments: any[],
-  todayIso: string,
-  excludeIds: Set<string> = new Set(),
-  limit: number = 3,
-): any[] => {
-  if (!Array.isArray(appointments)) return [];
-  return appointments
-    .filter(a => a && isRealAppointment(a) && !isCanceledAppointment(a) && a.status !== "completed")
-    .filter(a => a.date && a.date > todayIso)
-    .filter(a => !excludeIds.has(a.id))
-    .sort((a, b) => ((a.date || "") + (a.time || "")).localeCompare((b.date || "") + (b.time || "")))
-    .slice(0, limit);
 };
 
 // Best-effort safe JSON parse so a single corrupted localStorage entry
@@ -3910,7 +3897,16 @@ type KpiDetailKind =
   | "deposits"
   | "pending"
   | "monthExpected"
-  | "monthEarned";
+  | "monthEarned"
+  | "nextMonth";
+
+// Label for next-month views — e.g. "Expected in July". Computed from
+// today so the title always names the upcoming calendar month.
+const nextMonthName = (): string => {
+  const d = new Date();
+  const n = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  return n.toLocaleDateString(undefined, { month: "long" });
+};
 
 const KPI_TITLES: Record<KpiDetailKind, string> = {
   today: "Today's revenue",
@@ -3923,6 +3919,7 @@ const KPI_TITLES: Record<KpiDetailKind, string> = {
   pending: "Pending balances",
   monthExpected: "Expected this month",
   monthEarned: "Total earned this month",
+  nextMonth: `Expected in ${nextMonthName()}`,
 };
 
 const KpiDetailSheet = ({
@@ -4221,6 +4218,20 @@ const KpiDetailSheet = ({
             <Hero value={fmtMoney(total, currency)} hint={`${list.length} completed/paid appointment${list.length === 1 ? "" : "s"} this month`} />
             {list.length === 0 ? (
               <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No completed bookings this month yet.</p></Card>
+            ) : list.map(a => <ApptRow key={a.id} a={a} />)}
+          </>
+        );
+      }
+      case "nextMonth": {
+        const { appointments: list, revenue, clientCount } = nextMonthSummary(appointments, today);
+        return (
+          <>
+            <Hero
+              value={fmtMoney(revenue, currency)}
+              hint={`${clientCount} client${clientCount === 1 ? "" : "s"} · ${list.length} appointment${list.length === 1 ? "" : "s"} expected`}
+            />
+            {list.length === 0 ? (
+              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>Nothing on the books for next month yet.</p></Card>
             ) : list.map(a => <ApptRow key={a.id} a={a} />)}
           </>
         );
@@ -5427,20 +5438,24 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
     () => getTodaysAppointments(appointments, today, pendingIds),
     [appointments, today, pendingIds],
   );
-  const todayIds = useMemo(
-    () => new Set<string>(todayAppts.map((a: any) => a.id).filter(Boolean)),
-    [todayAppts],
+
+  // Forward-looking "Next month" preview — expected clients + revenue
+  // for the following calendar month. The dashboard shows the headline
+  // numbers and the first few appointments; tapping opens the full
+  // drill-down via openKpi("nextMonth").
+  const nextMonth = useMemo(
+    () => nextMonthSummary(appointments, today),
+    [appointments, today],
   );
-  const upcomingExcludeIds = useMemo(() => {
-    const s = new Set<string>();
-    pendingIds.forEach(id => s.add(id));
-    todayIds.forEach(id => s.add(id));
-    return s;
-  }, [pendingIds, todayIds]);
-  const upcomingAppts = useMemo(
-    () => getUpcomingAppointments(appointments, today, upcomingExcludeIds, 3),
-    [appointments, today, upcomingExcludeIds],
+  const nextMonthPreview = useMemo(
+    () => nextMonthAppts(appointments, today).slice(0, 3),
+    [appointments, today],
   );
+  const nextMonthLabel = useMemo(() => {
+    const d = new Date(today + "T00:00:00");
+    const n = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    return n.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  }, [today]);
 
   // Style-aware rebooking opportunities. Replaces the old generic 28-day
   // cutoff with per-style windows (knotless 6w, cornrows 3w, …) and
@@ -5895,12 +5910,48 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           onViewAll={() => setActive("rebooking")}
         />
 
-        {upcomingAppts.length > 0 && (
+        {nextMonth.appointments.length > 0 && (
           <div>
-            <SectionTitle>Coming up</SectionTitle>
+            <SectionTitle
+              action={{ label: `View all ${nextMonth.appointments.length} →`, onClick: () => openKpi("nextMonth") }}
+            >
+              Next month
+            </SectionTitle>
+            {/* Clickable preview of what's expected next month — taps
+                open the full drill-down via openKpi("nextMonth"). */}
+            <Card
+              className="p-4 mb-2.5 cursor-pointer active:scale-[0.99] transition"
+              onClick={() => openKpi("nextMonth")}
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-bold uppercase" style={{ color: C.muted, letterSpacing: "0.08em" }}>{nextMonthLabel}</p>
+                <span className="text-[11px] font-bold uppercase flex items-center gap-1" style={{ color: C.brandPrimary, letterSpacing: "0.06em" }}>
+                  Preview <ChevronRight size={13} />
+                </span>
+              </div>
+              <div className="flex items-end justify-between mt-2">
+                <div>
+                  <p className="text-[10px] font-bold uppercase" style={{ color: C.muted, letterSpacing: "0.08em" }}>Expected revenue</p>
+                  <p style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 700, color: C.brandPrimary, lineHeight: 1.1 }}>{money(nextMonth.revenue)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-bold uppercase" style={{ color: C.muted, letterSpacing: "0.08em" }}>Expected clients</p>
+                  <p style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 700, color: C.espresso, lineHeight: 1.1 }}>{nextMonth.clientCount}</p>
+                </div>
+              </div>
+            </Card>
             <div className="space-y-2.5">
-              {upcomingAppts.map(a => <AppointmentRow key={a.id} appt={a} business={business} compact recurringSeries={recurringSeries} />)}
+              {nextMonthPreview.map(a => (
+                <AppointmentRow key={a.id} appt={a} business={business} compact recurringSeries={recurringSeries} onClick={() => openKpi("nextMonth")} />
+              ))}
             </div>
+            {nextMonth.appointments.length > nextMonthPreview.length && (
+              <button type="button" onClick={() => openKpi("nextMonth")}
+                className="w-full text-center text-xs font-semibold py-2 mt-0.5"
+                style={{ color: C.brandPrimary }}>
+                View all {nextMonth.appointments.length} appointments →
+              </button>
+            )}
           </div>
         )}
 

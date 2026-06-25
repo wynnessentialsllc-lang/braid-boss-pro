@@ -644,6 +644,39 @@ export const monthEarnedAppts = (
   // appointments in the calendar month (month-to-date earnings).
   monthExpectedAppts(appointments, reference).filter(isPaidish);
 
+// Every billable appointment in the *following* calendar month — the
+// forward-looking "what's expected next month" preview on the
+// dashboard. Same billable filter as monthExpectedAppts, just shifted
+// one month ahead. Local-date string comparison is timezone-safe.
+export const nextMonthAppts = (
+  appointments: AppointmentLike[] | null | undefined,
+  reference: string = todayISO(),
+): AppointmentLike[] => {
+  const d = new Date(reference + "T00:00:00");
+  const startD = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  const endD = new Date(d.getFullYear(), d.getMonth() + 2, 1);
+  const start = `${startD.getFullYear()}-${String(startD.getMonth() + 1).padStart(2, "0")}-01`;
+  const end = `${endD.getFullYear()}-${String(endD.getMonth() + 1).padStart(2, "0")}-01`;
+  return (appointments || [])
+    .filter(isBillable)
+    .filter(a => a.date && a.date >= start && a.date < end)
+    .sort((a, b) => ((a.date || "") + (a.time || "")).localeCompare((b.date || "") + (b.time || "")));
+};
+
+// Expected revenue + unique-client count for the following calendar
+// month. Powers the dashboard "Next month" preview and its drill-down.
+export const nextMonthSummary = (
+  appointments: AppointmentLike[] | null | undefined,
+  reference: string = todayISO(),
+): { appointments: AppointmentLike[]; revenue: number; clientCount: number } => {
+  const list = nextMonthAppts(appointments, reference);
+  const revenue = round2(list.reduce((s, a) => s + ticketTotal(a), 0));
+  const clientCount = new Set(
+    list.map(a => a.clientId).filter((id): id is string => !!id),
+  ).size;
+  return { appointments: list, revenue, clientCount };
+};
+
 export type MonthProfitBreakdown = {
   appointments: AppointmentLike[];
   revenue: number;
