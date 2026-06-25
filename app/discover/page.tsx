@@ -18,6 +18,10 @@ import {
   type DiscoverStylist,
   type StylistReview,
 } from "../lib/marketplace";
+import {
+  findBraider,
+  type FindBraiderResult,
+} from "../lib/find-braider";
 
 const C = {
   cream: "#FFFFFF",
@@ -261,6 +265,57 @@ const DiscoverInner = () => {
     void run(query, style, next);
   };
 
+  // --- Find My Braider (AI Style-Match) ---
+  const [matchOpen, setMatchOpen] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoData, setPhotoData] = useState<{ base64: string; type: string } | null>(null);
+  const [matchNotes, setMatchNotes] = useState("");
+  const [matchBusy, setMatchBusy] = useState(false);
+  const [matchErr, setMatchErr] = useState<string | null>(null);
+  const [matchResult, setMatchResult] = useState<FindBraiderResult | null>(null);
+
+  const onPhotoPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setMatchErr(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      setPhotoPreview(dataUrl);
+      setPhotoData({ base64: dataUrl, type: file.type });
+    };
+    reader.onerror = () => setMatchErr("Couldn't read that image. Try another photo.");
+    reader.readAsDataURL(file);
+  };
+
+  const runMatch = async () => {
+    if (!photoData) { setMatchErr("Add a photo first."); return; }
+    setMatchBusy(true);
+    setMatchErr(null);
+    try {
+      const result = await findBraider({
+        imageBase64: photoData.base64,
+        mediaType: photoData.type,
+        city: query,
+        notes: matchNotes,
+      });
+      setMatchResult(result);
+    } catch (e: any) {
+      setMatchErr(e?.message || "Couldn't match your photo right now.");
+    } finally {
+      setMatchBusy(false);
+    }
+  };
+
+  const clearMatch = () => {
+    setMatchResult(null);
+    setPhotoPreview(null);
+    setPhotoData(null);
+    setMatchNotes("");
+    setMatchErr(null);
+    setMatchOpen(false);
+  };
+
   return (
     <div style={{
       minHeight: "100dvh",
@@ -351,7 +406,155 @@ const DiscoverInner = () => {
           })}
         </div>
 
-        {loading ? (
+        {/* Find My Braider — AI Style-Match */}
+        {!matchResult && (
+          <div style={{
+            background: C.ivory, border: `1px solid ${C.hairline}`, borderRadius: 16,
+            padding: 14, marginBottom: 18,
+          }}>
+            <button
+              type="button"
+              onClick={() => setMatchOpen(o => !o)}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                gap: 10, background: "transparent", border: 0, cursor: "pointer", padding: 0, textAlign: "left",
+              }}
+            >
+              <span>
+                <span style={{ display: "block", fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>
+                  ✦ Find My Braider
+                </span>
+                <span style={{ display: "block", fontSize: 12, color: C.muted, marginTop: 2 }}>
+                  Have a style in mind? Upload a photo and we&apos;ll match you.
+                </span>
+              </span>
+              <span style={{ color: C.goldDeep, fontWeight: 700, fontSize: 13 }}>{matchOpen ? "▴" : "▾"}</span>
+            </button>
+
+            {matchOpen && (
+              <div style={{ marginTop: 12 }}>
+                <label style={{
+                  display: "block", border: `1px dashed ${C.hairline}`, borderRadius: 12,
+                  padding: photoPreview ? 8 : 18, textAlign: "center", cursor: "pointer", background: "#FFFFFF",
+                }}>
+                  <input type="file" accept="image/*" onChange={onPhotoPick} style={{ display: "none" }} />
+                  {photoPreview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={photoPreview} alt="" style={{ maxHeight: 160, borderRadius: 8, objectFit: "contain", margin: "0 auto" }} />
+                  ) : (
+                    <span style={{ fontSize: 13, color: C.coffee, fontWeight: 600 }}>📷 Tap to add an inspiration photo</span>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  value={matchNotes}
+                  onChange={e => setMatchNotes(e.target.value)}
+                  placeholder="Anything else? (color, length, occasion — optional)"
+                  style={{
+                    width: "100%", marginTop: 10, padding: "10px 12px", fontSize: 13,
+                    borderRadius: 10, border: `1px solid ${C.hairline}`, background: "#FFFFFF",
+                    color: C.espresso, outline: "none",
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => void runMatch()}
+                  disabled={matchBusy || !photoData}
+                  style={{
+                    width: "100%", marginTop: 10, padding: "12px 18px", fontSize: 14, fontWeight: 700,
+                    borderRadius: 12, border: 0, cursor: matchBusy || !photoData ? "default" : "pointer",
+                    background: matchBusy || !photoData ? C.hairline : C.espresso,
+                    color: "#FFFFFF", letterSpacing: "0.03em",
+                  }}
+                >
+                  {matchBusy ? "Matching your style…" : "Find my matches"}
+                </button>
+                {matchErr && (
+                  <p style={{ fontSize: 12, color: "#9C3D2E", margin: "8px 0 0", textAlign: "center" }}>{matchErr}</p>
+                )}
+                {query.trim() && (
+                  <p style={{ fontSize: 11, color: C.muted, margin: "8px 0 0", textAlign: "center" }}>
+                    Matching near “{query.trim()}”. Clear the city box to search everywhere.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {matchResult ? (
+          <>
+            <div style={{
+              background: C.ivory, border: `1px solid ${C.hairline}`, borderRadius: 16,
+              padding: 14, marginBottom: 16,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso, margin: 0 }}>
+                  {matchResult.detected.styleFamily
+                    ? `We spotted ${matchResult.detected.styleFamily}`
+                    : "Your style match"}
+                </p>
+                <button
+                  type="button"
+                  onClick={clearMatch}
+                  style={{ background: "transparent", border: 0, color: C.goldDeep, fontWeight: 700, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  ✕ Clear
+                </button>
+              </div>
+              {matchResult.detected.rationale && (
+                <p style={{ fontSize: 13, color: C.coffee, margin: "6px 0 0", lineHeight: 1.5 }}>
+                  {matchResult.detected.rationale}
+                </p>
+              )}
+              {matchResult.detected.styleTags.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                  {matchResult.detected.styleTags.map(tag => (
+                    <span key={tag} style={{
+                      fontSize: 11, fontWeight: 700, color: C.goldDeep, background: "#FFFFFF",
+                      border: `1px solid ${C.hairline}`, borderRadius: 999, padding: "3px 9px",
+                    }}>
+                      {styleLabel(tag)}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {matchResult.matches.length > 0 ? (
+              <>
+                <p style={{ fontSize: 12, color: C.muted, margin: "0 0 10px" }}>
+                  {matchResult.matches.length} matching braider{matchResult.matches.length === 1 ? "" : "s"}
+                  {query.trim() ? ` near “${query.trim()}”` : ""}
+                </p>
+                {matchResult.matches.map(s => <StylistCard key={s.slug} s={s} />)}
+              </>
+            ) : (
+              <div style={{ textAlign: "center", padding: "24px 12px" }}>
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso, margin: 0 }}>
+                  {matchResult.detected.styleTags.length === 0
+                    ? "Hmm, we couldn't pin down that style"
+                    : "No braiders match that style yet"}
+                </p>
+                <p style={{ fontSize: 13, color: C.muted, margin: "8px 0 0", lineHeight: 1.5 }}>
+                  {query.trim()
+                    ? "Try clearing the city to search everywhere, or browse all braiders."
+                    : "Browse all braiders below instead."}
+                </p>
+                <button
+                  type="button"
+                  onClick={clearMatch}
+                  style={{
+                    marginTop: 14, padding: "10px 18px", fontSize: 13, fontWeight: 600,
+                    borderRadius: 999, border: `1px solid ${C.hairline}`, background: "transparent", color: C.espresso,
+                  }}
+                >
+                  Browse all braiders
+                </button>
+              </div>
+            )}
+          </>
+        ) : loading ? (
           <p style={{ textAlign: "center", color: C.muted, fontSize: 13, padding: "40px 0" }}>
             Loading braiders…
           </p>
