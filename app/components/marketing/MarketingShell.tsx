@@ -75,6 +75,7 @@ export const MarketingShell = ({ children }: { children: ReactNode }) => {
 };
 
 const MARKETING_NAV_LINKS: Array<{ href: string; label: string }> = [
+  { href: "/discover", label: "Find a Braider" },
   { href: "/#booking-scheduling", label: "Features" },
   { href: "/how-it-works", label: "How it works" },
   { href: "/pricing", label: "Pricing" },
@@ -314,6 +315,9 @@ const MarketingFooter = () => (
         Braid Boss Pro
       </p>
       <nav className="flex flex-wrap items-center justify-center" style={{ gap: 16 }}>
+        <Link href="/discover" style={footerLink}>
+          Find a Braider
+        </Link>
         <Link href="/features" style={footerLink}>
           Features
         </Link>

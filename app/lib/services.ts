@@ -9,6 +9,9 @@
 
 import { useEffect, useState } from "react";
 import { getSupabase } from "./supabase";
+import { STYLE_TAGS } from "./marketplace";
+
+const STYLE_TAG_SLUGS = new Set(STYLE_TAGS.map(s => s.slug));
 
 // Service variations (legacy: "add-ons"). The jsonb column is still
 // `add_ons` for back-compat, but each entry can now carry its own
@@ -312,6 +315,10 @@ export type Service = {
   // "I cap mobile to full installs only"). Null = use the generic
   // message we ship out of the box.
   mobile_minimum_price_note: string | null;
+  // Marketplace Phase 1 — canonical braid-style slugs (from STYLE_TAGS
+  // in lib/marketplace) used to filter this stylist on the public Find
+  // a Braider page. Constrained server-side by services_style_tags_chk.
+  style_tags: string[];
   created_at: string;
   updated_at: string;
 };
@@ -363,6 +370,7 @@ export type ServiceInput = Pick<
   | "mobile_tiered_bands"
   | "mobile_minimum_price"
   | "mobile_minimum_price_note"
+  | "style_tags"
 >;
 
 // ---- Validation -------------------------------------------------------
@@ -752,6 +760,15 @@ export const useServices = (
         const s = typeof v === "string" ? v.trim() : "";
         return s ? s.slice(0, 500) : null;
       })(),
+      // Marketplace style tags — dedupe + drop anything not in the
+      // canonical vocabulary so the row always satisfies the DB check.
+      style_tags: Array.isArray((draft as any).style_tags)
+        ? Array.from(new Set(
+            ((draft as any).style_tags as any[])
+              .map(t => String(t || "").trim())
+              .filter(t => STYLE_TAG_SLUGS.has(t)),
+          ))
+        : [],
       // Marketing rebook window in weeks. Empty / 0 / non-number =>
       // null (no auto-nudge). Clamped to the DB check (1..52).
       rebook_after_weeks: (() => {
