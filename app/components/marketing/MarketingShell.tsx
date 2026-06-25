@@ -326,14 +326,17 @@ const MarketingFooter = () => (
         <Link href="/faq" style={footerLink}>
           FAQ
         </Link>
+        <Link href="/support" style={footerLink}>
+          Support
+        </Link>
+        <Link href="/guides" style={footerLink}>
+          Guides
+        </Link>
         <Link href="/privacy" style={footerLink}>
           Privacy
         </Link>
         <Link href="/terms" style={footerLink}>
           Terms
-        </Link>
-        <Link href="/support" style={footerLink}>
-          Support
         </Link>
       </nav>
       {/* Comparison pages — kept in their own labelled row so the

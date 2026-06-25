@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import FeaturesContent from "../components/marketing/FeaturesContent";
+import { FeatureDirectory } from "../components/marketing/FeatureDirectory";
 
 export const metadata: Metadata = {
-  title: "Features · Braid Boss Pro — the business OS for braiders",
+  title: "Features · Braid Boss Pro — the all-in-one platform for braiders",
   description:
-    "Braid Boss Pro is the business operating system for braiders. Branded booking links, deposits, Stripe Connect, retail storefronts, contracts, analytics, and modern beauty-tech tools built specifically for braid stylists.",
+    "Explore every feature of Braid Boss Pro — booking software, payments and deposits, inventory, AI tools, contracts, storefront, memberships, marketing, public profile, and the mobile app. Built specifically for professional braiders.",
   alternates: { canonical: "/features" },
   keywords: [
     "braid business software",
@@ -15,12 +16,12 @@ export const metadata: Metadata = {
     "business tools for braiders",
     "braid pricing software",
     "braider client management app",
-    "creator economy braid platform",
+    "all-in-one platform for braiders",
   ],
   openGraph: {
-    title: "Features · Braid Boss Pro — the business OS for braiders",
+    title: "Features · Braid Boss Pro — the all-in-one platform for braiders",
     description:
-      "The business operating system for braiders. Branded booking links, deposits, Stripe Connect, retail storefronts, contracts, analytics — built specifically for braid stylists.",
+      "The all-in-one business platform built specifically for professional braiders. Booking, deposits, inventory, AI tools, contracts, storefront, memberships, marketing, and more.",
     url: "/features",
     siteName: "Braid Boss Pro",
     type: "website",
@@ -28,10 +29,10 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Features · Braid Boss Pro",
-    description: "The business operating system for braiders.",
+    description: "The all-in-one business platform built specifically for professional braiders.",
   },
 };
 
 export default function FeaturesPage() {
-  return <FeaturesContent />;
+  return <FeaturesContent directory={<FeatureDirectory />} />;
 }
