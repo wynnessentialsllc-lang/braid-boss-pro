@@ -21740,6 +21740,7 @@ const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
           description of the product (what it is, what it costs) and
           the privacy/terms pages reachable even from the auth screen. */}
       <nav aria-label="Learn more" className="bbpa-footnav">
+        <a href="/discover">Find a braider</a>
         <a href="/features">Features</a>
         <a href="/pricing">Pricing</a>
         <a href="/privacy">Privacy</a>

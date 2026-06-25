@@ -82,6 +82,7 @@ export const LegalShell = ({
 
         <footer className="mt-12 pt-6" style={{ borderTop: `1px solid ${C.hairline}` }}>
           <div className="flex flex-wrap gap-x-4 gap-y-2 text-[12px]" style={{ color: C.muted }}>
+            <Link href="/discover">Find a Braider</Link>
             <Link href="/privacy">Privacy</Link>
             <Link href="/terms">Terms</Link>
             <Link href="/support">Support</Link>

@@ -14,7 +14,7 @@ import { getSupabase } from "./supabase";
 export const APP_VERSION = "2.4.0";
 export const BUILD_NUMBER = "2026.05.30";
 
-export const SUPPORT_EMAIL = "support@braidbosspro.app";
+export const SUPPORT_EMAIL = "hello@braidbosspro.app";
 
 export const ONBOARDING_STEPS: { id: string; label: string }[] = [
   { id: "business_info",   label: "Add business information" },
