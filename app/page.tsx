@@ -1274,7 +1274,6 @@ const DEFAULT_REMINDER_SETTINGS = {
   sms: {
     reminders: false,
     waitlist: false,
-    displayNote: "",
   },
 };
 
@@ -16262,17 +16261,6 @@ const ReminderSettings = ({ store, onBack }: {
               />
             </div>
           ))}
-          {/* Stylist alerts (new bookings, cancellations, etc.) are
-              delivered as web push notifications, not SMS — so there's no
-              stylist phone-number field here. See the "Your SMS phone
-              number" removal: the value was never read by the send path. */}
-          <Field label="Business SMS display note" hint="Optional context shown to clients about your texts">
-            <Input
-              value={(s.sms || {}).displayNote || ""}
-              onChange={e => setS({ ...s, sms: { ...(s.sms || {}), displayNote: e.target.value } })}
-              placeholder={`Texts from ${store.business.businessName || "your stylist"}`}
-            />
-          </Field>
         </Card>
         </>}
 
