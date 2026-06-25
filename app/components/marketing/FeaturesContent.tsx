@@ -51,7 +51,11 @@ import {
   ClientInfoShowcase,
 } from "./ShowcaseSections";
 
-export default function FeaturesContent() {
+// `directory` is an optional slot rendered just above the closing CTA.
+// The /features hub passes in a grid that links to every dedicated SEO
+// feature page; the logged-out home landing (app/page.tsx) renders
+// FeaturesContent with no props, so its layout is unchanged.
+export default function FeaturesContent({ directory }: { directory?: React.ReactNode } = {}) {
   return (
     <MarketingShell>
       <MarketingHero
@@ -325,6 +329,8 @@ export default function FeaturesContent() {
           />
         </FeatureGrid>
       </Section>
+
+      {directory}
 
       <CtaFooter
         title="Run your braid business like a brand."
