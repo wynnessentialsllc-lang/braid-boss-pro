@@ -52,6 +52,10 @@ type Body = {
   media_type?: string | null;
   city?: string | null;
   notes?: string | null;
+  // When true, only classify the photo into style tags and skip the
+  // braider-matching query — used by the "post a request" form to
+  // auto-suggest style tags.
+  classify_only?: boolean;
 };
 
 export async function POST(req: Request) {
@@ -176,6 +180,11 @@ export async function POST(req: Request) {
     };
   } catch {
     return fail(502, "Couldn't match your photo right now. Please try again or search by city.");
+  }
+
+  // Classify-only (auto-suggest for the post-a-request form): skip matching.
+  if (body.classify_only) {
+    return NextResponse.json({ detected, matches: [] });
   }
 
   // Nothing canonical detected → return the read, no matches (UI falls back).

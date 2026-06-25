@@ -52,3 +52,21 @@ export const findBraider = async (input: FindBraiderInput): Promise<FindBraiderR
   }
   return data as FindBraiderResult;
 };
+
+// Classify-only: detect style tags from a photo without running the match
+// query. Used by the "post a request" form to auto-suggest style tags.
+export const classifyStyle = async (
+  imageBase64: string,
+  mediaType: string,
+): Promise<DetectedStyle> => {
+  const res = await fetch("/api/find-braider", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ image_base64: imageBase64, media_type: mediaType, classify_only: true }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as any)?.error || "Couldn't read that photo right now.");
+  }
+  return (data as FindBraiderResult).detected;
+};

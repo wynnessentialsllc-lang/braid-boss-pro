@@ -20,8 +20,10 @@ import {
 } from "../lib/marketplace";
 import {
   findBraider,
+  classifyStyle,
   type FindBraiderResult,
 } from "../lib/find-braider";
+import { createStyleRequest } from "../lib/style-request-post";
 
 const C = {
   cream: "#FFFFFF",
@@ -316,6 +318,71 @@ const DiscoverInner = () => {
     setMatchOpen(false);
   };
 
+  // --- Post an Open Style Request (reverse marketplace) ---
+  const [reqOpen, setReqOpen] = useState(false);
+  const [reqPhotoPreview, setReqPhotoPreview] = useState<string | null>(null);
+  const [reqPhotoData, setReqPhotoData] = useState<{ base64: string; type: string } | null>(null);
+  const [reqSuggesting, setReqSuggesting] = useState(false);
+  const [reqTags, setReqTags] = useState<string[]>([]);
+  const [reqName, setReqName] = useState("");
+  const [reqEmail, setReqEmail] = useState("");
+  const [reqBudgetMin, setReqBudgetMin] = useState("");
+  const [reqBudgetMax, setReqBudgetMax] = useState("");
+  const [reqNotes, setReqNotes] = useState("");
+  const [reqBusy, setReqBusy] = useState(false);
+  const [reqErr, setReqErr] = useState<string | null>(null);
+  const [reqDone, setReqDone] = useState(false);
+
+  const onReqPhotoPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setReqErr(null);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = String(reader.result || "");
+      setReqPhotoPreview(dataUrl);
+      setReqPhotoData({ base64: dataUrl, type: file.type });
+      // Auto-suggest style tags from the photo.
+      setReqSuggesting(true);
+      try {
+        const detected = await classifyStyle(dataUrl, file.type);
+        if (detected.styleTags.length > 0) setReqTags(detected.styleTags);
+      } catch { /* suggestion is best-effort */ }
+      finally { setReqSuggesting(false); }
+    };
+    reader.onerror = () => setReqErr("Couldn't read that image. Try another photo.");
+    reader.readAsDataURL(file);
+  };
+
+  const toggleReqTag = (slug: string) => {
+    setReqTags(cur => cur.includes(slug) ? cur.filter(x => x !== slug) : [...cur, slug]);
+  };
+
+  const submitReq = async () => {
+    if (!reqName.trim()) { setReqErr("Please add your name."); return; }
+    if (!reqEmail.trim()) { setReqErr("Add an email so braiders can reach you."); return; }
+    setReqBusy(true);
+    setReqErr(null);
+    try {
+      await createStyleRequest({
+        clientName: reqName,
+        clientEmail: reqEmail,
+        imageBase64: reqPhotoData?.base64 || null,
+        mediaType: reqPhotoData?.type || null,
+        styleTags: reqTags,
+        budgetMin: reqBudgetMin ? Number(reqBudgetMin) : null,
+        budgetMax: reqBudgetMax ? Number(reqBudgetMax) : null,
+        city: query,
+        notes: reqNotes,
+      });
+      setReqDone(true);
+    } catch (e: any) {
+      setReqErr(e?.message || "Couldn't post your request right now.");
+    } finally {
+      setReqBusy(false);
+    }
+  };
+
   return (
     <div style={{
       minHeight: "100dvh",
@@ -478,6 +545,135 @@ const DiscoverInner = () => {
                   </p>
                 )}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Post an Open Style Request */}
+        {!matchResult && (
+          <div style={{
+            background: "#FFFFFF", border: `1px solid ${C.hairline}`, borderRadius: 16,
+            padding: 14, marginBottom: 18,
+          }}>
+            {reqDone ? (
+              <div style={{ textAlign: "center", padding: "8px 4px" }}>
+                <p style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso, margin: 0 }}>
+                  ✓ Your request is posted
+                </p>
+                <p style={{ fontSize: 13, color: C.muted, margin: "6px 0 0", lineHeight: 1.5 }}>
+                  Braiders who do your style will send you quotes by email. Keep an eye on your inbox.
+                </p>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setReqOpen(o => !o)}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                    gap: 10, background: "transparent", border: 0, cursor: "pointer", padding: 0, textAlign: "left",
+                  }}
+                >
+                  <span>
+                    <span style={{ display: "block", fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: C.espresso }}>
+                      Can&apos;t find your style?
+                    </span>
+                    <span style={{ display: "block", fontSize: 12, color: C.muted, marginTop: 2 }}>
+                      Post a request and let braiders come to you with quotes.
+                    </span>
+                  </span>
+                  <span style={{ color: C.goldDeep, fontWeight: 700, fontSize: 13 }}>{reqOpen ? "▴" : "▾"}</span>
+                </button>
+
+                {reqOpen && (
+                  <div style={{ marginTop: 12 }}>
+                    <label style={{
+                      display: "block", border: `1px dashed ${C.hairline}`, borderRadius: 12,
+                      padding: reqPhotoPreview ? 8 : 14, textAlign: "center", cursor: "pointer", background: C.ivory,
+                    }}>
+                      <input type="file" accept="image/*" onChange={onReqPhotoPick} style={{ display: "none" }} />
+                      {reqPhotoPreview ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={reqPhotoPreview} alt="" style={{ maxHeight: 140, borderRadius: 8, objectFit: "contain", margin: "0 auto" }} />
+                      ) : (
+                        <span style={{ fontSize: 13, color: C.coffee, fontWeight: 600 }}>📷 Add an inspiration photo (optional)</span>
+                      )}
+                    </label>
+
+                    <p style={{ fontSize: 11, color: C.muted, margin: "10px 0 6px" }}>
+                      {reqSuggesting ? "Reading your photo…" : "Styles you want"}
+                    </p>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {STYLE_TAGS.map(t => {
+                        const on = reqTags.includes(t.slug);
+                        return (
+                          <button
+                            key={t.slug}
+                            type="button"
+                            onClick={() => toggleReqTag(t.slug)}
+                            style={{
+                              fontSize: 12, fontWeight: 600, padding: "6px 11px", borderRadius: 999, cursor: "pointer",
+                              border: `1px solid ${on ? C.espresso : C.hairline}`,
+                              background: on ? C.espresso : "#FFFFFF",
+                              color: on ? "#FFFFFF" : C.coffee,
+                            }}
+                          >
+                            {t.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                      <input
+                        type="number" inputMode="numeric" value={reqBudgetMin}
+                        onChange={e => setReqBudgetMin(e.target.value)} placeholder="Budget min $"
+                        style={{ flex: 1, padding: "10px 12px", fontSize: 13, borderRadius: 10, border: `1px solid ${C.hairline}`, background: "#FFFFFF", color: C.espresso, outline: "none" }}
+                      />
+                      <input
+                        type="number" inputMode="numeric" value={reqBudgetMax}
+                        onChange={e => setReqBudgetMax(e.target.value)} placeholder="Budget max $"
+                        style={{ flex: 1, padding: "10px 12px", fontSize: 13, borderRadius: 10, border: `1px solid ${C.hairline}`, background: "#FFFFFF", color: C.espresso, outline: "none" }}
+                      />
+                    </div>
+
+                    <input
+                      type="text" value={reqName} onChange={e => setReqName(e.target.value)} placeholder="Your name"
+                      style={{ width: "100%", marginTop: 10, padding: "10px 12px", fontSize: 13, borderRadius: 10, border: `1px solid ${C.hairline}`, background: "#FFFFFF", color: C.espresso, outline: "none" }}
+                    />
+                    <input
+                      type="email" value={reqEmail} onChange={e => setReqEmail(e.target.value)} placeholder="Email (so braiders can send quotes)"
+                      style={{ width: "100%", marginTop: 8, padding: "10px 12px", fontSize: 13, borderRadius: 10, border: `1px solid ${C.hairline}`, background: "#FFFFFF", color: C.espresso, outline: "none" }}
+                    />
+                    <textarea
+                      value={reqNotes} onChange={e => setReqNotes(e.target.value)} placeholder="Anything else? (length, color, when you need it)"
+                      rows={2}
+                      style={{ width: "100%", marginTop: 8, padding: "10px 12px", fontSize: 13, borderRadius: 10, border: `1px solid ${C.hairline}`, background: "#FFFFFF", color: C.espresso, outline: "none", resize: "vertical" }}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => void submitReq()}
+                      disabled={reqBusy}
+                      style={{
+                        width: "100%", marginTop: 10, padding: "12px 18px", fontSize: 14, fontWeight: 700,
+                        borderRadius: 12, border: 0, cursor: reqBusy ? "default" : "pointer",
+                        background: reqBusy ? C.hairline : C.espresso, color: "#FFFFFF", letterSpacing: "0.03em",
+                      }}
+                    >
+                      {reqBusy ? "Posting…" : "Post my request"}
+                    </button>
+                    {reqErr && (
+                      <p style={{ fontSize: 12, color: "#9C3D2E", margin: "8px 0 0", textAlign: "center" }}>{reqErr}</p>
+                    )}
+                    {query.trim() && (
+                      <p style={{ fontSize: 11, color: C.muted, margin: "8px 0 0", textAlign: "center" }}>
+                        Posting for “{query.trim()}”. Set your city in the search box above first.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
