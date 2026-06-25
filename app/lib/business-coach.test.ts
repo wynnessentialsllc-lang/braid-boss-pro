@@ -282,6 +282,22 @@ describe("parseCoachBriefing", () => {
     expect(without?.monthlyCheckIn).toBe("");
   });
 
+  it("truncates an over-long wellbeing note on a word boundary with an ellipsis", () => {
+    const longWellbeing = "lorem ".repeat(150).trim(); // ~899 chars, well over the cap
+    const out = parseCoachBriefing({ headline: "Hi", summary: "s", wellbeing: longWellbeing });
+    const w = out!.wellbeing;
+    // Never cut mid-word: every token (minus the trailing ellipsis) is whole.
+    expect(w.endsWith("…")).toBe(true);
+    expect(w.length).toBeLessThanOrEqual(601);
+    expect(w.replace("…", "").trim().split(" ").every(t => t === "lorem")).toBe(true);
+  });
+
+  it("leaves a wellbeing note that fits within the cap unchanged (no ellipsis)", () => {
+    const note = "Saturday's an 8-hour day — hydrate, take a real break, and let it recharge you.";
+    const out = parseCoachBriefing({ headline: "Hi", summary: "s", wellbeing: note });
+    expect(out?.wellbeing).toBe(note);
+  });
+
   it("returns null when there's no headline or summary", () => {
     expect(parseCoachBriefing({ actions: [] })).toBeNull();
   });
