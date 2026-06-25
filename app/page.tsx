@@ -1273,10 +1273,7 @@ const DEFAULT_REMINDER_SETTINGS = {
   // 3) AND Twilio is configured (Phase 1). No marketing.
   sms: {
     reminders: false,
-    bookingRequest: false,
-    cancelReschedule: false,
     waitlist: false,
-    stylistPhone: "",
     displayNote: "",
   },
 };
@@ -16246,10 +16243,12 @@ const ReminderSettings = ({ store, onBack }: {
           <p className="text-[12px]" style={{ color: C.muted, lineHeight: 1.5 }}>
             SMS helps clients remember appointments and respond faster. Carrier rates may apply.
           </p>
+          {/* Only client-facing SMS lives here. Stylist alerts about new
+              booking requests and cancellations/reschedules are delivered
+              as web push (and email), not SMS, so they're intentionally
+              not listed under Text message notifications. */}
           {([
             ["reminders", "Enable SMS reminders", "Appointment reminder texts"],
-            ["bookingRequest", "Enable booking request texts", "Texted when a request comes in"],
-            ["cancelReschedule", "Enable cancellation/reschedule texts", "Texted on cancel or reschedule"],
             ["waitlist", "Enable waitlist texts", "Texted about waitlist openings"],
           ] as [string, string, string][]).map(([k, label, hint]) => (
             <div key={k} className="flex items-center justify-between py-1">
@@ -16263,15 +16262,10 @@ const ReminderSettings = ({ store, onBack }: {
               />
             </div>
           ))}
-          <Field label="Your SMS phone number" hint="Used for stylist alerts (e.g. cancellations)">
-            <Input
-              type="tel"
-              inputMode="tel"
-              value={(s.sms || {}).stylistPhone || ""}
-              onChange={e => setS({ ...s, sms: { ...(s.sms || {}), stylistPhone: e.target.value } })}
-              placeholder="+1 555 123 4567"
-            />
-          </Field>
+          {/* Stylist alerts (new bookings, cancellations, etc.) are
+              delivered as web push notifications, not SMS — so there's no
+              stylist phone-number field here. See the "Your SMS phone
+              number" removal: the value was never read by the send path. */}
           <Field label="Business SMS display note" hint="Optional context shown to clients about your texts">
             <Input
               value={(s.sms || {}).displayNote || ""}
