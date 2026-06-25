@@ -651,7 +651,18 @@ export const coachTool = () => ({
   },
 });
 
-const str = (v: unknown, max: number): string => (typeof v === "string" ? v : "").trim().slice(0, max);
+// Normalize a model-supplied string to a length cap. When the text is
+// longer than `max`, truncate on a word boundary and append an ellipsis
+// so the UI never renders a half-word like "recharge you menta". Falls
+// back to a hard cut only when there's no nearby space to break on.
+const str = (v: unknown, max: number): string => {
+  const s = (typeof v === "string" ? v : "").trim();
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const lastSpace = cut.lastIndexOf(" ");
+  const base = lastSpace > max * 0.6 ? cut.slice(0, lastSpace) : cut;
+  return base.replace(/[\s,;:.!?\-—–]+$/, "") + "…";
+};
 
 export const parseCoachBriefing = (input: unknown): CoachBriefing | null => {
   const o = (input ?? {}) as Record<string, unknown>;
@@ -671,7 +682,7 @@ export const parseCoachBriefing = (input: unknown): CoachBriefing | null => {
     headline: headline || "Here's your day at a glance",
     summary,
     actions,
-    wellbeing: str(o.wellbeing, 320),
+    wellbeing: str(o.wellbeing, 600),
     monthlyCheckIn: str(o.monthlyCheckIn, 600),
     encouragement: str(o.encouragement, 200),
   };
