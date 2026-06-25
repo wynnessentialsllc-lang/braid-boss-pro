@@ -5912,11 +5912,7 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
 
         {nextMonth.appointments.length > 0 && (
           <div>
-            <SectionTitle
-              action={{ label: `View all ${nextMonth.appointments.length} →`, onClick: () => openKpi("nextMonth") }}
-            >
-              Next month
-            </SectionTitle>
+            <SectionTitle>Next month</SectionTitle>
             {/* Clickable preview of what's expected next month — taps
                 open the full drill-down via openKpi("nextMonth"). */}
             <Card
