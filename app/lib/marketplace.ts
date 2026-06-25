@@ -201,6 +201,18 @@ export const saveMarketplaceListing = async (
   if (error) throw error;
 };
 
+// Fire-and-forget: drops a one-time, personalized "you're listed" bell in
+// the stylist's inbox the first time they're eligible. Self-gates + dedupes
+// server-side, so it's safe to call on every listing load.
+export const notifySelfListed = async (): Promise<void> => {
+  try {
+    const supabase = getSupabase();
+    await supabase.rpc("notify_self_marketplace_listed");
+  } catch {
+    // best-effort — never surfaces to the stylist
+  }
+};
+
 export const priceRangeLabel = (
   min: number | null,
   max: number | null,

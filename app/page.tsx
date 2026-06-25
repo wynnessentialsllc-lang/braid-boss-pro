@@ -68,6 +68,7 @@ import {
   saveMarketplaceListing,
   isListed,
   listingGaps,
+  notifySelfListed,
   STYLE_TAGS,
   styleLabel,
 } from "./lib/marketplace";
@@ -22893,6 +22894,8 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
       try {
         const l = await loadMarketplaceListing(userId);
         if (!cancelled) setMktListing(l);
+        // First time they're actually listed, greet them in their inbox.
+        if (isListed(l)) void notifySelfListed();
       } catch { /* non-fatal — card just won't render */ }
     })();
     return () => { cancelled = true; };
@@ -35934,6 +35937,7 @@ const MarketplaceScreen = ({ store, onBack, onOpenRequests }: { store: any; onBa
       setHidden(l.hidden);
       setCity(l.city);
       setStateRegion(l.state);
+      if (isListed(l)) void notifySelfListed();
     } catch (e: any) {
       setMsg({ kind: "error", text: e?.message || "Couldn't load your listing." });
     } finally {
