@@ -332,6 +332,7 @@ const DiscoverInner = () => {
   const [reqBusy, setReqBusy] = useState(false);
   const [reqErr, setReqErr] = useState<string | null>(null);
   const [reqDone, setReqDone] = useState(false);
+  const [reqToken, setReqToken] = useState<string | null>(null);
 
   const onReqPhotoPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -364,7 +365,7 @@ const DiscoverInner = () => {
     setReqBusy(true);
     setReqErr(null);
     try {
-      await createStyleRequest({
+      const token = await createStyleRequest({
         clientName: reqName,
         clientEmail: reqEmail,
         imageBase64: reqPhotoData?.base64 || null,
@@ -375,6 +376,7 @@ const DiscoverInner = () => {
         city: query,
         notes: reqNotes,
       });
+      setReqToken(token);
       setReqDone(true);
     } catch (e: any) {
       setReqErr(e?.message || "Couldn't post your request right now.");
@@ -561,8 +563,16 @@ const DiscoverInner = () => {
                   ✓ Your request is posted
                 </p>
                 <p style={{ fontSize: 13, color: C.muted, margin: "6px 0 0", lineHeight: 1.5 }}>
-                  Braiders who do your style will send you quotes by email. Keep an eye on your inbox.
+                  Braiders who do your style will send you quotes by email. You can also track them here:
                 </p>
+                {reqToken && (
+                  <a href={`/requests/${encodeURIComponent(reqToken)}`} style={{
+                    display: "inline-block", marginTop: 12, padding: "10px 18px", fontSize: 13, fontWeight: 700,
+                    color: "#FFFFFF", background: C.espresso, borderRadius: 999, textDecoration: "none", letterSpacing: "0.03em",
+                  }}>
+                    View my quotes
+                  </a>
+                )}
               </div>
             ) : (
               <>

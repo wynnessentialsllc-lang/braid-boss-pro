@@ -159,16 +159,26 @@ export async function POST(req: Request) {
   };
 
   let token: string | null = null;
+  let requestId: string | null = null;
   try {
     const { data, error } = await admin
       .from("marketplace_style_requests")
       .insert(insert)
-      .select("client_token")
+      .select("id, client_token")
       .maybeSingle();
     if (error || !data) throw error || new Error("no row");
     token = String((data as any).client_token);
+    requestId = String((data as any).id);
   } catch {
     return fail(502, "Couldn't post your request. Please try again.");
+  }
+
+  // Fan out "new request near you" emails to matching braiders. Best-effort:
+  // a notification failure never fails the client's post.
+  try {
+    await admin.rpc("enqueue_request_match_notifications", { p_request_id: requestId });
+  } catch {
+    // ignore
   }
 
   return NextResponse.json({ token });

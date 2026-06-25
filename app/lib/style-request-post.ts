@@ -20,6 +20,59 @@ export type StyleRequestInput = {
   notes?: string;
 };
 
+export type RequestQuote = {
+  price: number;
+  message: string | null;
+  availableDate: string | null;
+  createdAt: string | null;
+  businessName: string;
+  slug: string;
+  logoUrl: string | null;
+};
+
+export type RequestView = {
+  status: string;
+  styleTags: string[];
+  size: string | null;
+  length: string | null;
+  budgetMin: number | null;
+  budgetMax: number | null;
+  city: string | null;
+  notes: string | null;
+  createdAt: string | null;
+  quotes: RequestQuote[];
+};
+
+// Loads a client's request + quotes by token. Returns null if not found.
+export const getRequestQuotes = async (token: string): Promise<RequestView | null> => {
+  const { getSupabase } = await import("./supabase");
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("public_get_request_quotes", { token_in: token });
+  if (error) throw error;
+  if (!data) return null;
+  const d = data as any;
+  return {
+    status: String(d.status || "open"),
+    styleTags: Array.isArray(d.styleTags) ? d.styleTags : [],
+    size: d.size || null,
+    length: d.length || null,
+    budgetMin: d.budgetMin == null ? null : Number(d.budgetMin),
+    budgetMax: d.budgetMax == null ? null : Number(d.budgetMax),
+    city: d.city || null,
+    notes: d.notes || null,
+    createdAt: d.createdAt || null,
+    quotes: Array.isArray(d.quotes) ? d.quotes.map((q: any) => ({
+      price: Number(q.price) || 0,
+      message: q.message || null,
+      availableDate: q.availableDate || null,
+      createdAt: q.createdAt || null,
+      businessName: String(q.businessName || "Braider"),
+      slug: String(q.slug || ""),
+      logoUrl: q.logoUrl || null,
+    })) : [],
+  };
+};
+
 // Returns the request's client_token. Throws Error(message) on non-2xx.
 export const createStyleRequest = async (input: StyleRequestInput): Promise<string> => {
   const res = await fetch("/api/style-request-post", {
