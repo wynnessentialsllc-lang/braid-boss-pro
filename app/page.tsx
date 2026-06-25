@@ -69,7 +69,13 @@ import {
   isListed,
   listingGaps,
   STYLE_TAGS,
+  styleLabel,
 } from "./lib/marketplace";
+import {
+  type OpenRequest,
+  fetchOpenRequests,
+  submitQuote,
+} from "./lib/marketplace-requests";
 import { type GiftCard, type GiftCardLookup, listGiftCards, findGiftCardByCode, redeemGiftCardInPerson } from "./lib/gift-cards";
 import {
   type LoyaltySettings, type LoyaltyRedemption,
@@ -35910,7 +35916,7 @@ const GiftCardsScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
 // ============================================================
 //  MARKETPLACE LISTING — opt into public "Find a braider" page
 // ============================================================
-const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+const MarketplaceScreen = ({ store, onBack, onOpenRequests }: { store: any; onBack: () => void; onOpenRequests?: () => void }) => {
   const userId: string | null = store.userId;
   const [loading, setLoading] = useState(true);
   const [listing, setListing] = useState<MarketplaceListing | null>(null);
@@ -35981,7 +35987,7 @@ const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }
             {bookingLinkOff && (
               <Card className="p-3.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
                 <p className="text-[12px]" style={{ color: C.coffee }}>
-                  Your booking link is currently turned off. While it's off, your marketplace listing won't appear either.
+                  Your booking link is currently turned off. While it&apos;s off, your marketplace listing won&apos;t appear either.
                 </p>
               </Card>
             )}
@@ -35992,12 +35998,12 @@ const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }
                 <>
                   <p className="text-sm font-semibold" style={{ color: C.espresso }}>Hidden from the marketplace</p>
                   <p className="text-[11px] mt-1" style={{ color: C.muted }}>
-                    You won't appear on the public Find a Braider page. Turn this off in Account &amp; Sync to be listed.
+                    You won&apos;t appear on the public Find a Braider page. Turn this off in Account &amp; Sync to be listed.
                   </p>
                 </>
               ) : live ? (
                 <>
-                  <p className="text-sm font-semibold" style={{ color: C.success }}>✓ You're listed</p>
+                  <p className="text-sm font-semibold" style={{ color: C.success }}>✓ You&apos;re listed</p>
                   <p className="text-[11px] mt-1" style={{ color: C.muted }}>
                     New clients can find and book you on the public Find a Braider page.
                   </p>
@@ -36006,7 +36012,7 @@ const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }
                 <>
                   <p className="text-sm font-semibold" style={{ color: C.espresso }}>Almost there</p>
                   <p className="text-[11px] mt-1 mb-2" style={{ color: C.muted }}>
-                    You're set to be listed automatically — finish these to go live:
+                    You&apos;re set to be listed automatically — finish these to go live:
                   </p>
                   <ul className="space-y-1.5 text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
                     {gaps.map((g, i) => <li key={i}>• {g}</li>)}
@@ -36053,6 +36059,20 @@ const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }
               </ul>
             </Card>
 
+            {onOpenRequests && (
+              <Card className="p-4 active:scale-[0.99]" onClick={onOpenRequests}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold" style={{ color: C.espresso }}>Open client requests</p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      Clients looking for your styles. Send a quote and win the booking.
+                    </p>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+
             <a
               href="/discover"
               target="_blank"
@@ -36063,6 +36083,160 @@ const MarketplaceScreen = ({ store, onBack }: { store: any; onBack: () => void }
               View the marketplace
             </a>
           </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
+//  OPEN REQUESTS — clients looking for your styles; send a quote
+// ============================================================
+const OpenRequestsScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const [loading, setLoading] = useState(true);
+  const [requests, setRequests] = useState<OpenRequest[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  // Per-request quote draft + busy/feedback, keyed by request id.
+  const [drafts, setDrafts] = useState<Record<string, { price: string; message: string; busy?: boolean; done?: boolean; error?: string }>>({});
+
+  const refresh = useCallback(async () => {
+    if (!userId) return;
+    setLoading(true);
+    setErr(null);
+    try {
+      setRequests(await fetchOpenRequests());
+    } catch (e: any) {
+      setErr(e?.message || "Couldn't load requests.");
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  const setDraft = (id: string, patch: Partial<{ price: string; message: string; busy: boolean; done: boolean; error: string }>) =>
+    setDrafts(d => {
+      const cur = d[id] || { price: "", message: "" };
+      return { ...d, [id]: { ...cur, ...patch } };
+    });
+
+  const sendQuote = async (r: OpenRequest) => {
+    const draft = drafts[r.id] || { price: "", message: "" };
+    const price = Number(draft.price);
+    if (!Number.isFinite(price) || price <= 0) {
+      setDraft(r.id, { error: "Enter a valid price." });
+      return;
+    }
+    setDraft(r.id, { busy: true, error: undefined });
+    try {
+      await submitQuote({ requestId: r.id, price, message: draft.message });
+      setDraft(r.id, { busy: false, done: true, error: undefined });
+      await refresh();
+    } catch (e: any) {
+      setDraft(r.id, { busy: false, error: e?.message || "Couldn't send your quote." });
+    }
+  };
+
+  const budgetLabel = (r: OpenRequest): string | null => {
+    const fmt = (n: number) => `$${Math.round(n)}`;
+    if (r.budgetMin != null && r.budgetMax != null) return `Budget ${fmt(r.budgetMin)}–${fmt(r.budgetMax)}`;
+    if (r.budgetMin != null) return `Budget from ${fmt(r.budgetMin)}`;
+    if (r.budgetMax != null) return `Budget up to ${fmt(r.budgetMax)}`;
+    return null;
+  };
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Open requests"
+        subtitle="Clients looking for your styles"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+      />
+      <div className="px-5 pt-2 space-y-4">
+        {loading ? (
+          <Card className="p-6 text-center"><p className="text-[13px]" style={{ color: C.muted }}>Loading…</p></Card>
+        ) : err ? (
+          <Card className="p-3.5" style={{ border: `1px solid ${C.danger}` }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>
+          </Card>
+        ) : requests.length === 0 ? (
+          <Card className="p-6 text-center">
+            <p className="text-sm font-semibold" style={{ color: C.espresso }}>No open requests right now</p>
+            <p className="text-[12px] mt-1" style={{ color: C.muted }}>
+              When a client posts a style you offer in your area, it shows up here. Tag your services with their styles so you get matched.
+            </p>
+          </Card>
+        ) : (
+          requests.map(r => {
+            const draft = drafts[r.id] || { price: "", message: "" };
+            const quoted = !!r.myQuoteId;
+            const budget = budgetLabel(r);
+            return (
+              <Card key={r.id} className="p-4">
+                <div className="flex gap-3">
+                  {r.photoUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={r.photoUrl} alt="" style={{ width: 64, height: 64, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold" style={{ color: C.espresso }}>{r.clientName}</p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      {[r.city, budget].filter(Boolean).join(" · ") || "—"}
+                    </p>
+                    {r.styleTags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {r.styleTags.map(t => (
+                          <span key={t} className="text-[11px] font-semibold rounded-full px-2 py-0.5"
+                            style={{ background: C.ivory, border: `1px solid ${C.hairline}`, color: C.coffee }}>
+                            {styleLabel(t)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {r.notes && (
+                  <p className="text-[12px] mt-2" style={{ color: C.coffee, lineHeight: 1.5 }}>{r.notes}</p>
+                )}
+
+                {quoted ? (
+                  <div className="mt-3 rounded-xl p-3" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                    <p className="text-[12px] font-semibold" style={{ color: C.success }}>
+                      ✓ You quoted ${Math.round(r.myQuotePrice || 0)}
+                    </p>
+                    <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>Update your price below to revise it.</p>
+                  </div>
+                ) : null}
+
+                <div className="mt-3 space-y-2">
+                  <div className="flex gap-2">
+                    <Input
+                      type="number"
+                      value={draft.price}
+                      onChange={(e: any) => setDraft(r.id, { price: e.target.value, done: false })}
+                      placeholder={quoted ? "New price $" : "Your price $"}
+                    />
+                    <Button
+                      variant="primary"
+                      onClick={() => void sendQuote(r)}
+                      disabled={draft.busy}
+                    >
+                      {draft.busy ? "Sending…" : quoted ? "Update" : "Send quote"}
+                    </Button>
+                  </div>
+                  <Input
+                    value={draft.message}
+                    onChange={(e: any) => setDraft(r.id, { message: e.target.value, done: false })}
+                    placeholder="Add a short message (optional)"
+                  />
+                  {draft.error && <p className="text-[12px] font-semibold" style={{ color: C.danger }}>{draft.error}</p>}
+                  {draft.done && <p className="text-[12px] font-semibold" style={{ color: C.success }}>Quote sent to {r.clientName}.</p>}
+                </div>
+              </Card>
+            );
+          })
         )}
       </div>
     </div>
@@ -39933,7 +40107,8 @@ export default function App() {
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} openSocialTemplates={() => setSecondary("socialTemplates")} />}
       {secondary === "socialTemplates" && <SocialTemplatesScreen store={store} onBack={() => setSecondary("marketing")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
-      {secondary === "marketplace" && <MarketplaceScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "marketplace" && <MarketplaceScreen store={store} onBack={() => setSecondary("settings")} onOpenRequests={() => setSecondary("marketplaceRequests")} />}
+      {secondary === "marketplaceRequests" && <OpenRequestsScreen store={store} onBack={() => setSecondary("marketplace")} />}
       {secondary === "giftCards" && <GiftCardsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "loyalty" && <LoyaltyScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "smsCredits" && <SmsCreditsScreen store={store} onBack={() => setSecondary("settings")} />}
