@@ -5694,7 +5694,7 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           }>Today&apos;s chair</SectionTitle>
           {todayAppts.length === 0 ? (
             <Card className="p-5 text-center">
-              <p className="italic mb-1" style={{ fontFamily: FONT_DISPLAY, color: C.gold, fontSize: 16 }}>a quiet morning</p>
+              <p className="italic mb-1" style={{ fontFamily: FONT_DISPLAY, color: C.gold, fontSize: 16 }}>a quiet day</p>
               <p className="text-sm" style={{ color: C.muted }}>No appointments today. Time to plan, prep, or post.</p>
             </Card>
           ) : (
@@ -39655,17 +39655,36 @@ export default function App() {
   // default "dashboard" can't overwrite the saved value on mount.
   const NAV_ACTIVE_KEY = "nav:active";
   const NAV_SECONDARY_KEY = "nav:secondary";
+  // Wall-clock of the user's last known presence (updated while the app is
+  // visible and stamped when it's backgrounded). Drives the idle reset
+  // below so a returning user lands on Home instead of deep in a sub-screen.
+  const NAV_LAST_SEEN_KEY = "nav:lastSeen";
+  // How long the user has to be away before we treat the next return as a
+  // fresh visit and drop them back on the Home dashboard. 30 min: short
+  // enough that a return after a real break starts fresh, long enough that
+  // a quick context switch (answer a text, glance at the calendar) keeps
+  // them right where they were.
+  const NAV_IDLE_RESET_MS = 30 * 60 * 1000;
   const navRestored = useRef(false);
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [savedActive, savedSecondary] = await Promise.all([
+      const [savedActive, savedSecondary, lastSeenRaw] = await Promise.all([
         safeStorage.get(NAV_ACTIVE_KEY),
         safeStorage.get(NAV_SECONDARY_KEY),
+        safeStorage.get(NAV_LAST_SEEN_KEY),
       ]);
       if (cancelled) return;
-      if (savedActive) setActive(savedActive);
-      if (savedSecondary) setSecondary(savedSecondary);
+      // Reload after a long absence: skip the restore so the default
+      // "dashboard" stands and the user re-enters on Home. A recent reload
+      // (pull-to-refresh, quick relaunch) still restores exactly where
+      // they were.
+      const lastSeen = lastSeenRaw ? Number(lastSeenRaw) : 0;
+      const idle = lastSeen > 0 && Date.now() - lastSeen > NAV_IDLE_RESET_MS;
+      if (!idle) {
+        if (savedActive) setActive(savedActive);
+        if (savedSecondary) setSecondary(savedSecondary);
+      }
       navRestored.current = true;
     })();
     return () => { cancelled = true; };
@@ -39675,6 +39694,41 @@ export default function App() {
     void safeStorage.set(NAV_ACTIVE_KEY, active);
     void safeStorage.set(NAV_SECONDARY_KEY, secondary ?? "");
   }, [active, secondary]);
+  // Idle-return handling for a still-mounted app (PWA / browser tab that was
+  // backgrounded rather than reloaded). We keep a "last seen" heartbeat
+  // while the app is visible; when it comes back to the foreground we check
+  // how long it was away and, past the idle threshold, send the user home.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const stamp = () => { void safeStorage.set(NAV_LAST_SEEN_KEY, String(Date.now())); };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        // Record the moment they left so the return can measure the gap.
+        stamp();
+        return;
+      }
+      void safeStorage.get(NAV_LAST_SEEN_KEY).then((raw) => {
+        const lastSeen = raw ? Number(raw) : 0;
+        if (lastSeen > 0 && Date.now() - lastSeen > NAV_IDLE_RESET_MS) {
+          setActive("dashboard");
+          setSecondary(null);
+        }
+        stamp();
+      });
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    // Heartbeat so "last seen" tracks active presence even when the user
+    // lingers on one screen without navigating. First fire is at +60s, by
+    // which point the one-time restore above has already run, so it can't
+    // race the idle check on mount.
+    const heartbeat = setInterval(() => {
+      if (document.visibilityState === "visible") stamp();
+    }, 60 * 1000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(heartbeat);
+    };
+  }, []);
   // Inventory can be reached from two surfaces (Settings → Catalog
   // and Shop). The back button should return to the screen the user
   // came from, so we remember the origin when navigating in.
