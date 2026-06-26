@@ -8959,20 +8959,14 @@ const DayCalendarView = ({
     return gaps;
   }, [businessBands]);
 
-  // On load (and whenever the day changes) scroll the timeline to a
-  // sensible focus: the current time when viewing today, otherwise the
-  // opening hour. Scrolling earlier/later stays fully available.
+  // The timeline opens at the top (12 AM) showing the full day's header
+  // and summary above it. We intentionally do NOT auto-scroll to the
+  // current hour on load: on iOS (Capacitor/WKWebView) setting scrollTop
+  // on this nested scroll container leaks to the page and pushes the
+  // month header, day strip and "Today's business" card off-screen.
+  // Letting it rest at the top keeps the whole page in view on open;
+  // scrolling the timeline to any hour stays fully available.
   const scrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const isToday = selectedDate === today;
-    const now = new Date();
-    const openMin = businessBands.length ? businessBands[0].start : 9 * 60;
-    const focusMin = isToday ? now.getHours() * 60 + now.getMinutes() : openMin;
-    const target = (focusMin / 60) * HOUR_PX - el.clientHeight / 2;
-    el.scrollTop = Math.max(0, target);
-  }, [selectedDate, today, businessBands]);
 
   const HOURS = useMemo(
     () => Array.from({ length: endHour - startHour + 1 }, (_, i) => startHour + i),
