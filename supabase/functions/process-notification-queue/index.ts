@@ -113,20 +113,35 @@ type ClaimedRow = {
 };
 
 // =====================================================================
-// Renderers — warm cream / gold / espresso palette. Single inline
-// stylesheet, no external CSS, mobile-safe layout. Templates avoid
-// images and webfonts so they render cleanly across every client.
+// Renderers — Braid Boss Pro 2026 brand palette: white surfaces with
+// vibrant purple → lavender → coral accents (mirrors the in-app tokens
+// in app/page.tsx). Single inline stylesheet, no external CSS,
+// mobile-safe layout. Templates avoid images and webfonts so they
+// render cleanly across every client. Key names are kept stable
+// (gold/goldDeep/cream…) so every existing template inherits the new
+// brand colors without per-template edits.
 // =====================================================================
 const C = {
-  espresso: "#1F140A",
-  coffee: "#4A2C1A",
-  cream: "#FAF6EE",
-  paper: "#FFFFFF",
-  hairline: "#E9DFC8",
-  muted: "#9A8B72",
-  gold: "#C9A961",
-  goldDeep: "#A8893F",
+  espresso: "#15111A",   // ink — primary headings
+  coffee: "#3D3447",     // body copy
+  cream: "#FFFFFF",      // page + light-on-dark text (now pure white)
+  paper: "#FFFFFF",      // card surface
+  hairline: "#ECE7F2",   // soft purple-tinted hairline border
+  muted: "#6F6477",      // captions / footnotes
+  gold: "#7C3AED",       // brand purple — eyebrows & primary accent
+  goldDeep: "#5B21B6",   // deep purple
+  // Bright brand accents for multicolor emphasis.
+  purple: "#7C3AED",
+  purpleDeep: "#5B21B6",
+  lavender: "#B14BE0",
+  coral: "#FF4D6D",
+  coralDeep: "#E0354F",
+  tint: "#F6F2FF",       // faint lavender wash for inset boxes
 };
+
+// Primary brand gradient (purple → coral). Used as the CTA fill, with a
+// solid purple fallback for clients that drop background-image.
+const BRAND_GRADIENT = "linear-gradient(135deg,#7C3AED 0%,#B14BE0 45%,#FF4D6D 100%)";
 
 const escape = (s: unknown): string =>
   String(s ?? "")
@@ -135,22 +150,36 @@ const escape = (s: unknown): string =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
+// Multicolor wordmark masthead — "Braid Boss Pro" rendered bright and
+// bold across the three brand hues (purple / lavender / coral) on
+// white, matching the in-app header. Serif stack only (no webfont) so
+// it renders everywhere.
+const masthead = `
+  <div style="text-align:center;margin:0 0 22px;">
+    <span style="font-family:Georgia,'Times New Roman',serif;font-size:26px;font-weight:700;letter-spacing:0.01em;line-height:1;">
+      <span style="color:${C.purple};">Braid</span> <span style="color:${C.lavender};">Boss</span> <span style="color:${C.coral};">Pro</span>
+    </span>
+  </div>`;
+
 const wrapHtml = (title: string, body: string): string => `<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)}</title></head>
-<body style="margin:0;background:${C.cream};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:${C.espresso};">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)}</title>
+<meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light only">
+<style>:root{color-scheme:light only;supported-color-schemes:light only;}</style></head>
+<body style="margin:0;background:#FFFFFF;color-scheme:light only;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:${C.espresso};">
   <div style="max-width:560px;margin:0 auto;padding:32px 24px;">
-    <div style="background:${C.paper};border:1px solid ${C.hairline};border-radius:16px;padding:28px;box-shadow:0 1px 4px rgba(31,20,10,0.04);">
+    ${masthead}
+    <div style="background:${C.paper};border:1px solid ${C.hairline};border-radius:16px;padding:28px;box-shadow:0 6px 22px -12px rgba(124,58,237,0.28);">
       ${body}
     </div>
     <p style="text-align:center;font-size:11px;color:${C.muted};margin-top:18px;">
-      Sent by Braid Boss Pro
+      Sent by <span style="color:${C.purple};font-weight:600;">Braid Boss Pro</span>
     </p>
   </div>
 </body></html>`;
 
 const ctaButton = (label: string, url: string): string => `
   <p style="margin:22px 0;text-align:center;">
-    <a href="${escape(url)}" style="display:inline-block;background:${C.espresso};color:${C.cream};text-decoration:none;padding:14px 26px;border-radius:999px;font-weight:600;font-size:14px;letter-spacing:0.04em;">
+    <a href="${escape(url)}" style="display:inline-block;background:${C.purple};background-image:${BRAND_GRADIENT};color:#FFFFFF;text-decoration:none;padding:14px 26px;border-radius:999px;font-weight:700;font-size:14px;letter-spacing:0.04em;">
       ${escape(label)}
     </a>
   </p>
@@ -237,7 +266,7 @@ const contractBlock = (p: Record<string, any>): string => {
 const hairBringBlock = (p: Record<string, any>): string => {
   const hair = String(p.hairBring ?? "").trim();
   if (!hair) return "";
-  return `<div style="margin-top:12px;padding:12px 14px;border-radius:12px;background:#FAF5EA;border:1px solid ${C.hairline};">
+  return `<div style="margin-top:12px;padding:12px 14px;border-radius:12px;background:${C.tint};border:1px solid ${C.hairline};">
     <p style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 4px;font-weight:700;">Hair to bring</p>
     <p style="font-size:13px;line-height:20px;color:${C.coffee};margin:0;">${escape(hair)}</p>
   </div>`;
@@ -596,7 +625,7 @@ const renderBalancePaid = (p: Record<string, any>) => {
     ? `<p style="font-size:14px;line-height:22px;">We received <strong>$${amountPaid.toFixed(2)}</strong> for your${serviceName ? ` ${escape(serviceName)}` : ""} appointment. You're all set.</p>`
     : "";
   const cta = reviewUrl
-    ? `<p style="margin:18px 0 8px;text-align:center;"><a href="${reviewUrl}" style="display:inline-block;background:${C.espresso};color:${C.cream};text-decoration:none;padding:14px 26px;border-radius:999px;font-weight:600;font-size:14px;letter-spacing:0.04em;">Leave a review · ★★★★★</a></p>`
+    ? `<p style="margin:18px 0 8px;text-align:center;"><a href="${reviewUrl}" style="display:inline-block;background:${C.purple};background-image:${BRAND_GRADIENT};color:#FFFFFF;text-decoration:none;padding:14px 26px;border-radius:999px;font-weight:700;font-size:14px;letter-spacing:0.04em;">Leave a review · ★★★★★</a></p>`
     : "";
   const html = wrapHtml(subject, `
     <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">Thank you, ${escape(clientName)}.</h1>
@@ -681,7 +710,7 @@ const renderGiftCardIssued = (p: Record<string, any>) => {
   const cardBlocks = cards
     .map(
       (c) => `
-    <div style="border:1px solid ${C.hairline};border-radius:12px;padding:16px;margin:0 0 10px;text-align:center;background:${C.cream};">
+    <div style="border:1px solid ${C.hairline};border-radius:12px;padding:16px;margin:0 0 10px;text-align:center;background:${C.tint};">
       <p style="font-size:12px;color:${C.muted};margin:0 0 6px;text-transform:uppercase;letter-spacing:0.12em;">${money(c.amount)} gift card</p>
       <p style="font-size:24px;font-weight:700;letter-spacing:2px;margin:0;color:${C.espresso};font-family:'Courier New',monospace;">${escape(c.code)}</p>
     </div>`,
@@ -726,7 +755,7 @@ const renderAppointmentConfirmed = (p: Record<string, any>) => {
   // confirmation, above the standard details.
   const customMessage = String(p.customMessage || "").trim();
   const messageBlock = customMessage
-    ? `<div style="background:#F6F2EC;border:1px solid rgba(21,17,26,0.08);border-radius:12px;padding:12px 14px;margin:0 0 16px;">
+    ? `<div style="background:${C.tint};border:1px solid ${C.hairline};border-radius:12px;padding:12px 14px;margin:0 0 16px;">
          <p style="font-size:14px;line-height:21px;margin:0;color:${C.coffee};white-space:pre-wrap;">${escape(customMessage)}</p>
        </div>`
     : "";
@@ -786,7 +815,7 @@ const renderAppointmentReminder = (p: Record<string, any>) => {
     ? `
       <p style="margin:0 0 8px;font-size:14px;font-weight:600;color:${C.espresso};">Need to reschedule?</p>
       <p style="margin:0 0 12px;font-size:13px;line-height:20px;color:${C.coffee};">You may reschedule one time without paying another deposit. Your original deposit will roll over to your new appointment time.</p>
-      <p style="margin:0 0 18px;"><a href="${escape(rescheduleUrl)}" style="display:inline-block;background:${C.espresso};color:${C.cream};text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:600;font-size:13px;letter-spacing:0.04em;">Reschedule appointment</a></p>`
+      <p style="margin:0 0 18px;"><a href="${escape(rescheduleUrl)}" style="display:inline-block;background:${C.purple};background-image:${BRAND_GRADIENT};color:#FFFFFF;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:700;font-size:13px;letter-spacing:0.04em;">Reschedule appointment</a></p>`
     : rescheduleUsed
       ? `<p style="margin:0 0 18px;font-size:13px;line-height:20px;color:${C.muted};">You've already used your one-time reschedule option for this appointment. To make another change, contact your stylist directly.</p>`
       : "";
@@ -800,8 +829,8 @@ const renderAppointmentReminder = (p: Record<string, any>) => {
 
   const html = wrapHtml(subject, `
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Reminder</p>
-    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">See you soon, ${escape(clientName)}.</h1>
-    <p style="font-size:15px;line-height:24px;margin:0 0 14px;">Your appointment with <strong>${escape(studioName)}</strong>${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}${when ? ` is on <strong>${escape(when)}</strong>` : " is coming up soon"}.</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">See you soon, <span style="color:${C.purple};">${escape(clientName)}</span>.</h1>
+    <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">Your appointment with <strong style="color:${C.purpleDeep};">${escape(studioName)}</strong>${serviceName ? ` for <strong style="color:${C.coralDeep};">${escape(serviceName)}</strong>` : ""}${when ? ` is on <strong style="color:${C.espresso};">${escape(when)}</strong>` : " is coming up soon"}.</p>
     ${recipientLine(p)}
     ${customizationBlock(p)}
     ${hairBringBlock(p)}
@@ -1253,7 +1282,7 @@ const renderOrderReadyForPickup = (p: Record<string, any>) => {
       Come grab it from <strong>${escape(studioName)}</strong> at your convenience.
     </p>
     ${pickupAddress ? `
-      <div style="background:${C.cream};border:1px solid ${C.hairline};border-radius:12px;padding:14px 16px;margin:0 0 14px;">
+      <div style="background:${C.tint};border:1px solid ${C.hairline};border-radius:12px;padding:14px 16px;margin:0 0 14px;">
         <p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.muted};margin:0 0 6px;font-weight:700;">Pickup location</p>
         <p style="font-size:15px;line-height:22px;margin:0;color:${C.espresso};font-weight:600;">${escape(pickupAddress)}</p>
         ${pickupInstructions ? `<p style="font-size:13px;line-height:20px;margin:8px 0 0;color:${C.coffee};">${escape(pickupInstructions)}</p>` : ""}
@@ -1300,7 +1329,7 @@ const renderOrderShipped = (p: Record<string, any>) => {
       Your order from <strong>${escape(studioName)}</strong> is in transit${carrier ? ` via <strong>${escape(carrier)}</strong>` : ""}.
     </p>
     ${trackingNumber ? `
-      <div style="background:${C.cream};border:1px solid ${C.hairline};border-radius:12px;padding:14px 16px;margin:0 0 14px;">
+      <div style="background:${C.tint};border:1px solid ${C.hairline};border-radius:12px;padding:14px 16px;margin:0 0 14px;">
         <p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.muted};margin:0 0 6px;font-weight:700;">Tracking</p>
         <p style="font-size:15px;line-height:22px;margin:0;color:${C.espresso};font-weight:600;font-family:SFMono-Regular,Menlo,Monaco,Consolas,monospace;">${escape(trackingNumber)}</p>
         ${trackingUrl ? `<p style="margin:10px 0 0;"><a href="${escape(trackingUrl)}" style="font-size:13px;color:${C.goldDeep};text-decoration:none;font-weight:600;">Track your package →</a></p>` : ""}
@@ -1374,7 +1403,7 @@ const renderStylistLabelPrinted = (p: Record<string, any>) => {
       Label purchased for <strong>${escape(customerName)}</strong>${cityState ? ` in <strong>${escape(cityState)}</strong>` : ""}${carrier ? ` via <strong>${escape(carrier)}${service ? ` ${escape(service)}` : ""}</strong>` : ""}${Number.isFinite(labelCost) && labelCost > 0 ? ` for <strong>$${labelCost.toFixed(2)}</strong>` : ""}.
     </p>
     ${trackingNumber ? `
-      <div style="background:${C.cream};border:1px solid ${C.hairline};border-radius:12px;padding:14px 16px;margin:0 0 14px;">
+      <div style="background:${C.tint};border:1px solid ${C.hairline};border-radius:12px;padding:14px 16px;margin:0 0 14px;">
         <p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.muted};margin:0 0 6px;font-weight:700;">Tracking</p>
         <p style="font-size:15px;line-height:22px;margin:0;color:${C.espresso};font-weight:600;font-family:SFMono-Regular,Menlo,Monaco,Consolas,monospace;">${escape(trackingNumber)}</p>
         ${trackingUrl ? `<p style="margin:10px 0 0;"><a href="${escape(trackingUrl)}" style="font-size:13px;color:${C.goldDeep};text-decoration:none;font-weight:600;">Open carrier tracking →</a></p>` : ""}
