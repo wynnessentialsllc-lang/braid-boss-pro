@@ -44,6 +44,20 @@ const RESEND_FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") || "";
 // sends instead of silently dropping.
 const RESEND_MARKETING_FROM_EMAIL =
   Deno.env.get("RESEND_MARKETING_FROM_EMAIL") || RESEND_FROM_EMAIL;
+
+// Build the From header with an explicit display name. A bare address
+// (e.g. "hello@braidbosspro.app") makes inbox clients fall back to just
+// the local part ("hello") as the sender name, which looks unbranded.
+// We set the display name to the full address so recipients see the
+// complete "hello@braidbosspro.app". If the env value already carries a
+// display name ("Name <addr>"), it's used as-is.
+const withSenderName = (addr: string): string => {
+  const a = (addr || "").trim();
+  if (!a || a.includes("<")) return a;
+  // Quote the display name — it contains "@"/"." which aren't allowed in
+  // an unquoted RFC 5322 display-name.
+  return `"${a}" <${a}>`;
+};
 // Notification types treated as marketing for sender selection.
 // Must be kept in sync with the suppression rules in the queue
 // processor — opt-out (clients.marketing_emails_enabled=false) is
@@ -1949,7 +1963,7 @@ const sendViaResend = async (
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        from: fromEmail,
+        from: withSenderName(fromEmail),
         to: row.recipient_email,
         reply_to: replyTo || undefined,
         subject: rendered.subject,
