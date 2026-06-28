@@ -39624,6 +39624,23 @@ export default function App() {
   const goToMoney = (p: string) => { setMoneyPeriod(p); setActive("money"); };
   const [secondary, setSecondary] = useState<string | null>(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
 
+  // Every screen and feature opens scrolled to the top. The app scrolls
+  // at the document level (see Frame: min-height:100dvh, no overflow
+  // container), so navigating between tabs/features otherwise inherits
+  // the previous screen's scroll position and lands mid-page. Reset the
+  // document scroll whenever the primary tab or a secondary feature
+  // screen changes. Window-level scroll only — never a nested scrollTop,
+  // which leaks to the page on iOS WKWebView. rAF + a short timeout
+  // re-assert it after layout settles.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const toTop = () => window.scrollTo(0, 0);
+    toTop();
+    const raf = requestAnimationFrame(toTop);
+    const t = setTimeout(toTop, 60);
+    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
+  }, [active, secondary]);
+
   // One-time Tap to Pay awareness splash. Shows once on a supported iPhone
   // that hasn't enabled Tap to Pay yet, then never again (flag persisted).
   const [ttpAwareOpen, setTtpAwareOpen] = useState(false);
