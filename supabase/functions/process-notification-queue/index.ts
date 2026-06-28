@@ -150,6 +150,17 @@ const escape = (s: unknown): string =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
+// Normalize a stored date to US MM/DD/YYYY for display. Accepts an
+// ISO `YYYY-MM-DD` (the shape the enqueue RPCs persist), with or
+// without a trailing time. Anything that doesn't match is returned
+// trimmed and unchanged so unexpected formats never break rendering.
+const fmtDate = (raw: unknown): string | null => {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[2]}/${m[3]}/${m[1]}` : s;
+};
+
 // Multicolor wordmark masthead — "Braid Boss Pro" rendered bright and
 // bold across the three brand hues (purple / lavender / coral) on
 // white, matching the in-app header. Serif stack only (no webfont) so
@@ -292,7 +303,7 @@ const renderBookingConfirmation = (p: Record<string, any>) => {
   const clientName  = p.clientName  || "there";
   const studioName  = p.studioName  || "your stylist";
   const serviceName = p.serviceName || null;
-  const date        = p.preferredDate || null;
+  const date        = fmtDate(p.preferredDate);
   const time        = p.preferredTime || null;
   const awaitingDeposit = p.approvalStatus === "awaiting_deposit";
   const depositRequired = !!p.depositRequired;
@@ -476,7 +487,7 @@ const renderAppointmentApproved = (p: Record<string, any>) => {
   const clientName  = p.clientName  || "there";
   const studioName  = p.studioName  || "your stylist";
   const serviceName = p.serviceName || null;
-  const date        = p.preferredDate || null;
+  const date        = fmtDate(p.preferredDate);
   const time        = p.preferredTime || null;
   const when        = [date, time].filter(Boolean).join(" · ");
   const depositAmount = Number(p.depositAmount) > 0 ? Number(p.depositAmount) : null;
@@ -518,7 +529,7 @@ const renderDepositReceived = (p: Record<string, any>) => {
   const clientName  = p.clientName  || "there";
   const studioName  = p.studioName  || "your stylist";
   const serviceName = p.serviceName || null;
-  const date        = p.preferredDate || null;
+  const date        = fmtDate(p.preferredDate);
   const time        = p.preferredTime || null;
   const when        = [date, time].filter(Boolean).join(" · ");
   // Pay-in-full BNPL bookings reuse this notification type but should
@@ -555,7 +566,7 @@ const renderDepositReceived = (p: Record<string, any>) => {
 const renderStylistDepositPaid = (p: Record<string, any>) => {
   const clientName  = p.clientName  || "A client";
   const serviceName = p.serviceName || null;
-  const date        = p.preferredDate || null;
+  const date        = fmtDate(p.preferredDate);
   const time        = p.preferredTime || null;
   const when        = [date, time].filter(Boolean).join(" · ");
   const subject = `New paid booking — ${clientName}`;
@@ -577,7 +588,7 @@ const renderStylistDepositPaid = (p: Record<string, any>) => {
 const renderStylistNewBooking = (p: Record<string, any>) => {
   const clientName  = p.clientName  || "A client";
   const serviceName = p.serviceName || null;
-  const date        = p.preferredDate || null;
+  const date        = fmtDate(p.preferredDate);
   const time        = p.preferredTime || null;
   const when        = [date, time].filter(Boolean).join(" · ");
   const subject = `New booking request — ${clientName}`;
@@ -741,7 +752,7 @@ const renderAppointmentConfirmed = (p: Record<string, any>) => {
   const clientName = p.clientName || "there";
   const studioName = p.studioName || "your stylist";
   const serviceName = p.serviceName || null;
-  const date = p.preferredDate || null;
+  const date = fmtDate(p.preferredDate);
   const time = p.preferredTime || null;
   const when = [date, time].filter(Boolean).join(" · ");
   const depositPaid = Number(p.depositPaid) > 0 ? Number(p.depositPaid) : null;
@@ -803,7 +814,7 @@ const renderAppointmentReminder = (p: Record<string, any>) => {
   const clientName = p.clientName || "there";
   const studioName = p.studioName || "your stylist";
   const serviceName = p.serviceName || null;
-  const date = p.preferredDate || null;
+  const date = fmtDate(p.preferredDate);
   const time = p.preferredTime || null;
   const when = [date, time].filter(Boolean).join(" · ");
   const cancelUrl = String(p.cancelUrl || "").trim();
@@ -850,7 +861,7 @@ const renderClientBookingCancelled = (p: Record<string, any>) => {
   const clientName = p.clientName || "there";
   const studioName = p.studioName || "your stylist";
   const serviceName = p.serviceName || null;
-  const date = p.preferredDate || null;
+  const date = fmtDate(p.preferredDate);
   const time = p.preferredTime || null;
   const when = [date, time].filter(Boolean).join(" · ");
   const depositForfeited = !!p.depositForfeited;
@@ -871,7 +882,7 @@ const renderClientBookingCancelled = (p: Record<string, any>) => {
 const renderStylistBookingCancelled = (p: Record<string, any>) => {
   const clientName = p.clientName || "A client";
   const serviceName = p.serviceName || null;
-  const date = p.preferredDate || null;
+  const date = fmtDate(p.preferredDate);
   const time = p.preferredTime || null;
   const when = [date, time].filter(Boolean).join(" · ");
   const reason = String(p.reason || "").trim();
@@ -893,7 +904,7 @@ const renderClientBookingRescheduled = (p: Record<string, any>) => {
   const clientName = p.clientName || "there";
   const studioName = p.studioName || "your stylist";
   const serviceName = p.serviceName || null;
-  const newDate = p.preferredDate || null;
+  const newDate = fmtDate(p.preferredDate);
   const newTime = p.preferredTime || null;
   const oldDate = p.fromDate || null;
   const oldTime = p.fromTime || null;
@@ -967,7 +978,7 @@ const renderFoundingWelcome = (p: Record<string, any>) => {
 
 // ---- booking denial / refund (client + stylist) --------------------
 const whenLine = (p: Record<string, any>): string => {
-  const d = String(p.preferredDate || "").trim();
+  const d = fmtDate(p.preferredDate) || "";
   const t = String(p.preferredTime || "").trim();
   const when = [d, t].filter(Boolean).join(" · ");
   return when
@@ -1058,7 +1069,7 @@ const renderAppointmentRescheduled = (p: Record<string, any>) => {
   const clientName = p.clientName || "there";
   const studioName = p.studioName || "your stylist";
   const serviceName = p.serviceName || null;
-  const newWhen = [p.preferredDate || null, p.preferredTime || null].filter(Boolean).join(" · ");
+  const newWhen = [fmtDate(p.preferredDate), p.preferredTime || null].filter(Boolean).join(" · ");
   const oldWhen = [p.fromDate || null, p.fromTime || null].filter(Boolean).join(" · ");
   const cancelUrl = String(p.cancelUrl || "").trim();
   const subject = `Your appointment with ${studioName} has been rescheduled`;
@@ -1098,7 +1109,7 @@ const renderAppointmentUpdated = (p: Record<string, any>) => {
     try { return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(v); }
     catch { return `$${v.toFixed(2)}`; }
   };
-  const newWhen = [p.preferredDate || null, p.preferredTime || null].filter(Boolean).join(" · ");
+  const newWhen = [fmtDate(p.preferredDate), p.preferredTime || null].filter(Boolean).join(" · ");
   const oldWhen = [p.fromDate || null, p.fromTime || null].filter(Boolean).join(" · ");
   const cancelUrl = String(p.cancelUrl || "").trim();
   const addonNames: string[] = Array.isArray(p.currentAddonNames)
