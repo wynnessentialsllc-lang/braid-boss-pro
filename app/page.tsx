@@ -8453,22 +8453,6 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
   const today = todayISO();
   const [selectedDate, setSelectedDate] = useState<string>(today);
 
-  // Open the Schedule at the very top by default so the month header,
-  // day strip and "Today's business" summary are in view — not wherever
-  // the document happened to be scrolled before this tab opened. The app
-  // scrolls at the document level (see Frame), so a window scroll is the
-  // right (and iOS-safe) lever; we deliberately avoid touching the
-  // timeline's nested scrollTop, which leaks to the page on WKWebView.
-  // rAF + a short timeout re-assert it after layout settles on iOS.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const toTop = () => window.scrollTo(0, 0);
-    toTop();
-    const raf = requestAnimationFrame(toTop);
-    const t = setTimeout(toTop, 60);
-    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
-  }, []);
-
   useEffect(() => {
     if (prefillNewAppt) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
@@ -39639,6 +39623,23 @@ export default function App() {
   const [moneyPeriod, setMoneyPeriod] = useState<string | null>(null);
   const goToMoney = (p: string) => { setMoneyPeriod(p); setActive("money"); };
   const [secondary, setSecondary] = useState<string | null>(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
+
+  // Every screen and feature opens scrolled to the top. The app scrolls
+  // at the document level (see Frame: min-height:100dvh, no overflow
+  // container), so navigating between tabs/features otherwise inherits
+  // the previous screen's scroll position and lands mid-page. Reset the
+  // document scroll whenever the primary tab or a secondary feature
+  // screen changes. Window-level scroll only — never a nested scrollTop,
+  // which leaks to the page on iOS WKWebView. rAF + a short timeout
+  // re-assert it after layout settles.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const toTop = () => window.scrollTo(0, 0);
+    toTop();
+    const raf = requestAnimationFrame(toTop);
+    const t = setTimeout(toTop, 60);
+    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
+  }, [active, secondary]);
 
   // One-time Tap to Pay awareness splash. Shows once on a supported iPhone
   // that hasn't enabled Tap to Pay yet, then never again (flag persisted).
