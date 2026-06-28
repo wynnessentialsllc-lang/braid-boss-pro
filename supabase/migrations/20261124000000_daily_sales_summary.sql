@@ -100,17 +100,32 @@ begin
       continue;
     end if;
 
-    -- Aggregate the prior local day's collected sales. "Collected"
-    -- mirrors the app's finance helpers: deposits/amount paid, or the
-    -- net (post-discount) total when the ticket is marked paid in full.
-    with day_appts as (
+    -- Aggregate the prior local day's collected sales across BOTH
+    -- revenue streams:
+    --   * appointments — "collected" mirrors the app's finance helpers
+    --     (deposits / amount paid, or the net post-discount total when
+    --     the ticket is marked paid in full).
+    --   * shop orders (product_orders) — paid orders bucketed to the
+    --     stylist's local day by paid_at; amount_total is the gross.
+    -- Customers are unified by email across both streams so "new vs
+    -- returning" reflects the whole business, not just the chair.
+    with appt_real as (
       select
-        a.client_id,
-        coalesce(nullif(s.name, ''), nullif(a.style, ''), 'Service') as svc_name,
-        greatest(0, coalesce(a.total_price, 0) - coalesce(a.discount_amount, 0)) as net,
-        greatest(coalesce(a.deposit_paid, 0), coalesce(a.amount_paid, 0)) as paid,
-        lower(coalesce(a.status, '')) as st,
-        coalesce(a.payment_status, '') as pay
+        lower(trim(coalesce(a.client_email, ''))) as email,
+        coalesce(nullif(s.name, ''), nullif(a.style, ''), 'Service') as item_name,
+        case
+          when greatest(coalesce(a.deposit_paid, 0), coalesce(a.amount_paid, 0)) > 0
+            then round((case
+                          when greatest(0, coalesce(a.total_price, 0) - coalesce(a.discount_amount, 0)) > 0
+                            then least(greatest(coalesce(a.deposit_paid, 0), coalesce(a.amount_paid, 0)),
+                                       greatest(0, coalesce(a.total_price, 0) - coalesce(a.discount_amount, 0)))
+                          else greatest(coalesce(a.deposit_paid, 0), coalesce(a.amount_paid, 0))
+                        end)::numeric, 2)
+          when (coalesce(a.payment_status, '') = 'paid' or lower(coalesce(a.status, '')) = 'completed')
+               and greatest(0, coalesce(a.total_price, 0) - coalesce(a.discount_amount, 0)) > 0
+            then round(greatest(0, coalesce(a.total_price, 0) - coalesce(a.discount_amount, 0))::numeric, 2)
+          else 0
+        end as collected
       from public.appointments a
       left join public.services s
         on s.id = a.service_id and s.user_id = a.user_id
@@ -119,54 +134,75 @@ begin
         and lower(coalesce(a.status, '')) not in
             ('cancelled', 'canceled', 'no-show', 'no_show', 'noshow', 'declined')
     ),
-    priced as (
+    appt_sales as (
+      select * from appt_real where collected > 0
+    ),
+    ord as (
       select
-        client_id,
-        svc_name,
-        case
-          when paid > 0
-            then round((case when net > 0 then least(paid, net) else paid end)::numeric, 2)
-          when (pay = 'paid' or st = 'completed') and net > 0
-            then round(net::numeric, 2)
-          else 0
-        end as collected
-      from day_appts
+        o.id,
+        lower(trim(coalesce(o.customer_email, ''))) as email,
+        coalesce(o.amount_total, 0)::numeric as amt,
+        coalesce(o.line_items, '[]'::jsonb) as line_items
+      from public.product_orders o
+      where o.user_id = u.user_id
+        and o.status = 'paid'
+        and o.paid_at is not null
+        and ((o.paid_at at time zone v_tz)::date) = v_local_date
     ),
-    sales as (
-      select * from priced where collected > 0
+    ord_items as (
+      select
+        coalesce(nullif(li->>'title', ''), nullif(li->>'name', ''), 'Product') as item_name,
+        coalesce(nullif(li->>'quantity', '')::numeric, 1) as qty,
+        coalesce(nullif(li->>'unit_amount', '')::numeric, 0) as unit
+      from ord
+      cross join lateral jsonb_array_elements(ord.line_items) li
     ),
-    by_client as (
-      select distinct
-        sales.client_id,
-        (select min(a2.appt_date)
-           from public.appointments a2
-          where a2.user_id = u.user_id
-            and a2.client_id = sales.client_id
-            and lower(coalesce(a2.status, '')) not in
-                ('cancelled', 'canceled', 'no-show', 'no_show', 'noshow', 'declined')
-        ) = v_local_date as is_new
-      from sales
-      where sales.client_id is not null
+    items_all as (
+      select item_name, collected as sales, 1::numeric as cnt from appt_sales
+      union all
+      select item_name, round((unit * qty)::numeric, 2) as sales, qty as cnt from ord_items
     ),
-    by_service as (
-      select svc_name, sum(collected) as svc_sales, count(*) as svc_count
-      from sales
-      group by svc_name
+    by_item as (
+      select item_name, sum(sales) as sales, sum(cnt) as cnt
+      from items_all
+      group by item_name
+    ),
+    emails_today as (
+      select email from appt_sales where email <> ''
+      union
+      select email from ord where email <> ''
     )
     select
-      (select coalesce(sum(collected), 0) from sales),
-      (select count(*) from sales),
-      (select count(distinct client_id) from sales where client_id is not null),
-      (select count(*) from by_client where is_new),
-      (select count(*) from by_client where not is_new),
-      (select svc_name from by_service order by svc_sales desc, svc_count desc limit 1),
-      (select coalesce(svc_sales, 0) from by_service order by svc_sales desc, svc_count desc limit 1),
+      (select coalesce(sum(collected), 0) from appt_sales) + (select coalesce(sum(amt), 0) from ord),
+      (select count(*) from appt_sales) + (select count(*) from ord),
+      (select count(*) from emails_today),
+      (select count(*) from emails_today et
+         where not exists (
+           select 1 from public.appointments a2
+            where a2.user_id = u.user_id
+              and lower(trim(coalesce(a2.client_email, ''))) = et.email
+              and a2.appt_date < v_local_date
+              and lower(coalesce(a2.status, '')) not in
+                  ('cancelled', 'canceled', 'no-show', 'no_show', 'noshow', 'declined')
+         )
+         and not exists (
+           select 1 from public.product_orders o2
+            where o2.user_id = u.user_id
+              and o2.status = 'paid'
+              and lower(trim(coalesce(o2.customer_email, ''))) = et.email
+              and o2.paid_at is not null
+              and ((o2.paid_at at time zone v_tz)::date) < v_local_date
+         )),
+      (select item_name from by_item order by sales desc, cnt desc limit 1),
+      (select coalesce(sales, 0) from by_item order by sales desc, cnt desc limit 1),
       (select coalesce(
-                jsonb_agg(jsonb_build_object('name', svc_name, 'count', svc_count, 'sales', svc_sales)
-                          order by svc_sales desc),
+                jsonb_agg(jsonb_build_object('name', item_name, 'count', cnt, 'sales', sales)
+                          order by sales desc),
                 '[]'::jsonb)
-         from by_service)
-    into v_revenue, v_sales, v_customers, v_new, v_returning, v_top_name, v_top_sales, v_items;
+         from by_item)
+    into v_revenue, v_sales, v_customers, v_new, v_top_name, v_top_sales, v_items;
+
+    v_returning := greatest(0, coalesce(v_customers, 0) - coalesce(v_new, 0));
 
     -- No money collected that day → no email.
     if coalesce(v_revenue, 0) <= 0 then

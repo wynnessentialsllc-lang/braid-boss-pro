@@ -1795,7 +1795,7 @@ const renderDailySalesSummary = (p: Record<string, any>) => {
       </tr>
     </table>
 
-    ${topServiceName ? `<p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.goldDeep};margin:18px 0 8px;font-weight:700;">Top service</p>
+    ${topServiceName ? `<p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.goldDeep};margin:18px 0 8px;font-weight:700;">Top seller</p>
     <p style="margin:0;font-size:16px;font-weight:700;color:${C.espresso};">${escape(topServiceName)} &nbsp;<span style="color:${C.coralDeep};">${money(topServiceSales)}</span></p>` : ""}
 
     ${itemsRows ? `<p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.goldDeep};margin:18px 0 6px;font-weight:700;">Item sales</p>
