@@ -20773,14 +20773,15 @@ const NotificationsSheet = ({ open, onClose, items, unreadCount, dismiss, snooze
                           n.tone === "gold" ? "rgba(201,169,97,0.18)" : C.ivory,
                     }}>{n.icon}</div>
                     <div className="min-w-0 flex-1" style={{ pointerEvents: "none" }}>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-start gap-2 min-w-0">
                         {isUnread && (
                           <span aria-hidden style={{
                             width: 6, height: 6, borderRadius: 999,
                             background: C.gold, flexShrink: 0,
+                            marginTop: 6,
                           }} />
                         )}
-                        <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{n.title}</p>
+                        <p className="text-sm font-semibold min-w-0 flex-1" style={{ color: C.espresso, overflowWrap: "anywhere" }}>{n.title}</p>
                       </div>
                       <p className="text-xs mt-0.5 leading-relaxed line-clamp-2" style={{ color: C.coffee }}>{n.body}</p>
                       {n.meta && <p className="text-[11px] mt-1" style={{ color: C.muted }}>{n.meta}</p>}
