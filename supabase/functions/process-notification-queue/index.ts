@@ -45,18 +45,54 @@ const RESEND_FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") || "";
 const RESEND_MARKETING_FROM_EMAIL =
   Deno.env.get("RESEND_MARKETING_FROM_EMAIL") || RESEND_FROM_EMAIL;
 
+// Owner-facing notifications are sent TO the stylist (alerts, not client
+// touchpoints). Their From name is the platform — "Braid Boss Pro" — so
+// the stylist instantly recognizes them as system alerts. Everything
+// else is client-facing and uses the studio's own name (see below).
+const OWNER_FACING_NOTIFICATION_TYPES = new Set<string>([
+  "stylist_new_booking",
+  "stylist_deposit_paid",
+  "stylist_booking_cancelled",
+  "stylist_booking_rescheduled",
+  "stylist_label_printed",
+  "client_message_owner_alert",
+  "contract_signed_owner_alert",
+  "contract_reminder_owner_alert",
+  "booking_refund_manual_stylist",
+  "review_received",
+  "daily_sales_summary",
+  "founding_welcome",
+]);
+
+// Pull the bare address out of a "Name <addr>" or plain "addr" string.
+const bareAddress = (addr: string): string => {
+  const m = (addr || "").match(/<([^>]+)>/);
+  return (m ? m[1] : addr).trim();
+};
+
 // Build the From header with an explicit display name. A bare address
 // (e.g. "hello@braidbosspro.app") makes inbox clients fall back to just
-// the local part ("hello") as the sender name, which looks unbranded.
-// We set the display name to the full address so recipients see the
-// complete "hello@braidbosspro.app". If the env value already carries a
-// display name ("Name <addr>"), it's used as-is.
-const withSenderName = (addr: string): string => {
-  const a = (addr || "").trim();
-  if (!a || a.includes("<")) return a;
-  // Quote the display name — it contains "@"/"." which aren't allowed in
-  // an unquoted RFC 5322 display-name.
-  return `"${a}" <${a}>`;
+// the local part ("hello") as the sender, which looks unbranded. Because
+// Braid Boss Pro is multi-tenant on one shared sending address, the
+// display name is chosen PER MESSAGE: each stylist's clients see that
+// stylist's studio name, owner alerts read "Braid Boss Pro", and we fall
+// back to the platform name when a studio name isn't available.
+const formatFrom = (displayName: string, addr: string): string => {
+  const a = bareAddress(addr);
+  const name = (displayName || "").trim();
+  if (!a) return a;
+  if (!name) return a;
+  // Quote + escape the display name per RFC 5322 (it may contain "@", a
+  // ".", or stray quotes from a free-text studio name).
+  const safe = name.replace(/[\\"]/g, (c) => "\\" + c);
+  return `"${safe}" <${a}>`;
+};
+
+// The sender display name for a given queue row, per the per-tenant rule.
+const senderDisplayName = (row: ClaimedRow): string => {
+  if (OWNER_FACING_NOTIFICATION_TYPES.has(row.notification_type)) return "Braid Boss Pro";
+  const studio = String((row.payload as any)?.studioName || "").trim();
+  return studio || "Braid Boss Pro";
 };
 // Notification types treated as marketing for sender selection.
 // Must be kept in sync with the suppression rules in the queue
@@ -1963,7 +1999,7 @@ const sendViaResend = async (
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        from: withSenderName(fromEmail),
+        from: formatFrom(senderDisplayName(row), fromEmail),
         to: row.recipient_email,
         reply_to: replyTo || undefined,
         subject: rendered.subject,
