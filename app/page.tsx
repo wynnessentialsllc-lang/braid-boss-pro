@@ -8453,6 +8453,22 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
   const today = todayISO();
   const [selectedDate, setSelectedDate] = useState<string>(today);
 
+  // Open the Schedule at the very top by default so the month header,
+  // day strip and "Today's business" summary are in view — not wherever
+  // the document happened to be scrolled before this tab opened. The app
+  // scrolls at the document level (see Frame), so a window scroll is the
+  // right (and iOS-safe) lever; we deliberately avoid touching the
+  // timeline's nested scrollTop, which leaks to the page on WKWebView.
+  // rAF + a short timeout re-assert it after layout settles on iOS.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const toTop = () => window.scrollTo(0, 0);
+    toTop();
+    const raf = requestAnimationFrame(toTop);
+    const t = setTimeout(toTop, 60);
+    return () => { cancelAnimationFrame(raf); clearTimeout(t); };
+  }, []);
+
   useEffect(() => {
     if (prefillNewAppt) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
