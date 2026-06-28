@@ -1723,6 +1723,90 @@ const renderWaitlistOpening = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- daily_sales_summary (owner end-of-day report) -----------------
+// Sent to the stylist at their local midnight summarizing the prior
+// day's sales. Enqueued by process_daily_sales_summaries() only when
+// the day had at least one paid appointment, so this renderer can
+// assume non-zero revenue. Mirrors the sections of a POS daily report
+// (totals, customers, top service, item sales) in Braid Boss Pro's
+// white + multicolor brand styling.
+const renderDailySalesSummary = (p: Record<string, any>) => {
+  const studioName  = p.studioName || "Your studio";
+  const currency    = String(p.currency || "USD");
+  const dateLabel   = fmtDate(p.summaryDate) || "";
+  const weekday     = String(p.weekday || "").trim();
+  const money = (n: unknown): string => {
+    const v = Number(n) || 0;
+    try {
+      return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(v);
+    } catch {
+      return "$" + v.toFixed(2);
+    }
+  };
+  const revenue       = Number(p.revenue) || 0;
+  const salesCount    = Number(p.salesCount) || 0;
+  const customers     = Number(p.customersServed) || 0;
+  const newCustomers  = Number(p.newCustomers) || 0;
+  const returning     = Number(p.returningCustomers) || 0;
+  const topServiceName = p.topServiceName ? String(p.topServiceName) : null;
+  const topServiceSales = Number(p.topServiceSales) || 0;
+  const items: any[] = Array.isArray(p.items) ? p.items : [];
+
+  const subject = `${studioName} — your sales summary for ${dateLabel}`;
+
+  // Stat tile — label + bright value on a faint lavender card.
+  const stat = (label: string, value: string, color: string): string =>
+    `<td style="width:50%;padding:5px;" valign="top">
+       <div style="background:${C.tint};border:1px solid ${C.hairline};border-radius:12px;padding:14px 16px;">
+         <p style="margin:0 0 4px;font-size:11px;letter-spacing:0.10em;text-transform:uppercase;color:${C.muted};font-weight:700;">${escape(label)}</p>
+         <p style="margin:0;font-size:22px;font-weight:700;color:${color};font-family:Georgia,serif;line-height:1;">${escape(value)}</p>
+       </div>
+     </td>`;
+
+  const itemsRows = items.slice(0, 8).map((it: any): string => {
+    const name = escape(it?.name || "Service");
+    const qty  = Number(it?.count) || 0;
+    return `<tr>
+      <td style="padding:8px 0;border-bottom:1px solid ${C.hairline};font-size:14px;color:${C.espresso};">${name}${qty ? ` <span style="color:${C.muted};">× ${qty}</span>` : ""}</td>
+      <td style="padding:8px 0;border-bottom:1px solid ${C.hairline};font-size:14px;font-weight:700;color:${C.coralDeep};text-align:right;white-space:nowrap;">${money(it?.sales)}</td>
+    </tr>`;
+  }).join("");
+
+  const dashUrl = (Deno.env.get("NEXT_PUBLIC_SITE_URL") || "https://braidbosspro.app").replace(/\/$/, "");
+
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Daily summary${weekday ? ` &middot; ${escape(weekday)}` : ""}</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 4px;color:${C.espresso};"><span style="color:${C.purple};">${escape(studioName)}</span>, here's your day.</h1>
+    <p style="font-size:13px;color:${C.muted};margin:0 0 18px;">${escape(dateLabel)}</p>
+
+    <div style="text-align:center;background:${C.tint};border:1px solid ${C.hairline};border-radius:16px;padding:22px 20px;margin:0 0 6px;">
+      <p style="margin:0 0 6px;font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.purpleDeep};font-weight:700;">Total collected</p>
+      <p style="margin:0;font-size:40px;line-height:1.05;font-weight:700;font-family:Georgia,serif;color:${C.purpleDeep};">${money(revenue)}</p>
+    </div>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;">
+      <tr>
+        ${stat("Sales", String(salesCount), C.espresso)}
+        ${stat("Customers", String(customers), C.coralDeep)}
+      </tr>
+      <tr>
+        ${stat("New clients", String(newCustomers), C.lavender)}
+        ${stat("Returning", String(returning), C.purpleDeep)}
+      </tr>
+    </table>
+
+    ${topServiceName ? `<p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.goldDeep};margin:18px 0 8px;font-weight:700;">Top service</p>
+    <p style="margin:0;font-size:16px;font-weight:700;color:${C.espresso};">${escape(topServiceName)} &nbsp;<span style="color:${C.coralDeep};">${money(topServiceSales)}</span></p>` : ""}
+
+    ${itemsRows ? `<p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.goldDeep};margin:18px 0 6px;font-weight:700;">Item sales</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${itemsRows}</table>` : ""}
+
+    ${ctaButton("Open your dashboard", dashUrl)}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin-top:2px;text-align:center;">Sent automatically the morning after a day with sales.</p>
+  `);
+  return { subject, html };
+};
+
 const renderGeneric = (row: ClaimedRow) => {
   const subject = row.subject || "Notification from Braid Boss Pro";
   const html = wrapHtml(subject, `
@@ -1826,6 +1910,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderReorderNudge(row.payload || {});
     case "waitlist_opening":
       return renderWaitlistOpening(row.payload || {});
+    case "daily_sales_summary":
+      return renderDailySalesSummary(row.payload || {});
     default:
       return renderGeneric(row);
   }
