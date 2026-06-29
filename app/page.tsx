@@ -260,7 +260,6 @@ import {
   computeDashboardRevenue,
   topBookedStyles,
   repeatClientStats,
-  lastBookingForClient,
   ticketTotal as reportTicketTotal,
   ticketBalance as reportTicketBalance,
   todayCompletedAppts,
@@ -10551,28 +10550,29 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   const creditApplied = Math.max(0, Math.min(Number(form.creditApplied) || 0, maxCreditApplicable));
   const balanceDue = Math.max(0, roundCents(balanceBeforeCredit - creditApplied));
 
-  // When picking an existing client, auto-fill phone/email + their
-  // most recent style/duration on NEW appointments only. We don't
-  // overwrite anything the user already typed.
+  // When picking an existing client, auto-fill their contact info
+  // (phone/email) only — never overwriting anything already typed.
+  // We intentionally do NOT pre-fill style/duration from the client's
+  // last booking: doing so silently populated "Style / Service" the
+  // moment a client was selected (before the stylist picked anything),
+  // which read as a bug and left the form in a confusing state (a style
+  // showing while the Service picker still said "Pick a service").
+  // Style/duration are chosen explicitly via the Service picker or by
+  // typing — both follow the "fills empty fields; manual edits stay" rule.
   useEffect(() => {
     if (form.clientId) {
       const c = clients.find(x => x.id === form.clientId);
       if (c) {
-        const last = !form.id
-          ? lastBookingForClient(appointments as any[], form.clientId)
-          : null;
         // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
         setForm(prev => ({
           ...prev,
           clientName: c.name,
           clientPhone: prev.clientPhone || c.phone || "",
           clientEmail: prev.clientEmail || c.email || "",
-          style: prev.style || (last?.style ?? ""),
-          durationHours: prev.durationHours || last?.durationHours || "",
         }));
       }
     }
-  }, [form.clientId, clients, form.id, appointments]);
+  }, [form.clientId, clients]);
 
   const handleSave = async () => {
     // Personal events and blocked time skip the entire client/payment/
