@@ -90,6 +90,25 @@ const SHADOWS = {
 const FONT_DISPLAY = `"Cormorant Garamond", Georgia, serif`;
 const FONT_BODY = `"DM Sans", "Inter", system-ui, sans-serif`;
 
+// Braiding hair color supports multiple picks (e.g. a "4 / 27" blend).
+// The selection is kept as one comma-separated string so it rides the
+// existing single `selected_hair_color` field end-to-end. These helpers
+// keep the chip multi-select in sync with that string.
+const splitHairColors = (value: string): string[] =>
+  String(value || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+const toggleHairColor = (value: string, option: string): string => {
+  const opt = option.trim();
+  const list = splitHairColors(value);
+  const idx = list.findIndex((c) => c.toLowerCase() === opt.toLowerCase());
+  if (idx >= 0) list.splice(idx, 1);
+  else list.push(opt);
+  return list.join(", ");
+};
+
 // A single "Client Love" testimonial. Long reviews are clamped to a
 // few lines so the cards stay compact on the booking page; a
 // "Read more" toggle expands the full text in place. Short reviews
@@ -1422,7 +1441,7 @@ export default function PublicBookingPage() {
       const isOther = (v: string) => v.trim().toLowerCase().replace(/\s/g, "") === "custom/other";
       if (custOn && svc?.hair_included && svc?.allow_client_hair_color_selection) {
         if (!hairColor.trim()) { setSubmitError("Please select your braiding hair color."); return; }
-        if (isOther(hairColor) && !customHairColor.trim()) {
+        if (splitHairColors(hairColor).some(isOther) && !customHairColor.trim()) {
           setSubmitError("Please tell your stylist the color you're looking for."); return;
         }
       }
@@ -1656,7 +1675,9 @@ export default function PublicBookingPage() {
         // RPC trims to 300 chars; we keep both the description and
         // the inspiration photo URL so a manual review sees both.
         let customHairText: string | null =
-          isCustom(hairPick) && customHairColor.trim() ? customHairColor.trim() : null;
+          splitHairColors(hairPick).some(isCustom) && customHairColor.trim()
+            ? customHairColor.trim()
+            : null;
         if (customColorSelected) {
           const parts: string[] = [];
           if (customColorDescription.trim()) parts.push(`Customized color: ${customColorDescription.trim()}`);
@@ -3892,19 +3913,45 @@ export default function PublicBookingPage() {
                     </div>
                   )}
 
-                  {showColor && (
+                  {showColor && (() => {
+                    const picked = splitHairColors(hairColor);
+                    const anyOther = picked.some(isOther);
+                    return (
                     <div>
                       <Field label="Basic braiding hair color">
-                        <select value={hairColor} onChange={e => setHairColor(e.target.value)}
-                          style={{ ...inputStyle, padding: 12 }}>
-                          <option value="">Select your braiding hair color</option>
-                          {colors.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
+                        {/* Multi-select — a client can blend more than one
+                            color (e.g. "4" + "27"). Tap to add or remove. */}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                          {colors.map(c => {
+                            const active = picked.some(p => p.toLowerCase() === c.trim().toLowerCase());
+                            return (
+                              <button
+                                key={c}
+                                type="button"
+                                onClick={() => setHairColor(toggleHairColor(hairColor, c))}
+                                aria-pressed={active}
+                                style={{
+                                  ...inputStyle,
+                                  width: "auto",
+                                  padding: "8px 14px",
+                                  borderRadius: 999,
+                                  cursor: "pointer",
+                                  fontWeight: 600,
+                                  background: active ? C.goldDeep : C.ivory,
+                                  color: active ? C.paper : C.espresso,
+                                  border: `1.5px solid ${active ? C.goldDeep : C.hairline}`,
+                                }}
+                              >
+                                {c}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </Field>
                       <p style={{ margin: "6px 0 0", fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
-                        Braiding hair is included with this service. Please select the color for your style.
+                        Braiding hair is included with this service. Pick one or more colors for your style.
                       </p>
-                      {isOther(hairColor) && (
+                      {anyOther && (
                         <div style={{ marginTop: 10 }}>
                           <Field label="Custom color request">
                             <textarea value={customHairColor} onChange={e => setCustomHairColor(e.target.value)}
@@ -3914,7 +3961,8 @@ export default function PublicBookingPage() {
                         </div>
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Customized braiding hair color — managed extra. Sits
                       between the basic-color picker and the ACV checkbox.

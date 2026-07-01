@@ -753,6 +753,25 @@ const prettifyKey = (k: string): string => {
     .toLowerCase();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : k;
 };
+// Braiding-hair color can hold multiple picks stored as a single
+// comma-separated string (e.g. "4, 27, Burgundy"). These keep the chip
+// multi-select in sync with that string without changing the shape of
+// the value that flows to the DB / portal / emails.
+const splitColorValue = (value: string): string[] =>
+  String(value || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+const toggleColorValue = (value: string, option: string): string => {
+  const opt = option.trim();
+  const list = splitColorValue(value);
+  const idx = list.findIndex((c) => c.toLowerCase() === opt.toLowerCase());
+  if (idx >= 0) list.splice(idx, 1);
+  else list.push(opt);
+  return list.join(", ");
+};
+
 const customizationEntries = (
   src: Record<string, any> | null | undefined,
 ): Array<{ label: string; value: string }> => {
@@ -12060,16 +12079,35 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           if (!showHairColorEditor && !showCurlEditor && otherEntries.length === 0 && !styleNotesValue) {
             return null;
           }
-          const chipRow = (options: string[], value: string, field: "hairColor" | "curlPattern") =>
+          // Braiding-hair colors support multiple picks — a client may
+          // want a blend (e.g. "4, 27"). We store the selection as a
+          // comma-separated string so the whole downstream pipeline
+          // (selected_hair_color text column, portal, emails, SMS) keeps
+          // working and just shows the combined value. Curl pattern stays
+          // single-select. `multi` toggles chip membership vs. replace.
+          const chipRow = (
+            options: string[],
+            value: string,
+            field: "hairColor" | "curlPattern",
+            multi = false,
+          ) =>
             options.length > 0 ? (
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {options.map((opt) => {
-                  const active = value.trim().toLowerCase() === opt.trim().toLowerCase();
+                  const picks = splitColorValue(value);
+                  const active = multi
+                    ? picks.some((p) => p.toLowerCase() === opt.trim().toLowerCase())
+                    : value.trim().toLowerCase() === opt.trim().toLowerCase();
                   return (
                     <button
                       key={opt}
                       type="button"
-                      onClick={() => setCustomizationField(field, opt)}
+                      onClick={() =>
+                        setCustomizationField(
+                          field,
+                          multi ? toggleColorValue(value, opt) : opt,
+                        )
+                      }
                       className="text-[12px] px-2.5 py-1 rounded-full"
                       style={{
                         background: active ? C.goldDeep : C.ivory,
@@ -12091,12 +12129,12 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
               </p>
               <div className="mt-3 space-y-3">
                 {showHairColorEditor && (
-                  <Field label="Braiding hair color">
-                    {chipRow(allowedHairColors, hairColorValue, "hairColor")}
+                  <Field label="Braiding hair color" hint="Pick one or more">
+                    {chipRow(allowedHairColors, hairColorValue, "hairColor", true)}
                     <Input
                       value={hairColorValue}
                       onChange={(e: any) => setCustomizationField("hairColor", e.target.value)}
-                      placeholder="e.g. 1B"
+                      placeholder="e.g. 1B, 27"
                     />
                   </Field>
                 )}
