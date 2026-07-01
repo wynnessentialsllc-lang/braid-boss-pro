@@ -22,6 +22,13 @@ export type BookingPolicy = {
   no_show_fee_enabled: boolean | null;
   no_show_fee_type: "flat" | "percent" | null;
   no_show_fee_value: number | null;
+  // Calendar Reveal — how far ahead clients may book. See app/lib/bookingWindow.ts.
+  booking_window_mode: "rolling" | "fixed" | "monthly_release" | null;
+  booking_window_days: number | null;
+  booking_window_until: string | null;   // "YYYY-MM-DD"
+  booking_min_notice_hours: number | null;
+  release_day_of_month: number | null;    // 1–28
+  release_months_ahead: number | null;    // months opened per drop
   created_at?: string;
   updated_at?: string;
 };
@@ -41,6 +48,12 @@ export const EMPTY_POLICY: BookingPolicyInput = {
   no_show_fee_enabled: false,
   no_show_fee_type: "flat",
   no_show_fee_value: null,
+  booking_window_mode: "rolling",
+  booking_window_days: 60,
+  booking_window_until: null,
+  booking_min_notice_hours: 0,
+  release_day_of_month: 1,
+  release_months_ahead: 1,
 };
 
 // Resolve the no-show fee amount (in dollars) for a given service price,
@@ -211,6 +224,15 @@ export const useBookingPolicy = (userId: string | null): {
         draft.no_show_fee_value == null || !Number.isFinite(Number(draft.no_show_fee_value))
           ? null
           : Number(draft.no_show_fee_value),
+      booking_window_mode:
+        draft.booking_window_mode === "fixed" || draft.booking_window_mode === "monthly_release"
+          ? draft.booking_window_mode
+          : "rolling",
+      booking_window_days: round(draft.booking_window_days) ?? 60,
+      booking_window_until: text(draft.booking_window_until),
+      booking_min_notice_hours: round(draft.booking_min_notice_hours) ?? 0,
+      release_day_of_month: round(draft.release_day_of_month),
+      release_months_ahead: round(draft.release_months_ahead) ?? 1,
     };
     const supabase = getSupabase();
     const { data, error: err } = await supabase
