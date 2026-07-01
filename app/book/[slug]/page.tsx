@@ -39,6 +39,11 @@ import {
   type MonthDayStatus,
 } from "../../lib/services";
 import { trackEvent } from "../../lib/track";
+import {
+  fetchPublicBookingWindow,
+  isMonthBeyondWindow,
+  type BookingWindow,
+} from "../../lib/bookingWindow";
 import { useModalA11y } from "../../lib/use-modal-a11y";
 import {
   fetchPublicReviews,
@@ -613,6 +618,20 @@ export default function PublicBookingPage() {
   const [monthLoading, setMonthLoading] = useState(false);
   const [monthError, setMonthError] = useState<string | null>(null);
   const monthCache = useRef<Map<string, MonthDay[]>>(new Map());
+
+  // Calendar Reveal — the stylist's booking window. Bounds month
+  // navigation and drives the "books open on…" messaging. Null until
+  // loaded / on error, in which case the calendar behaves as before.
+  const [bookingWindow, setBookingWindow] = useState<BookingWindow | null>(null);
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    (async () => {
+      const win = await fetchPublicBookingWindow(slug);
+      if (!cancelled) setBookingWindow(win);
+    })();
+    return () => { cancelled = true; };
+  }, [slug]);
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -4310,6 +4329,7 @@ export default function PublicBookingPage() {
               selectedDate={preferredDate}
               onSelectDate={(iso) => { setPreferredDate(iso); setPreferredTime(""); }}
               onJoinWaitlist={() => setWaitlistOpen(true)}
+              bookingWindow={bookingWindow}
             />
             {preferredDate && (
               <div>
@@ -5578,12 +5598,13 @@ type CalendarProps = {
   selectedDate: string;
   onSelectDate: (iso: string) => void;
   onJoinWaitlist: () => void;
+  bookingWindow: BookingWindow | null;
 };
 
 const BookingCalendar = ({
   monthCursor, setMonthCursor, monthDays, monthLoading, monthError,
   monthHasAnyAvailability, hasCatalog, hasService, selectedDate,
-  onSelectDate, onJoinWaitlist,
+  onSelectDate, onJoinWaitlist, bookingWindow,
 }: CalendarProps) => {
   const dayMap = useMemo(() => {
     const m = new Map<string, MonthDay>();
@@ -5611,12 +5632,22 @@ const BookingCalendar = ({
 
   const today = todayISO();
 
+  // The month directly after the one on screen — used to stop "next"
+  // navigation once the whole next month sits past the stylist's window.
+  const nextMonth =
+    monthCursor.month + 1 > 12
+      ? { year: monthCursor.year + 1, month: 1 }
+      : { year: monthCursor.year, month: monthCursor.month + 1 };
+  const nextBeyondWindow =
+    !!bookingWindow && isMonthBeyondWindow(bookingWindow, nextMonth.year, nextMonth.month);
+
   const goPrev = () => {
     const m = monthCursor.month - 1;
     if (m < 1) setMonthCursor({ year: monthCursor.year - 1, month: 12 });
     else setMonthCursor({ year: monthCursor.year, month: m });
   };
   const goNext = () => {
+    if (nextBeyondWindow) return;
     const m = monthCursor.month + 1;
     if (m > 12) setMonthCursor({ year: monthCursor.year + 1, month: 1 });
     else setMonthCursor({ year: monthCursor.year, month: m });
@@ -5629,6 +5660,26 @@ const BookingCalendar = ({
     monthCursor.year === now.getFullYear() && monthCursor.month === now.getMonth() + 1;
 
   const headerLabel = `${MONTH_LABELS[monthCursor.month - 1]} ${monthCursor.year}`;
+
+  // Friendly, branded copy about how far the books are open. Kept short
+  // so it reads as a caption under the month nav.
+  const fmtWindowDate = (iso: string): string => {
+    const d = new Date(`${iso}T00:00:00`);
+    return Number.isNaN(d.valueOf())
+      ? iso
+      : d.toLocaleDateString(undefined, { month: "long", day: "numeric" });
+  };
+  let windowCaption: string | null = null;
+  if (bookingWindow) {
+    if (bookingWindow.mode === "monthly_release" && bookingWindow.maxDate) {
+      windowCaption = `Booking open through ${fmtWindowDate(bookingWindow.maxDate)}.`
+        + (bookingWindow.nextReleaseDate ? ` More dates open ${fmtWindowDate(bookingWindow.nextReleaseDate)}.` : "");
+    } else if (bookingWindow.mode === "fixed" && bookingWindow.maxDate) {
+      windowCaption = `Books close after ${fmtWindowDate(bookingWindow.maxDate)}.`;
+    } else if (bookingWindow.mode === "rolling" && bookingWindow.maxDate) {
+      windowCaption = `Booking open through ${fmtWindowDate(bookingWindow.maxDate)}.`;
+    }
+  }
 
   return (
     <div
@@ -5665,12 +5716,24 @@ const BookingCalendar = ({
         <button
           type="button"
           onClick={goNext}
+          disabled={nextBeyondWindow}
           aria-label="Next month"
-          style={{ ...ghostButtonStyle, minHeight: 36, padding: "6px 10px" }}
+          style={{
+            ...ghostButtonStyle,
+            minHeight: 36, padding: "6px 10px",
+            opacity: nextBeyondWindow ? 0.4 : 1,
+            cursor: nextBeyondWindow ? "default" : "pointer",
+          }}
         >
           →
         </button>
       </div>
+
+      {windowCaption && (
+        <p style={{ fontSize: 11, color: C.muted, marginBottom: 8, lineHeight: 1.5, textAlign: "center" }}>
+          {windowCaption}
+        </p>
+      )}
 
       {!hasCatalog && (
         <p style={{ fontSize: 11, color: C.muted, marginBottom: 8, lineHeight: 1.5 }}>
@@ -5750,12 +5813,18 @@ const BookingCalendar = ({
             Stylist is updating availability
           </p>
           <p style={{ fontSize: 11, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
-            No openings this month yet. Try the next month, or join the waitlist and we&apos;ll text you.
+            {nextBeyondWindow
+              ? (bookingWindow?.mode === "monthly_release" && bookingWindow.nextReleaseDate
+                  ? `This is as far ahead as booking is open. More dates open ${fmtWindowDate(bookingWindow.nextReleaseDate)} — join the waitlist and we'll text you.`
+                  : "This is as far ahead as booking is open right now. Join the waitlist and we'll text you when more dates open.")
+              : "No openings this month yet. Try the next month, or join the waitlist and we'll text you."}
           </p>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 8, marginTop: 10 }}>
-            <button type="button" onClick={goNext} style={ghostButtonStyle}>
-              See next month
-            </button>
+          <div style={{ display: "grid", gridTemplateColumns: nextBeyondWindow ? "minmax(0, 1fr)" : "minmax(0, 1fr) minmax(0, 1fr)", gap: 8, marginTop: 10 }}>
+            {!nextBeyondWindow && (
+              <button type="button" onClick={goNext} style={ghostButtonStyle}>
+                See next month
+              </button>
+            )}
             <button type="button" onClick={onJoinWaitlist} style={primaryButtonStyle}>
               Join waitlist
             </button>

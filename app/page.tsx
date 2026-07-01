@@ -383,6 +383,13 @@ import {
   useAvailability,
 } from "./lib/availability";
 import {
+  type BookingWindowConfig,
+  type BookingWindowMode,
+  ROLLING_PRESETS,
+  computeBookingWindow,
+  describeBookingWindow,
+} from "./lib/bookingWindow";
+import {
   type WaitlistRequest,
   type WaitlistStatus,
   WAITLIST_STATUS_LABEL,
@@ -28498,6 +28505,14 @@ const BookingPoliciesScreen = ({ store, onBack }: { store: any; onBack: () => vo
         no_show_fee_enabled: policy.no_show_fee_enabled ?? false,
         no_show_fee_type: policy.no_show_fee_type ?? "flat",
         no_show_fee_value: policy.no_show_fee_value ?? null,
+        // Calendar Reveal fields — carried through untouched so saving a
+        // policy here never resets the booking window configured elsewhere.
+        booking_window_mode: policy.booking_window_mode ?? "rolling",
+        booking_window_days: policy.booking_window_days ?? 60,
+        booking_window_until: policy.booking_window_until ?? null,
+        booking_min_notice_hours: policy.booking_min_notice_hours ?? 0,
+        release_day_of_month: policy.release_day_of_month ?? 1,
+        release_months_ahead: policy.release_months_ahead ?? 1,
       });
     }
   }, [policy?.updated_at, policy?.user_id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -30956,6 +30971,46 @@ const AvailabilityScreen = ({ store, onBack }: { store: any; onBack: () => void 
   const [editingException, setEditingException] = useState<(AvailabilityExceptionInput & { id?: string }) | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // ---- Calendar Reveal (booking window) --------------------------------
+  const policiesApi = store.policiesApi;
+  const policy: BookingPolicy | null = policiesApi?.policy || null;
+  const windowConfig: BookingWindowConfig = useMemo(() => ({
+    mode: (policy?.booking_window_mode as BookingWindowMode) || "rolling",
+    windowDays: policy?.booking_window_days ?? 60,
+    until: policy?.booking_window_until ?? null,
+    minNoticeHours: policy?.booking_min_notice_hours ?? 0,
+    releaseDay: policy?.release_day_of_month ?? 1,
+    releaseMonths: policy?.release_months_ahead ?? 1,
+  }), [policy]);
+  const previewWindow = useMemo(() => computeBookingWindow(windowConfig), [windowConfig]);
+  const [windowDraft, setWindowDraft] = useState<BookingWindowConfig | null>(null);
+  const draftPreview = useMemo(
+    () => (windowDraft ? computeBookingWindow(windowDraft) : null),
+    [windowDraft],
+  );
+
+  const handleSaveWindow = async () => {
+    if (!windowDraft || busy || !policiesApi?.save) return;
+    setBusy(true);
+    await policiesApi.save({
+      ...(policy ?? EMPTY_POLICY),
+      booking_window_mode: windowDraft.mode,
+      booking_window_days: windowDraft.windowDays,
+      booking_window_until: windowDraft.mode === "fixed" ? (windowDraft.until || null) : windowConfig.until,
+      booking_min_notice_hours: windowDraft.minNoticeHours,
+      release_day_of_month: windowDraft.releaseDay,
+      release_months_ahead: windowDraft.releaseMonths,
+    } as BookingPolicyInput);
+    setBusy(false);
+    setWindowDraft(null);
+  };
+
+  const ordinalDay = (n: number): string => {
+    const s = ["th", "st", "nd", "rd"];
+    const v = n % 100;
+    return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+  };
+
   // Build a row per weekday merging existing rules + defaults so the
   // display shows all 7 days even if the user has only configured some.
   const merged: AvailabilityRule[] = useMemo(() => {
@@ -31090,6 +31145,49 @@ const AvailabilityScreen = ({ store, onBack }: { store: any; onBack: () => void 
                 </button>
               );
             })}
+          </Card>
+        </div>
+
+        {/* CALENDAR REVEAL — how far ahead clients can book */}
+        <div>
+          <SectionTitle>Calendar reveal</SectionTitle>
+          <Card className="p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+                    {windowConfig.mode === "rolling" ? "Rolling window"
+                      : windowConfig.mode === "fixed" ? "Book until a set date"
+                      : "Monthly book drop"}
+                  </p>
+                  {windowConfig.mode === "monthly_release" && <Pill tone="gold">Auto</Pill>}
+                </div>
+                <p className="text-[12px]" style={{ color: C.muted }}>
+                  {describeBookingWindow(windowConfig)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWindowDraft(windowConfig)}
+                className="text-[11px] font-semibold px-2 py-1 shrink-0"
+                style={{ color: C.goldDeep, background: "transparent", border: 0 }}
+              >
+                Edit
+              </button>
+            </div>
+            <div className="rounded-xl px-3 py-2.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: C.coffee, letterSpacing: "0.08em" }}>
+                Clients can book
+              </p>
+              <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
+                {fmtDate(previewWindow.minDate)} → {previewWindow.maxDate ? fmtDate(previewWindow.maxDate) : "no end date"}
+              </p>
+              {previewWindow.mode === "monthly_release" && previewWindow.nextReleaseDate && previewWindow.nextReleaseMaxDate && (
+                <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+                  Next drop {fmtDate(previewWindow.nextReleaseDate)} → opens through {fmtDate(previewWindow.nextReleaseMaxDate)}
+                </p>
+              )}
+            </div>
           </Card>
         </div>
 
@@ -31247,6 +31345,152 @@ const AvailabilityScreen = ({ store, onBack }: { store: any; onBack: () => void 
             <div className="grid grid-cols-2 gap-3 pt-2">
               <Button variant="outline" onClick={() => setEditingException(null)}>Cancel</Button>
               <Button variant="primary" onClick={handleSaveException}>{busy ? "Saving…" : "Save"}</Button>
+            </div>
+          </div>
+        )}
+      </Sheet>
+
+      {/* CALENDAR REVEAL SHEET */}
+      <Sheet
+        open={!!windowDraft}
+        onClose={() => setWindowDraft(null)}
+        title="Calendar reveal"
+      >
+        {windowDraft && (
+          <div className="space-y-4 pb-2">
+            <p className="text-[12px]" style={{ color: C.muted }}>
+              Choose how far ahead clients can book. Your calendar opens automatically — no need to
+              re-open it each month.
+            </p>
+
+            {/* Mode picker */}
+            <div className="space-y-2">
+              {([
+                { key: "rolling", label: "Rolling window", hint: "Always keep the next set of days open." },
+                { key: "monthly_release", label: "Monthly book drop", hint: "Open the next month(s) on a set day, every month." },
+                { key: "fixed", label: "Book until a date", hint: "A hard cutoff — books close after that day." },
+              ] as { key: BookingWindowMode; label: string; hint: string }[]).map(opt => {
+                const active = windowDraft.mode === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setWindowDraft({ ...windowDraft, mode: opt.key })}
+                    className="w-full text-left rounded-xl px-3.5 py-3 transition active:scale-[0.99] flex items-center gap-3"
+                    style={{ background: active ? C.ivory : C.paper, border: `1.5px solid ${active ? C.gold : C.hairline}` }}
+                  >
+                    <span
+                      className="shrink-0 rounded-full"
+                      style={{ width: 16, height: 16, border: `2px solid ${active ? C.goldDeep : C.hairline}`, background: active ? C.goldDeep : "transparent" }}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-[13px] font-semibold" style={{ color: C.espresso }}>{opt.label}</span>
+                      <span className="block text-[11px] mt-0.5" style={{ color: C.muted }}>{opt.hint}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Mode-specific params */}
+            {windowDraft.mode === "rolling" && (
+              <Field label="How far ahead" hint="Days clients can book">
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {ROLLING_PRESETS.map(d => {
+                    const on = windowDraft.windowDays === d;
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setWindowDraft({ ...windowDraft, windowDays: d })}
+                        className="px-3 py-1.5 rounded-full text-[12px] font-semibold transition"
+                        style={{ background: on ? C.espresso : C.paper, color: on ? "#fff" : C.coffee, border: `1px solid ${on ? C.espresso : C.hairline}` }}
+                      >
+                        {d} days
+                      </button>
+                    );
+                  })}
+                </div>
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  value={windowDraft.windowDays}
+                  onChange={e => setWindowDraft({ ...windowDraft, windowDays: Math.max(1, Math.min(730, parseInt(e.target.value || "0", 10) || 0)) })}
+                  suffix="days"
+                />
+              </Field>
+            )}
+
+            {windowDraft.mode === "fixed" && (
+              <Field label="Last bookable date" hint="Books close after this day">
+                <Input
+                  type="date"
+                  value={windowDraft.until || ""}
+                  min={todayISO()}
+                  onChange={e => setWindowDraft({ ...windowDraft, until: e.target.value || null })}
+                />
+              </Field>
+            )}
+
+            {windowDraft.mode === "monthly_release" && (
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Books drop on">
+                  <Select
+                    value={String(windowDraft.releaseDay ?? 1)}
+                    onChange={e => setWindowDraft({ ...windowDraft, releaseDay: parseInt(e.target.value, 10) })}
+                    options={Array.from({ length: 28 }, (_, i) => ({ value: String(i + 1), label: `${ordinalDay(i + 1)} of the month` }))}
+                  />
+                </Field>
+                <Field label="Months opened">
+                  <Select
+                    value={String(windowDraft.releaseMonths)}
+                    onChange={e => setWindowDraft({ ...windowDraft, releaseMonths: parseInt(e.target.value, 10) })}
+                    options={[1, 2, 3, 4, 5, 6].map(m => ({ value: String(m), label: m === 1 ? "1 month" : `${m} months` }))}
+                  />
+                </Field>
+              </div>
+            )}
+
+            {/* Minimum notice applies to every mode */}
+            <Field label="Minimum notice" hint="Lead time before an appointment">
+              <Select
+                value={String(windowDraft.minNoticeHours)}
+                onChange={e => setWindowDraft({ ...windowDraft, minNoticeHours: parseInt(e.target.value, 10) })}
+                options={[
+                  { value: "0", label: "No minimum" },
+                  { value: "12", label: "12 hours" },
+                  { value: "24", label: "1 day" },
+                  { value: "48", label: "2 days" },
+                  { value: "72", label: "3 days" },
+                  { value: "168", label: "1 week" },
+                ]}
+              />
+            </Field>
+
+            {/* Live preview */}
+            {draftPreview && (
+              <div className="rounded-xl px-3 py-2.5" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: C.coffee, letterSpacing: "0.08em" }}>
+                  Preview
+                </p>
+                <p className="text-[12px]" style={{ color: C.coffee }}>{describeBookingWindow(windowDraft)}</p>
+                <p className="text-[13px] font-semibold mt-1" style={{ color: C.espresso }}>
+                  {fmtDate(draftPreview.minDate)} → {draftPreview.maxDate ? fmtDate(draftPreview.maxDate) : "no end date"}
+                </p>
+                {draftPreview.mode === "fixed" && !draftPreview.maxDate && (
+                  <p className="text-[11px] mt-1" style={{ color: C.danger }}>Pick a date to close your books, or clients can book with no limit.</p>
+                )}
+                {draftPreview.mode === "monthly_release" && draftPreview.nextReleaseDate && draftPreview.nextReleaseMaxDate && (
+                  <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+                    Next drop {fmtDate(draftPreview.nextReleaseDate)} → opens through {fmtDate(draftPreview.nextReleaseMaxDate)}
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <Button variant="outline" onClick={() => setWindowDraft(null)}>Cancel</Button>
+              <Button variant="primary" onClick={handleSaveWindow}>{busy ? "Saving…" : "Save"}</Button>
             </div>
           </div>
         )}
