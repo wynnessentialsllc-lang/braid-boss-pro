@@ -582,7 +582,7 @@ export const avgTicket30dBreakdown = (
   };
 };
 
-// ---- Average hourly rate (year) ---------------------------------------
+// ---- Average hourly rate ----------------------------------------------
 
 export type HourlyRateRow = {
   appointment: AppointmentLike;
@@ -596,20 +596,25 @@ export type HourlyRateBreakdown = {
   hours: number;      // total hours across contributing bookings
   earned: number;     // total earned across contributing bookings
   rate: number;       // blended rate = earned ÷ hours
-  skipped: number;    // paid bookings this year with no duration recorded
+  skipped: number;    // paid bookings in scope with no duration recorded
 };
 
-// Effective hourly rate for the calendar year. Mirrors the accumulation
-// in computeDashboardRevenue so the card headline and this detail view
-// can never disagree: completed/paid bookings in the year with a
-// recorded duration, blended (total earned ÷ total hours). Bookings
+// Which calendar window the hourly rate covers. "year" powers the Home
+// card headline; the detail sheet lets the stylist toggle to "month".
+export type HourlyRateScope = "year" | "month";
+
+// Effective hourly rate over the given calendar window. Mirrors the
+// accumulation in computeDashboardRevenue so the card headline and this
+// detail view can never disagree: completed/paid bookings in scope with
+// a recorded duration, blended (total earned ÷ total hours). Bookings
 // with no duration are counted in `skipped` so the sheet can nudge the
 // stylist to fill durations in for a more accurate number.
-export const yearHourlyRateBreakdown = (
+export const hourlyRateBreakdown = (
   appointments: AppointmentLike[] | null | undefined,
   reference: string = todayISO(),
+  scope: HourlyRateScope = "year",
 ): HourlyRateBreakdown => {
-  const year = yearBoundary(reference);
+  const window = scope === "month" ? monthBoundary(reference) : yearBoundary(reference);
   const rows: HourlyRateRow[] = [];
   let hours = 0;
   let earned = 0;
@@ -617,7 +622,7 @@ export const yearHourlyRateBreakdown = (
   for (const a of (appointments || [])) {
     if (!isBillable(a)) continue;
     const d = a.date || "";
-    if (!(d >= year.start && d < year.end)) continue;
+    if (!(d >= window.start && d < window.end)) continue;
     if (!isPaidish(a)) continue;
     const hrs = num(a.durationHours);
     const t = ticketTotal(a);
@@ -635,6 +640,13 @@ export const yearHourlyRateBreakdown = (
     skipped,
   };
 };
+
+// Year-scoped convenience wrapper — matches the Home card headline
+// (computeDashboardRevenue.yearHourlyRate).
+export const yearHourlyRateBreakdown = (
+  appointments: AppointmentLike[] | null | undefined,
+  reference: string = todayISO(),
+): HourlyRateBreakdown => hourlyRateBreakdown(appointments, reference, "year");
 
 export type DepositBucket = {
   appointments: AppointmentLike[];

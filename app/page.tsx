@@ -269,8 +269,9 @@ import {
   type WeekClientRow,
   avgTicket30dBreakdown,
   type AvgTicketBreakdown,
-  yearHourlyRateBreakdown,
+  hourlyRateBreakdown,
   type HourlyRateBreakdown,
+  type HourlyRateScope,
   weekDepositBuckets,
   getDepositCollectedAmount,
   type WeekDepositBuckets,
@@ -3973,6 +3974,11 @@ const KpiDetailSheet = ({
   const open = !!kind;
   const title = kind ? KPI_TITLES[kind] : "";
 
+  // Average-hourly-rate window toggle (month vs year). Lives on the
+  // sheet so the compact grid card can stay a single glanceable number
+  // while the drill-down lets the stylist switch scope.
+  const [hourlyScope, setHourlyScope] = useState<HourlyRateScope>("year");
+
   // Compact appointment row used by every list-style KPI. Tappable
   // unless `tappable` is false (deposit-due / missing rows still want
   // to open the booking, so default true). Real <button> for iOS.
@@ -4151,17 +4157,30 @@ const KpiDetailSheet = ({
         );
       }
       case "hourlyRate": {
-        const b: HourlyRateBreakdown = yearHourlyRateBreakdown(appointments, today);
+        const b: HourlyRateBreakdown = hourlyRateBreakdown(appointments, today, hourlyScope);
+        const scopeWord = hourlyScope === "month" ? "this month" : "this year";
         const hoursLabel = `${b.hours % 1 === 0 ? b.hours : b.hours.toFixed(1)} hr${b.hours === 1 ? "" : "s"}`;
         return (
           <>
+            {/* Month / year window toggle */}
+            <div className="flex p-1 rounded-2xl mb-3" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              {([["month", "This month"], ["year", `${new Date().getFullYear()}`]] as [HourlyRateScope, string][]).map(([k, label]) => (
+                <button type="button" key={k} onClick={() => setHourlyScope(k)}
+                  className="flex-1 py-2 rounded-xl text-xs font-bold transition"
+                  style={{
+                    background: hourlyScope === k ? C.espresso : "transparent",
+                    color: hourlyScope === k ? C.cream : C.coffee,
+                    letterSpacing: "0.06em", textTransform: "uppercase",
+                  }}>{label}</button>
+              ))}
+            </div>
             <Hero
               value={b.rate > 0 ? `${fmtMoney(b.rate, currency)}/hr` : "—"}
-              hint={b.rate > 0 ? `${fmtMoney(b.earned, currency)} ÷ ${hoursLabel}` : "No completed bookings with a duration yet"}
+              hint={b.rate > 0 ? `${fmtMoney(b.earned, currency)} ÷ ${hoursLabel}` : `No completed bookings with a duration ${scopeWord} yet`}
             />
             <Card className="p-3.5 mb-3" style={{ background: C.paper }}>
               <p className="text-[11px]" style={{ color: C.coffee }}>
-                <strong>Calculation:</strong> total earned this year divided by total hours worked, across completed/paid bookings that have a duration. Longer, higher-priced styles weigh more — it&apos;s your true blended rate, not a simple average.
+                <strong>Calculation:</strong> total earned {scopeWord} divided by total hours worked, across completed/paid bookings that have a duration. Longer, higher-priced styles weigh more — it&apos;s your true blended rate, not a simple average.
               </p>
               {b.skipped > 0 && (
                 <p className="text-[11px] mt-2" style={{ color: C.muted }}>
@@ -4170,7 +4189,7 @@ const KpiDetailSheet = ({
               )}
             </Card>
             {b.rows.length === 0 ? (
-              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No completed bookings with a recorded duration this year yet.</p></Card>
+              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No completed bookings with a recorded duration {scopeWord} yet.</p></Card>
             ) : b.rows.map(r => (
               <ApptRow
                 key={r.appointment.id}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextMonthAppts, nextMonthSummary, yearHourlyRateBreakdown, computeDashboardRevenue, type AppointmentLike } from "./reports";
+import { nextMonthAppts, nextMonthSummary, yearHourlyRateBreakdown, hourlyRateBreakdown, computeDashboardRevenue, type AppointmentLike } from "./reports";
 
 // Reference date sits in June so "next month" is July 2026.
 const REF = "2026-06-25";
@@ -110,6 +110,23 @@ describe("yearHourlyRateBreakdown", () => {
     expect(b.rate).toBe(0);
     expect(b.hours).toBe(0);
     expect(b.rows).toHaveLength(0);
+  });
+
+  it("scopes to the current calendar month when asked", () => {
+    const appts = [
+      // June (reference month) — $120 over 2h → $60/hr
+      appt({ id: "jun", date: "2026-06-10", status: "completed", totalPrice: 120, durationHours: 2 }),
+      // February (same year, different month) — in year scope, out of month scope
+      appt({ id: "feb", date: "2026-02-10", status: "completed", totalPrice: 500, durationHours: 10 }),
+    ];
+    const month = hourlyRateBreakdown(appts, REF, "month");
+    expect(month.rate).toBe(60);
+    expect(month.rows.map(r => r.appointment.id)).toEqual(["jun"]);
+
+    const year = hourlyRateBreakdown(appts, REF, "year");
+    // (120 + 500) / (2 + 10) = 620 / 12 ≈ 51.67
+    expect(year.rate).toBe(51.67);
+    expect(year.rows).toHaveLength(2);
   });
 
   it("matches the dashboard card's yearHourlyRate field", () => {
