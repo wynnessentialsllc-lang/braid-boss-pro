@@ -1115,30 +1115,6 @@ const calculateRetentionScore = (metrics: ClientMetrics): number => {
   return Math.round(recency + frequency + monetary);
 };
 
-// Rebooking candidates: clients overdue for their next visit, with a
-// reason string suitable to display next to their name. Sorted by how
-// overdue they are (relative to their own cadence).
-const getRebookingCandidates = (clients: any[], appointments: any[], todayIso: string): { client: any; metrics: ClientMetrics; reason: string; overdueBy: number }[] => {
-  if (!Array.isArray(clients)) return [];
-  const out: { client: any; metrics: ClientMetrics; reason: string; overdueBy: number }[] = [];
-  for (const c of clients) {
-    if (!c || !c.id) continue;
-    const m = calculateClientMetrics(c.id, appointments, todayIso);
-    if (m.upcomingAppointmentDate) continue; // already on the books
-    if (m.completedAppts === 0) continue;     // no history yet
-    if (m.daysSinceLast == null) continue;
-    const cadence = m.averageDaysBetween || 42; // default 6-week touch-up window
-    if (m.daysSinceLast < cadence) continue;
-    const overdueBy = m.daysSinceLast - cadence;
-    let reason = "Time to rebook";
-    if (m.daysSinceLast >= 42 && m.daysSinceLast < 56) reason = "Client may need touch-up";
-    else if (m.daysSinceLast >= 56) reason = "Follow up after 6+ weeks";
-    if (m.lifetimeValue >= 800 && m.daysSinceLast >= 30) reason = "VIP client inactive for 30+ days";
-    out.push({ client: c, metrics: m, reason, overdueBy });
-  }
-  return out.sort((a, b) => b.overdueBy - a.overdueBy);
-};
-
 // ---- DASHBOARD ORCHESTRATION --------------------------------------------
 // The dashboard surfaces the same appointment data through three lenses
 // (Pending Balances → Today's Chair → Coming Up). Each card has a single
@@ -3362,18 +3338,31 @@ const RebookingOpportunitiesCard = ({
   summary,
   currency,
   clients,
+  today,
   openQuickAppt,
+  onMuteClient,
   onViewAll,
 }: {
   opportunities: RebookingOpportunity[];
   summary: { total: number; high: number; medium: number; low: number; estimated_returning_revenue: number };
   currency: string;
   clients: any[];
+  today: string;
   openQuickAppt: (prefill?: any) => void;
   openCommunication?: (ctx: CommContext) => void;
+  // Snooze / stop rebooking reminders for a client. Folded in from the
+  // old "Time to rebook" card so that quick action survives the merge.
+  onMuteClient?: (client: any, patch: { rebookingOptOut?: boolean; rebookingSnoozedUntil?: string | null }) => void;
   onViewAll: () => void;
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [dismissOp, setDismissOp] = useState<RebookingOpportunity | null>(null);
+
+  const applyMute = (op: RebookingOpportunity, patch: { rebookingOptOut?: boolean; rebookingSnoozedUntil?: string | null }) => {
+    const c = clients.find((x: any) => x?.id === op.client_id) || { id: op.client_id, name: op.client_name };
+    onMuteClient?.(c, patch);
+    setDismissOp(null);
+  };
 
   const onCopyMessage = async (op: RebookingOpportunity) => {
     const ok = await copyTextToClipboard(buildRebookingMessage(op));
@@ -3472,11 +3461,20 @@ const RebookingOpportunitiesCard = ({
                   style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
                   Book again
                 </button>
-                <button type="button" onClick={() => onCopyMessage(op)}
-                  className="px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
-                  style={{ background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}`, letterSpacing: "0.08em" }}>
-                  {copiedId === op.client_id ? "Copied" : "Copy msg"}
-                </button>
+                <div className="flex gap-1.5">
+                  <button type="button" onClick={() => onCopyMessage(op)}
+                    className="flex-1 px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
+                    style={{ background: "transparent", color: C.coffee, border: `1px solid ${C.hairline}`, letterSpacing: "0.08em" }}>
+                    {copiedId === op.client_id ? "Copied" : "Copy msg"}
+                  </button>
+                  {onMuteClient && (
+                    <button type="button" aria-label="Snooze or stop reminders" onClick={() => setDismissOp(op)}
+                      className="w-8 rounded-lg flex items-center justify-center active:scale-[0.95] transition shrink-0"
+                      style={{ border: `1px solid ${C.hairline}`, color: C.muted }}>
+                      <BellOff size={13} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -3488,6 +3486,22 @@ const RebookingOpportunitiesCard = ({
           View all
         </button>
       </Card>
+
+      {/* Snooze / stop reminders — folded in from the old "Time to
+          rebook" card so muting a client is still a home-screen tap. */}
+      <Sheet open={!!dismissOp} onClose={() => setDismissOp(null)} title="Pause reminders">
+        {dismissOp && (
+          <div className="space-y-2.5">
+            <p className="text-[13px]" style={{ color: C.coffee }}>
+              Stop reminding you to rebook <span className="font-semibold" style={{ color: C.espresso }}>{dismissOp.client_name}</span>?
+            </p>
+            <Button variant="outline" fullWidth onClick={() => applyMute(dismissOp, { rebookingSnoozedUntil: rebookingSnoozeUntil(today, 4), rebookingOptOut: false })}>Snooze 4 weeks</Button>
+            <Button variant="outline" fullWidth onClick={() => applyMute(dismissOp, { rebookingSnoozedUntil: rebookingSnoozeUntil(today, 12), rebookingOptOut: false })}>Snooze 3 months</Button>
+            <Button variant="outline" fullWidth icon={<BellOff size={16} />} onClick={() => applyMute(dismissOp, { rebookingOptOut: true, rebookingSnoozedUntil: null })}>Stop reminders (taking a break)</Button>
+            <p className="text-[11px] pt-1" style={{ color: C.muted }}>You can resume reminders anytime from {String(dismissOp.client_name || "").split(" ")[0] || "the client"}&apos;s profile.</p>
+          </div>
+        )}
+      </Sheet>
     </div>
   );
 };
@@ -5928,10 +5942,8 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           appointments={appointments}
           today={today}
           business={business}
-          openCommunication={openCommunication}
-          openQuickAppt={openQuickAppt}
+          rebookDueCount={rebookingSummary.total}
           setActive={setActive}
-          onMuteClient={(client, patch) => store.upsertClient({ ...client, ...patch })}
         />
 
         <div>
@@ -5997,7 +6009,9 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           summary={rebookingSummary}
           currency={business.currency}
           clients={clients}
+          today={today}
           openQuickAppt={openQuickAppt}
+          onMuteClient={(client, patch) => store.upsertClient({ ...client, ...patch })}
           onViewAll={() => setActive("rebooking")}
         />
 
@@ -6299,22 +6313,22 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
   );
 };
 
-const RetentionInsights = ({ clients, appointments, today, business, openCommunication, openQuickAppt, setActive, onMuteClient }: {
+const RetentionInsights = ({ clients, appointments, today, business, rebookDueCount, setActive }: {
   clients: any[];
   appointments: any[];
   today: string;
   business: any;
-  openCommunication?: (ctx: CommContext) => void;
-  openQuickAppt: (prefill?: any) => void;
+  // Due/overdue rebooking count from the shared rebooking engine
+  // (computeRebookingOpportunities), passed in so this tile shows the
+  // exact same number as the Rebooking opportunities card below.
+  rebookDueCount: number;
   setActive: (tab: string) => void;
-  onMuteClient?: (client: any, patch: { rebookingOptOut?: boolean; rebookingSnoozedUntil?: string | null }) => void;
 }) => {
-  const [dismissCand, setDismissCand] = useState<any | null>(null);
   const insights = useMemo(() => {
     const safeClients = Array.isArray(clients) ? clients : [];
     const safeAppts = Array.isArray(appointments) ? appointments : [];
     if (safeClients.length === 0) {
-      return { hasData: false, candidates: [], topClients: [], inactiveCount: 0, repeatPct: 0, vipThreshold: 0 };
+      return { hasData: false, topClients: [], inactiveCount: 0, repeatPct: 0, vipThreshold: 0 };
     }
     // VIP threshold = 75th percentile of lifetime value across clients
     // who have at least one completed appointment. Falls back to a flat
@@ -6333,11 +6347,6 @@ const RetentionInsights = ({ clients, appointments, today, business, openCommuni
       })
       .filter(x => x.metrics.totalAppts > 0);
 
-    // Skip clients who've snoozed or stopped rebooking reminders so the
-    // homepage "Time to rebook" + "Overdue" stay consistent with the
-    // Rebooking screen and the per-client toggle.
-    const rebookableClients = safeClients.filter(c => !isRebookingMuted(c, today));
-    const candidates = getRebookingCandidates(rebookableClients, safeAppts, today).slice(0, 3);
     const inactiveCount = enriched.filter(x => x.status === "inactive" || x.status === "at_risk").length;
 
     // Repeat booking %: clients with 2+ completed visits / clients with any history.
@@ -6358,7 +6367,7 @@ const RetentionInsights = ({ clients, appointments, today, business, openCommuni
       .sort((a, b) => b.monthValue - a.monthValue)
       .slice(0, 3);
 
-    return { hasData: true, candidates, topClients, inactiveCount, repeatPct, vipThreshold };
+    return { hasData: true, topClients, inactiveCount, repeatPct, vipThreshold };
   }, [clients, appointments, today]);
 
   return (
@@ -6374,8 +6383,8 @@ const RetentionInsights = ({ clients, appointments, today, business, openCommuni
         <>
           <div className="grid grid-cols-3 gap-2 mb-3">
             <Card className="p-3" style={{ background: C.ivory }}>
-              <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Overdue</p>
-              <p className="text-base font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{insights.candidates.length}</p>
+              <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Rebook due</p>
+              <p className="text-base font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{rebookDueCount}</p>
             </Card>
             <Card className="p-3" style={{ background: C.ivory }}>
               <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Repeat %</p>
@@ -6387,54 +6396,10 @@ const RetentionInsights = ({ clients, appointments, today, business, openCommuni
             </Card>
           </div>
 
-          {insights.candidates.length > 0 && (
-            <Card className="p-3.5 mb-3">
-              <p className="text-[10px] uppercase tracking-widest font-bold mb-2" style={{ color: C.muted, letterSpacing: "0.12em" }}>Time to rebook</p>
-              <div className="space-y-2">
-                {insights.candidates.map(({ client, metrics, reason }) => (
-                  <div key={client.id} className="flex items-center gap-3">
-                    <div className="rounded-full flex items-center justify-center shrink-0"
-                      style={{ width: 32, height: 32, background: `linear-gradient(135deg, ${C.brandPrimary}, ${C.brandPrimaryDeep})`, color: C.cream, fontFamily: FONT_DISPLAY, fontSize: 13, fontWeight: 600 }}>
-                      {initials(client.name)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm truncate" style={{ color: C.espresso }}>{client.name}</p>
-                      <p className="text-[11px] truncate" style={{ color: C.muted }}>
-                        {reason} · {metrics.daysSinceLast}d since last
-                      </p>
-                    </div>
-                    <div className="flex gap-1.5 shrink-0 items-center">
-                      {onMuteClient && (
-                        <button type="button" aria-label="Snooze or stop reminders" onClick={() => setDismissCand(client)}
-                          className="w-7 h-7 rounded-lg flex items-center justify-center active:scale-[0.95] transition"
-                          style={{ border: `1px solid ${C.hairline}`, color: C.muted }}>
-                          <BellOff size={13} />
-                        </button>
-                      )}
-                      {openCommunication && (
-                        <button type="button" onClick={() => openCommunication({ client, initialKey: "rebooking_nudge" })}
-                          className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
-                          style={{ background: "transparent", color: C.goldDeep, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
-                          Remind
-                        </button>
-                      )}
-                      <button type="button" onClick={() => openQuickAppt({
-                        clientId: client.id,
-                        clientName: client.name,
-                        clientPhone: client.phone,
-                        clientEmail: client.email,
-                        style: metrics.mostBookedStyle || "",
-                      })}
-                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider active:scale-[0.97] transition"
-                        style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}`, letterSpacing: "0.08em" }}>
-                        Rebook
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
+          {/* "Time to rebook" list removed — it duplicated the
+              "Rebooking opportunities" card below. The Overdue tile
+              above still summarizes the same candidates, and per-client
+              Rebook / Remind / snooze actions now live on that card. */}
 
           {insights.topClients.length > 0 && (
             <Card className="p-3.5">
@@ -6458,20 +6423,6 @@ const RetentionInsights = ({ clients, appointments, today, business, openCommuni
           )}
         </>
       )}
-
-      <Sheet open={!!dismissCand} onClose={() => setDismissCand(null)} title="Pause reminders">
-        {dismissCand && (
-          <div className="space-y-2.5">
-            <p className="text-[13px]" style={{ color: C.coffee }}>
-              Stop reminding you to rebook <span className="font-semibold" style={{ color: C.espresso }}>{dismissCand.name}</span>?
-            </p>
-            <Button variant="outline" fullWidth onClick={() => { onMuteClient?.(dismissCand, { rebookingSnoozedUntil: rebookingSnoozeUntil(today, 4), rebookingOptOut: false }); setDismissCand(null); }}>Snooze 4 weeks</Button>
-            <Button variant="outline" fullWidth onClick={() => { onMuteClient?.(dismissCand, { rebookingSnoozedUntil: rebookingSnoozeUntil(today, 12), rebookingOptOut: false }); setDismissCand(null); }}>Snooze 3 months</Button>
-            <Button variant="outline" fullWidth icon={<BellOff size={16} />} onClick={() => { onMuteClient?.(dismissCand, { rebookingOptOut: true, rebookingSnoozedUntil: null }); setDismissCand(null); }}>Stop reminders (taking a break)</Button>
-            <p className="text-[11px] pt-1" style={{ color: C.muted }}>You can resume reminders anytime from {String(dismissCand.name || "").split(" ")[0] || "the client"}&apos;s profile.</p>
-          </div>
-        )}
-      </Sheet>
     </div>
   );
 };
@@ -20012,18 +19963,28 @@ const buildNotifications = (store: any): NotifItem[] => {
     });
   }
 
-  // RETENTION — overdue rebooking candidates (top 3)
-  const candidates = getRebookingCandidates(safeClients, safeAppts, today).slice(0, 3);
-  for (const c of candidates) {
+  // RETENTION — overdue rebooking clients (top 3). Reads the same
+  // style-aware engine as the Rebooking opportunities card and the
+  // Retention tile, so all three stay in sync. The card/tile show every
+  // due-or-overdue client, but the bell stays conservative: it only
+  // nudges once a client is clearly overdue (days_overdue >= 8, i.e.
+  // medium/high urgency), never the moment they enter the style window.
+  const rebookDue = computeRebookingOpportunities(safeClients, safeAppts, today)
+    .filter((o) => o.days_overdue >= 8)
+    .slice(0, 3);
+  for (const op of rebookDue) {
+    const daysSinceLast = Math.max(0, Math.round(
+      (new Date(today + "T00:00:00").getTime() - new Date(op.last_appointment_date + "T00:00:00").getTime()) / 86400000,
+    ));
     items.push({
-      id: `reb_${c.client.id}`,
+      id: `reb_${op.client_id}`,
       category: "retention",
       kind: "rebooking_overdue",
       tone: "gold",
       icon: <Sparkles size={16} style={{ color: C.goldDeep }} />,
-      title: `${c.reason} · ${c.client.name || "Client"}`,
-      body: `${c.metrics.daysSinceLast ?? 0}d since last visit${c.metrics.mostBookedStyle ? ` · prefers ${c.metrics.mostBookedStyle}` : ""}.`,
-      target: { kind: "client", clientId: c.client.id },
+      title: `${op.reason} · ${op.client_name}`,
+      body: `${daysSinceLast}d since last visit${op.last_style ? ` · ${op.last_style}` : ""}.`,
+      target: { kind: "client", clientId: op.client_id },
     });
   }
 
