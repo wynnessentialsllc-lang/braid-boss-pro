@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextMonthAppts, nextMonthSummary, type AppointmentLike } from "./reports";
+import { nextMonthAppts, nextMonthSummary, yearHourlyRateBreakdown, computeDashboardRevenue, type AppointmentLike } from "./reports";
 
 // Reference date sits in June so "next month" is July 2026.
 const REF = "2026-06-25";
@@ -71,5 +71,56 @@ describe("nextMonthSummary", () => {
   it("returns zeros when nothing is on the books next month", () => {
     const s = nextMonthSummary([appt({ date: "2026-06-10", totalPrice: 100 })], REF);
     expect(s).toEqual({ appointments: [], revenue: 0, clientCount: 0 });
+  });
+});
+
+describe("yearHourlyRateBreakdown", () => {
+  it("blends earned ÷ hours across completed/paid bookings in the year", () => {
+    const appts = [
+      // $200 over 4h → $50/hr
+      appt({ id: "a", date: "2026-02-01", status: "completed", totalPrice: 200, durationHours: 4 }),
+      // $300 over 5h, post-discount $250 → contributes 250 / 5h
+      appt({ id: "b", date: "2026-03-01", status: "completed", totalPrice: 300, discountAmount: 50, durationHours: 5 }),
+      // unpaid/scheduled — excluded
+      appt({ id: "c", date: "2026-04-01", status: "scheduled", totalPrice: 500, durationHours: 5 }),
+      // last year — excluded
+      appt({ id: "d", date: "2025-12-01", status: "completed", totalPrice: 500, durationHours: 5 }),
+    ];
+    const b = yearHourlyRateBreakdown(appts, REF);
+    // (200 + 250) / (4 + 5) = 450 / 9 = 50
+    expect(b.rate).toBe(50);
+    expect(b.earned).toBe(450);
+    expect(b.hours).toBe(9);
+    expect(b.rows.map(r => r.appointment.id)).toEqual(["a", "b"]); // sorted by rate desc (both 50)
+  });
+
+  it("skips paid bookings with no recorded duration so they can't inflate the rate", () => {
+    const appts = [
+      appt({ id: "timed", date: "2026-02-01", status: "completed", totalPrice: 100, durationHours: 2 }), // $50/hr
+      appt({ id: "untimed", date: "2026-02-02", paymentStatus: "paid", totalPrice: 999, durationHours: 0 }),
+    ];
+    const b = yearHourlyRateBreakdown(appts, REF);
+    expect(b.rate).toBe(50);   // untimed booking excluded from numerator AND denominator
+    expect(b.skipped).toBe(1);
+    expect(b.rows).toHaveLength(1);
+  });
+
+  it("returns a zero rate when nothing qualifies", () => {
+    const b = yearHourlyRateBreakdown([appt({ date: "2026-02-01", status: "scheduled", totalPrice: 100, durationHours: 3 })], REF);
+    expect(b.rate).toBe(0);
+    expect(b.hours).toBe(0);
+    expect(b.rows).toHaveLength(0);
+  });
+
+  it("matches the dashboard card's yearHourlyRate field", () => {
+    const appts = [
+      appt({ id: "a", date: "2026-02-01", status: "completed", totalPrice: 200, durationHours: 4 }),
+      appt({ id: "b", date: "2026-03-01", paymentStatus: "paid", totalPrice: 300, durationHours: 6 }),
+    ];
+    const card = computeDashboardRevenue(appts, REF);
+    const sheet = yearHourlyRateBreakdown(appts, REF);
+    expect(card.yearHourlyRate).toBe(sheet.rate);
+    expect(card.yearHoursWorked).toBe(sheet.hours);
+    expect(card.yearRateEarnings).toBe(sheet.earned);
   });
 });
