@@ -53,6 +53,26 @@ const isEditableTarget = (el: EventTarget | null): boolean => {
   return !!editable;
 };
 
+// A downward drag that begins inside an inner vertical scroller that is
+// already scrolled (scrollTop > 0) is the user scrolling THAT container
+// back up — not a page pull. The page stays at scrollY 0 the whole time
+// (e.g. the calendar's day timeline), so without this check the pull
+// indicator hijacks the gesture and the scroll feels like it's fighting
+// back. Walk up from the touch target; if any scrollable ancestor can
+// still scroll up, let it own the gesture.
+const startsInScrolledContainer = (el: EventTarget | null): boolean => {
+  if (typeof window === "undefined") return false;
+  let node: Element | null = el instanceof Element ? el : null;
+  while (node && node !== document.body && node !== document.documentElement) {
+    if (node.scrollHeight > node.clientHeight && node.scrollTop > 0) {
+      const oy = window.getComputedStyle(node).overflowY;
+      if (oy === "auto" || oy === "scroll") return true;
+    }
+    node = node.parentElement;
+  }
+  return false;
+};
+
 // Any open sheet / modal / drawer renders with aria-modal="true" (the
 // Sheet and CartDrawer components both do, and only while open). When one
 // is up, the page behind it is still at scrollY 0, so a downward drag
@@ -109,6 +129,7 @@ const PullToRefresh = () => {
       if (window.scrollY > 0) return;
       if (isModalOpen()) return;
       if (isEditableTarget(e.target)) return;
+      if (startsInScrolledContainer(e.target)) return;
       if (e.touches.length !== 1) return;
       startY.current = e.touches[0].clientY;
       pulling.current = false;
