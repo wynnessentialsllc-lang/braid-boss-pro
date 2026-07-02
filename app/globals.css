@@ -40,12 +40,24 @@ body {
      state. `contain` blocks the chain to the viewport but still
      allows inner scroll containers to behave normally. */
   overscroll-behavior-y: contain;
+  /* Kill horizontal document scroll + rubber-band. A left/right swipe
+     on the calendar was panning the whole page sideways (revealing a
+     blank strip on iOS/WKWebView). `overflow-x: clip` hides any x
+     overflow WITHOUT turning body into a scroll container the way
+     `hidden` would (which would also break window.scrollY, the signal
+     PullToRefresh keys off of). `overscroll-behavior-x: none` stops the
+     horizontal bounce even when there's nothing to scroll. Horizontal
+     paging is handled in JS by the calendar's own swipe handlers. */
+  overflow-x: clip;
+  overscroll-behavior-x: none;
 }
 html {
   /* Same reasoning as body — Chrome reads overscroll-behavior off
      the viewport root, so setting it on body alone isn't always
      enough on Android PWA. */
   overscroll-behavior-y: contain;
+  overflow-x: clip;
+  overscroll-behavior-x: none;
 }
 
 /* Form placeholders ship very light on iOS Safari (and with reduced

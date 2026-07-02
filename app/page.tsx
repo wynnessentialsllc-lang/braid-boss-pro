@@ -8716,6 +8716,7 @@ const Schedule = ({ store, prefillNewAppt, clearApptPrefill, openTimerForAppt, o
         className="flex items-center gap-1 px-2 mb-3"
         onTouchStart={onWeekTouchStart}
         onTouchEnd={onWeekTouchEnd}
+        style={{ touchAction: "pan-y" }}
       >
         <button
           type="button"
@@ -8984,14 +8985,13 @@ const DayCalendarView = ({
     return gaps;
   }, [businessBands]);
 
-  // The timeline opens at the top (12 AM) showing the full day's header
-  // and summary above it. We intentionally do NOT auto-scroll to the
-  // current hour on load: on iOS (Capacitor/WKWebView) setting scrollTop
-  // on this nested scroll container leaks to the page and pushes the
-  // month header, day strip and "Today's business" card off-screen.
-  // Letting it rest at the top keeps the whole page in view on open;
-  // scrolling the timeline to any hour stays fully available.
+  // The timeline is a nested scroll container. On date change we scroll it
+  // to the day's bookings (see the effect below) — carefully, via scrollTop
+  // on this element only, so it never disturbs the outer page. rafHandle
+  // tracks the pending animation frame so we can cancel it on unmount / a
+  // rapid date change.
   const scrollRef = useRef<HTMLDivElement>(null);
+  const rafHandle = useRef<number | null>(null);
 
   const HOURS = useMemo(
     () => Array.from({ length: endHour - startHour + 1 }, (_, i) => startHour + i),
@@ -9052,6 +9052,46 @@ const DayCalendarView = ({
     [appts],
   );
 
+  // Drop the timeline onto the day's bookings the moment a date comes
+  // into view, so the stylist sees their appointments straight away
+  // instead of an empty pre-dawn grid they have to scroll past. Anchor
+  // priority: first booking → (for today) the current hour → the start of
+  // the working day → top. We set scrollTop DIRECTLY on this container —
+  // never scrollIntoView, which walks every scroll ancestor and would
+  // shove the month header / day strip off-screen on iOS. A double rAF
+  // lets the (fixed-height) grid finish laying out first; the
+  // scrollHeight guard makes sure the container is genuinely scrollable
+  // before we touch it, so WKWebView can't bubble the scroll to the page.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    let anchorMin: number | null = null;
+    if (placedAppts.length > 0) {
+      anchorMin = Math.min(...placedAppts.map(p => p.startMin));
+    } else if (selectedDate === today) {
+      const now = new Date();
+      anchorMin = now.getHours() * 60 + now.getMinutes();
+    } else if (businessBands.length > 0) {
+      anchorMin = businessBands[0].start;
+    }
+    const target = anchorMin == null
+      ? 0
+      : Math.max(0, ((anchorMin - startHour * 60) / 60) * HOUR_PX - 24);
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => {
+        const node = scrollRef.current;
+        if (!node) return;
+        if (target > 0 && node.scrollHeight <= node.clientHeight) return;
+        node.scrollTop = target;
+      });
+      rafHandle.current = raf2;
+    });
+    rafHandle.current = raf1;
+    return () => {
+      if (rafHandle.current != null) cancelAnimationFrame(rafHandle.current);
+    };
+  }, [selectedDate, today, placedAppts, businessBands, startHour]);
+
   const dayStatusToneBg = (() => {
     switch (dayStatus.status) {
       case "fully_booked": return "rgba(91, 33, 182, 0.18)";
@@ -9072,7 +9112,7 @@ const DayCalendarView = ({
   })();
 
   return (
-    <div className="space-y-3" onTouchStart={onDayTouchStart} onTouchEnd={onDayTouchEnd}>
+    <div className="space-y-3" onTouchStart={onDayTouchStart} onTouchEnd={onDayTouchEnd} style={{ touchAction: "pan-y" }}>
       {/* DAILY BUSINESS SUMMARY — single-chair snapshot replaces the
           multi-stylist column header. */}
       <div style={{ borderRadius: 20, overflow: "hidden", border: `1px solid ${C.hairline}`, boxShadow: "0 16px 36px -24px rgba(21,17,26,0.5)" }}>
@@ -9116,7 +9156,12 @@ const DayCalendarView = ({
       <div
         ref={scrollRef}
         className="relative"
-        style={{ maxHeight: TIMELINE_VIEWPORT_PX, overflowY: "auto", overscrollBehavior: "contain", background: C.paper, border: `1px solid ${C.hairline}`, borderRadius: 16 }}
+        // touchAction pan-y keeps this an exclusively vertical scroller so a
+        // horizontal swipe falls through to the day-stepper instead of
+        // fighting it; WebkitOverflowScrolling gives iOS momentum so the
+        // timeline doesn't feel stuck; overscrollBehavior contain stops the
+        // scroll from chaining out to the page (and into PullToRefresh).
+        style={{ maxHeight: TIMELINE_VIEWPORT_PX, overflowY: "auto", WebkitOverflowScrolling: "touch", touchAction: "pan-y", overscrollBehavior: "contain", background: C.paper, border: `1px solid ${C.hairline}`, borderRadius: 16 }}
       >
         <div className="relative" style={{ height: (endHour - startHour) * HOUR_PX + 8 }}>
         {/* Off-hour grey wash — lightly dims hours outside the working
