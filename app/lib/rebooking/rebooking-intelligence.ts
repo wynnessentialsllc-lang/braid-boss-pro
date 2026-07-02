@@ -10,11 +10,12 @@
 //   based on each client's own historical gap between visits — fine for
 //   regulars, but it never flags a one-time client. Style-aware windows
 //   let us notice that a knotless client from 7 weeks ago is overdue
-//   even if she's only been in once. The two systems are complementary
-//   and both still ship: this module is what powers the new
-//   "Rebooking Opportunities" surface; the older `getRebookingCandidates`
-//   in page.tsx still drives the legacy Retention Insights card so we
-//   don't change behavior anywhere it was already working.
+//   even if she's only been in once. This module is now the single
+//   source of truth for rebooking across the app — the Rebooking
+//   opportunities card, the "Rebook due" retention tile, and the
+//   notification bell all read from it. (An older cadence-based
+//   `getRebookingCandidates` detector in page.tsx was retired once every
+//   surface moved here.)
 
 // Match against the lower-cased trimmed style string. Order matters:
 // more specific phrases ("loc maintenance") must be tested before

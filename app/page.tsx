@@ -1115,30 +1115,6 @@ const calculateRetentionScore = (metrics: ClientMetrics): number => {
   return Math.round(recency + frequency + monetary);
 };
 
-// Rebooking candidates: clients overdue for their next visit, with a
-// reason string suitable to display next to their name. Sorted by how
-// overdue they are (relative to their own cadence).
-const getRebookingCandidates = (clients: any[], appointments: any[], todayIso: string): { client: any; metrics: ClientMetrics; reason: string; overdueBy: number }[] => {
-  if (!Array.isArray(clients)) return [];
-  const out: { client: any; metrics: ClientMetrics; reason: string; overdueBy: number }[] = [];
-  for (const c of clients) {
-    if (!c || !c.id) continue;
-    const m = calculateClientMetrics(c.id, appointments, todayIso);
-    if (m.upcomingAppointmentDate) continue; // already on the books
-    if (m.completedAppts === 0) continue;     // no history yet
-    if (m.daysSinceLast == null) continue;
-    const cadence = m.averageDaysBetween || 42; // default 6-week touch-up window
-    if (m.daysSinceLast < cadence) continue;
-    const overdueBy = m.daysSinceLast - cadence;
-    let reason = "Time to rebook";
-    if (m.daysSinceLast >= 42 && m.daysSinceLast < 56) reason = "Client may need touch-up";
-    else if (m.daysSinceLast >= 56) reason = "Follow up after 6+ weeks";
-    if (m.lifetimeValue >= 800 && m.daysSinceLast >= 30) reason = "VIP client inactive for 30+ days";
-    out.push({ client: c, metrics: m, reason, overdueBy });
-  }
-  return out.sort((a, b) => b.overdueBy - a.overdueBy);
-};
-
 // ---- DASHBOARD ORCHESTRATION --------------------------------------------
 // The dashboard surfaces the same appointment data through three lenses
 // (Pending Balances → Today's Chair → Coming Up). Each card has a single
@@ -5966,6 +5942,7 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           appointments={appointments}
           today={today}
           business={business}
+          rebookDueCount={rebookingSummary.total}
           setActive={setActive}
         />
 
@@ -6336,18 +6313,22 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
   );
 };
 
-const RetentionInsights = ({ clients, appointments, today, business, setActive }: {
+const RetentionInsights = ({ clients, appointments, today, business, rebookDueCount, setActive }: {
   clients: any[];
   appointments: any[];
   today: string;
   business: any;
+  // Due/overdue rebooking count from the shared rebooking engine
+  // (computeRebookingOpportunities), passed in so this tile shows the
+  // exact same number as the Rebooking opportunities card below.
+  rebookDueCount: number;
   setActive: (tab: string) => void;
 }) => {
   const insights = useMemo(() => {
     const safeClients = Array.isArray(clients) ? clients : [];
     const safeAppts = Array.isArray(appointments) ? appointments : [];
     if (safeClients.length === 0) {
-      return { hasData: false, candidates: [], topClients: [], inactiveCount: 0, repeatPct: 0, vipThreshold: 0 };
+      return { hasData: false, topClients: [], inactiveCount: 0, repeatPct: 0, vipThreshold: 0 };
     }
     // VIP threshold = 75th percentile of lifetime value across clients
     // who have at least one completed appointment. Falls back to a flat
@@ -6366,11 +6347,6 @@ const RetentionInsights = ({ clients, appointments, today, business, setActive }
       })
       .filter(x => x.metrics.totalAppts > 0);
 
-    // Skip clients who've snoozed or stopped rebooking reminders so the
-    // homepage "Overdue" tile stays consistent with the Rebooking
-    // opportunities card, the Rebooking screen, and the per-client toggle.
-    const rebookableClients = safeClients.filter(c => !isRebookingMuted(c, today));
-    const candidates = getRebookingCandidates(rebookableClients, safeAppts, today).slice(0, 3);
     const inactiveCount = enriched.filter(x => x.status === "inactive" || x.status === "at_risk").length;
 
     // Repeat booking %: clients with 2+ completed visits / clients with any history.
@@ -6391,7 +6367,7 @@ const RetentionInsights = ({ clients, appointments, today, business, setActive }
       .sort((a, b) => b.monthValue - a.monthValue)
       .slice(0, 3);
 
-    return { hasData: true, candidates, topClients, inactiveCount, repeatPct, vipThreshold };
+    return { hasData: true, topClients, inactiveCount, repeatPct, vipThreshold };
   }, [clients, appointments, today]);
 
   return (
@@ -6407,8 +6383,8 @@ const RetentionInsights = ({ clients, appointments, today, business, setActive }
         <>
           <div className="grid grid-cols-3 gap-2 mb-3">
             <Card className="p-3" style={{ background: C.ivory }}>
-              <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Overdue</p>
-              <p className="text-base font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{insights.candidates.length}</p>
+              <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Rebook due</p>
+              <p className="text-base font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{rebookDueCount}</p>
             </Card>
             <Card className="p-3" style={{ background: C.ivory }}>
               <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Repeat %</p>
@@ -19942,18 +19918,27 @@ const buildNotifications = (store: any): NotifItem[] => {
     });
   }
 
-  // RETENTION — overdue rebooking candidates (top 3)
-  const candidates = getRebookingCandidates(safeClients, safeAppts, today).slice(0, 3);
-  for (const c of candidates) {
+  // RETENTION — overdue rebooking clients (top 3). Uses the same
+  // style-aware engine as the Rebooking opportunities card and the
+  // Retention tile, so the bell, the card, and the tile can never
+  // disagree. Only clients actually due/overdue (not "due soon", which
+  // is days_overdue < 0) generate a nudge here.
+  const rebookDue = computeRebookingOpportunities(safeClients, safeAppts, today)
+    .filter((o) => o.days_overdue >= 0)
+    .slice(0, 3);
+  for (const op of rebookDue) {
+    const daysSinceLast = Math.max(0, Math.round(
+      (new Date(today + "T00:00:00").getTime() - new Date(op.last_appointment_date + "T00:00:00").getTime()) / 86400000,
+    ));
     items.push({
-      id: `reb_${c.client.id}`,
+      id: `reb_${op.client_id}`,
       category: "retention",
       kind: "rebooking_overdue",
       tone: "gold",
       icon: <Sparkles size={16} style={{ color: C.goldDeep }} />,
-      title: `${c.reason} · ${c.client.name || "Client"}`,
-      body: `${c.metrics.daysSinceLast ?? 0}d since last visit${c.metrics.mostBookedStyle ? ` · prefers ${c.metrics.mostBookedStyle}` : ""}.`,
-      target: { kind: "client", clientId: c.client.id },
+      title: `${op.reason} · ${op.client_name}`,
+      body: `${daysSinceLast}d since last visit${op.last_style ? ` · ${op.last_style}` : ""}.`,
+      target: { kind: "client", clientId: op.client_id },
     });
   }
 
