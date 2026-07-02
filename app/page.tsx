@@ -19918,13 +19918,14 @@ const buildNotifications = (store: any): NotifItem[] => {
     });
   }
 
-  // RETENTION — overdue rebooking clients (top 3). Uses the same
+  // RETENTION — overdue rebooking clients (top 3). Reads the same
   // style-aware engine as the Rebooking opportunities card and the
-  // Retention tile, so the bell, the card, and the tile can never
-  // disagree. Only clients actually due/overdue (not "due soon", which
-  // is days_overdue < 0) generate a nudge here.
+  // Retention tile, so all three stay in sync. The card/tile show every
+  // due-or-overdue client, but the bell stays conservative: it only
+  // nudges once a client is clearly overdue (days_overdue >= 8, i.e.
+  // medium/high urgency), never the moment they enter the style window.
   const rebookDue = computeRebookingOpportunities(safeClients, safeAppts, today)
-    .filter((o) => o.days_overdue >= 0)
+    .filter((o) => o.days_overdue >= 8)
     .slice(0, 3);
   for (const op of rebookDue) {
     const daysSinceLast = Math.max(0, Math.round(
