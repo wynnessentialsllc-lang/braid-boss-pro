@@ -269,6 +269,9 @@ import {
   type WeekClientRow,
   avgTicket30dBreakdown,
   type AvgTicketBreakdown,
+  hourlyRateBreakdown,
+  type HourlyRateBreakdown,
+  type HourlyRateScope,
   weekDepositBuckets,
   getDepositCollectedAmount,
   type WeekDepositBuckets,
@@ -3925,6 +3928,7 @@ type KpiDetailKind =
   | "monthClients"
   | "yearClients"
   | "avgTicket"
+  | "hourlyRate"
   | "deposits"
   | "pending"
   | "monthExpected"
@@ -3946,6 +3950,7 @@ const KPI_TITLES: Record<KpiDetailKind, string> = {
   monthClients: "Clients this month",
   yearClients: "Clients this year",
   avgTicket: "Average ticket (30 days)",
+  hourlyRate: `Average hourly rate (${new Date().getFullYear()})`,
   deposits: "Deposits this week",
   pending: "Pending balances",
   monthExpected: "Expected this month",
@@ -3968,6 +3973,11 @@ const KpiDetailSheet = ({
   const today = todayISO();
   const open = !!kind;
   const title = kind ? KPI_TITLES[kind] : "";
+
+  // Average-hourly-rate window toggle (month vs year). Lives on the
+  // sheet so the compact grid card can stay a single glanceable number
+  // while the drill-down lets the stylist switch scope.
+  const [hourlyScope, setHourlyScope] = useState<HourlyRateScope>("year");
 
   // Compact appointment row used by every list-style KPI. Tappable
   // unless `tappable` is false (deposit-due / missing rows still want
@@ -4143,6 +4153,52 @@ const KpiDetailSheet = ({
             {b.appointments.length === 0 ? (
               <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No bookings in the last 30 days.</p></Card>
             ) : b.appointments.map(a => <ApptRow key={a.id} a={a} />)}
+          </>
+        );
+      }
+      case "hourlyRate": {
+        const b: HourlyRateBreakdown = hourlyRateBreakdown(appointments, today, hourlyScope);
+        const scopeWord = hourlyScope === "month" ? "this month" : "this year";
+        const hoursLabel = `${b.hours % 1 === 0 ? b.hours : b.hours.toFixed(1)} hr${b.hours === 1 ? "" : "s"}`;
+        return (
+          <>
+            {/* Month / year window toggle */}
+            <div className="flex p-1 rounded-2xl mb-3" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+              {([["month", "This month"], ["year", `${new Date().getFullYear()}`]] as [HourlyRateScope, string][]).map(([k, label]) => (
+                <button type="button" key={k} onClick={() => setHourlyScope(k)}
+                  className="flex-1 py-2 rounded-xl text-xs font-bold transition"
+                  style={{
+                    background: hourlyScope === k ? C.espresso : "transparent",
+                    color: hourlyScope === k ? C.cream : C.coffee,
+                    letterSpacing: "0.06em", textTransform: "uppercase",
+                  }}>{label}</button>
+              ))}
+            </div>
+            <Hero
+              value={b.rate > 0 ? `${fmtMoney(b.rate, currency)}/hr` : "—"}
+              hint={b.rate > 0 ? `${fmtMoney(b.earned, currency)} ÷ ${hoursLabel}` : `No completed bookings with a duration ${scopeWord} yet`}
+            />
+            <Card className="p-3.5 mb-3" style={{ background: C.paper }}>
+              <p className="text-[11px]" style={{ color: C.coffee }}>
+                <strong>Calculation:</strong> total earned {scopeWord} divided by total hours worked, across completed/paid bookings that have a duration. Longer, higher-priced styles weigh more — it&apos;s your true blended rate, not a simple average.
+              </p>
+              {b.skipped > 0 && (
+                <p className="text-[11px] mt-2" style={{ color: C.muted }}>
+                  {b.skipped} paid booking{b.skipped === 1 ? "" : "s"} skipped — no duration recorded. Add a duration when booking for a more accurate rate.
+                </p>
+              )}
+            </Card>
+            {b.rows.length === 0 ? (
+              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No completed bookings with a recorded duration {scopeWord} yet.</p></Card>
+            ) : b.rows.map(r => (
+              <ApptRow
+                key={r.appointment.id}
+                a={r.appointment}
+                amountOverride={r.earned}
+                rightLabel={`${fmtMoney(r.rate, currency)}/hr · ${r.hours % 1 === 0 ? r.hours : r.hours.toFixed(1)}h`}
+                tone="muted"
+              />
+            ))}
           </>
         );
       }
@@ -5824,6 +5880,10 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
             <KpiCard label="Shop sales (mo)" value={money(shopSales.month)} icon={<ShoppingBag size={16} />} tone={shopSales.month > 0 ? "gold" : "neutral"} onClick={() => (openReports ? openReports("shopSales") : goToMoney("month"))} compact riseDelay={160} />
             <KpiCard label={`${new Date().getFullYear()} Total Earnings`} value={money(revenueStats.yearMade + shopSales.year)} icon={<Sparkles size={16} />} tone={(revenueStats.yearMade + shopSales.year) > 0 ? "gold" : "neutral"} onClick={() => goToMoney("all")} compact riseDelay={200} />
             <KpiCard label={`${new Date().getFullYear()} clients`} value={stats.yearClients} icon={<Users size={16} />} tone="primary" onClick={() => openKpi("yearClients")} compact riseDelay={240} />
+            {/* Average hourly rate — blended earned ÷ hours worked this
+                year across completed/paid bookings with a duration. Fills
+                the last grid cell beside "{year} clients". */}
+            <KpiCard label={`Avg hourly (${new Date().getFullYear()})`} value={revenueStats.yearHourlyRate > 0 ? `${money(revenueStats.yearHourlyRate)}/hr` : "—"} icon={<Clock size={16} />} tone={revenueStats.yearHourlyRate > 0 ? "gold" : "neutral"} onClick={() => openKpi("hourlyRate")} compact riseDelay={280} />
           </div>
         </div>
 

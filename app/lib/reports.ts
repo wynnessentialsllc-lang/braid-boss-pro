@@ -171,6 +171,19 @@ export type DashboardRevenue = {
   // yearMade, just month-bounded.
   monthEarned: number;
   yearMade: number;
+  // yearHourlyRate: effective (blended) hourly rate over the calendar
+  // year — total earned ÷ total hours worked, across completed/paid
+  // appointments that have a recorded duration. Only bookings with
+  // durationHours > 0 contribute to BOTH sides of the ratio, so a paid
+  // booking with a missing duration can't inflate the rate. This is a
+  // true weighted average (a long expensive style counts more than a
+  // quick cheap one), which reflects real earning power better than
+  // averaging each booking's rate equally.
+  yearHourlyRate: number;
+  // Supporting totals so the card / detail sheet can show the math
+  // ("$X ÷ Y hrs") without recomputing.
+  yearHoursWorked: number;
+  yearRateEarnings: number;
 };
 
 // Filter helpers for the new month/year aggregates.
@@ -215,6 +228,8 @@ export const computeDashboardRevenue = (
   let monthExpected = 0;
   let monthEarned = 0;
   let yearMade = 0;
+  let yearHoursWorked = 0;
+  let yearRateEarnings = 0;
 
   const month = monthBoundary(today);
   const year = yearBoundary(today);
@@ -255,9 +270,21 @@ export const computeDashboardRevenue = (
     // calendar year. ticketTotal (not deposit + balance) so paid
     // bookings can't double-count.
     if (d >= year.start && d < year.end && isPaidish(a)) yearMade += t;
+    // Average hourly rate (year) — only completed/paid bookings in the
+    // calendar year that carry a real duration contribute. Numerator
+    // and denominator are kept in lock-step (same appointments) so the
+    // ratio is a genuine effective hourly rate.
+    if (d >= year.start && d < year.end && isPaidish(a)) {
+      const hrs = num(a.durationHours);
+      if (hrs > 0) {
+        yearHoursWorked += hrs;
+        yearRateEarnings += t;
+      }
+    }
   }
 
   const averageTicket30d = last30Count > 0 ? last30Total / last30Count : 0;
+  const yearHourlyRate = yearHoursWorked > 0 ? yearRateEarnings / yearHoursWorked : 0;
 
   return {
     todayRevenue: round2(todayRevenue),
@@ -269,6 +296,9 @@ export const computeDashboardRevenue = (
     monthExpected: round2(monthExpected),
     monthEarned: round2(monthEarned),
     yearMade: round2(yearMade),
+    yearHourlyRate: round2(yearHourlyRate),
+    yearHoursWorked: round2(yearHoursWorked),
+    yearRateEarnings: round2(yearRateEarnings),
   };
 };
 
@@ -551,6 +581,72 @@ export const avgTicket30dBreakdown = (
     average: list.length > 0 ? round2(total / list.length) : 0,
   };
 };
+
+// ---- Average hourly rate ----------------------------------------------
+
+export type HourlyRateRow = {
+  appointment: AppointmentLike;
+  hours: number;
+  earned: number;
+  rate: number;   // earned ÷ hours for this single booking
+};
+
+export type HourlyRateBreakdown = {
+  rows: HourlyRateRow[];
+  hours: number;      // total hours across contributing bookings
+  earned: number;     // total earned across contributing bookings
+  rate: number;       // blended rate = earned ÷ hours
+  skipped: number;    // paid bookings in scope with no duration recorded
+};
+
+// Which calendar window the hourly rate covers. "year" powers the Home
+// card headline; the detail sheet lets the stylist toggle to "month".
+export type HourlyRateScope = "year" | "month";
+
+// Effective hourly rate over the given calendar window. Mirrors the
+// accumulation in computeDashboardRevenue so the card headline and this
+// detail view can never disagree: completed/paid bookings in scope with
+// a recorded duration, blended (total earned ÷ total hours). Bookings
+// with no duration are counted in `skipped` so the sheet can nudge the
+// stylist to fill durations in for a more accurate number.
+export const hourlyRateBreakdown = (
+  appointments: AppointmentLike[] | null | undefined,
+  reference: string = todayISO(),
+  scope: HourlyRateScope = "year",
+): HourlyRateBreakdown => {
+  const window = scope === "month" ? monthBoundary(reference) : yearBoundary(reference);
+  const rows: HourlyRateRow[] = [];
+  let hours = 0;
+  let earned = 0;
+  let skipped = 0;
+  for (const a of (appointments || [])) {
+    if (!isBillable(a)) continue;
+    const d = a.date || "";
+    if (!(d >= window.start && d < window.end)) continue;
+    if (!isPaidish(a)) continue;
+    const hrs = num(a.durationHours);
+    const t = ticketTotal(a);
+    if (hrs <= 0) { skipped += 1; continue; }
+    hours += hrs;
+    earned += t;
+    rows.push({ appointment: a, hours: hrs, earned: round2(t), rate: round2(t / hrs) });
+  }
+  rows.sort((a, b) => b.rate - a.rate);
+  return {
+    rows,
+    hours: round2(hours),
+    earned: round2(earned),
+    rate: hours > 0 ? round2(earned / hours) : 0,
+    skipped,
+  };
+};
+
+// Year-scoped convenience wrapper — matches the Home card headline
+// (computeDashboardRevenue.yearHourlyRate).
+export const yearHourlyRateBreakdown = (
+  appointments: AppointmentLike[] | null | undefined,
+  reference: string = todayISO(),
+): HourlyRateBreakdown => hourlyRateBreakdown(appointments, reference, "year");
 
 export type DepositBucket = {
   appointments: AppointmentLike[];
