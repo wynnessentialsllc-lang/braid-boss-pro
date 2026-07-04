@@ -3373,13 +3373,18 @@ const RebookingOpportunitiesCard = ({
 
   const onBookAgain = (op: RebookingOpportunity) => {
     const c = clients.find((x: any) => x?.id === op.client_id);
+    // Carry only the client + contact info. Deliberately DON'T prefill
+    // the style or price: "Book again" opens a fresh ticket, and a stale
+    // last-visit style/price with no linked service is misleading — the
+    // free-text Style field can't drive pricing, so it looks broken when
+    // editing it doesn't move the price. The stylist picks the Service
+    // (which fills price/duration and re-prices when changed) or enters
+    // the style + price by hand.
     openQuickAppt({
       clientId: op.client_id,
       clientName: op.client_name,
       clientPhone: op.client_phone || c?.phone,
       clientEmail: op.client_email || c?.email,
-      style: op.last_style || "",
-      totalPrice: op.estimated_value || undefined,
     });
   };
 
@@ -3559,13 +3564,18 @@ const RebookingScreen = ({
 
   const onBookAgain = (op: RebookingOpportunity) => {
     const c = clients.find((x: any) => x?.id === op.client_id);
+    // Carry only the client + contact info. Deliberately DON'T prefill
+    // the style or price: "Book again" opens a fresh ticket, and a stale
+    // last-visit style/price with no linked service is misleading — the
+    // free-text Style field can't drive pricing, so it looks broken when
+    // editing it doesn't move the price. The stylist picks the Service
+    // (which fills price/duration and re-prices when changed) or enters
+    // the style + price by hand.
     openQuickAppt({
       clientId: op.client_id,
       clientName: op.client_name,
       clientPhone: op.client_phone || c?.phone,
       clientEmail: op.client_email || c?.email,
-      style: op.last_style || "",
-      totalPrice: op.estimated_value || undefined,
     });
   };
 
