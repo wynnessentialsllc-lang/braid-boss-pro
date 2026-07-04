@@ -3373,13 +3373,18 @@ const RebookingOpportunitiesCard = ({
 
   const onBookAgain = (op: RebookingOpportunity) => {
     const c = clients.find((x: any) => x?.id === op.client_id);
+    // Carry only the client + contact info. Deliberately DON'T prefill
+    // the style or price: "Book again" opens a fresh ticket, and a stale
+    // last-visit style/price with no linked service is misleading — the
+    // free-text Style field can't drive pricing, so it looks broken when
+    // editing it doesn't move the price. The stylist picks the Service
+    // (which fills price/duration and re-prices when changed) or enters
+    // the style + price by hand.
     openQuickAppt({
       clientId: op.client_id,
       clientName: op.client_name,
       clientPhone: op.client_phone || c?.phone,
       clientEmail: op.client_email || c?.email,
-      style: op.last_style || "",
-      totalPrice: op.estimated_value || undefined,
     });
   };
 
@@ -3559,13 +3564,18 @@ const RebookingScreen = ({
 
   const onBookAgain = (op: RebookingOpportunity) => {
     const c = clients.find((x: any) => x?.id === op.client_id);
+    // Carry only the client + contact info. Deliberately DON'T prefill
+    // the style or price: "Book again" opens a fresh ticket, and a stale
+    // last-visit style/price with no linked service is misleading — the
+    // free-text Style field can't drive pricing, so it looks broken when
+    // editing it doesn't move the price. The stylist picks the Service
+    // (which fills price/duration and re-prices when changed) or enters
+    // the style + price by hand.
     openQuickAppt({
       clientId: op.client_id,
       clientName: op.client_name,
       clientPhone: op.client_phone || c?.phone,
       clientEmail: op.client_email || c?.email,
-      style: op.last_style || "",
-      totalPrice: op.estimated_value || undefined,
     });
   };
 
@@ -10519,20 +10529,47 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     const overwriteEmpty = (current: any, next: any) =>
       mode === "replace" ? next : (current && current !== "" && current !== 0 ? current : next);
     const dur = Number(svc.duration_hours) || 0;
-    setForm(prev => ({
-      ...prev,
-      serviceId: svc.id,
-      style: overwriteEmpty(prev.style, svc.name),
-      durationHours: overwriteEmpty(Number(prev.durationHours) || 0, dur) || prev.durationHours,
-      totalPrice: overwriteEmpty(Number(prev.totalPrice) || 0, svc.base_price) || prev.totalPrice,
-      depositPaid: prev.depositPaid, // never auto-pay on the user's behalf
-      // Surface deposit_amount in the notes/prep area only — the
-      // appointment's own depositPaid field reflects what the
-      // STYLIST has actually collected, not the required amount.
-      notes: mode === "replace" || !prev.notes
-        ? (svc.prep_instructions ? `${svc.prep_instructions}${prev.notes ? `\n\n${prev.notes}` : ""}` : prev.notes)
-        : prev.notes,
-    }));
+    setForm(prev => {
+      // Switching to a DIFFERENT service invalidates the previous menu's
+      // paid add-ons and the variation/option snapshot — both are
+      // service-specific. Drop them and strip their price/duration back
+      // out of the running totals so the ticket re-prices to the new
+      // style cleanly instead of carrying phantom add-on charges (and
+      // orphan rows) from the service the client is switching away from.
+      // Re-applying the SAME service leaves the current picks intact.
+      const serviceChanged = String(svc.id) !== String(prev.serviceId ?? "");
+      const prevAddons: any[] = Array.isArray(prev.addons) ? prev.addons : [];
+      const strippedPrice = serviceChanged
+        ? prevAddons.reduce((s, a) => s + (Number(a?.price) || 0), 0) : 0;
+      const strippedDur = serviceChanged
+        ? prevAddons.reduce((s, a) => s + (Number(a?.duration_hours_delta) || 0), 0) : 0;
+      const baseTotal = Math.max(0, (Number(prev.totalPrice) || 0) - strippedPrice);
+      const baseDur = Math.max(0, (Number(prev.durationHours) || 0) - strippedDur);
+      return {
+        ...prev,
+        serviceId: svc.id,
+        style: overwriteEmpty(prev.style, svc.name),
+        durationHours: overwriteEmpty(baseDur, dur) || prev.durationHours,
+        totalPrice: overwriteEmpty(baseTotal, svc.base_price) || prev.totalPrice,
+        depositPaid: prev.depositPaid, // never auto-pay on the user's behalf
+        // Surface deposit_amount in the notes/prep area only — the
+        // appointment's own depositPaid field reflects what the
+        // STYLIST has actually collected, not the required amount.
+        notes: mode === "replace" || !prev.notes
+          ? (svc.prep_instructions ? `${svc.prep_instructions}${prev.notes ? `\n\n${prev.notes}` : ""}` : prev.notes)
+          : prev.notes,
+        ...(serviceChanged
+          ? {
+              addons: [],
+              variationId: null,
+              variationName: null,
+              variationPrice: null,
+              variationDurationHours: null,
+              variationDepositAmount: null,
+            }
+          : {}),
+      };
+    });
   };
 
   const addDiscount = (id: string) => {
@@ -11547,12 +11584,28 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     return Array.from(new Set(names));
   }, [apptService, apptContracts.contractTemplates]);
   const currentAddons: any[] = Array.isArray(form.addons) ? form.addons : [];
-  const isExtraSelected = (id: string) => currentAddons.some((a) => String(a?.id) === String(id));
+  // Match a stored add-on to a menu extra by a STABLE key, not just id.
+  // A service's extra ids are regenerated whenever its extras are
+  // re-saved, so a client's booked add-on snapshot (id captured at
+  // booking time) can drift out of sync with the live menu extra even
+  // though it's the same add-on. When that happened the id-only match
+  // left the menu row unchecked AND showed the booked add-on as an
+  // orphan, so a stylist re-picking it stacked a second copy that
+  // double-charged the client (e.g. Boho Max counted twice). Falling
+  // back to the normalized name keeps the right row lit and lets the
+  // toggle/orphan logic treat the two representations as one.
+  const addonKey = (x: any): string => String(x?.name ?? "").trim().toLowerCase();
+  const sameAddon = (a: any, b: any): boolean =>
+    (a?.id != null && b?.id != null && String(a.id) === String(b.id)) ||
+    (!!addonKey(a) && addonKey(a) === addonKey(b));
+  const isExtraSelected = (extra: ServiceExtra) => currentAddons.some((a) => sameAddon(a, extra));
   // Add-ons not backed by a current menu extra (custom one-offs, or
   // client-picked extras the service no longer lists). Rendered with a
-  // remove control so they're still manageable.
+  // remove control so they're still manageable. Matched id-or-name so a
+  // drifted-id booked add-on surfaces on its menu row instead of here as
+  // a duplicate orphan.
   const orphanAddons = currentAddons.filter(
-    (a) => !availableExtras.some((e) => String(e.id) === String(a?.id)),
+    (a) => !availableExtras.some((e) => sameAddon(a, e)),
   );
   // Round a duration to whole minutes to keep float noise out of the
   // hours field; "" when it lands at/under zero.
@@ -11566,19 +11619,29 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   const toggleExtra = (extra: ServiceExtra) => {
     setForm((prev: any) => {
       const addons: any[] = Array.isArray(prev.addons) ? prev.addons : [];
-      const exists = addons.some((a) => String(a?.id) === String(extra.id));
+      // Match id-or-name so a drifted-id booked add-on is recognised as
+      // already-on (and removed cleanly) rather than treated as absent.
+      const matches = addons.filter((a) => sameAddon(a, extra));
       const price = Number(extra.price) || 0;
       const durDelta = Number(extra.duration_hours_delta) || 0;
       const curTotal = parseMoney(prev.totalPrice);
       const curDur = Number(prev.durationHours) || 0;
-      if (exists) {
+      if (matches.length > 0) {
+        // Turn OFF. Remove EVERY entry for this add-on (not just the
+        // first) so a pre-existing drifted-id duplicate is cleared in a
+        // single tap, and subtract the full price/duration those entries
+        // actually contributed — this repairs a ticket that was already
+        // double-charged.
+        const removedPrice = matches.reduce((s, a) => s + (Number(a?.price) || 0), 0);
+        const removedDur = matches.reduce((s, a) => s + (Number(a?.duration_hours_delta) || 0), 0);
         return {
           ...prev,
-          addons: addons.filter((a) => String(a?.id) !== String(extra.id)),
-          totalPrice: sanitizeMoneyInput(Math.max(0, roundCents(curTotal - price))),
-          durationHours: durationStr(curDur - durDelta),
+          addons: addons.filter((a) => !sameAddon(a, extra)),
+          totalPrice: sanitizeMoneyInput(Math.max(0, roundCents(curTotal - removedPrice))),
+          durationHours: durationStr(curDur - removedDur),
         };
       }
+      // Turn ON. Add exactly one canonical entry from the live menu.
       return {
         ...prev,
         addons: [
@@ -12013,7 +12076,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             {availableExtras.length > 0 && (
               <ul className="mt-3 space-y-1.5" style={{ listStyle: "none", padding: 0, margin: 0 }}>
                 {availableExtras.map((e) => {
-                  const selected = isExtraSelected(e.id);
+                  const selected = isExtraSelected(e);
                   const durDelta = Number(e.duration_hours_delta) || 0;
                   return (
                     <li key={e.id}>
