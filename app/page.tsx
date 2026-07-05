@@ -4012,8 +4012,12 @@ const KpiDetailSheet = ({
     const balance = Math.max(0, total - dep - (Number(a?.discountAmount) || 0));
     // Deposit views pass the canonical collected-deposit amount so
     // the big number matches the dashboard / sheet total (not the
-    // ticket total or an expected deposit).
-    const primaryAmount = amountOverride != null ? amountOverride : total;
+    // ticket total or an expected deposit). Otherwise show the
+    // post-discount ticket total (totalPrice − discountAmount), NOT the
+    // gross totalPrice — so a discounted booking (e.g. $355 knocked down
+    // to $150) reads its real value and each row sums to the header
+    // total, which is computed the same way (reportTicketTotal).
+    const primaryAmount = amountOverride != null ? amountOverride : reportTicketTotal(a);
     const ps = paymentStatusOf(a, today);
     const rightColor = tone === "warning" ? C.warning : tone === "success" ? C.success : tone === "danger" ? C.danger : tone === "muted" ? C.muted : C.coffee;
     return (
@@ -14171,7 +14175,9 @@ const ClientProfileSheet = ({
           </div>
           <div className="text-right shrink-0">
             <p style={{ fontFamily: FONT_DISPLAY, fontSize: 16, fontWeight: 600, color: C.goldDeep }}>
-              {fmtMoney(total, currency)}
+              {/* Post-discount ticket total, not the gross totalPrice, so a
+                  discounted visit shows what the client actually paid. */}
+              {fmtMoney(reportTicketTotal(a), currency)}
             </p>
             {balance > 0 && (
               <p className="text-[11px]" style={{ color: C.warning }}>
