@@ -683,7 +683,12 @@ export const parseCoachBriefing = (input: unknown): CoachBriefing | null => {
     summary,
     actions,
     wellbeing: str(o.wellbeing, 600),
-    monthlyCheckIn: str(o.monthlyCheckIn, 600),
+    // The monthly check-in is the top-of-month centerpiece: a reflection
+    // on last month plus goal-setting advice. It runs naturally longer
+    // than the daily fields, and the card has no height clamp, so give it
+    // room to render in full instead of cutting mid-sentence ("You've
+    // got…"). The cap stays only as a runaway-response guard.
+    monthlyCheckIn: str(o.monthlyCheckIn, 1600),
     encouragement: str(o.encouragement, 200),
   };
 };
