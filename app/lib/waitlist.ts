@@ -265,7 +265,10 @@ export const useWaitlist = (
     };
     const { data, error: err } = draft.id
       ? await supabase.from("waitlist_requests").update(payload).eq("id", draft.id).eq("user_id", userId).select("*").maybeSingle()
-      : await supabase.from("waitlist_requests").insert(payload).select("*").maybeSingle();
+      // Owner-created entries are stamped source:"manual" so analytics can
+      // tell them apart from public_waitlist self-joins. created_from_public
+      // stays false (its column default).
+      : await supabase.from("waitlist_requests").insert({ ...payload, source: "manual" }).select("*").maybeSingle();
     if (err || !data) { setError(err?.message || "Could not save."); return null; }
     setError(null);
     await refresh();

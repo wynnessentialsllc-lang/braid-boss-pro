@@ -395,6 +395,7 @@ import {
 import {
   type WaitlistRequest,
   type WaitlistStatus,
+  type WaitlistFlexibility,
   WAITLIST_STATUS_LABEL,
   WAITLIST_FLEX_LABEL,
   useWaitlist,
@@ -15095,6 +15096,121 @@ const ClientCreditCard = ({ userId, client, currency, studioName }: {
   );
 };
 
+// Add-to-waitlist form. Shared by the Waitlist screen (blank — for a new
+// prospect who isn't a client yet) and a client's profile (prefilled from
+// their record — for a regular who texted asking about dates). Writes
+// through the existing owner-side waitlist upsert, which stamps manual
+// entries source:"manual". Once someone's on the list, "Broadcast an
+// opening" on the Waitlist screen emails them all when a slot frees up.
+const AddToWaitlistSheet = ({
+  open, onClose, store, prefill, onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  store: any;
+  prefill?: { client_name?: string; client_phone?: string | null; client_email?: string | null } | null;
+  onSaved?: () => void;
+}) => {
+  const services: Service[] = store?.servicesApi?.services || [];
+  const api = store?.waitlistApi;
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [serviceId, setServiceId] = useState("");
+  const [customService, setCustomService] = useState("");
+  const [prefDate, setPrefDate] = useState("");
+  const [prefTime, setPrefTime] = useState("");
+  const [flexibility, setFlexibility] = useState<WaitlistFlexibility>("anytime");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- prop-driven reset on open, intentional
+    setName(prefill?.client_name || "");
+    setPhone(prefill?.client_phone || "");
+    setEmail(prefill?.client_email || "");
+    setServiceId(""); setCustomService("");
+    setPrefDate(""); setPrefTime("");
+    setFlexibility("anytime"); setNotes("");
+    setErr(null); setBusy(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, prefill?.client_name, prefill?.client_phone, prefill?.client_email]);
+
+  const save = async () => {
+    if (busy) return;
+    if (!name.trim()) { setErr("Name is required."); return; }
+    if (!api?.upsert) { setErr("Waitlist isn't available right now."); return; }
+    setBusy(true); setErr(null);
+    const svc = services.find(s => s.id === serviceId) || null;
+    const saved = await api.upsert({
+      client_name: name.trim(),
+      client_phone: phone.trim() || null,
+      client_email: email.trim() || null,
+      service_id: svc ? svc.id : null,
+      service_name: svc ? svc.name : (customService.trim() || null),
+      preferred_date: prefDate || null,
+      preferred_time: prefTime || null,
+      flexibility,
+      notes: notes.trim() || null,
+    });
+    setBusy(false);
+    if (!saved) { setErr(api?.error || "Could not add to the waitlist. Please try again."); return; }
+    onSaved?.();
+    onClose();
+  };
+
+  const serviceOptions = [
+    { value: "", label: "— Other / not sure —" },
+    ...services.filter(s => (s as any).is_active !== false).map(s => ({ value: s.id, label: s.name })),
+  ];
+  const flexOptions = (Object.keys(WAITLIST_FLEX_LABEL) as WaitlistFlexibility[])
+    .map(k => ({ value: k, label: WAITLIST_FLEX_LABEL[k] }));
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Add to waitlist">
+      <div className="space-y-4 pb-6">
+        <p className="text-[12px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+          Hold this client&apos;s place for an opening. When a slot frees up, use
+          &ldquo;Broadcast an opening&rdquo; on the Waitlist screen to email everyone waiting at once.
+        </p>
+        {err && (
+          <Card className="p-3" style={{ border: `1px solid ${C.danger}`, background: C.ivory }}>
+            <p className="text-[12px]" style={{ color: C.danger }}>{err}</p>
+          </Card>
+        )}
+        <Field label="Name"><Input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Phone" hint="for texts"><Input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="555-0123" /></Field>
+          <Field label="Email" hint="for opening alerts"><Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@email.com" /></Field>
+        </div>
+        <Field label="Service / style" hint="Optional">
+          <Select value={serviceId} onChange={e => setServiceId(e.target.value)} options={serviceOptions} />
+        </Field>
+        {serviceId === "" && (
+          <Field label="Or type a style" hint="Optional">
+            <Input value={customService} onChange={e => setCustomService(e.target.value)} placeholder="e.g. Knotless braids" />
+          </Field>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Preferred date" hint="Optional"><Input type="date" value={prefDate} onChange={e => setPrefDate(e.target.value)} /></Field>
+          <Field label="Preferred time" hint="Optional"><Input type="time" value={prefTime} onChange={e => setPrefTime(e.target.value)} /></Field>
+        </div>
+        <Field label="Flexibility">
+          <Select value={flexibility} onChange={e => setFlexibility(e.target.value as WaitlistFlexibility)} options={flexOptions} />
+        </Field>
+        <Field label="Notes" hint="Optional">
+          <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Anything to remember — e.g. wants a Saturday, flexible on length" />
+        </Field>
+        <Button onClick={save} disabled={busy || !name.trim()} fullWidth icon={<UserPlus size={16} />}>
+          {busy ? "Adding…" : "Add to waitlist"}
+        </Button>
+      </div>
+    </Sheet>
+  );
+};
+
 const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuickAppt, savePhoto, deletePhotoExternal }: {
   open: boolean;
   client: any;
@@ -15112,6 +15228,7 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
   const deletePhotoFn = deletePhotoExternal || deletePhoto;
   const [tab, setTab] = useState("info");
   const [form, setForm] = useState<any>({});
+  const [showAddWaitlist, setShowAddWaitlist] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -15249,6 +15366,13 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
                 currency={business.currency}
                 studioName={business?.name || business?.studioName || null}
               />
+            )}
+            {/* Booked up? Hold their place. Prefilled from this client so a
+                later "Convert to appt" matches them cleanly (no duplicate). */}
+            {form.id && (
+              <Button variant="outline" fullWidth icon={<Clock size={16} />} onClick={() => setShowAddWaitlist(true)}>
+                Add to waitlist
+              </Button>
             )}
             <Field label="Name"><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Full name" /></Field>
             <div className="grid grid-cols-2 gap-3">
@@ -15390,6 +15514,12 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
           </div>
         )}
       </div>
+      <AddToWaitlistSheet
+        open={showAddWaitlist}
+        onClose={() => setShowAddWaitlist(false)}
+        store={store}
+        prefill={{ client_name: form.name, client_phone: form.phone, client_email: form.email }}
+      />
     </Sheet>
   );
 };
@@ -29183,6 +29313,7 @@ const WaitlistScreen = ({
   const clients: ClientLike[] = (store.clients as ClientLike[]) || [];
   const [filter, setFilter] = useState<"waiting" | "all" | "archived">("waiting");
   const [picker, setPicker] = useState<{ req: WaitlistRequest; candidates: ClientLike[] } | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const filtered = useMemo(() => {
     if (filter === "all") return requests;
@@ -29287,6 +29418,10 @@ const WaitlistScreen = ({
           {bResult && <p className="text-[12px] mt-2" style={{ color: C.coffee }}>{bResult}</p>}
         </Card>
 
+        <Button variant="outline" fullWidth icon={<UserPlus size={16} />} onClick={() => setAdding(true)}>
+          Add someone to the waitlist
+        </Button>
+
         <div className="flex p-1 rounded-xl" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
           {[
             { id: "waiting", label: `Active · ${requests.filter(r => r.status === "waiting" || r.status === "contacted").length}` },
@@ -29366,6 +29501,12 @@ const WaitlistScreen = ({
           ))
         )}
       </div>
+
+      <AddToWaitlistSheet
+        open={adding}
+        onClose={() => setAdding(false)}
+        store={store}
+      />
 
       <Sheet
         open={!!picker}
