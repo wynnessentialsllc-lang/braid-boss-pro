@@ -36034,6 +36034,7 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
   const [ledger, setLedger] = useState<SmsLedgerEntry[]>([]);
   const [busyPack, setBusyPack] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [openEntry, setOpenEntry] = useState<SmsLedgerEntry | null>(null);
 
   useEffect(() => {
     if (!userId) { setLoading(false); return; }
@@ -36147,9 +36148,11 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
             </p>
             <Card className="p-0 overflow-hidden">
               {ledger.map((r, i) => (
-                <div
+                <button
                   key={r.id}
-                  className="flex items-center justify-between gap-3 px-3.5 py-2.5"
+                  type="button"
+                  onClick={() => setOpenEntry(r)}
+                  className="w-full flex items-center gap-3 px-3.5 py-2.5 text-left transition-colors active:opacity-70"
                   style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
                 >
                   <div className="min-w-0 flex-1">
@@ -36166,12 +36169,70 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
                   >
                     {r.delta >= 0 ? "+" : ""}{r.delta}
                   </span>
-                </div>
+                  <ChevronRight size={16} style={{ color: C.mutedSoft ?? C.muted, flexShrink: 0 }} />
+                </button>
               ))}
             </Card>
           </>
         )}
       </div>
+
+      <Sheet
+        open={!!openEntry}
+        onClose={() => setOpenEntry(null)}
+        title={openEntry ? ledgerLabel(openEntry) : ""}
+      >
+        {openEntry && (
+          <div className="px-5 pb-6 pt-1 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[12px]" style={{ color: C.muted }}>
+                {openEntry.createdAt
+                  ? new Date(openEntry.createdAt).toLocaleString([], {
+                      year: "numeric", month: "short", day: "numeric",
+                      hour: "numeric", minute: "2-digit",
+                    })
+                  : ""}
+              </p>
+              <span
+                className="text-[13px] font-bold whitespace-nowrap"
+                style={{ color: openEntry.delta >= 0 ? C.success : C.coffee }}
+              >
+                {openEntry.delta >= 0 ? "+" : ""}{openEntry.delta} credit{Math.abs(openEntry.delta) === 1 ? "" : "s"}
+              </span>
+            </div>
+
+            {openEntry.reason === "send" && (
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+                  Message sent
+                </p>
+                {openEntry.note ? (
+                  <div
+                    className="flex gap-2.5 p-3.5 rounded-2xl"
+                    style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}
+                  >
+                    <MessageSquare size={16} style={{ color: C.gold, flexShrink: 0, marginTop: 2 }} />
+                    <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
+                      {openEntry.note}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-[12px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+                    The message text wasn&apos;t recorded for this text. New texts sent
+                    from now on will show their full message here.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {openEntry.reason !== "send" && (
+              <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.55 }}>
+                {openEntry.note || ledgerLabel(openEntry)}
+              </p>
+            )}
+          </div>
+        )}
+      </Sheet>
     </div>
   );
 };

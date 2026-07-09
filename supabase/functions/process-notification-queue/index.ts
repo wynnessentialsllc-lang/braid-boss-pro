@@ -2502,7 +2502,7 @@ serve(async (req) => {
         // the credit is refunded so an undelivered text is free.
         const { data: consumeRes, error: consumeErr } = await admin.rpc(
           "consume_sms_credit",
-          { user_id_in: row.user_id },
+          { user_id_in: row.user_id, body_in: smsText(row) },
         );
         const consumed =
           !consumeErr && consumeRes && (consumeRes as any).ok === true;
