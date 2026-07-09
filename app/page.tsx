@@ -16277,28 +16277,42 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
     return list.sort((a, b) => (a.scheduledFor || "").localeCompare(b.scheduledFor || ""));
   }, [store.reminders, filter]);
 
-  // Self-heal legacy data: a reminder created before its appointment was
-  // cancelled (or from a build prior to the cancel→clear fix) can linger
-  // as "pending". Cancel any whose appointment is now cancelled / no-show
-  // so it leaves the queue and never dispatches. The upsert flips it out
-  // of "pending", so this can't loop.
+  // Self-heal the queue so it never needs manual cleanup. Two passes,
+  // both of which flip a row out of "pending" (so this can't loop):
+  //   • cancel  — the appointment was cancelled / no-showed, so the
+  //     reminder should never dispatch.
+  //   • expire  — the appointment has already passed (its date is before
+  //     today), so the reminder is moot. Orphaned reminders (appointment
+  //     deleted) whose send time is in the past expire the same way.
+  // This keeps "Pending" showing only upcoming, actionable reminders
+  // instead of a growing pile of past-due ones.
   useEffect(() => {
     const isDead = (s: unknown) => {
       const v = String(s || "").toLowerCase();
       return v === "cancelled" || v === "canceled" || v === "no_show";
     };
-    const deadApptIds = new Set(
+    const apptById = new Map<string, any>(
       (store.appointments || [])
-        .filter((a: any) => a?.id && isDead(a.status))
-        .map((a: any) => a.id),
+        .filter((a: any) => a?.id)
+        .map((a: any) => [a.id, a]),
     );
-    if (deadApptIds.size === 0) return;
-    const stuck = (store.reminders || []).filter(
-      (r: any) => r.status === "pending" && r.appointmentId && deadApptIds.has(r.appointmentId),
-    );
-    if (stuck.length === 0) return;
+    const today = todayISO();
+    const now = Date.now();
+    const updates: { r: any; status: string }[] = [];
+    for (const r of (store.reminders || [])) {
+      if (r?.status !== "pending") continue;
+      const appt = r.appointmentId ? apptById.get(r.appointmentId) : null;
+      if (appt && isDead(appt.status)) { updates.push({ r, status: "cancelled" }); continue; }
+      // Appointment already happened → the reminder can't be useful.
+      if (appt && appt.date && appt.date < today) { updates.push({ r, status: "expired" }); continue; }
+      // Orphaned reminder (its appointment is gone) whose send time passed.
+      if (!appt && r.scheduledFor && new Date(r.scheduledFor).getTime() < now) {
+        updates.push({ r, status: "expired" });
+      }
+    }
+    if (updates.length === 0) return;
     void (async () => {
-      for (const r of stuck) await store.upsertReminder({ ...r, status: "cancelled" });
+      for (const u of updates) await store.upsertReminder({ ...u.r, status: u.status });
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.reminders, store.appointments]);
@@ -16374,18 +16388,19 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
                       background: r.status === "delivered" ? "rgba(92,124,74,0.12)" :
                         r.status === "sent" ? "rgba(201,169,97,0.18)" :
                           r.status === "failed" ? "rgba(156,61,46,0.12)" :
-                            r.status === "cancelled" ? C.ivory : "rgba(201,118,43,0.12)"
+                            (r.status === "cancelled" || r.status === "expired") ? C.ivory : "rgba(201,118,43,0.12)"
                     }}>
                       {r.status === "delivered" ? <CheckCircle2 size={16} style={{ color: C.success }} /> :
                         r.status === "sent" ? <Send size={16} style={{ color: C.goldDeep }} /> :
                           r.status === "failed" ? <XCircle size={16} style={{ color: C.danger }} /> :
                             r.status === "cancelled" ? <X size={16} style={{ color: C.muted }} /> :
-                              <Clock size={16} style={{ color: C.warning }} />}
+                              r.status === "expired" ? <Clock size={16} style={{ color: C.muted }} /> :
+                                <Clock size={16} style={{ color: C.warning }} />}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2 mb-1">
                         <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{client?.name || "Client"}</p>
-                        <Pill tone={r.status === "delivered" ? "success" : r.status === "sent" ? "gold" : r.status === "failed" ? "danger" : r.status === "cancelled" ? "neutral" : "warning"}>
+                        <Pill tone={r.status === "delivered" ? "success" : r.status === "sent" ? "gold" : r.status === "failed" ? "danger" : (r.status === "cancelled" || r.status === "expired") ? "neutral" : "warning"}>
                           {r.status}
                         </Pill>
                       </div>
