@@ -15,7 +15,7 @@
 // Mobile-first, card-based, matching the booking/payments palette so the
 // visual language carries across the app.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ChevronLeft,
@@ -34,7 +34,7 @@ import { getSupabase } from "../../lib/supabase";
 import {
   blankProduct,
   calculateProduct,
-  MARGIN_PRESETS,
+  computeCostBreakdown,
   PRODUCT_CATEGORIES,
   rankProducts,
   averageCostPerUnit,
@@ -44,6 +44,15 @@ import {
   type SizeUnit,
 } from "../../lib/product-profit";
 import {
+  batchSnapshot,
+  founderInsights,
+  priceBounds,
+  productHealth,
+  profitTimeline,
+  recommendedPrice,
+  unitEconomics,
+} from "../../lib/product-intel";
+import {
   listProducts,
   saveProduct,
   setArchived,
@@ -51,20 +60,15 @@ import {
   newSavedProduct,
   duplicateSavedProduct,
 } from "../../lib/product-profit-store";
-
-const C = {
-  espresso: "#15111A", coffee: "#3D3447", cream: "#FFFFFF",
-  ivory: "#F6F2EC", paper: "#FFFFFF", gold: "#7C3AED", goldDeep: "#5B21B6",
-  muted: "#6F6477", hairline: "rgba(21, 17, 26, 0.12)",
-  success: "#5C7C4A", warning: "#B8860B", danger: "#9C3D2E",
-};
-const FONT_DISPLAY = `"Cormorant Garamond", Georgia, serif`;
-const FONT_BODY = `"DM Sans", "Inter", system-ui, sans-serif`;
-
-const fmt$ = (n: number | null | undefined): string =>
-  n == null ? "—" : `$${(Math.round(n * 100) / 100).toFixed(2)}`;
-const fmtPct = (n: number | null | undefined): string =>
-  n == null ? "—" : `${Math.round(n)}%`;
+import { C, FONT_DISPLAY, FONT_BODY, fmt$, fmtPct, cardStyle, labelStyle } from "./theme";
+import { Section, Kpi, Stat, CalloutRow } from "./primitives";
+import ProductHealthCard from "./components/ProductHealthCard";
+import ProfitPerUnitCard from "./components/ProfitPerUnitCard";
+import PriceRecommendation from "./components/PriceRecommendation";
+import PricingSimulator from "./components/PricingSimulator";
+import FounderInsights from "./components/FounderInsights";
+import ProfitTimeline from "./components/ProfitTimeline";
+import BatchSnapshot from "./components/BatchSnapshot";
 
 type Mode = "list" | "edit" | "report";
 
@@ -357,9 +361,28 @@ function ProductEditor({
     setInput((prev) => ({ ...prev, packaging: { ...prev.packaging, [key]: { ...prev.packaging[key], ...patch } } }));
   }, []);
 
+  // Immediate metrics for the simulator so dragging the slider feels live.
+  const cost = useMemo(() => computeCostBreakdown(input), [input]);
   const m = useMemo(() => calculateProduct(input), [input]);
+  const price = m.suggestedRetail; // honors the input.retailPrice override
+  const bounds = useMemo(() => priceBounds(input, cost), [input, cost]);
+  const rec = useMemo(() => recommendedPrice(input, cost), [input, cost]);
+  const liveEconomics = useMemo(() => unitEconomics(input, price, cost), [input, price, cost]);
+  const liveBreakEven = useMemo(
+    () => (price > cost.costPerUnit && cost.totalBatchCost > 0 ? Math.ceil(cost.totalBatchCost / price) : null),
+    [price, cost],
+  );
 
-  const [customMargin, setCustomMargin] = useState(false);
+  // Deferred (debounced) advisory metrics — non-blocking while typing so
+  // the heavier insight/timeline/snapshot cards never make input feel laggy.
+  const dInput = useDeferredValue(input);
+  const dCost = useMemo(() => computeCostBreakdown(dInput), [dInput]);
+  const dPrice = useMemo(() => calculateProduct(dInput).suggestedRetail, [dInput]);
+  const health = useMemo(() => productHealth(dInput, dPrice, dCost), [dInput, dPrice, dCost]);
+  const profitPerUnit = useMemo(() => unitEconomics(dInput, dPrice, dCost).netProfit, [dInput, dPrice, dCost]);
+  const insights = useMemo(() => founderInsights(dInput, dPrice, dCost), [dInput, dPrice, dCost]);
+  const timeline = useMemo(() => profitTimeline(dInput, dPrice, dCost), [dInput, dPrice, dCost]);
+  const snapshot = useMemo(() => batchSnapshot(dInput, dPrice, dCost), [dInput, dPrice, dCost]);
 
   const submit = () => {
     setSaving(true);
@@ -478,42 +501,26 @@ function ProductEditor({
         </div>
       </Section>
 
-      {/* Smart pricing */}
-      <Section title="Smart pricing" icon={<Sparkles size={15} />}>
-        <CalloutRow label="Suggested wholesale" value={fmt$(m.wholesale)} hint="cost × 2" />
-        <p style={{ ...labelStyle, marginTop: 6 }}>Target retail margin</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {MARGIN_PRESETS.map((mp) => (
-            <button key={mp} type="button"
-              onClick={() => { setCustomMargin(false); set("marginPct", mp); }}
-              style={input.marginPct === mp && !customMargin ? marginChipActive : marginChip}>
-              {mp}%
-            </button>
-          ))}
-          <button type="button" onClick={() => setCustomMargin(true)} style={customMargin ? marginChipActive : marginChip}>
-            Custom
-          </button>
-        </div>
-        {customMargin && (
-          <Field label="Custom margin %">
-            <NumInput value={input.marginPct} onChange={(v) => set("marginPct", v)} />
-          </Field>
-        )}
+      {/* Recommended retail price */}
+      <PriceRecommendation rec={rec} current={price} onApply={() => set("retailPrice", rec.price)} />
 
-        <div style={{ ...cardStyle, padding: 0, marginTop: 12, overflow: "hidden" }}>
-          {m.pricing.map((row) => {
-            const isSel = Math.round(row.marginPct) === Math.round(input.marginPct);
-            return (
-              <div key={row.marginPct} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: isSel ? "rgba(124,58,237,0.07)" : "transparent", borderBottom: `1px solid ${C.hairline}` }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: C.coffee }}>{row.marginPct}% margin</span>
-                <span style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: isSel ? C.goldDeep : C.espresso }}>
-                  {fmt$(row.rounded)}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </Section>
+      {/* Interactive pricing simulator (replaces the static pricing table) */}
+      <PricingSimulator
+        value={price}
+        min={bounds.min}
+        max={bounds.max}
+        recommended={rec.price}
+        maxProfit={bounds.max}
+        economics={liveEconomics}
+        breakEven={liveBreakEven}
+        onChange={(v) => set("retailPrice", v)}
+      />
+
+      {/* Product health — sits above the revenue forecast */}
+      <ProductHealthCard health={health} />
+
+      {/* Profit per unit */}
+      <ProfitPerUnitCard value={profitPerUnit} />
 
       {/* Revenue forecast */}
       <Section title="Revenue forecast" icon={<BarChart3 size={15} />}>
@@ -525,10 +532,31 @@ function ProductEditor({
           <Kpi label="Gross profit" value={fmt$(m.forecast.totalProfit)} tone="success" />
           <Kpi label="Net profit" value={fmt$(m.forecast.netProfit)} tone="success" hint="after fees & tax" />
           <Kpi label="ROI" value={fmtPct(m.forecast.roiPct)} tone="gold" />
-          <Kpi label="Break-even" value={m.forecast.breakEvenUnits == null ? "—" : `${m.forecast.breakEvenUnits} units`} />
           <Kpi label="Retail price" value={fmt$(m.suggestedRetail)} />
+          <Kpi label="Wholesale" value={fmt$(m.wholesale)} hint="cost × 2" />
+        </div>
+        {/* Break-even, explained */}
+        <div style={{ padding: "12px 14px", borderRadius: 12, background: C.ivory, marginTop: 4 }}>
+          <p style={labelStyle}>Break-even</p>
+          <p style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: C.espresso, lineHeight: 1.1, marginTop: 2 }}>
+            {m.forecast.breakEvenUnits == null ? "—" : `${m.forecast.breakEvenUnits} Units`}
+          </p>
+          <p style={{ fontSize: 12, color: C.muted, marginTop: 2, lineHeight: 1.5 }}>
+            {m.forecast.breakEvenUnits == null
+              ? "Set a price above your cost to see when you recover your investment."
+              : `You'll recover your investment after selling your first ${m.forecast.breakEvenUnits} units.`}
+          </p>
         </div>
       </Section>
+
+      {/* Founder insights — sits below the revenue forecast */}
+      <FounderInsights insights={insights} />
+
+      {/* Profit timeline */}
+      <ProfitTimeline rows={timeline} />
+
+      {/* Batch snapshot */}
+      <BatchSnapshot snapshot={snapshot} />
 
       <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
         <button type="button" onClick={onCancel} style={{ ...ghostButton, flex: 1 }}>Cancel</button>
@@ -637,21 +665,6 @@ function Shell({
           {loading ? <p style={{ fontSize: 13, color: C.muted, textAlign: "center" }}>Loading…</p> : children}
         </div>
       </div>
-    </div>
-  );
-}
-
-function Section({ title, icon, right, children }: { title: string; icon?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div style={cardStyle}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {icon && <span style={{ color: C.goldDeep }}>{icon}</span>}
-          <h2 style={{ fontSize: 14, fontWeight: 700, color: C.espresso }}>{title}</h2>
-        </div>
-        {right}
-      </div>
-      <div style={{ display: "grid", gap: 10 }}>{children}</div>
     </div>
   );
 }
@@ -773,54 +786,11 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
-function CalloutRow({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", borderRadius: 12, background: C.ivory }}>
-      <div>
-        <p style={{ fontSize: 12.5, fontWeight: 600, color: C.coffee }}>{label}</p>
-        {hint && <p style={{ fontSize: 10.5, color: C.muted }}>{hint}</p>}
-      </div>
-      <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: C.goldDeep }}>{value}</p>
-    </div>
-  );
-}
-
-function Kpi({ label, value, tone, hint }: { label: string; value: string; tone?: "success" | "gold"; hint?: string }) {
-  const color = tone === "success" ? C.success : tone === "gold" ? C.goldDeep : C.espresso;
-  return (
-    <div style={{ ...cardStyle, padding: 14, boxShadow: "none", border: `1px solid ${C.hairline}` }}>
-      <p style={labelStyle}>{label}</p>
-      <p style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color, lineHeight: 1.1, marginTop: 2 }}>{value}</p>
-      {hint && <p style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{hint}</p>}
-    </div>
-  );
-}
-
-function Stat({ label, value, tone, small }: { label: string; value: string; tone?: "gold" | "success"; small?: boolean }) {
-  const color = tone === "success" ? C.success : tone === "gold" ? C.goldDeep : C.espresso;
-  return (
-    <div>
-      <p style={{ ...labelStyle, fontSize: 9 }}>{label}</p>
-      <p style={{ fontFamily: FONT_DISPLAY, fontSize: small ? 17 : 22, fontWeight: 600, color, lineHeight: 1.1, marginTop: 1 }}>{value}</p>
-    </div>
-  );
-}
-
 function ErrorNote({ children }: { children: React.ReactNode }) {
   return <p style={{ fontSize: 12.5, color: C.danger, padding: "10px 12px", borderRadius: 10, background: "rgba(156,61,46,0.08)" }}>{children}</p>;
 }
 
 // ---- Styles ------------------------------------------------------------
-
-const cardStyle: React.CSSProperties = {
-  padding: 16, borderRadius: 16, background: C.cream,
-  border: `1px solid ${C.hairline}`,
-  boxShadow: "0 1px 2px rgba(21,17,26,0.04), 0 8px 24px -16px rgba(21,17,26,0.12)",
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: C.muted,
-};
 
 const inputStyle: React.CSSProperties = {
   width: "100%", minHeight: 48, padding: "0 14px", borderRadius: 12,
@@ -848,12 +818,4 @@ const iconButton: React.CSSProperties = {
 const chip: React.CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 11px", borderRadius: 999,
   background: C.ivory, border: `1px solid ${C.hairline}`, color: C.coffee, fontSize: 12, fontWeight: 600, cursor: "pointer",
-};
-
-const marginChip: React.CSSProperties = {
-  padding: "9px 14px", borderRadius: 999, background: C.paper, border: `1px solid ${C.hairline}`,
-  color: C.coffee, fontSize: 13, fontWeight: 700, cursor: "pointer", minWidth: 52,
-};
-const marginChipActive: React.CSSProperties = {
-  ...marginChip, background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`, color: "#fff", border: `1px solid ${C.goldDeep}`,
 };
