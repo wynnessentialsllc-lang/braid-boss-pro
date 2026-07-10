@@ -16272,6 +16272,9 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // appointmentId -> the automatic reminder the server already sent for it,
+  // so we can flag local reminders that would double up if texted by hand.
+  const [autoSentByAppt, setAutoSentByAppt] = useState<Record<string, { channel: string; sentAt: string | null }>>({});
 
   const filtered = useMemo(() => {
     let list = [...store.reminders];
@@ -16337,6 +16340,38 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.reminders, store.appointments]);
+
+  // The booking backend already dispatches its own appointment reminders
+  // (email ~24h out, SMS ~2h out) through notification_queue. Pull the ones
+  // it has actually sent so the inbox can mark the matching local reminders
+  // as already handled — otherwise a stylist copy-pasting from here texts a
+  // client who was reminded automatically minutes ago. RLS scopes the query
+  // to the signed-in owner; on any failure we simply show no badge.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data, error } = await getSupabase()
+          .from("notification_queue")
+          .select("appointment_id, channel, sent_at, status")
+          .in("notification_type", ["appointment_reminder", "appointment_reminder_2h"])
+          .in("status", ["sent", "delivered"]);
+        if (cancelled || error || !Array.isArray(data)) return;
+        const map: Record<string, { channel: string; sentAt: string | null }> = {};
+        for (const row of data as any[]) {
+          const aid = row?.appointment_id;
+          if (!aid) continue;
+          const prev = map[aid];
+          // Keep the most recent send so the badge reflects the latest touch.
+          if (!prev || String(row.sent_at || "") > String(prev.sentAt || "")) {
+            map[aid] = { channel: String(row.channel || "email"), sentAt: row.sent_at || null };
+          }
+        }
+        if (!cancelled) setAutoSentByAppt(map);
+      } catch { /* best-effort; no badge when the queue can't be read */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 1800); };
 
@@ -16486,6 +16521,10 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
                       {g.items.map(r => {
                         const appt = store.appointments.find(a => a.id === r.appointmentId);
                         const isSel = selected.has(r.id);
+                        // Only timing reminders overlap with the backend's
+                        // auto-dispatch; deposit/balance/late alerts don't.
+                        const isTimingReminder = r.purpose === "reminder_48h" || r.purpose === "reminder_24h" || r.purpose === "reminder_same_day";
+                        const auto = isTimingReminder && r.appointmentId ? autoSentByAppt[r.appointmentId] : null;
                         return (
                           <button type="button" key={r.id}
                             onClick={() => (selectMode ? toggleSelect(r.id) : setOpenItem(r))}
@@ -16527,6 +16566,15 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
                                 {r.status === "pending" ? `Scheduled ${fmtRelative(r.scheduledFor)}` :
                                   r.sentAt ? `Sent ${fmtRelative(r.sentAt)}` : fmtRelative(r.scheduledFor)}
                               </p>
+                              {auto && (
+                                <div className="mt-1.5 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full"
+                                  style={{ background: "rgba(92,124,74,0.12)" }}>
+                                  <CheckCircle2 size={11} style={{ color: C.success }} />
+                                  <span className="text-[10px] font-semibold" style={{ color: C.success }}>
+                                    Auto-{auto.channel === "sms" ? "texted" : "emailed"} by the app{auto.sentAt ? ` ${fmtRelative(auto.sentAt)}` : ""}
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           </button>
                         );
@@ -16585,6 +16633,10 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
           appointment={store.appointments.find(a => a.id === openItem.appointmentId)}
           template={store.reminderTemplates.find(t => t.id === openItem.templateId)}
           business={store.business}
+          autoSent={
+            (openItem.purpose === "reminder_48h" || openItem.purpose === "reminder_24h" || openItem.purpose === "reminder_same_day")
+              && openItem.appointmentId ? (autoSentByAppt[openItem.appointmentId] || null) : null
+          }
           onClose={() => setOpenItem(null)}
           onSimSend={handleSimSend}
           onCopy={handleCopy}
@@ -16602,12 +16654,13 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
   );
 };
 
-const ReminderDetailSheet = ({ reminder, client, appointment, template, business, onClose, onSimSend, onCopy, onCancel }: {
+const ReminderDetailSheet = ({ reminder, client, appointment, template, business, autoSent, onClose, onSimSend, onCopy, onCancel }: {
   reminder: any;
   client: any;
   appointment: any;
   template: any;
   business: any;
+  autoSent?: { channel: string; sentAt: string | null } | null;
   onClose: () => void;
   onSimSend: (r: any) => Promise<void>;
   onCopy: (text: any, kind: any) => Promise<void>;
@@ -16623,6 +16676,16 @@ const ReminderDetailSheet = ({ reminder, client, appointment, template, business
   return (
     <Sheet open={!!reminder} onClose={onClose} title={PURPOSE_LABEL_LOCAL[reminder.purpose] || reminder.purpose}>
       <div className="space-y-4">
+        {autoSent && (
+          <Card className="p-3" style={{ background: "rgba(92,124,74,0.10)", border: `1px solid rgba(92,124,74,0.30)` }}>
+            <div className="flex items-start gap-2">
+              <CheckCircle2 size={15} style={{ color: C.success, flexShrink: 0, marginTop: 1 }} />
+              <p className="text-[11px] leading-relaxed" style={{ color: C.coffee }}>
+                The app already {autoSent.channel === "sms" ? "texted" : "emailed"} this client an automatic reminder for this appointment{autoSent.sentAt ? ` ${fmtRelative(autoSent.sentAt)}` : ""}. Sending this one by hand may remind them twice.
+              </p>
+            </div>
+          </Card>
+        )}
         <div className="grid grid-cols-2 gap-2">
           <Card className="p-3" style={{ background: C.ivory }}>
             <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted }}>Client</p>
