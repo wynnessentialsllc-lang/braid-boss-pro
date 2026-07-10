@@ -593,6 +593,12 @@ export default function PublicBookingPage() {
   // collapses the tall menu, so we scroll here (not to page top) to keep
   // the client in the flow and land them on their service + options.
   const serviceDetailRef = useRef<HTMLDivElement | null>(null);
+  const waitlistRef = useRef<HTMLDivElement | null>(null);
+  // Guided-flow scroll anchors (progressive highlight, single page).
+  const stayStepRef = useRef<HTMLDivElement | null>(null);
+  const serviceStepRef = useRef<HTMLParagraphElement | null>(null);
+  const timeStepRef = useRef<HTMLParagraphElement | null>(null);
+  const intakeRef = useRef<HTMLDivElement | null>(null);
   // Sticky "Book" bar shows only while the form is OFF screen, so the
   // CTA is always one tap away without doubling up once the visitor is
   // already at the picker.
@@ -788,6 +794,22 @@ export default function PublicBookingPage() {
   const [waitlistSubmitting, setWaitlistSubmitting] = useState(false);
   const [waitlistDone, setWaitlistDone] = useState(false);
   const [waitlistError, setWaitlistError] = useState<string | null>(null);
+  // When the client picks "a specific time" for the waitlist, capture the
+  // exact date/time they want so the stylist can convert straight to an
+  // appointment instead of having to chase them for it.
+  const [waitlistDate, setWaitlistDate] = useState("");
+  const [waitlistTime, setWaitlistTime] = useState("");
+
+  // The waitlist form often opens from the empty-calendar CTA far up the
+  // page. Bring it into view when it opens so the button doesn't look like
+  // it "did nothing".
+  useEffect(() => {
+    if (!waitlistOpen) return;
+    const raf = requestAnimationFrame(() => {
+      waitlistRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [waitlistOpen]);
 
   const submitWaitlist = async () => {
     if (waitlistSubmitting) return;
@@ -802,6 +824,10 @@ export default function PublicBookingPage() {
       setWaitlistError("Please pick a service above before joining the waitlist.");
       return;
     }
+    if (waitlistFlex === "specific" && !waitlistDate) {
+      setWaitlistError("Please pick the date you'd like.");
+      return;
+    }
     setWaitlistSubmitting(true);
     const selectedId = hasCatalog
       ? selectedCatalogService?.id || null
@@ -813,8 +839,8 @@ export default function PublicBookingPage() {
       client_email: email.trim() || null,
       service_id: selectedId,
       service_name: serviceName || null,
-      preferred_date: preferredDate || null,
-      preferred_time: preferredTime || null,
+      preferred_date: (waitlistFlex === "specific" ? waitlistDate : preferredDate) || null,
+      preferred_time: (waitlistFlex === "specific" ? waitlistTime : preferredTime) || null,
       flexibility: waitlistFlex,
       notes: notes.trim() || null,
     });
@@ -1166,6 +1192,50 @@ export default function PublicBookingPage() {
   const displayColor = (selectedHairVariation?.variation_hair_color || hairSpec.color) || null;
   const showHairSpec = (hairSourcing === "client" || hairSourcing === "choice")
     && !!(hairSpec.brand || displayColor || displayPacks || hairSpec.prep || hairSpec.buyUrl);
+
+  // ---- Guided booking flow (progressive highlight, single page) --------
+  // Everything stays on one page; we just light up the step the client
+  // should act on next and check off what's done. Shown only for catalog
+  // studios — legacy free-form links keep the plain form.
+  const detailsDone = !!name.trim() && (!!phone.trim() || !!email.trim());
+  const serviceDone = hasCatalog ? !!selectedCatalogService : !!serviceName.trim();
+  const dateTimeDone = !!preferredDate && !!preferredTime;
+  // "Stay updated" is optional — treated as addressed once the client ticks
+  // a box OR simply moves on to a later step, so it never traps the tracker.
+  const stayUpdatedDone = smsOptIn || smsMarketingOptIn || serviceDone || dateTimeDone;
+  const currentStepKey: "details" | "stay" | "service" | "time" | "review" =
+    !detailsDone ? "details"
+      : !stayUpdatedDone ? "stay"
+        : (hasCatalog && !serviceDone) ? "service"
+          : !dateTimeDone ? "time"
+            : "review";
+
+  // Intake / consultation is optional; before the final submit we offer the
+  // client a chance to fill it in rather than silently skipping it.
+  const intakeQuestions = useMemo(() => visibleQuestions(intakeForm), [intakeForm]);
+  const intakeAnswered = useMemo(
+    () => Object.values(intakeAnswers).some(v => (v || "").trim().length > 0),
+    [intakeAnswers],
+  );
+  const [showConsultPrompt, setShowConsultPrompt] = useState(false);
+  const consultAckRef = useRef(false);
+
+  // Auto-scroll nudge at the one "what's next?" moment that is safe to fire
+  // on: picking a time is a discrete tap (not typing), so guiding the client
+  // to the Review & book button afterward feels natural rather than yanking
+  // the page away mid-keystroke. The details→stay and service→detail moves
+  // are left to the checklist + section highlight so we never interrupt the
+  // client while they're still typing contact info.
+  const prevDateTimeDone = useRef(false);
+  useEffect(() => {
+    if (hasCatalog && dateTimeDone && !prevDateTimeDone.current) {
+      prevDateTimeDone.current = true;
+      const raf = requestAnimationFrame(() =>
+        bookingSubmitRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
+      return () => cancelAnimationFrame(raf);
+    }
+    if (!dateTimeDone) prevDateTimeDone.current = false;
+  }, [dateTimeDone, hasCatalog]);
   // Buy-from-me (phase 2): a managed extra mirrors hair_spec.sellPrice so
   // the purchase rides the trusted add-on price/deposit rails. Surfaced
   // as the "Buy from me" side of the choice toggle below.
@@ -1427,8 +1497,8 @@ export default function PublicBookingPage() {
     !!preferredDate && !slotsLoading && !slotsError &&
     hasFetchedSlots && !selectedDateHasAvailability;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (submitting) return;
     setSubmitError(null);
     // Bot honeypot — a hidden field real users never see or fill. If it
@@ -1513,6 +1583,16 @@ export default function PublicBookingPage() {
     // bringing their own hair before booking.
     if (hairAckRequired && !hairAck) {
       setSubmitError("Please confirm you'll bring your own hair to continue.");
+      return;
+    }
+    // Optional consultation — offer it once before booking rather than
+    // silently skipping it. consultAckRef flips true after the client
+    // answers the prompt (either way), so we never nag twice.
+    if (!consultAckRef.current && intakeQuestions.length > 0 && !intakeAnswered) {
+      setSubmitError(null);
+      setShowConsultPrompt(true);
+      requestAnimationFrame(() =>
+        bookingSubmitRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
       return;
     }
     setSubmitting(true);
@@ -2947,7 +3027,61 @@ export default function PublicBookingPage() {
             {/* Your details — collected at the top of the form, above the
                 service menu and the SMS consent card, so the client tells us
                 who they are before configuring a style and picking a time. */}
-            {hasCatalog && <p style={{ ...stepHeaderStyle, color: accent }}>Your details</p>}
+            {/* Guided step tracker — checks off progress and highlights the
+                step to act on next. Tapping a step scrolls to it. Catalog
+                studios only; legacy free-form links keep the plain form. */}
+            {hasCatalog && (
+              <div style={{ display: "grid", gap: 8, padding: 14, borderRadius: 16, background: C.cream, border: `1px solid ${C.hairline}` }}>
+                <p style={{ margin: 0, fontSize: 11, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: accent }}>
+                  How to book
+                </p>
+                {([
+                  { key: "details", label: "Your details", done: detailsDone, ref: bookingFormRef },
+                  { key: "stay", label: "Stay updated (optional)", done: stayUpdatedDone, ref: stayStepRef },
+                  { key: "service", label: "Pick your service", done: serviceDone, ref: serviceStepRef },
+                  { key: "time", label: "Choose date & time", done: dateTimeDone, ref: timeStepRef },
+                  { key: "review", label: "Review & book", done: submitted, ref: bookingSubmitRef },
+                ] as const).map((s, i) => {
+                  const isCurrent = currentStepKey === s.key;
+                  return (
+                    <button
+                      key={s.key}
+                      type="button"
+                      onClick={() => (s.ref as React.RefObject<HTMLElement | null>).current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10, width: "100%",
+                        padding: "8px 10px", borderRadius: 10, cursor: "pointer", textAlign: "left",
+                        background: isCurrent ? C.paper : "transparent",
+                        border: isCurrent ? `1px solid ${accent}` : "1px solid transparent",
+                        boxShadow: isCurrent ? `0 0 0 3px ${accent}22` : "none",
+                      }}
+                    >
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          display: "inline-flex", alignItems: "center", justifyContent: "center",
+                          width: 22, height: 22, borderRadius: 999, flexShrink: 0,
+                          fontSize: 12, fontWeight: 700,
+                          background: s.done ? accent : (isCurrent ? accent : C.hairline),
+                          color: s.done || isCurrent ? C.paper : C.muted,
+                        }}
+                      >
+                        {s.done ? "✓" : i + 1}
+                      </span>
+                      <span style={{ fontSize: 13.5, fontWeight: isCurrent ? 700 : 600, color: s.done ? C.muted : C.espresso }}>
+                        {s.label}
+                      </span>
+                      {isCurrent && (
+                        <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: accent }}>You&apos;re here</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {hasCatalog && (
+              <p style={{ ...stepHeaderStyle, color: accent, ...(currentStepKey === "details" ? stepCurrentStyle(accent) : null) }}>Your details</p>
+            )}
             <Field label="Your name">
               <Input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" autoComplete="name" required />
             </Field>
@@ -3045,12 +3179,16 @@ export default function PublicBookingPage() {
                 policy acceptance — opt-in is optional and not a condition of
                 booking. */}
             <div
+              ref={stayStepRef}
               style={{
                 background: C.paper,
-                border: `1px solid ${C.hairline}`,
+                border: currentStepKey === "stay" ? `1px solid ${accent}` : `1px solid ${C.hairline}`,
                 borderRadius: 18,
                 padding: 18,
-                boxShadow: "0 4px 14px rgba(21, 17, 26, 0.06)",
+                boxShadow: currentStepKey === "stay"
+                  ? `0 0 0 3px ${accent}22, 0 4px 14px rgba(21, 17, 26, 0.06)`
+                  : "0 4px 14px rgba(21, 17, 26, 0.06)",
+                scrollMarginTop: 12,
                 display: "grid",
                 gap: 10,
               }}
@@ -3113,6 +3251,9 @@ export default function PublicBookingPage() {
             </div>
             {hasCatalog ? (
               <>
+                <p ref={serviceStepRef} style={{ ...stepHeaderStyle, color: accent, scrollMarginTop: 12, ...(currentStepKey === "service" ? stepCurrentStyle(accent) : null) }}>
+                  Pick your service
+                </p>
                 {/* The "Choose a service" heading lives below (after the
                     Featured row + category dropdown) so this section
                     isn't titled twice. */}
@@ -4364,7 +4505,7 @@ export default function PublicBookingPage() {
                 (or in legacy free-form mode), so the landing reads
                 cleanly as a menu. */}
             {(serviceId || !hasCatalog) && <>
-            {hasCatalog && <p style={{ ...stepHeaderStyle, color: accent }}>Pick a time</p>}
+            {hasCatalog && <p ref={timeStepRef} style={{ ...stepHeaderStyle, color: accent, scrollMarginTop: 12, ...(currentStepKey === "time" ? stepCurrentStyle(accent) : null) }}>Pick a time</p>}
             <BookingCalendar
               monthCursor={monthCursor}
               setMonthCursor={setMonthCursor}
@@ -4558,7 +4699,7 @@ export default function PublicBookingPage() {
               const setAns = (id: string, v: string) =>
                 setIntakeAnswers(prev => ({ ...prev, [id]: v }));
               return (
-                <div style={{ borderTop: `1px solid ${C.hairline}`, paddingTop: 16, marginTop: 4, display: "grid", gap: 14 }}>
+                <div ref={intakeRef} style={{ borderTop: `1px solid ${C.hairline}`, paddingTop: 16, marginTop: 4, scrollMarginTop: 12, display: "grid", gap: 14 }}>
                   <div>
                     <p style={{ fontSize: 13, fontWeight: 700, color: C.espresso, margin: 0 }}>Consultation</p>
                     <p style={{ fontSize: 11.5, color: C.muted, margin: "2px 0 0", lineHeight: 1.5 }}>
@@ -4662,6 +4803,43 @@ export default function PublicBookingPage() {
             {submitError && (
               <p role="alert" aria-live="assertive" style={{ fontSize: 12, color: C.danger }}>{submitError}</p>
             )}
+            {/* Optional consultation prompt — shown once, right before
+                booking, when the stylist has intake questions the client
+                hasn't answered. Lets them add details or skip on purpose. */}
+            {showConsultPrompt && (
+              <div style={{ display: "grid", gap: 10, padding: 16, borderRadius: 14, background: C.cream, border: `1px solid ${accent}` }}>
+                <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: C.espresso }}>
+                  Add consultation details?
+                </p>
+                <p style={{ margin: 0, fontSize: 12.5, color: C.muted, lineHeight: 1.5 }}>
+                  {link?.business_name || "Your stylist"} has a few optional questions so your appointment is tailored to you. It only takes a moment — or you can skip and book now.
+                </p>
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      consultAckRef.current = true;
+                      setShowConsultPrompt(false);
+                      requestAnimationFrame(() => intakeRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+                    }}
+                    style={{ padding: "12px 14px", borderRadius: 12, background: accent, color: C.paper, border: `1px solid ${accent}`, fontSize: 13.5, fontWeight: 700, cursor: "pointer" }}
+                  >
+                    Add details
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      consultAckRef.current = true;
+                      setShowConsultPrompt(false);
+                      void handleSubmit();
+                    }}
+                    style={{ padding: "12px 14px", borderRadius: 12, background: "transparent", color: C.espresso, border: `1px solid ${C.hairline}`, fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}
+                  >
+                    Skip &amp; book
+                  </button>
+                </div>
+              </div>
+            )}
             <button ref={bookingSubmitRef} type="submit" disabled={submitting || (noShowConsentRequired && !noShowConsent) || (hairAckRequired && !hairAck)}
               // 2026 refresh: primary booking CTA now uses the brand
               // purple→coral gradient with a soft halo shadow. The
@@ -4703,7 +4881,7 @@ export default function PublicBookingPage() {
 
         {/* Waitlist alternate flow */}
         {!linkLoading && !linkError && !submitted && !paymentChoice && (
-          <div style={{ marginTop: 24, padding: 16, borderRadius: 16, background: C.paper, border: `1px solid ${C.hairline}` }}>
+          <div ref={waitlistRef} style={{ marginTop: 24, padding: 16, borderRadius: 16, background: C.paper, border: `1px solid ${C.hairline}` }}>
             {!waitlistOpen && !waitlistDone && (
               <button
                 type="button"
@@ -4740,6 +4918,26 @@ export default function PublicBookingPage() {
                     ))}
                   </select>
                 </Field>
+                {waitlistFlex === "specific" && (
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10 }}>
+                    <Field label="Preferred date">
+                      <input
+                        type="date"
+                        value={waitlistDate}
+                        onChange={e => setWaitlistDate(e.target.value)}
+                        style={{ ...inputStyle, padding: 12 }}
+                      />
+                    </Field>
+                    <Field label="Preferred time">
+                      <input
+                        type="time"
+                        value={waitlistTime}
+                        onChange={e => setWaitlistTime(e.target.value)}
+                        style={{ ...inputStyle, padding: 12 }}
+                      />
+                    </Field>
+                  </div>
+                )}
                 {waitlistError && (
                   <p style={{ fontSize: 12, color: C.danger }}>{waitlistError}</p>
                 )}
@@ -5448,6 +5646,18 @@ const stepHeaderStyle: React.CSSProperties = {
   color: C.brandPrimary,
   margin: "6px 0 -2px",
 };
+
+// Applied to a section step-header when it is the client's CURRENT step —
+// a soft accent pill so the eye lands on what to do next. Kept subtle so it
+// guides without shouting over the stylist's own branding.
+const stepCurrentStyle = (accent: string): React.CSSProperties => ({
+  display: "inline-block",
+  background: `${accent}14`,
+  border: `1px solid ${accent}55`,
+  borderRadius: 999,
+  padding: "4px 12px",
+  margin: "6px 0 2px",
+});
 
 // Shared between the "Recommended Products" + "For Your Appointment"
 // rails. Image on top, title + price below, optional external
