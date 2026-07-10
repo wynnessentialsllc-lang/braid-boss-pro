@@ -357,28 +357,33 @@ export const submitPublicWaitlistRequest = async (params: {
   if (!name) return { ok: false, error: "Name is required." };
   if (!params.ownerUserId) return { ok: false, error: "Booking link is misconfigured." };
   const ctx = collectPublicContext();
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from("waitlist_requests")
-    .insert({
-      user_id: params.ownerUserId,
-      client_name: name,
-      client_phone: sanitize(params.client_phone),
-      client_email: sanitize(params.client_email),
-      service_id: params.service_id || null,
-      service_name: sanitize(params.service_name),
-      preferred_date: params.preferred_date || null,
-      preferred_time: sanitize(params.preferred_time),
-      flexibility: params.flexibility || null,
-      notes: sanitize(params.notes),
-      // Future-proofing — see migration 20260514100000:
-      source: "public_waitlist",
-      timezone: ctx.timezone,
-      locale: ctx.locale,
-      created_from_public: true,
-    })
-    .select("id")
-    .maybeSingle();
-  if (error || !data) return { ok: false, error: error?.message || "Could not submit your request." };
-  return { ok: true, id: (data as any).id };
+  // Submit through the server route (rate-limited + owner-validated) rather
+  // than inserting directly with the anon key. See app/api/waitlist-join.
+  try {
+    const res = await fetch("/api/waitlist-join", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        user_id: params.ownerUserId,
+        client_name: name,
+        client_phone: sanitize(params.client_phone),
+        client_email: sanitize(params.client_email),
+        service_id: params.service_id || null,
+        service_name: sanitize(params.service_name),
+        preferred_date: params.preferred_date || null,
+        preferred_time: sanitize(params.preferred_time),
+        flexibility: params.flexibility || null,
+        notes: sanitize(params.notes),
+        timezone: ctx.timezone,
+        locale: ctx.locale,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.ok) {
+      return { ok: false, error: (data as any)?.error || "Could not submit your request." };
+    }
+    return { ok: true, id: String((data as any).id) };
+  } catch {
+    return { ok: false, error: "Could not reach the server. Please try again." };
+  }
 };
