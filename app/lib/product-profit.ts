@@ -109,6 +109,10 @@ export type ProductProfitInput = {
 
   // Pricing + forecast controls.
   marginPct: number; // selected retail margin, e.g. 50 → 0.5
+  // Chosen retail price. 0 means "auto" — derive from marginPct. Set by
+  // the pricing simulator so the whole intelligence layer (health,
+  // insights, timeline, batch) reacts to the price the user is exploring.
+  retailPrice: number;
   unitsToSell: number;
 };
 
@@ -137,6 +141,7 @@ export const blankProduct = (): ProductProfitInput => ({
   additional: { shipping: 0, customs: 0, misc: 0 },
   fees: { processingPct: 2.9, taxPct: 0 },
   marginPct: 50,
+  retailPrice: 0,
   unitsToSell: 0,
 });
 
@@ -405,14 +410,21 @@ export type ProductMetrics = {
 export const calculateProduct = (input: ProductProfitInput): ProductMetrics => {
   const cost = computeCostBreakdown(input);
   const pricing = pricingTable(cost.costPerUnit);
-  const suggested = retailForMargin(cost.costPerUnit, input.marginPct);
-  const forecast = computeForecast(input, suggested.rounded, cost);
+  // An explicit retailPrice (set via the simulator) wins over the
+  // margin-derived suggestion so every downstream number reflects the
+  // price the user actually chose.
+  const override = num(input.retailPrice);
+  const suggestedRetail =
+    override > 0
+      ? round2(override)
+      : retailForMargin(cost.costPerUnit, input.marginPct).rounded;
+  const forecast = computeForecast(input, suggestedRetail, cost);
   return {
     yield: { ...computeYield(input) },
     cost,
     pricing,
     wholesale: wholesalePrice(cost.costPerUnit),
-    suggestedRetail: suggested.rounded,
+    suggestedRetail,
     forecast,
   };
 };
