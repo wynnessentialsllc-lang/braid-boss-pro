@@ -13,7 +13,6 @@
 // snapshot. Photo persistence can be added later via a storage bucket.
 
 import { useRef, useState } from "react";
-import { getSupabase } from "../../lib/supabase";
 import {
   validateStyleIntake,
   STYLE_SIZES,
@@ -166,30 +165,39 @@ export default function BuildYourStyle({ slug, userId, accent = "#7C3AED", curre
     if (!v.ok) { setError(v.errors[0]); return; }
     setSubmitting(true);
     try {
-      const supabase = getSupabase();
-      const { error: insErr } = await supabase.from("style_requests").insert({
-        user_id: userId,
-        client_name: name.trim(),
-        client_phone: phone.trim() || null,
-        client_email: email.trim() || null,
-        photo_path: savedPhotoPath, // persisted by the estimate route (if used)
-        size: size || null,
-        length: length || null,
-        hair_included: hairIncluded === "" ? null : hairIncluded === "yes",
-        human_hair: humanHair === "" ? null : humanHair === "yes",
-        color: color.trim() || null,
-        notes: notes.trim() || null,
-        preferred_date: preferredDate || null,
-        preferred_time: preferredTime || null,
-        ai_style_family: quote?.styleFamily ?? null,
-        ai_suggested_service_id: quote?.matchedServiceId ?? null,
-        ai_price_low: quote?.priceLow ?? null,
-        ai_price_high: quote?.priceHigh ?? null,
-        ai_est_duration_hours: quote?.estDurationHours ?? null,
-        ai_rationale: quote?.rationale ?? null,
-        status: "submitted",
+      // Submit through the server route (rate-limited + owner-validated)
+      // rather than inserting directly with the anon key. See
+      // app/api/style-request-submit.
+      const res = await fetch("/api/style-request-submit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          client_name: name.trim(),
+          client_phone: phone.trim() || null,
+          client_email: email.trim() || null,
+          photo_path: savedPhotoPath, // persisted by the estimate route (if used)
+          size: size || null,
+          length: length || null,
+          hair_included: hairIncluded === "" ? null : hairIncluded === "yes",
+          human_hair: humanHair === "" ? null : humanHair === "yes",
+          color: color.trim() || null,
+          notes: notes.trim() || null,
+          preferred_date: preferredDate || null,
+          preferred_time: preferredTime || null,
+          ai_style_family: quote?.styleFamily ?? null,
+          ai_suggested_service_id: quote?.matchedServiceId ?? null,
+          ai_price_low: quote?.priceLow ?? null,
+          ai_price_high: quote?.priceHigh ?? null,
+          ai_est_duration_hours: quote?.estDurationHours ?? null,
+          ai_rationale: quote?.rationale ?? null,
+        }),
       });
-      if (insErr) { setError("Couldn't send your request. Please try again."); return; }
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body?.ok) {
+        setError(body?.error || "Couldn't send your request. Please try again.");
+        return;
+      }
       setSubmitted(true);
     } catch {
       setError("Couldn't send your request. Please try again.");
