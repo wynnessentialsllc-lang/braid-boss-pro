@@ -16268,6 +16268,10 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
   const [filter, setFilter] = useState("pending"); // pending | sent | failed | all
   const [openItem, setOpenItem] = useState<EntityRecord | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const filtered = useMemo(() => {
     let list = [...store.reminders];
@@ -16276,6 +16280,37 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
     else if (filter === "failed") list = list.filter(r => r.status === "failed");
     return list.sort((a, b) => (a.scheduledFor || "").localeCompare(b.scheduledFor || ""));
   }, [store.reminders, filter]);
+
+  // Group the (already status-filtered) reminders by client so the inbox
+  // reads as a roster of client names rather than one long undifferentiated
+  // queue. Each group keeps its reminders in the scheduled order set above.
+  const grouped = useMemo(() => {
+    const map = new Map<string, EntityRecord[]>();
+    for (const r of filtered) {
+      const key = r.clientId || "__none__";
+      const bucket = map.get(key);
+      if (bucket) bucket.push(r);
+      else map.set(key, [r]);
+    }
+    return [...map.entries()]
+      .map(([clientId, items]) => ({
+        clientId,
+        client: clientId === "__none__" ? null : store.clientById(clientId),
+        items,
+        pending: items.filter(r => r.status === "pending").length,
+      }))
+      .sort((a, b) => (a.client?.name || "￿").localeCompare(b.client?.name || "￿"));
+  }, [filtered, store]);
+
+  // Drop selections/expansions that reference reminders no longer in view
+  // (e.g. after a filter switch or a delete) so counts stay honest.
+  useEffect(() => {
+    const live = new Set(filtered.map(r => r.id));
+    setSelected(prev => {
+      const next = new Set([...prev].filter(id => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [filtered]);
 
   // Self-heal legacy data: a reminder created before its appointment was
   // cancelled (or from a build prior to the cancel→clear fix) can linger
@@ -16304,6 +16339,38 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
   }, [store.reminders, store.appointments]);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 1800); };
+
+  const toggleExpand = (clientId: string) =>
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(clientId)) next.delete(clientId); else next.add(clientId);
+      return next;
+    });
+
+  const toggleSelect = (id: string) =>
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const toggleSelectGroup = (ids: string[]) =>
+    setSelected(prev => {
+      const next = new Set(prev);
+      const allOn = ids.every(id => next.has(id));
+      for (const id of ids) { if (allOn) next.delete(id); else next.add(id); }
+      return next;
+    });
+
+  const exitSelect = () => { setSelectMode(false); setSelected(new Set()); };
+
+  const handleBulkDelete = async () => {
+    const ids = [...selected];
+    for (const id of ids) await store.deleteReminder(id);
+    setConfirmDelete(false);
+    exitSelect();
+    showToast(`Deleted ${ids.length} reminder${ids.length === 1 ? "" : "s"}`);
+  };
 
   const handleSimSend = async (r: any) => {
     const updated = { ...r, status: "sent", sentAt: new Date().toISOString() };
@@ -16350,11 +16417,25 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
           ))}
         </div>
 
+        {/* Roster toolbar: summary + enter/exit multi-select */}
+        {filtered.length > 0 && (
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[11px]" style={{ color: C.muted }}>
+              {grouped.length} client{grouped.length === 1 ? "" : "s"} · {filtered.length} reminder{filtered.length === 1 ? "" : "s"}
+            </p>
+            <button type="button" onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
+              className="text-xs font-semibold px-3 py-1.5 rounded-full transition"
+              style={{ color: selectMode ? C.cream : C.coffee, background: selectMode ? C.espresso : "transparent", border: `1px solid ${selectMode ? C.espresso : C.hairline}` }}>
+              {selectMode ? "Done" : "Select"}
+            </button>
+          </div>
+        )}
+
         {/* honest engineering note */}
         <Card className="p-3 mb-4" style={{ background: "rgba(201,169,97,0.10)", border: `1px solid rgba(201,169,97,0.35)` }}>
           <p className="text-[11px] leading-relaxed" style={{ color: C.coffee }}>
             <Sparkles size={12} style={{ display: "inline", marginRight: 4, color: C.gold }} />
-            Reminders are queued here. Tap any reminder to copy the message and send via your phone, or mark it sent. Auto-dispatch ships when your backend is connected.
+            Reminders are grouped by client. Tap a name to see their queue, then tap a reminder to copy the message and send it — or use Select to remove several at once. Auto-dispatch ships when your backend is connected.
           </p>
         </Card>
 
@@ -16364,47 +16445,138 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
             body="Reminders are auto-created when you book an appointment with reminders enabled." />
         ) : (
           <div className="space-y-2">
-            {filtered.map(r => {
-              const client = store.clientById(r.clientId);
-              const appt = store.appointments.find(a => a.id === r.appointmentId);
+            {grouped.map(g => {
+              const open = expanded.has(g.clientId);
+              const ids = g.items.map(r => r.id);
+              const allSel = selectMode && ids.length > 0 && ids.every(id => selected.has(id));
+              const selCount = ids.filter(id => selected.has(id)).length;
+              const name = g.client?.name || "Unknown client";
+              const initial = (g.client?.name || "?").trim().charAt(0).toUpperCase() || "?";
               return (
-                <Card key={r.id} className="p-3" onClick={() => setOpenItem(r)}>
-                  <div className="flex items-start gap-3">
-                    <div className="rounded-xl p-2 flex-shrink-0" style={{
-                      background: r.status === "delivered" ? "rgba(92,124,74,0.12)" :
-                        r.status === "sent" ? "rgba(201,169,97,0.18)" :
-                          r.status === "failed" ? "rgba(156,61,46,0.12)" :
-                            r.status === "cancelled" ? C.ivory : "rgba(201,118,43,0.12)"
-                    }}>
-                      {r.status === "delivered" ? <CheckCircle2 size={16} style={{ color: C.success }} /> :
-                        r.status === "sent" ? <Send size={16} style={{ color: C.goldDeep }} /> :
-                          r.status === "failed" ? <XCircle size={16} style={{ color: C.danger }} /> :
-                            r.status === "cancelled" ? <X size={16} style={{ color: C.muted }} /> :
-                              <Clock size={16} style={{ color: C.warning }} />}
-                    </div>
+                <Card key={g.clientId} className="p-0 overflow-hidden">
+                  {/* Client header — tap to expand this client's reminders */}
+                  <button type="button" onClick={() => toggleExpand(g.clientId)}
+                    className="w-full flex items-center gap-3 p-3 text-left transition active:scale-[0.99]">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold"
+                      style={{ background: C.ivory, color: C.espresso }}>{initial}</div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{client?.name || "Client"}</p>
-                        <Pill tone={r.status === "delivered" ? "success" : r.status === "sent" ? "gold" : r.status === "failed" ? "danger" : r.status === "cancelled" ? "neutral" : "warning"}>
-                          {r.status}
-                        </Pill>
-                      </div>
+                      <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{name}</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
-                        {PURPOSE_LABEL_LOCAL[r.purpose] || r.purpose} · {reminderChannelLabel(r)}
-                      </p>
-                      <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
-                        {r.status === "pending" ? `Scheduled ${fmtRelative(r.scheduledFor)}` :
-                          r.sentAt ? `Sent ${fmtRelative(r.sentAt)}` : fmtRelative(r.scheduledFor)}
-                        {appt && ` · ${appt.style || "appt"}`}
+                        {g.items.length} reminder{g.items.length === 1 ? "" : "s"}
+                        {g.pending > 0 && ` · ${g.pending} pending`}
+                        {selectMode && selCount > 0 && ` · ${selCount} selected`}
                       </p>
                     </div>
-                  </div>
+                    {g.pending > 0 && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                        style={{ background: "rgba(201,118,43,0.12)", color: C.warning }}>{g.pending}</span>
+                    )}
+                    {open ? <ChevronUp size={18} style={{ color: C.muted }} /> : <ChevronDown size={18} style={{ color: C.muted }} />}
+                  </button>
+
+                  {open && (
+                    <div style={{ borderTop: `1px solid ${C.hairline}` }}>
+                      {selectMode && (
+                        <button type="button" onClick={() => toggleSelectGroup(ids)}
+                          className="w-full flex items-center justify-end gap-2 px-3 py-2 text-[11px] font-semibold"
+                          style={{ color: C.coffee, background: C.ivory }}>
+                          {allSel ? "Deselect all" : "Select all"}
+                        </button>
+                      )}
+                      {g.items.map(r => {
+                        const appt = store.appointments.find(a => a.id === r.appointmentId);
+                        const isSel = selected.has(r.id);
+                        return (
+                          <button type="button" key={r.id}
+                            onClick={() => (selectMode ? toggleSelect(r.id) : setOpenItem(r))}
+                            className="w-full flex items-start gap-3 p-3 text-left transition active:scale-[0.99]"
+                            style={{ borderTop: `1px solid ${C.hairline}`, background: isSel ? "rgba(201,169,97,0.10)" : "transparent" }}>
+                            {selectMode ? (
+                              <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 mt-0.5"
+                                style={{ background: isSel ? C.espresso : "transparent", border: `1.5px solid ${isSel ? C.espresso : C.hairline}` }}>
+                                {isSel && <Check size={14} style={{ color: C.cream }} />}
+                              </div>
+                            ) : (
+                              <div className="rounded-xl p-2 flex-shrink-0" style={{
+                                background: r.status === "delivered" ? "rgba(92,124,74,0.12)" :
+                                  r.status === "sent" ? "rgba(201,169,97,0.18)" :
+                                    r.status === "failed" ? "rgba(156,61,46,0.12)" :
+                                      r.status === "cancelled" ? C.ivory : "rgba(201,118,43,0.12)"
+                              }}>
+                                {r.status === "delivered" ? <CheckCircle2 size={16} style={{ color: C.success }} /> :
+                                  r.status === "sent" ? <Send size={16} style={{ color: C.goldDeep }} /> :
+                                    r.status === "failed" ? <XCircle size={16} style={{ color: C.danger }} /> :
+                                      r.status === "cancelled" ? <X size={16} style={{ color: C.muted }} /> :
+                                        <Clock size={16} style={{ color: C.warning }} />}
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>
+                                  {PURPOSE_LABEL_LOCAL[r.purpose] || r.purpose}
+                                </p>
+                                <Pill tone={r.status === "delivered" ? "success" : r.status === "sent" ? "gold" : r.status === "failed" ? "danger" : r.status === "cancelled" ? "neutral" : "warning"}>
+                                  {r.status}
+                                </Pill>
+                              </div>
+                              <p className="text-[11px]" style={{ color: C.muted }}>
+                                {reminderChannelLabel(r)}
+                                {appt && ` · ${appt.style || "appt"}`}
+                              </p>
+                              <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
+                                {r.status === "pending" ? `Scheduled ${fmtRelative(r.scheduledFor)}` :
+                                  r.sentAt ? `Sent ${fmtRelative(r.sentAt)}` : fmtRelative(r.scheduledFor)}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </Card>
               );
             })}
           </div>
         )}
       </div>
+
+      {/* Bulk-delete action bar */}
+      {selectMode && selected.size > 0 && (
+        <div className="fixed left-0 right-0 z-40 px-5" style={{ bottom: 84 }}>
+          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl mx-auto"
+            style={{ maxWidth: 420, background: C.espresso, boxShadow: "0 12px 32px -8px rgba(0,0,0,0.4)" }}>
+            <p className="text-sm font-semibold flex-1" style={{ color: C.cream }}>
+              {selected.size} selected
+            </p>
+            <button type="button" onClick={() => setSelected(new Set())}
+              className="text-xs font-semibold px-3 py-2 rounded-xl"
+              style={{ color: C.cream, border: `1px solid rgba(255,255,255,0.25)` }}>
+              Clear
+            </button>
+            <button type="button" onClick={() => setConfirmDelete(true)}
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl"
+              style={{ background: C.danger, color: C.cream }}>
+              <Trash2 size={14} /> Delete
+            </button>
+          </div>
+        </div>
+      )}
+
+      {confirmDelete && (
+        <Sheet open={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete reminders?">
+          <div className="space-y-4">
+            <p className="text-sm leading-relaxed" style={{ color: C.coffee }}>
+              This removes {selected.size} reminder{selected.size === 1 ? "" : "s"} from the queue. This can't be undone.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={() => setConfirmDelete(false)} fullWidth>Keep</Button>
+              <Button variant="danger" icon={<Trash2 size={15} />} onClick={handleBulkDelete} fullWidth>
+                Delete {selected.size}
+              </Button>
+            </div>
+          </div>
+        </Sheet>
+      )}
 
       {openItem && (
         <ReminderDetailSheet
