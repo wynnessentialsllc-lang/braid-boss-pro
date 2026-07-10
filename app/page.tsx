@@ -16435,7 +16435,7 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
         <Card className="p-3 mb-4" style={{ background: "rgba(201,169,97,0.10)", border: `1px solid rgba(201,169,97,0.35)` }}>
           <p className="text-[11px] leading-relaxed" style={{ color: C.coffee }}>
             <Sparkles size={12} style={{ display: "inline", marginRight: 4, color: C.gold }} />
-            Reminders are grouped by client. Tap a name to see their queue, then tap a reminder to copy the message and send it — or use Select to remove several at once. Auto-dispatch ships when your backend is connected.
+            Reminders are grouped by client. Tap a name to open their queue, then tap a reminder to copy it or text it from your own phone — no SMS credits needed. Use Select to clear out several at once. Heads up: automatic email reminders already go out through your booking system (plus texts too, when you have SMS credits).
           </p>
         </Card>
 
