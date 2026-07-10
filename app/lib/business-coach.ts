@@ -488,7 +488,13 @@ export const snapshotFacts = (snap: CoachSnapshot): string => {
       r.momChangePct != null ? `, ${r.momChangePct >= 0 ? "+" : ""}${r.momChangePct}% MoM` : ""
     }).`,
   );
-  lines.push(`Average ticket: ${money(r.averageTicket, c)}.`);
+  // Labeled "lifetime" on purpose: this is the all-time average across
+  // completed/paid bookings, which is a DIFFERENT metric from the
+  // dashboard's "Avg ticket (30d)" card (trailing 30 days, every booked
+  // appointment, full post-discount price). Naming it here keeps the
+  // coach from calling this number "your average ticket" and appearing to
+  // contradict the card.
+  lines.push(`Lifetime average ticket (all completed/paid bookings, all-time): ${money(r.averageTicket, c)}.`);
   // Balances are split by whether the work is done. Only earnedUnpaid is
   // genuinely owed; dueToday/upcoming have not been earned yet.
   if (r.balances.earnedUnpaid > 0) {
@@ -593,8 +599,8 @@ export const buildCoachSystem = (snap: CoachSnapshot, ctx: CoachContext): string
     "Growing the book matters: when bookings are light, the calendar has gaps, or new clients this month are few, give at least one concrete strategy to attract NEW clientele — not just rebooking existing clients. Be specific and realistic for a solo braider (e.g. post a before/after of the top style on social with a booking link, a limited new-client offer, asking happy clients for a referral or a tagged photo, partnering with a local business, showing fresh availability). Tie it to a number above when you can.",
     "",
     "Monthly goal:",
-    "- If a monthly revenue goal is set, hold them to it kindly: state progress, what's left, and a concrete pace to get there (e.g. how many bookings at their average ticket), using the days left in the month.",
-    "- If it is the TOP OF THE MONTH (flagged in the facts), make the monthly check-in the centerpiece: reflect briefly on last month, and either celebrate/adjust the goal or — if no goal is set — warmly prompt them to set one and suggest a realistic target based on last month and their average ticket. Put this in the monthlyCheckIn field.",
+    "- If a monthly revenue goal is set, hold them to it kindly: state progress, what's left, and a concrete pace to get there (e.g. how many bookings at their lifetime average ticket), using the days left in the month.",
+    "- If it is the TOP OF THE MONTH (flagged in the facts), make the monthly check-in the centerpiece: reflect briefly on last month, and either celebrate/adjust the goal or — if no goal is set — warmly prompt them to set one and suggest a realistic target based on last month and their lifetime average ticket. Put this in the monthlyCheckIn field.",
     "- If it is NOT the top of the month, leave monthlyCheckIn empty.",
     "",
     "Today's numbers:",
@@ -608,6 +614,7 @@ export const buildCoachSystem = (snap: CoachSnapshot, ctx: CoachContext): string
     "- monthlyCheckIn: ONLY at the top of the month — the goal reflection + advice described above. Otherwise leave it empty.",
     "- encouragement: one warm closing line.",
     "Be concrete and motivating, not generic. No fake statistics.",
+    "When you mention the average ticket, always call it the \"lifetime average ticket\" (it is the all-time paid average). Never call it just \"average ticket\" — the dashboard shows a separate 30-day average ticket, and an unqualified label makes the two numbers look contradictory.",
   ].join("\n");
 };
 
