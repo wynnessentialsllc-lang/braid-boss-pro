@@ -16346,32 +16346,51 @@ const ReminderInbox = ({ store, onBack, openSettings }: {
   // it has actually sent so the inbox can mark the matching local reminders
   // as already handled — otherwise a stylist copy-pasting from here texts a
   // client who was reminded automatically minutes ago. RLS scopes the query
-  // to the signed-in owner; on any failure we simply show no badge.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const { data, error } = await getSupabase()
-          .from("notification_queue")
-          .select("appointment_id, channel, sent_at, status")
-          .in("notification_type", ["appointment_reminder", "appointment_reminder_2h"])
-          .in("status", ["sent", "delivered"]);
-        if (cancelled || error || !Array.isArray(data)) return;
-        const map: Record<string, { channel: string; sentAt: string | null }> = {};
-        for (const row of data as any[]) {
-          const aid = row?.appointment_id;
-          if (!aid) continue;
-          const prev = map[aid];
-          // Keep the most recent send so the badge reflects the latest touch.
-          if (!prev || String(row.sent_at || "") > String(prev.sentAt || "")) {
-            map[aid] = { channel: String(row.channel || "email"), sentAt: row.sent_at || null };
-          }
+  // to the signed-in owner; on any failure we simply leave the map untouched.
+  const autoSentMounted = useRef(true);
+  useEffect(() => () => { autoSentMounted.current = false; }, []);
+  const loadAutoSent = useCallback(async () => {
+    try {
+      const { data, error } = await getSupabase()
+        .from("notification_queue")
+        .select("appointment_id, channel, sent_at, status")
+        .in("notification_type", ["appointment_reminder", "appointment_reminder_2h"])
+        .in("status", ["sent", "delivered"]);
+      if (error || !Array.isArray(data)) return;
+      const map: Record<string, { channel: string; sentAt: string | null }> = {};
+      for (const row of data as any[]) {
+        const aid = row?.appointment_id;
+        if (!aid) continue;
+        const prev = map[aid];
+        // Keep the most recent send so the badge reflects the latest touch.
+        if (!prev || String(row.sent_at || "") > String(prev.sentAt || "")) {
+          map[aid] = { channel: String(row.channel || "email"), sentAt: row.sent_at || null };
         }
-        if (!cancelled) setAutoSentByAppt(map);
-      } catch { /* best-effort; no badge when the queue can't be read */ }
-    })();
-    return () => { cancelled = true; };
+      }
+      if (autoSentMounted.current) setAutoSentByAppt(map);
+    } catch { /* best-effort; no badge when the queue can't be read */ }
   }, []);
+
+  // Fetch once, then keep it fresh: pull-to-refresh (bbp:refresh, whose
+  // detail.waitFor keeps the spinner up until we finish) plus tab focus /
+  // visibility, so a reminder that auto-fires while this screen is open
+  // shows its badge on the next refresh instead of only after a reopen.
+  useEffect(() => {
+    void loadAutoSent();
+    const onRefresh = (e: Event) => {
+      const p = loadAutoSent();
+      try { (e as CustomEvent).detail?.waitFor?.(p); } catch { /* optional protocol */ }
+    };
+    const onVis = () => { if (document.visibilityState === "visible") void loadAutoSent(); };
+    window.addEventListener("bbp:refresh", onRefresh);
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return () => {
+      window.removeEventListener("bbp:refresh", onRefresh);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onVis);
+    };
+  }, [loadAutoSent]);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 1800); };
 
