@@ -593,6 +593,7 @@ export default function PublicBookingPage() {
   // collapses the tall menu, so we scroll here (not to page top) to keep
   // the client in the flow and land them on their service + options.
   const serviceDetailRef = useRef<HTMLDivElement | null>(null);
+  const waitlistRef = useRef<HTMLDivElement | null>(null);
   // Sticky "Book" bar shows only while the form is OFF screen, so the
   // CTA is always one tap away without doubling up once the visitor is
   // already at the picker.
@@ -788,6 +789,22 @@ export default function PublicBookingPage() {
   const [waitlistSubmitting, setWaitlistSubmitting] = useState(false);
   const [waitlistDone, setWaitlistDone] = useState(false);
   const [waitlistError, setWaitlistError] = useState<string | null>(null);
+  // When the client picks "a specific time" for the waitlist, capture the
+  // exact date/time they want so the stylist can convert straight to an
+  // appointment instead of having to chase them for it.
+  const [waitlistDate, setWaitlistDate] = useState("");
+  const [waitlistTime, setWaitlistTime] = useState("");
+
+  // The waitlist form often opens from the empty-calendar CTA far up the
+  // page. Bring it into view when it opens so the button doesn't look like
+  // it "did nothing".
+  useEffect(() => {
+    if (!waitlistOpen) return;
+    const raf = requestAnimationFrame(() => {
+      waitlistRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [waitlistOpen]);
 
   const submitWaitlist = async () => {
     if (waitlistSubmitting) return;
@@ -802,6 +819,10 @@ export default function PublicBookingPage() {
       setWaitlistError("Please pick a service above before joining the waitlist.");
       return;
     }
+    if (waitlistFlex === "specific" && !waitlistDate) {
+      setWaitlistError("Please pick the date you'd like.");
+      return;
+    }
     setWaitlistSubmitting(true);
     const selectedId = hasCatalog
       ? selectedCatalogService?.id || null
@@ -813,8 +834,8 @@ export default function PublicBookingPage() {
       client_email: email.trim() || null,
       service_id: selectedId,
       service_name: serviceName || null,
-      preferred_date: preferredDate || null,
-      preferred_time: preferredTime || null,
+      preferred_date: (waitlistFlex === "specific" ? waitlistDate : preferredDate) || null,
+      preferred_time: (waitlistFlex === "specific" ? waitlistTime : preferredTime) || null,
       flexibility: waitlistFlex,
       notes: notes.trim() || null,
     });
@@ -4703,7 +4724,7 @@ export default function PublicBookingPage() {
 
         {/* Waitlist alternate flow */}
         {!linkLoading && !linkError && !submitted && !paymentChoice && (
-          <div style={{ marginTop: 24, padding: 16, borderRadius: 16, background: C.paper, border: `1px solid ${C.hairline}` }}>
+          <div ref={waitlistRef} style={{ marginTop: 24, padding: 16, borderRadius: 16, background: C.paper, border: `1px solid ${C.hairline}` }}>
             {!waitlistOpen && !waitlistDone && (
               <button
                 type="button"
@@ -4740,6 +4761,26 @@ export default function PublicBookingPage() {
                     ))}
                   </select>
                 </Field>
+                {waitlistFlex === "specific" && (
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10 }}>
+                    <Field label="Preferred date">
+                      <input
+                        type="date"
+                        value={waitlistDate}
+                        onChange={e => setWaitlistDate(e.target.value)}
+                        style={{ ...inputStyle, padding: 12 }}
+                      />
+                    </Field>
+                    <Field label="Preferred time">
+                      <input
+                        type="time"
+                        value={waitlistTime}
+                        onChange={e => setWaitlistTime(e.target.value)}
+                        style={{ ...inputStyle, padding: 12 }}
+                      />
+                    </Field>
+                  </div>
+                )}
                 {waitlistError && (
                   <p style={{ fontSize: 12, color: C.danger }}>{waitlistError}</p>
                 )}
