@@ -1264,7 +1264,13 @@ const cadenceLabel = (c: string): string => ({
 // ============================================================
 const DEFAULT_BUSINESS = {
   businessName: "Braid Boss Pro", ownerName: "",
-  hourlyRate: 50, overheadPerHour: 8, profitMargin: 25,
+  // Pricing-formula defaults. These apply to NEW accounts (or any value
+  // a user never set) only — on load, saved settings win via the
+  // { ...DEFAULT_BUSINESS, ...bizParsed } merge, so bumping these numbers
+  // never overwrites a stylist's own saved values.
+  // NOTE: `profitMargin` is a legacy field name. It stores a FLAT dollar
+  // "target profit" added to each appointment, NOT a percentage.
+  hourlyRate: 65, overheadPerHour: 10, profitMargin: 30,
   defaultTravelFee: 0, currency: "USD",
   // Merchant opt-in for in-app Tap to Pay on iPhone. Off until the
   // stylist enables it under Settings → Payments → Tap to Pay; the
@@ -2213,11 +2219,13 @@ const Button = ({ children, variant = "primary", onClick, disabled, className = 
   );
 };
 
-const Field = ({ label, hint, children, suffix }: {
+const Field = ({ label, hint, children, suffix, help }: {
   label: string;
   hint?: string;
   children: React.ReactNode;
   suffix?: string;
+  /** Optional descriptive helper text rendered beneath the input. */
+  help?: string;
 }) => (
   <label className="block">
     <div className="flex items-baseline justify-between mb-1.5">
@@ -2228,6 +2236,7 @@ const Field = ({ label, hint, children, suffix }: {
       {children}
       {suffix && <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-sm font-medium" style={{ color: C.muted }}>{suffix}</span>}
     </div>
+    {help && <p className="text-[11px] mt-1.5" style={{ color: C.muted, lineHeight: 1.4 }}>{help}</p>}
   </label>
 );
 
@@ -18786,6 +18795,10 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
   useEffect(() => { trackEvent("settings_view", { category: "feature" }); }, []);
   const [b, setB] = useState(store.business);
   const [saved, setSaved] = useState(false);
+  // Demonstration-only appointment length for the live pricing example.
+  // Never persisted to the business record — it drives the "How your
+  // price is calculated" card and nothing else.
+  const [exampleHours, setExampleHours] = useState<string | number>(6);
   // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
   useEffect(() => { setB(store.business); }, [store.business]);
 
@@ -18884,6 +18897,20 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
     setTimeout(() => { importFiredRef.current = false; }, 500);
   }, []);
 
+  // Live pricing-formula example. Reads straight from the in-progress `b`
+  // state (not the saved record) so the breakdown updates instantly as
+  // the stylist edits either the defaults above or the example length.
+  // parseMoney() turns empty/NaN/negative-stripped inputs into 0, so the
+  // math never produces NaN. `profitMargin` is the legacy field name for
+  // the flat "target profit" dollar amount.
+  const exCurrency = b.currency || "USD";
+  const exHours = parseMoney(exampleHours);
+  const exLabor = parseMoney(b.hourlyRate) * exHours;
+  const exOverhead = parseMoney(b.overheadPerHour) * exHours;
+  const exTargetProfit = parseMoney(b.profitMargin);
+  const exTravel = parseMoney(b.defaultTravelFee);
+  const exRecommended = exLabor + exOverhead + exTargetProfit + exTravel;
+
   return (
     <div className="bbp-fade pb-32">
       <Header title="Settings" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
@@ -18898,18 +18925,67 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
           </Field>
         </Card>
 
-        <SectionTitle>Default pricing</SectionTitle>
+        <div>
+          <SectionTitle>Pricing formula</SectionTitle>
+          <p className="text-[12px] -mt-1" style={{ color: C.muted, lineHeight: 1.45 }}>
+            These defaults help calculate recommended service prices. You can still customize each service.
+          </p>
+        </div>
         <Card className="p-4 space-y-3">
-          <Field label="Hourly rate"><MoneyInput value={b.hourlyRate ?? ""} onChange={(v) => setB({ ...b, hourlyRate: parseMoney(v) })} /></Field>
-          <Field label="Overhead per hour" hint="Booth rent, supplies, utilities">
+          <Field label="Hourly rate" help="What you want to earn for each hour of hands-on work.">
+            <MoneyInput value={b.hourlyRate ?? ""} onChange={(v) => setB({ ...b, hourlyRate: parseMoney(v) })} />
+          </Field>
+          <Field label="Overhead per hour" help="Your hourly share of supplies, booth rent, utilities, software and other business expenses.">
             <MoneyInput value={b.overheadPerHour ?? ""} onChange={(v) => setB({ ...b, overheadPerHour: parseMoney(v) })} />
           </Field>
-          <Field label="Profit margin" hint="Default $ margin per appointment">
+          {/* `profitMargin` is a legacy DB field name kept for backward
+              compatibility. It stores a FLAT dollar "target profit" added
+              to each appointment, NOT a percentage. Surfaced to the user
+              as "Target profit". */}
+          <Field label="Target profit" help="Extra profit added after your labor and business expenses are covered.">
             <MoneyInput value={b.profitMargin ?? ""} onChange={(v) => setB({ ...b, profitMargin: parseMoney(v) })} />
           </Field>
-          <Field label="Default travel fee">
+          <Field label="Default travel fee" help="Optional flat fee added to mobile appointments.">
             <MoneyInput value={b.defaultTravelFee ?? ""} onChange={(v) => setB({ ...b, defaultTravelFee: parseMoney(v) })} />
           </Field>
+        </Card>
+
+        {/* Live pricing example — demonstration only. Never written to the
+            business record; exampleHours is local UI state. */}
+        <Card className="p-4 space-y-3">
+          <SectionEyebrow>How your price is calculated</SectionEyebrow>
+          <Field label="Example appointment length" help="For demonstration only — this length isn't saved.">
+            <MoneyInput
+              value={exampleHours}
+              onChange={(v) => setExampleHours(v)}
+              prefix=""
+              suffix="hrs"
+            />
+          </Field>
+          <div className="pt-1">
+            <MetricRow
+              label={`Labor (${exHours || 0} hrs × ${fmtMoney(parseMoney(b.hourlyRate), exCurrency)})`}
+              value={fmtMoney(exLabor, exCurrency)}
+            />
+            <MetricRow
+              label={`Overhead (${exHours || 0} hrs × ${fmtMoney(parseMoney(b.overheadPerHour), exCurrency)})`}
+              value={fmtMoney(exOverhead, exCurrency)}
+            />
+            <MetricRow label="Target profit" value={fmtMoney(exTargetProfit, exCurrency)} />
+            <MetricRow label="Travel" value={fmtMoney(exTravel, exCurrency)} />
+          </div>
+          <div
+            className="mt-1 pt-3"
+            style={{ borderTop: `1px solid ${C.hairline}`, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}
+          >
+            <SectionEyebrow>Recommended price</SectionEyebrow>
+            <p style={{ margin: 0, fontFamily: FONT_DISPLAY, fontSize: 30, fontWeight: 600, color: C.goldDeep, lineHeight: 1, letterSpacing: "-0.01em" }}>
+              {fmtMoney(exRecommended, exCurrency)}
+            </p>
+          </div>
+          <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.45 }}>
+            This is a starting recommendation. Hair, add-ons, complexity and other service costs may increase the final price.
+          </p>
         </Card>
 
         {openAccount && (
