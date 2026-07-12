@@ -288,8 +288,11 @@ function Inner() {
     let gross = 0;
     let fees = 0;
     for (const t of visible) {
-      gross += t.amount + (t.amount > 0 ? t.tip : 0);
-      if (t.amount > 0) fees += t.fee || 0;
+      // Refunds carry signed-negative tip + fee, so they reverse their charge
+      // in full — keeping this banner in step with the summary cards.
+      const isRefund = t.type === "refund";
+      gross += t.amount + (isRefund || t.amount > 0 ? t.tip : 0);
+      if (isRefund || t.amount > 0) fees += t.fee || 0;
     }
     const r = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
     return { gross: r(gross), fees: r(fees), net: r(gross - fees) };
@@ -395,13 +398,22 @@ function Inner() {
         }
       }
 
+      // Reverse the share of the original tip this refund covers, so "Tips
+      // Collected" drops the moment the refund is issued (a full refund
+      // reverses the whole tip) instead of waiting for Stripe sync. A row's
+      // `amount` already excludes the tip, so it's the service figure the
+      // refund is measured against.
+      const service = Math.max(0, Math.round(txn.amount * 100) / 100);
+      const frac = service > 0 ? Math.min(1, amt / service) : txn.tip > 0 ? 1 : 0;
+      const tipReversed = Math.round((txn.tip || 0) * frac * 100) / 100;
+
       const record = {
         id: uid(),
         appointmentId: txn.appointmentId || null,
         clientName: txn.clientName,
         serviceName: txn.serviceName,
         amount: amt,
-        tipAmount: 0,
+        tipAmount: tipReversed,
         paymentType: "refund" as PaymentType,
         paymentMethod: txn.method,
         // Tie a card refund back to its original charge's

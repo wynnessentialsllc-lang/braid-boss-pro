@@ -194,24 +194,42 @@ export async function POST(req: Request) {
         type: "charge",
         refunds,
       };
-      const refundRows = refundList.map((r: any) => ({
-        id: `${String(c.id)}_re_${String(r.id)}`,
-        amount: cents(r.amount),
-        fee: 0,
-        // A refund returns the charged amount; Stripe keeps the fee, so net
-        // out is the full refund.
-        net: cents(r.amount),
-        tip: 0,
-        paid_at: new Date((r.created || 0) * 1000).toISOString(),
-        client_name: clientName,
-        service_name: serviceName,
-        payment_intent: paymentIntent,
-        charge: String(c.id),
-        appointment_id: appointmentId,
-        payment_type: "refund",
-        type: "refund",
-        refunds: [],
-      }));
+      // The service portion of the charge (what shows as the payment amount,
+      // tip excluded). A refund is measured against this so a full refund
+      // reverses the whole charge even when Stripe returned the tip too.
+      const serviceAmount = Math.max(0, cents(c.amount) - tipAmount);
+      const refundRows = refundList.map((r: any) => {
+        const refundAmt = cents(r.amount);
+        // How much of the charge this refund covers (capped at 1 = full). A
+        // full refund reverses the entire tip and processing fee; a partial
+        // refund reverses them proportionally — so the summary nets a
+        // refunded charge to zero (tip and Stripe fee included), the way
+        // Stripe treats a refunded payment.
+        const denom = serviceAmount > 0 ? serviceAmount : cents(c.amount);
+        const frac = denom > 0 ? Math.min(1, refundAmt / denom) : 1;
+        const round2 = (n: number) => Math.round(n * 100) / 100;
+        const tipReversed = round2(tipAmount * frac);
+        const feeReversed = round2(fee * frac);
+        // Show the refund as the service amount returned; carry the reversed
+        // tip/fee alongside so the ledger totals net out correctly.
+        const shownAmount = denom > 0 ? Math.min(refundAmt, denom) : refundAmt;
+        return {
+          id: `${String(c.id)}_re_${String(r.id)}`,
+          amount: shownAmount,
+          fee: feeReversed,
+          net: round2(shownAmount + tipReversed),
+          tip: tipReversed,
+          paid_at: new Date((r.created || 0) * 1000).toISOString(),
+          client_name: clientName,
+          service_name: serviceName,
+          payment_intent: paymentIntent,
+          charge: String(c.id),
+          appointment_id: appointmentId,
+          payment_type: "refund",
+          type: "refund",
+          refunds: [],
+        };
+      });
       return [chargeRow, ...refundRows];
     });
 
