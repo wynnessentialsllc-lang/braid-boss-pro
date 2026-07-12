@@ -343,37 +343,51 @@ describe("reconcilePaidAppointments", () => {
       client_name: "Claudia Vine",
     });
 
-  it("marks the appointment paid in full when a linked balance charge covers it", () => {
+  it("marks paid while preserving the deposit/balance split and Stripe fee/net", () => {
     const [fixed] = reconcilePaidAppointments([claudiaAppt()], [claudiaBalanceCharge()], "2026-07-11");
     expect(fixed).toBeTruthy();
     expect(fixed.paymentStatus).toBe("paid");
+    expect(fixed.balance_paid).toBe(true);
     expect(fixed.balanceDue).toBe(0);
-    // depositPaid is bumped to the net ticket so collected-revenue math is
-    // right (the whole $304.74, not just the original $25 deposit).
-    expect(fixed.depositPaid).toBe(304.74);
     expect(fixed.status).toBe("completed");
-    // Tip is preserved and the balance intent stamped for ledger de-dupe.
+    // The original $25 deposit is NOT collapsed into the total — the
+    // deposit-vs-balance breakdown survives for the receipt and ledger.
+    expect(fixed.depositPaid).toBe(25);
+    // Tip preserved, balance intent stamped for ledger de-dupe.
     expect(fixed.tipAmount).toBe(30);
     expect(fixed.balance_payment_intent_id).toBe("pi_claudia_balance");
+    // Stripe fee + true net payout persisted so totals show what landed.
+    expect(fixed.stripeFee).toBe(18.85);
+    expect(fixed.stripeNet).toBe(290.89);
   });
 
-  it("the reconciled appointment de-dupes the Stripe balance row (no double entry)", () => {
+  it("derives the deposit + balance rows (with fee/net) and de-dupes the Stripe charge", () => {
     const [fixed] = reconcilePaidAppointments([claudiaAppt()], [claudiaBalanceCharge()], "2026-07-11");
     const merged = mergeTransactions(
       deriveAppointmentTransactions([fixed]),
       [claudiaBalanceCharge()],
       [],
     );
-    // One row for Claudia's payment, sourced from the appointment, carrying
-    // the live Stripe fee/net that merge folds in.
     const claudiaRows = merged.filter((t) => t.clientName === "Claudia Vine");
-    expect(claudiaRows).toHaveLength(1);
-    expect(claudiaRows[0].source).toBe("appointment");
-    expect(claudiaRows[0].stripeId).toBe("pi_claudia_balance");
+    // Two appointment rows — the $25 deposit and the $279.74 balance — and
+    // the live Stripe charge collapses into the balance row (no third entry).
+    expect(claudiaRows).toHaveLength(2);
+    expect(claudiaRows.every((r) => r.source === "appointment")).toBe(true);
+    const deposit = claudiaRows.find((r) => r.type === "deposit");
+    const balance = claudiaRows.find((r) => r.type === "final");
+    expect(deposit?.amount).toBe(25);
+    expect(balance?.amount).toBe(279.74);
+    // The balance row carries the Stripe fee + net payout.
+    expect(balance?.fee).toBe(18.85);
+    expect(balance?.net).toBe(290.89);
+    expect(balance?.stripeId).toBe("pi_claudia_balance");
+    // Full collected still sums to the whole ticket.
+    const collected = claudiaRows.reduce((s, r) => s + r.amount, 0);
+    expect(Math.round(collected * 100) / 100).toBe(304.74);
   });
 
   it("leaves an already-paid appointment alone (idempotent)", () => {
-    const paid = { ...claudiaAppt(), paymentStatus: "paid", depositPaid: 304.74, balanceDue: 0 };
+    const paid = { ...claudiaAppt(), paymentStatus: "paid", balance_paid: true, balanceDue: 0 };
     expect(reconcilePaidAppointments([paid], [claudiaBalanceCharge()], "2026-07-11")).toHaveLength(0);
   });
 

@@ -924,14 +924,20 @@ const normalizeAppointment = (raw: any): any => {
 // explicit depositPaid value (legacy data).
 const calculateCollectedAmount = (appt: any): number => {
   if (!appt || isCanceledAppointment(appt)) return 0;
+  // NET ticket (post-discount) — never gross, so a discount doesn't overstate.
+  const total = roundCents(Math.max(0, parseMoney(appt.totalPrice) - parseMoney(appt.discountAmount)));
   const deposit = parseMoney(appt.depositPaid);
+  // Paid in full → the whole ticket is collected, even when the deposit is
+  // left at its original amount instead of being collapsed into the total.
+  // This lets us preserve the deposit-vs-balance breakdown (for receipts and
+  // the ledger) without under-counting revenue.
+  const paidInFull =
+    appt.balance_paid === true ||
+    appt.balancePaid === true ||
+    appt.paymentStatus === "paid" ||
+    (parseMoney(appt.balanceDue) === 0 && total > 0);
+  if (paidInFull && total > 0) return total;
   if (deposit > 0) return roundCents(deposit);
-  if (parseMoney(appt.balanceDue) === 0 && parseMoney(appt.totalPrice) > 0) {
-    // Paid-in-full fallback for legacy/imported rows without an explicit
-    // depositPaid. Collected = NET (post-discount), not gross — otherwise
-    // a discounted appointment overstates revenue by the discount amount.
-    return roundCents(Math.max(0, parseMoney(appt.totalPrice) - parseMoney(appt.discountAmount)));
-  }
   return 0;
 };
 
