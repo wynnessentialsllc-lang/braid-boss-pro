@@ -330,6 +330,11 @@ function Inner() {
         tipAmount: 0,
         paymentType: "refund" as PaymentType,
         paymentMethod: txn.method,
+        // Tie a card refund back to its original charge's
+        // payment_intent/charge. Once Stripe sync surfaces the same refund
+        // as its own row, mergeTransactions collapses the two so the refund
+        // never shows (or counts) twice. Cash/Zelle/etc. leave this null.
+        stripeId: viaStripe && txn.stripeId ? String(txn.stripeId) : null,
         paidAt: new Date().toISOString(),
         note: reason
           ? `Refund · ${reason}`

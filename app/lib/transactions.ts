@@ -313,7 +313,10 @@ export const fromManualRecord = (r: any): Transaction => {
     depositAmount: type === "deposit" ? Math.abs(amount) : 0,
     balancePaid: type === "final" || type === "full" ? Math.abs(amount) : 0,
     refunds: [],
-    stripeId: null,
+    // A card refund recorded from the Payments screen stamps the original
+    // charge's payment_intent/charge here so mergeTransactions can collapse
+    // this optimistic row into the Stripe-surfaced refund for the same money.
+    stripeId: r.stripeId ?? r.stripe_id ?? null,
     note: String(r.note || ""),
   };
 };
@@ -409,7 +412,24 @@ export const mergeTransactions = (
     }
     return false;
   });
-  const all = [...appointmentTxns, ...dedupedStripe, ...manualTxns];
+  // A card refund issued from the Payments screen writes an optimistic
+  // manual `refund` row so it shows the instant it's issued. Once Stripe
+  // sync catches up, the now fully-refunded charge comes back as its own
+  // refund row (same money, now carrying the real fee/net) keyed by the
+  // same payment_intent/charge. Drop the optimistic manual duplicate so
+  // the refund isn't listed — or counted in the summary — twice. Partial
+  // card refunds never surface a Stripe refund row (the charge stays a
+  // positive row), so their manual row is kept; cash/Zelle/etc. refunds
+  // carry no stripeId and are always kept.
+  const stripeRefundKeys = new Set(
+    dedupedStripe
+      .filter((s) => s.type === "refund" && s.stripeId)
+      .map((s) => String(s.stripeId)),
+  );
+  const dedupedManual = manualTxns.filter(
+    (m) => !(m.type === "refund" && m.stripeId && stripeRefundKeys.has(String(m.stripeId))),
+  );
+  const all = [...appointmentTxns, ...dedupedStripe, ...dedupedManual];
   all.sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
   return all;
 };
