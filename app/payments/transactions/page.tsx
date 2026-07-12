@@ -648,6 +648,11 @@ function Inner() {
         <DetailSheet
           txn={selected}
           currency={currency}
+          appointment={
+            selected.appointmentId
+              ? appointments.find((a) => String(a.id) === selected.appointmentId)
+              : undefined
+          }
           onClose={() => setSelected(null)}
           onRefund={handleRefund}
           onToast={flashToast}
@@ -814,21 +819,66 @@ function SummaryCard({
 // ---- Detail sheet -------------------------------------------------------
 
 function DetailSheet({
-  txn, currency, onClose, onRefund, onToast,
+  txn, currency, appointment, onClose, onRefund, onToast,
 }: {
   txn: Transaction;
   currency: string;
+  // The booking behind this payment, when we have it — supplies the pricing
+  // record (base service, add-ons, discount, deposit) the transaction row
+  // alone doesn't carry.
+  appointment?: any;
   onClose: () => void;
   onRefund: (txn: Transaction, amount: number, reason: string) => Promise<{ ok: boolean; message: string }>;
   onToast: (msg: string) => void;
 }) {
   const isRefund = txn.type === "refund" || txn.amount < 0;
+  const money = (n: number) => Math.round(n * 100) / 100;
+  const num = (v: any): number => {
+    if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+    const n = parseFloat(String(v ?? "").replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  };
 
-  // Net payout = Stripe's own net for the charge when we have it (so the app
-  // agrees with the Stripe dashboard, e.g. a $309.74 Klarna charge − $18.85
-  // fee = $290.89), falling back to amount + tip − fee for rows without a
-  // persisted net.
-  const netPayout = txn.net || txn.amount + txn.tip - txn.fee;
+  // Two separate stories so neither has to reconcile against the other:
+  //   • THE TICKET — the pricing record (base + add-ons − discount, deposit,
+  //     balance, tip). No fees here, so it always adds up.
+  //   • THE MONEY — what she paid and what actually landed. Only the balance +
+  //     tip run through Stripe (the deposit is collected on its own, e.g. by
+  //     Zelle), so the fee applies to that charge alone.
+  const addOnsTotal = money((txn.addOns || []).reduce((s, a) => s + num(a.amount), 0));
+  const subtotal = money(num(appointment?.totalPrice)); // base service + add-ons, pre-discount
+  const discount = money(num(appointment?.discountAmount));
+  const baseService = money(Math.max(0, subtotal - addOnsTotal));
+  // Net service after discount. Falls back to the row's own amounts when there
+  // is no linked appointment (a manual/standalone Stripe row).
+  const serviceTotal = subtotal > 0
+    ? money(Math.max(0, subtotal - discount))
+    : money((txn.balancePaid > 0 ? txn.balancePaid : Math.max(0, txn.amount)) + txn.depositAmount);
+  const deposit = money(Math.max(0, num(appointment?.depositPaid) || txn.depositAmount));
+  // Prefer the appointment's tip/fee so the appointment-wide totals read the
+  // same whichever of its rows (deposit or balance) is open — tip and fee sit
+  // on the balance row, not the deposit.
+  const tip = money(num(appointment?.tipAmount ?? appointment?.tip) || txn.tip);
+  const ticketTotal = money(serviceTotal + tip);
+
+  // Is the balance actually settled? Only then does it count as money in.
+  const paidInFull = appointment
+    ? (appointment.balance_paid === true ||
+       appointment.balancePaid === true ||
+       appointment.paymentStatus === "paid" ||
+       (subtotal > 0 && num(appointment.balanceDue) === 0))
+    : txn.type !== "deposit";
+  const balancePaid = paidInFull ? money(Math.max(0, serviceTotal - deposit)) : 0;
+  const balanceDue = money(Math.max(0, serviceTotal - deposit - balancePaid));
+
+  // Money side. The deposit is collected separately (no Stripe fee); the
+  // balance + tip is the Stripe charge the fee comes off. "In your bank" is
+  // every dollar collected minus that fee — deposits included, since they're
+  // income too.
+  const fee = money(num(appointment?.stripeFee) || num(txn.fee));
+  const stripeCharge = money(balancePaid + tip);
+  const collected = money(deposit + stripeCharge);
+  const inBank = money(collected - fee);
 
   // How much is still refundable: the (positive) charge minus anything
   // already refunded. Stripe charges carry their refund history; other
@@ -985,47 +1035,80 @@ function DetailSheet({
               : <Row label="Linked booking" value="Not linked" muted />}
           </Section>
 
-          {txn.addOns.length > 0 && (
-            <Section title="Add-ons">
-              {txn.addOns.map((a, i) => (
-                <Row key={i} label={a.name} value={formatMoney(a.amount, currency)} />
-              ))}
+          {isRefund ? (
+            // A refund is money going back out — show it plainly, no ticket.
+            <Section title="Refund">
+              <Row
+                label="Refunded to client"
+                value={`− ${formatMoney(Math.abs(txn.amount), currency)}`}
+                strong
+              />
+              {Math.abs(txn.tip) > 0 && (
+                <Row label="Tip reversed" value={`− ${formatMoney(Math.abs(txn.tip), currency)}`} />
+              )}
             </Section>
+          ) : (
+            <>
+              {/* THE TICKET — the pricing record. No fees, so it always adds up. */}
+              <Section title="The ticket">
+                {baseService > 0 && (
+                  <Row label={txn.serviceName} value={formatMoney(baseService, currency)} />
+                )}
+                {(txn.addOns || []).map((a, i) => (
+                  <Row key={i} label={`+ ${a.name}`} value={formatMoney(num(a.amount), currency)} />
+                ))}
+                {discount > 0 && (
+                  <Row label="Discount" value={`− ${formatMoney(discount, currency)}`} />
+                )}
+                <Row label="Service total" value={formatMoney(serviceTotal, currency)} strong />
+                {deposit > 0 && (
+                  <Row label="Deposit paid" value={formatMoney(deposit, currency)} />
+                )}
+                {balancePaid > 0 && (
+                  <Row label="Balance" value={formatMoney(balancePaid, currency)} />
+                )}
+                {balanceDue > 0 && (
+                  <Row label="Balance due" value={formatMoney(balanceDue, currency)} />
+                )}
+                {tip > 0 && <Row label="Tip" value={`+ ${formatMoney(tip, currency)}`} />}
+                <Row label="Total" value={formatMoney(ticketTotal, currency)} strong />
+              </Section>
+
+              {/* THE MONEY — what she paid and what landed, fee included. Every
+                  line is visible so the total reconciles on its face. */}
+              <Section title="The money">
+                {deposit > 0 && (
+                  <Row label="Deposit" value={formatMoney(deposit, currency)} />
+                )}
+                {stripeCharge > 0 && (
+                  <Row
+                    label={
+                      fee > 0
+                        ? (tip > 0 ? "Balance + tip (Stripe)" : "Balance (Stripe)")
+                        : (tip > 0 ? "Balance + tip" : "Balance")
+                    }
+                    value={formatMoney(stripeCharge, currency)}
+                  />
+                )}
+                {fee > 0 && (
+                  <Row label="Stripe fee" value={`− ${formatMoney(fee, currency)}`} />
+                )}
+                <Row label="In your bank" value={formatMoney(inBank, currency)} strong />
+              </Section>
+
+              {txn.refunds.length > 0 && (
+                <Section title="Refund history">
+                  {txn.refunds.map((r) => (
+                    <Row
+                      key={r.id}
+                      label={`${fmtRowDate(r.date)}${r.reason ? ` · ${r.reason}` : ""}`}
+                      value={`− ${formatMoney(r.amount, currency)}`}
+                    />
+                  ))}
+                </Section>
+              )}
+            </>
           )}
-
-          <Section title="Payment breakdown">
-            {txn.depositAmount > 0 && (
-              <Row label="Deposit amount" value={formatMoney(txn.depositAmount, currency)} />
-            )}
-            {txn.balancePaid > 0 && (
-              <Row label="Balance paid" value={formatMoney(txn.balancePaid, currency)} />
-            )}
-            {txn.tip > 0 && (
-              <Row label="Tip amount" value={formatMoney(txn.tip, currency)} />
-            )}
-            {txn.fee > 0 && (
-              <Row label="Stripe fee" value={`− ${formatMoney(txn.fee, currency)}`} />
-            )}
-            <Row
-              label="Net payout"
-              value={formatMoney(netPayout, currency)}
-              strong
-            />
-          </Section>
-
-          <Section title="Refund history">
-            {txn.refunds.length === 0 ? (
-              <Row label="Refunds" value="None" muted />
-            ) : (
-              txn.refunds.map((r) => (
-                <Row
-                  key={r.id}
-                  label={`${fmtRowDate(r.date)}${r.reason ? ` · ${r.reason}` : ""}`}
-                  value={`− ${formatMoney(r.amount, currency)}`}
-                />
-              ))
-            )}
-          </Section>
 
           {txn.note && (
             <Section title="Note">
