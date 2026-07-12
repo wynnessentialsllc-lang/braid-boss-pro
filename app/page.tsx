@@ -36686,11 +36686,16 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
                   style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
-                      {ledgerLabel(r)}
+                    <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>
+                      {ledgerLabel(r)}{r.reason === "send" && r.recipient ? ` · ${r.recipient}` : ""}
                     </p>
                     <p className="text-[11px]" style={{ color: C.muted }}>
-                      {r.createdAt ? new Date(r.createdAt).toLocaleDateString() : ""}
+                      {r.createdAt
+                        ? new Date(r.createdAt).toLocaleString([], {
+                            month: "short", day: "numeric",
+                            hour: "numeric", minute: "2-digit",
+                          })
+                        : ""}
                     </p>
                   </div>
                   <span
@@ -36730,6 +36735,15 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
                 {openEntry.delta >= 0 ? "+" : ""}{openEntry.delta} credit{Math.abs(openEntry.delta) === 1 ? "" : "s"}
               </span>
             </div>
+
+            {openEntry.reason === "send" && openEntry.recipient && (
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+                  Sent to
+                </p>
+                <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>{openEntry.recipient}</p>
+              </div>
+            )}
 
             {openEntry.reason === "send" && (
               <div>
