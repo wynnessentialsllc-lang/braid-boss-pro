@@ -21391,9 +21391,21 @@ const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: 
             <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
               <span>Deposit paid</span><span className="font-mono">{formatCurrency(receipt.depositPaid, currency)}</span>
             </div>
-            <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
-              <span>Balance due</span><span className="font-mono">{formatCurrency(receipt.balanceDue, currency)}</span>
-            </div>
+            {receipt.balancePaid ? (
+              <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
+                <span>Balance paid</span><span className="font-mono">{formatCurrency(receipt.balancePaid, currency)}</span>
+              </div>
+            ) : null}
+            {receipt.balanceDue > 0 && (
+              <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
+                <span>Balance due</span><span className="font-mono">{formatCurrency(receipt.balanceDue, currency)}</span>
+              </div>
+            )}
+            {receipt.tip ? (
+              <div className="flex justify-between text-sm" style={{ color: C.success }}>
+                <span>Tip</span><span className="font-mono">{formatCurrency(receipt.tip, currency)}</span>
+              </div>
+            ) : null}
             {!isInvoice && (
               <div className="flex justify-between pt-2 mt-2 text-base font-bold" style={{ borderTop: `1px solid ${C.hairline}`, color: C.espresso }}>
                 <span>Amount collected</span>
@@ -21402,6 +21414,18 @@ const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: 
                 </span>
               </div>
             )}
+            {!isInvoice && receipt.stripeFee ? (
+              <>
+                <div className="flex justify-between text-xs" style={{ color: C.muted }}>
+                  <span>Stripe fee</span><span className="font-mono">− {formatCurrency(receipt.stripeFee, currency)}</span>
+                </div>
+                {receipt.netPayout != null && (
+                  <div className="flex justify-between text-sm font-semibold" style={{ color: C.coffee }}>
+                    <span>Net payout</span><span className="font-mono">{formatCurrency(receipt.netPayout, currency)}</span>
+                  </div>
+                )}
+              </>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2 mt-4 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
             {receipt.paymentStatus && <Pill tone={receipt.paymentStatus === "paid" ? "success" : receipt.paymentStatus === "partial" ? "gold" : "warning"}>{String(receipt.paymentStatus).toUpperCase()}</Pill>}
