@@ -8,6 +8,48 @@ import {
   reconcilePaidAppointments,
 } from "./transactions";
 
+// Regression for "Stripe payment shows as Cash": an appointment whose
+// balance was paid by card must read as a Stripe payment (so it lands in the
+// Stripe filter, not Cash), even if paymentMethod still says "cash".
+describe("deriveAppointmentTransactions — Stripe method detection", () => {
+  it("labels a balance-paid-by-card appointment as Stripe despite a cash paymentMethod", () => {
+    const [row] = deriveAppointmentTransactions([
+      {
+        id: "appt_claudia",
+        clientName: "Claudia Vine",
+        totalPrice: 304.74,
+        depositPaid: 304.74, // legacy-flattened → single "full" row
+        balanceDue: 0,
+        balance_paid: true,
+        paymentStatus: "paid",
+        paymentMethod: "cash", // stale default
+        tipAmount: 30,
+        stripeFee: 18.85,
+        stripeNet: 290.89,
+        balance_payment_intent_id: "pi_claudia",
+      },
+    ]);
+    expect(row.type).toBe("full");
+    expect(row.method).toBe("stripe");
+    expect(row.fee).toBe(18.85);
+  });
+
+  it("keeps a genuine cash payment as cash", () => {
+    const [row] = deriveAppointmentTransactions([
+      {
+        id: "appt_cash",
+        clientName: "Zee",
+        totalPrice: 150,
+        depositPaid: 150,
+        balanceDue: 0,
+        paymentStatus: "paid",
+        paymentMethod: "cash",
+      },
+    ]);
+    expect(row.method).toBe("cash");
+  });
+});
+
 // computeSummary reports revenue NET of Stripe fees — what actually lands.
 describe("computeSummary net of Stripe fees", () => {
   it("subtracts the Stripe fee from the period revenue", () => {
