@@ -195,7 +195,19 @@ export const deriveAppointmentTransactions = (appointments: any[]): Transaction[
     const balanceDue = roundCents(parseMoney(a.balanceDue));
     const balancePaidFlag =
       a.balance_paid === true || a.balancePaid === true || a.paymentStatus === "paid";
-    const method = normalizeMethod(a.paymentMethod || (a.stripe_payment_intent_id ? "stripe" : "cash"));
+    // A payment that actually went through Stripe should read as Stripe even
+    // if the appointment's paymentMethod still says "cash" (a stale default):
+    // a deposit/balance payment_intent or a real Stripe fee proves a card
+    // charge happened. Otherwise honor the recorded method. Per-row so a cash
+    // deposit + card balance each read correctly.
+    const recordedMethod = normalizeMethod(a.paymentMethod || "cash");
+    const depositViaStripe = !!a.stripe_payment_intent_id;
+    const balanceViaStripe =
+      !!a.balance_payment_intent_id || parseMoney(a.stripeFee) > 0 || parseMoney(a.stripeNet) > 0;
+    const depositMethod: PaymentMethod = depositViaStripe ? "stripe" : recordedMethod;
+    const finalMethod: PaymentMethod = balanceViaStripe ? "stripe" : recordedMethod;
+    const fullMethod: PaymentMethod =
+      depositViaStripe || balanceViaStripe ? "stripe" : recordedMethod;
     const tip = apptTip(a);
     const addOns = apptAddOns(a);
     const clientName = apptClientName(a);
@@ -239,7 +251,7 @@ export const deriveAppointmentTransactions = (appointments: any[]): Transaction[
         id: `appt-full-${apptId}`,
         source: "appointment",
         type: "full",
-        method,
+        method: fullMethod,
         amount,
         tip,
         fee: stripeFee,
@@ -259,7 +271,7 @@ export const deriveAppointmentTransactions = (appointments: any[]): Transaction[
         id: `appt-deposit-${apptId}`,
         source: "appointment",
         type: "deposit",
-        method,
+        method: depositMethod,
         amount: deposit,
         tip: 0,
         net: deposit,
@@ -277,7 +289,7 @@ export const deriveAppointmentTransactions = (appointments: any[]): Transaction[
         id: `appt-final-${apptId}`,
         source: "appointment",
         type: "final",
-        method,
+        method: finalMethod,
         amount: balancePaidAmount,
         tip,
         fee: stripeFee,
@@ -543,6 +555,8 @@ export const reconcilePaidAppointments = (
         seen.add(key);
         out.push({
           ...a,
+          // This was a card charge, so correct a stale "cash" method too.
+          paymentMethod: normalizeMethod(a.paymentMethod) === "card" ? a.paymentMethod : "stripe",
           stripeFee: s.fee,
           stripeNet: s.net > 0 ? s.net : parseMoney(a.stripeNet),
         });
@@ -579,6 +593,10 @@ export const reconcilePaidAppointments = (
       balanceDue: 0,
       paymentStatus: "paid",
       paymentDate: a.paymentDate || todayYMD,
+      // The balance was collected via Stripe, so label it Stripe (not a stale
+      // "cash" default) — keeps it out of the Cash filter and in the Stripe
+      // filter, and makes the Stripe fee on the row consistent.
+      paymentMethod: normalizeMethod(a.paymentMethod) === "card" ? a.paymentMethod : "stripe",
       status: a.status === "scheduled" || a.status === "confirmed" ? "completed" : a.status,
       tipAmount: a.tipAmount != null ? a.tipAmount : s.tip > 0 ? s.tip : 0,
       // Stamp the balance payment_intent so mergeTransactions collapses the

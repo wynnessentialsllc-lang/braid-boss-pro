@@ -281,6 +281,23 @@ function Inner() {
     [],
   );
 
+  // Gross / fees / net of exactly the rows currently shown — so a filtered
+  // view can reconcile the card (net) against the transaction rows (gross)
+  // and the −Stripe-fee gap doesn't read as a math error.
+  const visibleTotals = useMemo(() => {
+    let gross = 0;
+    let fees = 0;
+    for (const t of visible) {
+      gross += t.amount + (t.amount > 0 ? t.tip : 0);
+      if (t.amount > 0) fees += t.fee || 0;
+    }
+    const r = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+    return { gross: r(gross), fees: r(fees), net: r(gross - fees) };
+  }, [visible]);
+
+  const periodLabel =
+    period === "today" ? "Today" : period === "week" ? "This week" : period === "month" ? "This month" : "";
+
   const flashToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2600);
@@ -544,6 +561,37 @@ function Inner() {
           {visible.length} transaction{visible.length === 1 ? "" : "s"}
         </span>
       </div>
+
+      {/* When a period is active, reconcile the rows (gross) to the card
+          (net) so the −Stripe-fee gap is explained, not confusing. */}
+      {period !== "all" && (
+        <div
+          style={{
+            display: "flex", alignItems: "center", flexWrap: "wrap", gap: "4px 10px",
+            padding: "10px 14px", marginTop: 4, borderRadius: 12,
+            background: C.ivory, border: `1px solid ${C.hairline}`,
+            fontSize: 12, color: C.coffee,
+          }}
+        >
+          <strong style={{ color: C.espresso }}>{periodLabel}</strong>
+          <span>Collected {formatMoney(visibleTotals.gross, currency)}</span>
+          {visibleTotals.fees > 0 && (
+            <span style={{ color: C.muted }}>− Stripe fees {formatMoney(visibleTotals.fees, currency)}</span>
+          )}
+          <span style={{ fontWeight: 700, color: C.espresso }}>= Net {formatMoney(visibleTotals.net, currency)}</span>
+          <button
+            type="button"
+            onClick={() => setPeriod("all")}
+            style={{
+              marginLeft: "auto", background: "transparent", border: 0,
+              color: C.gold, fontWeight: 600, fontSize: 12, cursor: "pointer",
+              fontFamily: FONT_BODY,
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* Transaction list */}
       <div

@@ -124,74 +124,95 @@ export async function POST(req: Request) {
 
   const transactions = charges
     .filter((c: any) => c?.status === "succeeded" || c?.paid)
-    .map((c: any) => {
+    .flatMap((c: any) => {
       const bt = c?.balance_transaction;
       const fee = bt && typeof bt === "object" ? cents(bt.fee) : 0;
       const net = bt && typeof bt === "object" ? cents(bt.net) : cents(c.amount) - fee;
       const meta = c?.metadata || {};
       const tipCents = Number(meta.tip_cents ?? meta.tip ?? 0);
       const refundList = Array.isArray(c?.refunds?.data) ? c.refunds.data : [];
-      const refundedTotal = cents(c?.amount_refunded);
-      // A fully-refunded charge is surfaced as a single "Refund" row, so
-      // it must be dated when the refund actually happened — the latest
-      // refund's timestamp — not when the original charge was created.
-      const isFullyRefunded = refundedTotal > 0 && refundedTotal >= cents(c.amount);
-      const latestRefundCreated = refundList.reduce(
-        (max: number, r: any) => Math.max(max, Number(r?.created) || 0),
-        0,
-      );
-      const rowCreatedUnix = isFullyRefunded && latestRefundCreated > 0
-        ? latestRefundCreated
-        : (c.created || 0);
       const bookingRequestId = meta.booking_request_id || meta.bookingRequestId || null;
       const br = bookingRequestId ? bookingRequestMap.get(String(bookingRequestId)) : null;
-      return {
+      // Prefer the booking's client over the card's billing name, and the
+      // booked service over Stripe's description.
+      const clientName =
+        br?.client_name ||
+        c?.billing_details?.name ||
+        meta.client_name ||
+        meta.clientName ||
+        "Stripe customer";
+      const serviceName =
+        br?.service_name_snapshot ||
+        br?.service_name ||
+        c?.description ||
+        meta.service_name ||
+        meta.serviceName ||
+        "Stripe payment";
+      const paymentIntent = typeof c?.payment_intent === "string" ? c.payment_intent : null;
+      const appointmentId =
+        meta.appointment_id ||
+        meta.appointmentId ||
+        br?.appointment_id ||
+        bookingRequestId ||
+        null;
+      const paymentType =
+        meta.type === "balance_payment"
+          ? "final"
+          : meta.booking_request_id
+            ? "deposit"
+            : "full";
+      const refunds = refundList.map((r: any) => ({
+        id: String(r.id),
+        amount: cents(r.amount),
+        reason: r.reason || undefined,
+        date: new Date((r.created || 0) * 1000).toISOString(),
+      }));
+
+      // Always record the charge as income, dated when it was charged, and
+      // record each refund as its OWN line, dated when it was refunded. A
+      // paid-then-refunded charge therefore nets to zero (income in, refund
+      // out) instead of showing as pure money-out — which used to wipe out a
+      // later re-payment. The charge row keeps the refund history for the
+      // detail view; the refund rows carry the ledger entries.
+      const tipAmount = Number.isFinite(tipCents) && tipCents > 0 ? Math.round(tipCents) / 100 : 0;
+      const chargeRow = {
         id: String(c.id),
-        amount: cents(c.amount),
+        // The Stripe amount already includes the tip; carry the tip
+        // separately and exclude it from `amount` so amount + tip (how the
+        // app sums a row) equals the charge total, not double the tip.
+        amount: Math.max(0, cents(c.amount) - tipAmount),
         fee,
         net,
-        tip: Number.isFinite(tipCents) && tipCents > 0 ? Math.round(tipCents) / 100 : 0,
-        paid_at: new Date(rowCreatedUnix * 1000).toISOString(),
-        // Prefer the booking's client over the card's billing name: the
-        // person being served is who the stylist recognizes, not whoever
-        // happened to pay (a friend/parent paying a deposit is common).
-        client_name:
-          br?.client_name ||
-          c?.billing_details?.name ||
-          meta.client_name ||
-          meta.clientName ||
-          "Stripe customer",
-        service_name:
-          br?.service_name_snapshot ||
-          br?.service_name ||
-          c?.description ||
-          meta.service_name ||
-          meta.serviceName ||
-          "Stripe payment",
-        payment_intent: typeof c?.payment_intent === "string" ? c.payment_intent : null,
+        tip: tipAmount,
+        paid_at: new Date((c.created || 0) * 1000).toISOString(),
+        client_name: clientName,
+        service_name: serviceName,
+        payment_intent: paymentIntent,
         charge: String(c.id),
-        // Real appointment id when the booking has been approved; fall back
-        // to the booking_request id so a still-pending deposit stays linked.
-        appointment_id:
-          meta.appointment_id ||
-          meta.appointmentId ||
-          br?.appointment_id ||
-          bookingRequestId ||
-          null,
-        payment_type:
-          meta.type === "balance_payment"
-            ? "final"
-            : meta.booking_request_id
-              ? "deposit"
-              : "full",
-        type: isFullyRefunded ? "refund" : "charge",
-        refunds: refundList.map((r: any) => ({
-          id: String(r.id),
-          amount: cents(r.amount),
-          reason: r.reason || undefined,
-          date: new Date((r.created || 0) * 1000).toISOString(),
-        })),
+        appointment_id: appointmentId,
+        payment_type: paymentType,
+        type: "charge",
+        refunds,
       };
+      const refundRows = refundList.map((r: any) => ({
+        id: `${String(c.id)}_re_${String(r.id)}`,
+        amount: cents(r.amount),
+        fee: 0,
+        // A refund returns the charged amount; Stripe keeps the fee, so net
+        // out is the full refund.
+        net: cents(r.amount),
+        tip: 0,
+        paid_at: new Date((r.created || 0) * 1000).toISOString(),
+        client_name: clientName,
+        service_name: serviceName,
+        payment_intent: paymentIntent,
+        charge: String(c.id),
+        appointment_id: appointmentId,
+        payment_type: "refund",
+        type: "refund",
+        refunds: [],
+      }));
+      return [chargeRow, ...refundRows];
     });
 
   return NextResponse.json({ transactions, connected: true });
