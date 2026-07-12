@@ -1,11 +1,50 @@
 import { describe, it, expect } from "vitest";
 import {
+  computeSummary,
   deriveAppointmentTransactions,
   fromManualRecord,
   fromStripeRecord,
   mergeTransactions,
   reconcilePaidAppointments,
 } from "./transactions";
+
+// computeSummary reports revenue NET of Stripe fees — what actually lands.
+describe("computeSummary net of Stripe fees", () => {
+  it("subtracts the Stripe fee from the period revenue", () => {
+    const now = new Date("2026-07-15T12:00:00.000Z");
+    const paid = fromStripeRecord({
+      id: "ch_1",
+      amount: 304.74,
+      fee: 18.85,
+      net: 285.89,
+      type: "charge",
+      payment_type: "full",
+      payment_intent: "pi_1",
+      paid_at: "2026-07-15T10:00:00.000Z",
+    });
+    const s = computeSummary([paid], [], now);
+    // $304.74 collected − $18.85 fee = $285.89 net.
+    expect(s.monthGross).toBe(304.74);
+    expect(s.monthFees).toBe(18.85);
+    expect(s.todayRevenue).toBe(285.89);
+    expect(s.monthRevenue).toBe(285.89);
+  });
+
+  it("leaves cash revenue (no fee) unchanged", () => {
+    const now = new Date("2026-07-15T12:00:00.000Z");
+    const cash = fromManualRecord({
+      id: "m1",
+      clientName: "Zee",
+      amount: 150,
+      paymentType: "full",
+      paymentMethod: "cash",
+      paidAt: "2026-07-15T10:00:00.000Z",
+    });
+    const s = computeSummary([cash], [], now);
+    expect(s.monthFees).toBe(0);
+    expect(s.todayRevenue).toBe(150);
+  });
+});
 
 // Regression for the "unknown booking" duplicate: a Stripe deposit charge
 // and the appointment-derived deposit row describe the same money and must
@@ -386,9 +425,30 @@ describe("reconcilePaidAppointments", () => {
     expect(Math.round(collected * 100) / 100).toBe(304.74);
   });
 
-  it("leaves an already-paid appointment alone (idempotent)", () => {
-    const paid = { ...claudiaAppt(), paymentStatus: "paid", balance_paid: true, balanceDue: 0 };
+  it("leaves an already-paid appointment that already has its fee alone (idempotent)", () => {
+    const paid = {
+      ...claudiaAppt(),
+      paymentStatus: "paid",
+      balance_paid: true,
+      balanceDue: 0,
+      stripeFee: 18.85,
+      stripeNet: 290.89,
+    };
     expect(reconcilePaidAppointments([paid], [claudiaBalanceCharge()], "2026-07-11")).toHaveLength(0);
+  });
+
+  it("back-fills the Stripe fee on an appointment the webhook paid without it", () => {
+    // The balance webhook marks it paid but doesn't know the Stripe fee, so
+    // the record has no fee and the net-of-fees totals would be wrong. The
+    // live charge supplies it on the next reconcile.
+    const paidNoFee = { ...claudiaAppt(), paymentStatus: "paid", balance_paid: true, balanceDue: 0 };
+    const [fixed] = reconcilePaidAppointments([paidNoFee], [claudiaBalanceCharge()], "2026-07-11");
+    expect(fixed).toBeTruthy();
+    expect(fixed.stripeFee).toBe(18.85);
+    expect(fixed.stripeNet).toBe(290.89);
+    // It doesn't disturb the existing paid state.
+    expect(fixed.paymentStatus).toBe("paid");
+    expect(fixed.depositPaid).toBe(25);
   });
 
   it("does not flip a booking when the charge only partially covers the balance", () => {
