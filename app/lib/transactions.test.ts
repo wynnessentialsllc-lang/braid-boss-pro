@@ -72,6 +72,42 @@ describe("computeSummary net of Stripe fees", () => {
     expect(s.monthRevenue).toBe(285.89);
   });
 
+  it("a paid → refunded → paid-again nets to the successful payment, not to the refund", () => {
+    const now = new Date("2026-07-11T23:30:00.000Z");
+    // The route now emits, per charge, a +charge row and a separate −refund
+    // row (amount excludes tip; tip is carried separately).
+    const charge1 = fromStripeRecord({
+      id: "ch1", amount: 279.74, tip: 30, fee: 18.85, net: 290.89, type: "charge",
+      payment_type: "final", payment_intent: "pi_1", appointment_id: "appt_c",
+      paid_at: "2026-07-11T10:00:00.000Z", client_name: "Claudia Vine",
+    });
+    const refund1 = fromStripeRecord({
+      id: "ch1_re", amount: 309.74, type: "refund", payment_type: "refund",
+      payment_intent: "pi_1", appointment_id: "appt_c",
+      paid_at: "2026-07-11T11:00:00.000Z", client_name: "Claudia Vine",
+    });
+    const charge2 = fromStripeRecord({
+      id: "ch2", amount: 279.74, tip: 30, fee: 18.85, net: 290.89, type: "charge",
+      payment_type: "final", payment_intent: "pi_2", appointment_id: "appt_c",
+      paid_at: "2026-07-11T12:00:00.000Z", client_name: "Claudia Vine",
+    });
+    // The appointment, paid, linked to the successful re-payment (pi_2).
+    const appt = {
+      id: "appt_c", clientName: "Claudia Vine", totalPrice: 304.74, depositPaid: 304.74,
+      balanceDue: 0, balance_paid: true, paymentStatus: "paid", tipAmount: 30,
+      stripeFee: 18.85, balance_payment_intent_id: "pi_2",
+    };
+    const merged = mergeTransactions(deriveAppointmentTransactions([appt]), [charge1, refund1, charge2], []);
+    const s = computeSummary(merged, [appt], now);
+    // charge1 (+$309.74) and its refund (−$309.74) cancel; charge2 folds into
+    // the appointment ($334.74). The successful payment survives — the old
+    // bug netted this to ~$25 by dropping charge1's income.
+    expect(s.monthGross).toBe(334.74);
+    // Net = $334.74 − the two Stripe fees ($18.85 each; the refunded charge's
+    // fee is a real, non-recovered loss).
+    expect(s.monthRevenue).toBe(297.04);
+  });
+
   it("leaves cash revenue (no fee) unchanged", () => {
     const now = new Date("2026-07-15T12:00:00.000Z");
     const cash = fromManualRecord({
