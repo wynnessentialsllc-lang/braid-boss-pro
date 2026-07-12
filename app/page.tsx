@@ -435,7 +435,7 @@ import {
   type SaleTender,
 } from "./lib/boss-checkout";
 import { buildDayReport } from "./lib/day-report";
-import { computeShopSales, shopSalesInRange, txnStream, txnIncomeAmount, isCheckoutSale } from "./lib/shop-sales";
+import { computeShopSales, shopSalesInRange, txnStream, txnIncomeAmount, isCheckoutSale, localDayKey } from "./lib/shop-sales";
 import {
   type ClientLike,
   matchClientByContact,
@@ -3969,6 +3969,10 @@ type KpiDetailKind =
   | "monthEarned"
   | "nextMonth";
 
+// One shop-money line (Boss Checkout sale or paid online order) itemised
+// in the Today / Week revenue drill-downs.
+type ShopSaleRow = { id: string; client: string; label: string; amount: number; date: string };
+
 // Label for next-month views — e.g. "Expected in July". Computed from
 // today so the title always names the upcoming calendar month.
 const nextMonthName = (): string => {
@@ -3993,7 +3997,7 @@ const KPI_TITLES: Record<KpiDetailKind, string> = {
 };
 
 const KpiDetailSheet = ({
-  kind, onClose, appointments, clients, currency, revenueStats, onOpenAppointment, markAppointmentPaid,
+  kind, onClose, appointments, clients, currency, revenueStats, shopSales, shopRows, onOpenAppointment, markAppointmentPaid,
 }: {
   kind: KpiDetailKind | null;
   onClose: () => void;
@@ -4001,6 +4005,8 @@ const KpiDetailSheet = ({
   clients: any[];
   currency: string;
   revenueStats: DashboardRevenue;
+  shopSales?: { today: number; week: number };
+  shopRows?: { today: ShopSaleRow[]; week: ShopSaleRow[] };
   onOpenAppointment: (a: any) => void;
   markAppointmentPaid: (a: any) => Promise<void> | void;
 }) => {
@@ -4088,30 +4094,72 @@ const KpiDetailSheet = ({
     </Card>
   );
 
+  // Non-appointment money — a Boss Checkout sale or a paid online order —
+  // rendered beneath the appointment rows in the Today / Week drill-downs so
+  // the sheet itemises the shop sales the tiles now fold into their totals.
+  const ShopRow = ({ r }: { r: ShopSaleRow }) => (
+    <Card className="p-3.5 mb-2 flex items-center justify-between">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 mb-1">
+          <Pill tone="gold">Shop</Pill>
+        </div>
+        <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{r.client}</p>
+        <p className="text-[11px] mt-0.5 truncate" style={{ color: C.muted }}>{r.label} · {fmtDate(r.date)}</p>
+      </div>
+      <span className="text-[13px] font-semibold tabular-nums shrink-0" style={{ color: C.goldDeep }}>
+        {fmtMoney(r.amount, currency)}
+      </span>
+    </Card>
+  );
+
   const renderBody = () => {
     if (!open) return null;
     switch (kind!) {
       case "today": {
         const list = todayCompletedAppts(appointments, today);
-        const total = list.reduce((s, a) => s + reportTicketTotal(a), 0);
+        const shop = shopRows?.today ?? [];
+        const apptTotal = list.reduce((s, a) => s + reportTicketTotal(a), 0);
+        // Add shop money (Checkout + online) from the same authoritative
+        // figure the tile uses, so the sheet's Total always matches it.
+        const total = apptTotal + (shopSales?.today ?? 0);
+        const hint = [
+          `${list.length} completed`,
+          shop.length > 0 ? `${shop.length} shop sale${shop.length === 1 ? "" : "s"}` : "",
+        ].filter(Boolean).join(" · ");
         return (
           <>
-            <Hero value={fmtMoney(total, currency)} hint={`${list.length} completed today`} />
-            {list.length === 0 ? (
-              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No completed bookings yet today.</p></Card>
-            ) : list.map(a => <ApptRow key={a.id} a={a} tone="success" />)}
+            <Hero value={fmtMoney(total, currency)} hint={hint || "Nothing yet today"} />
+            {list.length === 0 && shop.length === 0 ? (
+              <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>No completed bookings or shop sales yet today.</p></Card>
+            ) : (
+              <>
+                {list.map(a => <ApptRow key={a.id} a={a} tone="success" />)}
+                {shop.map(r => <ShopRow key={r.id} r={r} />)}
+              </>
+            )}
           </>
         );
       }
       case "week": {
         const list = weekRevenueAppts(appointments, today);
-        const total = list.reduce((s, a) => s + reportTicketTotal(a), 0);
+        const shop = shopRows?.week ?? [];
+        const apptTotal = list.reduce((s, a) => s + reportTicketTotal(a), 0);
+        const total = apptTotal + (shopSales?.week ?? 0);
+        const hint = [
+          `${list.length} appointment${list.length === 1 ? "" : "s"}`,
+          shop.length > 0 ? `${shop.length} shop sale${shop.length === 1 ? "" : "s"}` : "",
+        ].filter(Boolean).join(" · ");
         return (
           <>
-            <Hero value={fmtMoney(total, currency)} hint={`${list.length} appointment${list.length === 1 ? "" : "s"} this week`} />
-            {list.length === 0 ? (
+            <Hero value={fmtMoney(total, currency)} hint={`${hint} this week`} />
+            {list.length === 0 && shop.length === 0 ? (
               <Card className="p-4 text-center"><p className="text-[12px]" style={{ color: C.muted }}>Nothing on the books for this week yet.</p></Card>
-            ) : list.map(a => <ApptRow key={a.id} a={a} />)}
+            ) : (
+              <>
+                {list.map(a => <ApptRow key={a.id} a={a} />)}
+                {shop.map(r => <ShopRow key={r.id} r={r} />)}
+              </>
+            )}
           </>
         );
       }
@@ -5542,6 +5590,44 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
     [transactions, store.productOrders, today],
   );
 
+  // Itemised shop money (Boss Checkout sales + paid online orders) for the
+  // Today / Week revenue drill-downs, bucketed the same way computeShopSales
+  // buckets its totals — so the detail sheet lists exactly what the tiles
+  // now fold into their headline numbers.
+  const shopRows = useMemo(() => {
+    const txnRow = (t: any) => ({
+      id: String(t.id ?? uid()),
+      client: String(t.clientName || t.customerName || "Walk-in"),
+      label: String(t.serviceName || "Shop sale"),
+      amount: txnIncomeAmount(t),
+      date: localDayKey(t.date),
+    });
+    const shopTxns = ((transactions as any[]) || [])
+      .filter((t) => txnStream(t) === "shop" && txnIncomeAmount(t) > 0)
+      .map(txnRow);
+    const orderRow = (o: any) => ({
+      id: String(o.id ?? o.stripe_session_id ?? uid()),
+      client: String(o.customer_name || o.client_name || "Online order"),
+      label: "Online store order",
+      amount: Number(o.amount_total) || 0,
+      date: localDayKey(o.paid_at),
+    });
+    const orders = ((store.productOrders as any[]) || [])
+      .filter((o) => String(o?.status || "").toLowerCase() === "paid" && (Number(o?.amount_total) || 0) > 0)
+      .map(orderRow);
+    const all = [...shopTxns, ...orders].filter((r) => r.amount > 0 && r.date);
+    // Sunday-anchored week start, matching shop-sales.ts computeShopSales.
+    const wk = new Date(today + "T00:00:00");
+    wk.setDate(wk.getDate() - wk.getDay());
+    const weekStart = localDateISO(wk);
+    const byDateDesc = (a: { date: string }, b: { date: string }) =>
+      a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+    return {
+      today: all.filter((r) => r.date === today).sort(byDateDesc),
+      week: all.filter((r) => r.date >= weekStart && r.date <= today).sort(byDateDesc),
+    };
+  }, [transactions, store.productOrders, today]);
+
   // Until the first cloud pull lands, the figures below come from a
   // possibly-stale local cache. Show "—" for money rather than flash an
   // out-of-date number that snaps to the real value a second later.
@@ -5795,7 +5881,7 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           greeting={greeting}
           ownerName={business.ownerName?.split(" ")[0] || null}
           today={today}
-          todayRevenue={revenueStats.todayRevenue}
+          todayRevenue={revenueStats.todayRevenue + shopSales.today}
           weekAppts={stats.weekAppts}
           currency={business.currency}
           cloudReady={cloudReady}
@@ -5867,7 +5953,10 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
               // The neutral-when-zero downshift is removed so the
               // tile reads the same whether the day is empty or
               // not — the value itself is the indicator.
-              value={money(revenueStats.todayRevenue)}
+              // Folds in shop sales (Boss Checkout + paid online orders)
+              // so a walk-in rung up at Checkout counts as today's money,
+              // matching the year Total Earnings + monthly goal below.
+              value={money(revenueStats.todayRevenue + shopSales.today)}
               icon={<DollarSign size={16} />}
               tone="success"
               onClick={() => openKpi("today")}
@@ -5875,7 +5964,8 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
             />
             <KpiCard
               label="Week revenue"
-              value={money(stats.weekRevenue)}
+              // Also folds in this week's shop sales (Checkout + online).
+              value={money(stats.weekRevenue + shopSales.week)}
               icon={<ArrowUpRight size={16} />}
               tone="gold"
               onClick={() => openKpi("week")}
@@ -5932,6 +6022,8 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           clients={clients as any[]}
           currency={business.currency || "USD"}
           revenueStats={revenueStats}
+          shopSales={{ today: shopSales.today, week: shopSales.week }}
+          shopRows={shopRows}
           onOpenAppointment={(a) => { closeKpi(); openAppointmentRecord?.(a); }}
           markAppointmentPaid={async (a) => {
             const netTotal = Math.max(0, (Number(a.totalPrice) || 0) - (Number(a.discountAmount) || 0));
