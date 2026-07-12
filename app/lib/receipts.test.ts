@@ -56,6 +56,29 @@ describe("buildReceiptFromAppointment — payment breakdown", () => {
   });
 });
 
+describe("buildReceiptFromAppointment — collapsed deposit (legacy mark-paid)", () => {
+  // An appointment whose deposit_paid was overwritten to the full service
+  // total by an old "mark paid" path. That's not a real deposit, so it must
+  // not render as a full-price deposit line.
+  const rcp = buildReceiptFromAppointment(
+    {
+      id: "a3", totalPrice: 325, discountAmount: 20.26, depositPaid: 304.74,
+      balance_paid: true, paymentStatus: "paid", tipAmount: 30, stripeFee: 18.85,
+    },
+    "receipt", [], "rcp_3",
+  );
+
+  it("ignores a deposit that covers the whole service", () => {
+    expect(rcp.depositPaid).toBe(0);
+    expect(rcp.balancePaid).toBe(304.74);
+  });
+
+  it("still collects and nets the same", () => {
+    expect(rcp.amountCollected).toBe(334.74);
+    expect(rcp.netPayout).toBe(315.89);
+  });
+});
+
 describe("buildReceiptFromAppointment — deposit only (unpaid balance)", () => {
   const rcp = buildReceiptFromAppointment(
     { id: "a2", totalPrice: 200, depositPaid: 50, balanceDue: 150, paymentStatus: "partial" },

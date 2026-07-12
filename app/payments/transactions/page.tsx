@@ -854,7 +854,12 @@ function DetailSheet({
   const serviceTotal = subtotal > 0
     ? money(Math.max(0, subtotal - discount))
     : money((txn.balancePaid > 0 ? txn.balancePaid : Math.max(0, txn.amount)) + txn.depositAmount);
-  const deposit = money(Math.max(0, num(appointment?.depositPaid) || txn.depositAmount));
+  // A deposit is a PARTIAL prepayment. Ignore a recorded value that covers (or
+  // exceeds) the whole service — that's a legacy "mark paid" collapse where
+  // deposit_paid was set to the total, not a real deposit. Showing it would
+  // misreport a $305 deposit on a $305 ticket and leave a $0 balance.
+  const rawDeposit = money(Math.max(0, num(appointment?.depositPaid) || txn.depositAmount));
+  const deposit = rawDeposit > 0 && rawDeposit < serviceTotal ? rawDeposit : 0;
   // Prefer the appointment's tip/fee so the appointment-wide totals read the
   // same whichever of its rows (deposit or balance) is open — tip and fee sit
   // on the balance row, not the deposit.
@@ -879,6 +884,10 @@ function DetailSheet({
   const stripeCharge = money(balancePaid + tip);
   const collected = money(deposit + stripeCharge);
   const inBank = money(collected - fee);
+  // "Balance" only reads right when a deposit was taken first; otherwise the
+  // whole service ran on this one charge.
+  const chargeLabel =
+    `${deposit > 0 ? "Balance" : "Service"}${tip > 0 ? " + tip" : ""}${fee > 0 ? " (Stripe)" : ""}`;
 
   // How much is still refundable: the (positive) charge minus anything
   // already refunded. Stripe charges carry their refund history; other
@@ -1081,14 +1090,7 @@ function DetailSheet({
                   <Row label="Deposit" value={formatMoney(deposit, currency)} />
                 )}
                 {stripeCharge > 0 && (
-                  <Row
-                    label={
-                      fee > 0
-                        ? (tip > 0 ? "Balance + tip (Stripe)" : "Balance (Stripe)")
-                        : (tip > 0 ? "Balance + tip" : "Balance")
-                    }
-                    value={formatMoney(stripeCharge, currency)}
-                  />
+                  <Row label={chargeLabel} value={formatMoney(stripeCharge, currency)} />
                 )}
                 {fee > 0 && (
                   <Row label="Stripe fee" value={`− ${formatMoney(fee, currency)}`} />

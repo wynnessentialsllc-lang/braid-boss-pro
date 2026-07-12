@@ -123,7 +123,11 @@ export const buildReceiptFromAppointment = (
   // so a paid-in-full receipt must reflect post-discount dollars or
   // the math reads as if the client overpaid by the discount amount.
   const total = Math.max(0, subtotal - discountAmount);
-  const deposit = parseMoney(a.depositPaid);
+  const rawDeposit = parseMoney(a.depositPaid);
+  // A deposit is a PARTIAL prepayment. Ignore a value that covers the whole
+  // service — a legacy "mark paid" collapse (deposit_paid set to the total),
+  // not a real deposit — so the receipt doesn't show a full-price "deposit".
+  const deposit = total > 0 && rawDeposit >= total ? 0 : rawDeposit;
   // Paid-in-full is now marked WITHOUT collapsing the deposit into the total,
   // so read it from the paid flags — not from "deposit >= total".
   const paidInFull =
