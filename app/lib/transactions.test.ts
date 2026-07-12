@@ -1,11 +1,50 @@
 import { describe, it, expect } from "vitest";
 import {
+  computeSummary,
   deriveAppointmentTransactions,
   fromManualRecord,
   fromStripeRecord,
   mergeTransactions,
   reconcilePaidAppointments,
 } from "./transactions";
+
+// computeSummary reports revenue NET of Stripe fees — what actually lands.
+describe("computeSummary net of Stripe fees", () => {
+  it("subtracts the Stripe fee from the period revenue", () => {
+    const now = new Date("2026-07-15T12:00:00.000Z");
+    const paid = fromStripeRecord({
+      id: "ch_1",
+      amount: 304.74,
+      fee: 18.85,
+      net: 285.89,
+      type: "charge",
+      payment_type: "full",
+      payment_intent: "pi_1",
+      paid_at: "2026-07-15T10:00:00.000Z",
+    });
+    const s = computeSummary([paid], [], now);
+    // $304.74 collected − $18.85 fee = $285.89 net.
+    expect(s.monthGross).toBe(304.74);
+    expect(s.monthFees).toBe(18.85);
+    expect(s.todayRevenue).toBe(285.89);
+    expect(s.monthRevenue).toBe(285.89);
+  });
+
+  it("leaves cash revenue (no fee) unchanged", () => {
+    const now = new Date("2026-07-15T12:00:00.000Z");
+    const cash = fromManualRecord({
+      id: "m1",
+      clientName: "Zee",
+      amount: 150,
+      paymentType: "full",
+      paymentMethod: "cash",
+      paidAt: "2026-07-15T10:00:00.000Z",
+    });
+    const s = computeSummary([cash], [], now);
+    expect(s.monthFees).toBe(0);
+    expect(s.todayRevenue).toBe(150);
+  });
+});
 
 // Regression for the "unknown booking" duplicate: a Stripe deposit charge
 // and the appointment-derived deposit row describe the same money and must

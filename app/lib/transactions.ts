@@ -630,10 +630,10 @@ export type Summary = {
   tips: number;
   deposits: number;
   outstanding: number;
-  // Stripe processing fees for the month, and the true net that landed
-  // after them (monthRevenue − monthFees) — what actually hits the bank.
+  // Stripe processing fees for the month, and the gross-before-fees figure.
+  // The revenue fields above are already NET of fees.
   monthFees: number;
-  monthNet: number;
+  monthGross: number;
 };
 
 // Local day boundaries so "today" matches the stylist's wall clock.
@@ -659,6 +659,8 @@ export const computeSummary = (
   let month = 0;
   let tips = 0;
   let deposits = 0;
+  let todayFees = 0;
+  let weekFees = 0;
   let monthFees = 0;
 
   for (const t of txns) {
@@ -666,14 +668,15 @@ export const computeSummary = (
     if (Number.isNaN(ts)) continue;
     // Revenue = collected money (refunds reduce it via signed amount).
     const gross = t.amount + (t.amount > 0 ? t.tip : 0);
-    if (ts >= dayStart) today += gross;
-    if (ts >= weekStart) week += gross;
-    if (ts >= monthStart) month += gross;
+    // Stripe processing fee on collected (positive) money — what Stripe
+    // skims before the payout reaches the bank. Subtracted below so the
+    // revenue figures read as the true net that lands.
+    const fee = t.amount > 0 ? t.fee || 0 : 0;
+    if (ts >= dayStart) { today += gross; todayFees += fee; }
+    if (ts >= weekStart) { week += gross; weekFees += fee; }
+    if (ts >= monthStart) { month += gross; monthFees += fee; }
     if (t.amount > 0) tips += t.tip;
     if (t.type === "deposit" && t.amount > 0) deposits += t.amount;
-    // Stripe processing fees on collected (positive) money this month —
-    // what Stripe skims before the payout reaches the bank.
-    if (ts >= monthStart && t.amount > 0) monthFees += t.fee || 0;
   }
 
   // Outstanding = sum of balance still due on non-cancelled, unpaid
@@ -688,14 +691,15 @@ export const computeSummary = (
   }
 
   return {
-    todayRevenue: roundCents(today),
-    weekRevenue: roundCents(week),
-    monthRevenue: roundCents(month),
+    // Revenue figures are NET of Stripe fees — what actually lands.
+    todayRevenue: roundCents(today - todayFees),
+    weekRevenue: roundCents(week - weekFees),
+    monthRevenue: roundCents(month - monthFees),
     tips: roundCents(tips),
     deposits: roundCents(deposits),
     outstanding: roundCents(outstanding),
     monthFees: roundCents(monthFees),
-    monthNet: roundCents(month - monthFees),
+    monthGross: roundCents(month),
   };
 };
 

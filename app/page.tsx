@@ -4009,7 +4009,7 @@ const KPI_TITLES: Record<KpiDetailKind, string> = {
 };
 
 const KpiDetailSheet = ({
-  kind, onClose, appointments, clients, currency, revenueStats, shopSales, shopRows, onOpenAppointment, markAppointmentPaid,
+  kind, onClose, appointments, clients, currency, revenueStats, shopSales, shopRows, stripeFees, onOpenAppointment, markAppointmentPaid,
 }: {
   kind: KpiDetailKind | null;
   onClose: () => void;
@@ -4019,6 +4019,7 @@ const KpiDetailSheet = ({
   revenueStats: DashboardRevenue;
   shopSales?: { today: number; week: number };
   shopRows?: { today: ShopSaleRow[]; week: ShopSaleRow[] };
+  stripeFees?: { today: number; week: number };
   onOpenAppointment: (a: any) => void;
   markAppointmentPaid: (a: any) => Promise<void> | void;
 }) => {
@@ -4124,16 +4125,29 @@ const KpiDetailSheet = ({
     </Card>
   );
 
+  // Stripe fees line — the Total above is already net of this; showing it
+  // makes clear why the net is below the gross of the rows.
+  const FeeRow = ({ fee, currency: cur }: { fee: number; currency: string }) =>
+    fee > 0 ? (
+      <div className="flex items-center justify-between px-1 pt-1 pb-2">
+        <span className="text-[12px]" style={{ color: C.muted }}>Stripe fees (already deducted)</span>
+        <span className="text-[12px] font-semibold tabular-nums" style={{ color: C.muted }}>
+          − {fmtMoney(fee, cur)}
+        </span>
+      </div>
+    ) : null;
+
   const renderBody = () => {
     if (!open) return null;
     switch (kind!) {
       case "today": {
         const list = todayCompletedAppts(appointments, today);
         const shop = shopRows?.today ?? [];
+        const fee = stripeFees?.today ?? 0;
         const apptTotal = list.reduce((s, a) => s + reportTicketTotal(a), 0);
-        // Add shop money (Checkout + online) from the same authoritative
-        // figure the tile uses, so the sheet's Total always matches it.
-        const total = apptTotal + (shopSales?.today ?? 0);
+        // Add shop money (Checkout + online) and subtract Stripe fees, from
+        // the same figures the tile uses, so the sheet's Total always matches.
+        const total = apptTotal + (shopSales?.today ?? 0) - fee;
         const hint = [
           `${list.length} completed`,
           shop.length > 0 ? `${shop.length} shop sale${shop.length === 1 ? "" : "s"}` : "",
@@ -4147,6 +4161,7 @@ const KpiDetailSheet = ({
               <>
                 {list.map(a => <ApptRow key={a.id} a={a} tone="success" />)}
                 {shop.map(r => <ShopRow key={r.id} r={r} />)}
+                <FeeRow fee={fee} currency={currency} />
               </>
             )}
           </>
@@ -4155,8 +4170,9 @@ const KpiDetailSheet = ({
       case "week": {
         const list = weekRevenueAppts(appointments, today);
         const shop = shopRows?.week ?? [];
+        const fee = stripeFees?.week ?? 0;
         const apptTotal = list.reduce((s, a) => s + reportTicketTotal(a), 0);
-        const total = apptTotal + (shopSales?.week ?? 0);
+        const total = apptTotal + (shopSales?.week ?? 0) - fee;
         const hint = [
           `${list.length} appointment${list.length === 1 ? "" : "s"}`,
           shop.length > 0 ? `${shop.length} shop sale${shop.length === 1 ? "" : "s"}` : "",
@@ -4170,6 +4186,7 @@ const KpiDetailSheet = ({
               <>
                 {list.map(a => <ApptRow key={a.id} a={a} />)}
                 {shop.map(r => <ShopRow key={r.id} r={r} />)}
+                <FeeRow fee={fee} currency={currency} />
               </>
             )}
           </>
@@ -5640,6 +5657,23 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
     };
   }, [transactions, store.productOrders, today]);
 
+  // Stripe processing fees on card payments, so the Today/Week revenue cards
+  // can show what actually landed (net) rather than the gross the client was
+  // charged. Bucketed to match the revenue figures: this week's fees use the
+  // same weekRevenueAppts set as stats.weekRevenue; today's use date === today.
+  const stripeFeeAdj = useMemo(() => {
+    const weekFee = roundCents(
+      weekRevenueAppts(appointments, today)
+        .reduce((s: number, a: any) => s + Math.max(0, parseMoney(a.stripeFee)), 0),
+    );
+    const todayFee = roundCents(
+      (appointments as any[])
+        .filter((a: any) => a && !isCanceledAppointment(a) && a.date === today)
+        .reduce((s: number, a: any) => s + Math.max(0, parseMoney(a.stripeFee)), 0),
+    );
+    return { today: todayFee, week: weekFee };
+  }, [appointments, today]);
+
   // Until the first cloud pull lands, the figures below come from a
   // possibly-stale local cache. Show "—" for money rather than flash an
   // out-of-date number that snaps to the real value a second later.
@@ -5893,7 +5927,7 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           greeting={greeting}
           ownerName={business.ownerName?.split(" ")[0] || null}
           today={today}
-          todayRevenue={revenueStats.todayRevenue + shopSales.today}
+          todayRevenue={revenueStats.todayRevenue + shopSales.today - stripeFeeAdj.today}
           weekAppts={stats.weekAppts}
           currency={business.currency}
           cloudReady={cloudReady}
@@ -5967,8 +6001,8 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
               // not — the value itself is the indicator.
               // Folds in shop sales (Boss Checkout + paid online orders)
               // so a walk-in rung up at Checkout counts as today's money,
-              // matching the year Total Earnings + monthly goal below.
-              value={money(revenueStats.todayRevenue + shopSales.today)}
+              // and subtracts Stripe fees so it reads as the net that lands.
+              value={money(revenueStats.todayRevenue + shopSales.today - stripeFeeAdj.today)}
               icon={<DollarSign size={16} />}
               tone="success"
               onClick={() => openKpi("today")}
@@ -5976,8 +6010,8 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
             />
             <KpiCard
               label="Week revenue"
-              // Also folds in this week's shop sales (Checkout + online).
-              value={money(stats.weekRevenue + shopSales.week)}
+              // Folds in this week's shop sales and nets out Stripe fees.
+              value={money(stats.weekRevenue + shopSales.week - stripeFeeAdj.week)}
               icon={<ArrowUpRight size={16} />}
               tone="gold"
               onClick={() => openKpi("week")}
@@ -6036,6 +6070,7 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           revenueStats={revenueStats}
           shopSales={{ today: shopSales.today, week: shopSales.week }}
           shopRows={shopRows}
+          stripeFees={stripeFeeAdj}
           onOpenAppointment={(a) => { closeKpi(); openAppointmentRecord?.(a); }}
           markAppointmentPaid={async (a) => {
             const next = {
@@ -9167,14 +9202,21 @@ const DayCalendarView = ({
   // Daily business summary — derived from the day's billable bookings.
   const summary = useMemo(() => {
     const billable = appts.filter((a: any) => a && (!a.kind || a.kind === "appointment") && a.status !== "cancelled" && a.status !== "canceled");
-    let booked = 0, collected = 0, outstanding = 0, hours = 0;
+    let booked = 0, collected = 0, outstanding = 0, hours = 0, fees = 0;
     for (const a of billable) {
       const net = Math.max(0, (Number(a.totalPrice) || 0) - (Number(a.discountAmount) || 0));
-      const dep = getDepositCollectedAmount(a);
-      booked += net; collected += dep; outstanding += Math.max(0, net - dep);
+      // Actual money collected (full ticket once paid, deposit otherwise) —
+      // not just the booking deposit, so a paid appointment reads as
+      // collected, not outstanding.
+      const coll = calculateCollectedAmount(a);
+      booked += net;
+      collected += coll;
+      outstanding += Math.max(0, roundCents(net - coll));
+      if (coll > 0) fees += Math.max(0, parseMoney(a.stripeFee));
       hours += Number(a.durationHours) || 0;
     }
-    return { count: billable.length, booked, collected, outstanding, hours };
+    // "Collected" is shown net of Stripe fees — what actually landed.
+    return { count: billable.length, booked, collected: roundCents(collected - fees), outstanding, hours };
   }, [appts]);
 
   // An all-day availability block already reads in the top "All day"
