@@ -204,6 +204,20 @@ describe("mergeTransactions refund de-dupe", () => {
     expect(refundTotal).toBe(-309.74);
   });
 
+  it("collapses a legacy manual refund with no payment_intent (amount+client+day)", () => {
+    // The duplicate a stylist actually hit: the manual refund row was
+    // recorded before refunds carried a payment_intent, so it can only be
+    // matched to the Stripe refund by amount + client + day.
+    const legacyManual = manualRefund({ id: "legacy", stripeId: null });
+    const merged = mergeTransactions([], [stripeRefund()], [legacyManual]);
+    const refunds = merged.filter((t) => t.type === "refund");
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0].source).toBe("stripe");
+    // Today's summary reads one −$309.74, not −$619.48.
+    const refundTotal = merged.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0);
+    expect(refundTotal).toBe(-309.74);
+  });
+
   it("keeps a manual card refund until the Stripe refund row arrives", () => {
     // Before Stripe sync catches up there's no Stripe refund row yet — the
     // optimistic manual row is all we have and must still show.

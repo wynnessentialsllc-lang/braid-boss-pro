@@ -434,20 +434,46 @@ export const mergeTransactions = (
   // A card refund issued from the Payments screen writes an optimistic
   // manual `refund` row so it shows the instant it's issued. Once Stripe
   // sync catches up, the now fully-refunded charge comes back as its own
-  // refund row (same money, now carrying the real fee/net) keyed by the
-  // same payment_intent/charge. Drop the optimistic manual duplicate so
-  // the refund isn't listed — or counted in the summary — twice. Partial
-  // card refunds never surface a Stripe refund row (the charge stays a
-  // positive row), so their manual row is kept; cash/Zelle/etc. refunds
-  // carry no stripeId and are always kept.
-  const stripeRefundKeys = new Set(
-    dedupedStripe
-      .filter((s) => s.type === "refund" && s.stripeId)
-      .map((s) => String(s.stripeId)),
-  );
-  const dedupedManual = manualTxns.filter(
-    (m) => !(m.type === "refund" && m.stripeId && stripeRefundKeys.has(String(m.stripeId))),
-  );
+  // refund row (same money, with the real fee/net), so the same refund
+  // would list — and count in the summary — twice. Collapse the manual
+  // duplicate into the Stripe row.
+  //
+  // Matching: newer manual refunds carry the charge's payment_intent, so
+  // they match exactly. Older ones (recorded before that stamp existed)
+  // have no intent, so a CARD refund also matches on amount + client + day
+  // — which identifies the same refund in practice. Each Stripe refund
+  // absorbs at most one manual row. Cash/Zelle/etc. refunds only match by
+  // intent (which they never have), so a genuine offline refund is never
+  // swallowed; a partial card refund keeps its manual row too, since a
+  // partially-refunded charge never surfaces a Stripe refund row to match.
+  const refundDayKey = (iso: string): string => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  };
+  const refundFuzzyKey = (t: Transaction): string =>
+    `${Math.abs(roundCents(t.amount))}|${(t.clientName || "").trim().toLowerCase()}|${refundDayKey(t.paidAt)}`;
+  const refundSlots = dedupedStripe
+    .filter((s) => s.type === "refund")
+    .map((s) => ({
+      intent: s.stripeId ? String(s.stripeId) : null,
+      fuzzy: refundFuzzyKey(s),
+      used: false,
+    }));
+  const dedupedManual = manualTxns.filter((m) => {
+    if (m.type !== "refund") return true;
+    const viaCard = m.method === "stripe" || m.method === "card";
+    const mFuzzy = refundFuzzyKey(m);
+    const slot = refundSlots.find(
+      (sl) =>
+        !sl.used &&
+        ((m.stripeId && sl.intent === String(m.stripeId)) || (viaCard && sl.fuzzy === mFuzzy)),
+    );
+    if (slot) {
+      slot.used = true;
+      return false;
+    }
+    return true;
+  });
   const all = [...appointmentTxns, ...dedupedStripe, ...dedupedManual];
   all.sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
   return all;
