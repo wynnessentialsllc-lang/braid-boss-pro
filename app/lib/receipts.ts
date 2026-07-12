@@ -202,7 +202,13 @@ export const buildInvoiceFromQuote = (
 };
 
 // Plain-text summary suitable for SMS / WhatsApp / clipboard fallback.
-export const buildReceiptSummaryText = (rcp: ReceiptRecord, currency: string = "USD"): string => {
+export const buildReceiptSummaryText = (
+  rcp: ReceiptRecord,
+  currency: string = "USD",
+  // Client-facing by default: the stylist's Stripe fee / net payout are hidden.
+  // Pass { includeNet: true } for an internal copy.
+  opts?: { includeNet?: boolean },
+): string => {
   const fmt = (n: number) => formatCurrency(n, currency);
   const lines: (string | null)[] = [
     `${rcp.type === "invoice" ? "Invoice" : "Receipt"} #${rcp.receiptNumber}`,
@@ -218,9 +224,9 @@ export const buildReceiptSummaryText = (rcp: ReceiptRecord, currency: string = "
     rcp.balanceDue > 0 ? `Balance due: ${fmt(rcp.balanceDue)}` : null,
     rcp.tip ? `Tip: ${fmt(rcp.tip)}` : null,
     `Total: ${fmt(roundMoney(rcp.totalPrice + (rcp.tip || 0)))}`,
-    // The money — what landed.
-    rcp.type === "receipt" && rcp.stripeFee ? `Stripe fee: − ${fmt(rcp.stripeFee)}` : null,
-    rcp.type === "receipt" ? `In your bank: ${fmt(rcp.netPayout ?? rcp.amountCollected)}` : null,
+    // The money — what landed. Hidden on client-facing copies.
+    opts?.includeNet && rcp.type === "receipt" && rcp.stripeFee ? `Stripe fee: − ${fmt(rcp.stripeFee)}` : null,
+    opts?.includeNet && rcp.type === "receipt" ? `In your bank: ${fmt(rcp.netPayout ?? rcp.amountCollected)}` : null,
     rcp.paymentMethod ? `Method: ${rcp.paymentMethod}` : null,
     rcp.paymentDate ? `Paid on: ${fmtDateLong(rcp.paymentDate)}` : null,
   ];

@@ -48,6 +48,10 @@ export const renderReceiptPdf = async (
   rcp: ReceiptRecord,
   business: any,
   policies?: any[],
+  // Receipts are client-facing, so the stylist's processing costs (Stripe fee
+  // and net payout) are hidden by default. Pass { includeNet: true } for an
+  // internal copy that shows what actually landed.
+  opts?: { includeNet?: boolean },
 ): Promise<{ blob: Blob; filename: string }> => {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt", format: "letter" });
@@ -167,10 +171,11 @@ export const renderReceiptPdf = async (
   if (rcp.tip) drawRow("Tip", fmt(rcp.tip));
   drawRow("Total", fmt(r2(rcp.totalPrice + (rcp.tip || 0))), { bold: true });
 
-  // THE MONEY — what was collected and what actually landed. The deposit is
-  // collected on its own (no fee); only the balance + tip runs through Stripe,
-  // so the fee comes off that charge alone and every line stays visible.
-  if (!isInvoice) {
+  // THE MONEY — what was collected and what actually landed. Hidden by default
+  // because a receipt goes to the client, who shouldn't see the stylist's
+  // Stripe fee / net payout; the app's Payments view shows it. Only rendered
+  // for an explicit internal copy (opts.includeNet).
+  if (!isInvoice && opts?.includeNet) {
     y += 8;
     sectionLabel("The money");
     const stripeCharge = r2((rcp.balancePaid || 0) + (rcp.tip || 0));
