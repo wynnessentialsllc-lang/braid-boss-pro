@@ -489,21 +489,32 @@ export const mergeTransactions = (
   };
   const refundFuzzyKey = (t: Transaction): string =>
     `${Math.abs(roundCents(t.amount))}|${(t.clientName || "").trim().toLowerCase()}|${refundDayKey(t.paidAt)}`;
+  // Same-charge, same-day key that ignores the amount: the optimistic manual
+  // refund can be recorded at the FULL charge ($309.74) while the Stripe row
+  // surfaces at the service-only amount ($279.74, tip carried separately), so
+  // the amount-based fuzzy key misses them. Matching a card refund by its
+  // appointment (or client) + refund day collapses the two regardless.
+  const refundApptKey = (t: Transaction): string =>
+    `${t.appointmentId || (t.clientName || "").trim().toLowerCase()}|${refundDayKey(t.paidAt)}`;
   const refundSlots = dedupedStripe
     .filter((s) => s.type === "refund")
     .map((s) => ({
       intent: s.stripeId ? String(s.stripeId) : null,
       fuzzy: refundFuzzyKey(s),
+      apptDay: refundApptKey(s),
       used: false,
     }));
   const dedupedManual = manualTxns.filter((m) => {
     if (m.type !== "refund") return true;
     const viaCard = m.method === "stripe" || m.method === "card";
     const mFuzzy = refundFuzzyKey(m);
+    const mApptDay = refundApptKey(m);
     const slot = refundSlots.find(
       (sl) =>
         !sl.used &&
-        ((m.stripeId && sl.intent === String(m.stripeId)) || (viaCard && sl.fuzzy === mFuzzy)),
+        ((m.stripeId && sl.intent === String(m.stripeId)) ||
+          (viaCard && sl.fuzzy === mFuzzy) ||
+          (viaCard && sl.apptDay === mApptDay)),
     );
     if (slot) {
       slot.used = true;

@@ -371,6 +371,28 @@ describe("mergeTransactions refund de-dupe", () => {
     expect(refundTotal).toBe(-309.74);
   });
 
+  it("collapses a manual refund whose amount differs from the Stripe row (full vs service)", () => {
+    // The reported "4 rows should be 3": the manual optimistic refund is the
+    // FULL charge ($309.74) while the Stripe row surfaces the service-only
+    // amount ($279.74, tip carried apart). Amounts and intents differ, so only
+    // the appointment + day match collapses them into one.
+    const stripeServiceRefund = fromStripeRecord({
+      id: "ch_c", amount: 279.74, tip: 30, type: "refund", payment_type: "refund",
+      payment_intent: "pi_stripe", appointment_id: "appt_c",
+      paid_at: "2026-07-11T23:04:00.000Z", client_name: "Claudia Vine",
+    });
+    const manualFull = fromManualRecord({
+      id: "m2", clientName: "Claudia Vine", amount: 309.74, paymentType: "refund",
+      paymentMethod: "stripe", stripeId: "pi_manual", appointmentId: "appt_c",
+      paidAt: "2026-07-11T23:04:05.000Z",
+    });
+    const merged = mergeTransactions([], [stripeServiceRefund], [manualFull]);
+    const refunds = merged.filter((t) => t.type === "refund");
+    expect(refunds).toHaveLength(1);
+    // The Stripe row survives — it carries the tip reversal that nets tips out.
+    expect(refunds[0].source).toBe("stripe");
+  });
+
   it("keeps a manual card refund until the Stripe refund row arrives", () => {
     // Before Stripe sync catches up there's no Stripe refund row yet — the
     // optimistic manual row is all we have and must still show.
