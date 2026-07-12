@@ -288,11 +288,13 @@ function Inner() {
     let gross = 0;
     let fees = 0;
     for (const t of visible) {
-      // Refunds carry signed-negative tip + fee, so they reverse their charge
-      // in full — keeping this banner in step with the summary cards.
+      // Refunds carry signed-negative amount + tip, reversing their charge's
+      // revenue and tip. The fee is not recovered on a refund (Stripe keeps
+      // it), so only positive charges add to fees — keeping this banner in
+      // step with the summary cards.
       const isRefund = t.type === "refund";
       gross += t.amount + (isRefund || t.amount > 0 ? t.tip : 0);
-      if (isRefund || t.amount > 0) fees += t.fee || 0;
+      if (t.amount > 0) fees += t.fee || 0;
     }
     const r = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
     return { gross: r(gross), fees: r(fees), net: r(gross - fees) };

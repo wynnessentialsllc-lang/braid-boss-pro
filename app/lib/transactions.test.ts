@@ -72,12 +72,12 @@ describe("computeSummary net of Stripe fees", () => {
     expect(s.monthRevenue).toBe(285.89);
   });
 
-  it("a paid → refunded → paid-again nets to the successful payment, refund cancels its charge in full", () => {
+  it("a paid → refunded → paid-again nets to the successful payment; the refunded charge's fee stays a loss", () => {
     const now = new Date("2026-07-11T23:30:00.000Z");
     // The route emits, per charge, a +charge row and a separate −refund row.
-    // Both the charge row and the refund row carry amount (tip excluded),
-    // tip and fee, so a full refund reverses the charge's amount, tip AND
-    // Stripe fee — the pair nets to exactly zero, the way Stripe treats it.
+    // A full refund reverses the charge's amount and tip, but NOT the Stripe
+    // fee — Stripe keeps its fee on a refund, so it stays a real loss on the
+    // original charge (the refund row carries fee 0).
     const charge1 = fromStripeRecord({
       id: "ch1", amount: 279.74, tip: 30, fee: 18.85, net: 290.89, type: "charge",
       payment_type: "final", payment_intent: "pi_1", appointment_id: "appt_c",
@@ -101,13 +101,13 @@ describe("computeSummary net of Stripe fees", () => {
     };
     const merged = mergeTransactions(deriveAppointmentTransactions([appt]), [charge1, refund1, charge2], []);
     const s = computeSummary(merged, [appt], now);
-    // charge1 and its refund cancel completely (amount, tip AND fee); charge2
-    // folds into the appointment ($334.74 incl. $30 tip). Only the successful
-    // payment survives.
+    // charge1's revenue and tip cancel against its refund; charge2 folds into
+    // the appointment ($334.74 incl. $30 tip). Only the successful payment's
+    // revenue survives.
     expect(s.monthGross).toBe(334.74);
-    // Net = $334.74 − the ONE surviving Stripe fee ($18.85). The refunded
-    // charge's fee is reversed, not double-counted as a loss.
-    expect(s.monthRevenue).toBe(315.89);
+    // Net = $334.74 − BOTH Stripe fees ($18.85 each): the surviving charge's
+    // fee and the refunded charge's fee, which Stripe keeps as a real loss.
+    expect(s.monthRevenue).toBe(297.04);
     // One real $30 tip — the refunded charge's tip is reversed, not stacked.
     expect(s.tips).toBe(30);
   });
@@ -149,11 +149,12 @@ describe("computeSummary net of Stripe fees", () => {
       paid_at: "2026-07-11T23:04:00.000Z", client_name: "Claudia Vine",
     });
     const s = computeSummary([cashFull, stripeCharge, stripeRefund], [], now);
-    // The Stripe charge + refund cancel completely (amount, tip and fee), so
-    // Today (net) is exactly the cash payment: $334.74 + $30 tip, no fee.
-    expect(s.todayRevenue).toBe(364.74);
-    // The refunded charge's fee is reversed, so no net fee for the day/month.
-    expect(s.monthFees).toBe(0);
+    // The Stripe charge's revenue + tip cancel against its refund, leaving the
+    // cash payment ($334.74 + $30 tip) MINUS the $9.28 fee Stripe kept on the
+    // refunded charge — a real, non-recovered loss: 364.74 − 9.28 = 355.46.
+    expect(s.todayRevenue).toBe(355.46);
+    // The refunded charge's fee is not recovered, so it still counts.
+    expect(s.monthFees).toBe(9.28);
     // One real tip survives — not $60.
     expect(s.tips).toBe(30);
   });

@@ -373,14 +373,15 @@ export const fromStripeRecord = (r: any): Transaction => {
   const rawNet = roundCents(parseMoney(r.net ?? rawAmount - rawFee));
   const rawTip = roundCents(parseMoney(r.tip));
   const isRefund = r.type === "refund" || rawAmount < 0;
-  // Refunds are money OUT: store amount, tip AND fee signed-negative
-  // (matching the manual-refund path) so they read as "−$X" and reverse the
-  // charge's tip + processing fee on the refund date instead of inflating
-  // revenue. A fully-refunded charge therefore nets to exactly zero.
+  // Refunds are money OUT: store amount and tip signed-negative (matching the
+  // manual-refund path) so they read as "−$X" and reverse the charge's
+  // revenue + tip on the refund date. The processing fee is NOT reversed —
+  // Stripe keeps its fee even on a full refund, so it stays a real loss on
+  // the original charge (the refund row carries no fee of its own).
   const amount = isRefund ? -Math.abs(rawAmount) : rawAmount;
   const net = isRefund ? -Math.abs(rawNet) : rawNet;
   const tip = isRefund ? -Math.abs(rawTip) : rawTip;
-  const fee = isRefund ? -Math.abs(rawFee) : rawFee;
+  const fee = isRefund ? 0 : rawFee;
   return {
     id: `stripe-${String(r.id)}`,
     source: "stripe",
@@ -699,13 +700,13 @@ export const computeSummary = (
     if (Number.isNaN(ts)) continue;
     const isRefund = t.type === "refund";
     // Revenue = collected money. A charge adds amount + tip; a refund carries
-    // signed-negative amount, tip AND fee, so it reverses its charge in full —
-    // a paid-then-refunded charge nets to exactly zero.
+    // signed-negative amount + tip, reversing its charge's revenue and tip.
     const gross = t.amount + (isRefund || t.amount > 0 ? t.tip : 0);
-    // Stripe processing fee — what Stripe skims before the payout lands.
-    // Subtracted below so revenue reads as the true net. Refunds carry the
-    // reversed fee (negative), cancelling the original charge's fee.
-    const fee = isRefund || t.amount > 0 ? t.fee || 0 : 0;
+    // Stripe processing fee — what Stripe skims before the payout lands,
+    // subtracted below so revenue reads as the true net. Only a positive
+    // charge incurs a fee; a refund does NOT recover it (Stripe keeps its fee
+    // on refunds), so the fee stays a real loss on the refunded charge.
+    const fee = t.amount > 0 ? t.fee || 0 : 0;
     if (ts >= dayStart) { today += gross; todayFees += fee; }
     if (ts >= weekStart) { week += gross; weekFees += fee; }
     if (ts >= monthStart) { month += gross; monthFees += fee; }

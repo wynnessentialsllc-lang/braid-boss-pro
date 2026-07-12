@@ -209,14 +209,15 @@ export async function POST(req: Request) {
         const frac = denom > 0 ? Math.min(1, refundAmt / denom) : 1;
         const round2 = (n: number) => Math.round(n * 100) / 100;
         const tipReversed = round2(tipAmount * frac);
-        const feeReversed = round2(fee * frac);
-        // Show the refund as the service amount returned; carry the reversed
-        // tip/fee alongside so the ledger totals net out correctly.
+        // Show the refund as the service amount returned, carrying the
+        // reversed tip so tips net out. The fee is intentionally 0: Stripe
+        // keeps its processing fee even on a full refund, so it stays a real
+        // loss on the original charge rather than being recovered here.
         const shownAmount = denom > 0 ? Math.min(refundAmt, denom) : refundAmt;
         return {
           id: `${String(c.id)}_re_${String(r.id)}`,
           amount: shownAmount,
-          fee: feeReversed,
+          fee: 0,
           net: round2(shownAmount + tipReversed),
           tip: tipReversed,
           paid_at: new Date((r.created || 0) * 1000).toISOString(),
