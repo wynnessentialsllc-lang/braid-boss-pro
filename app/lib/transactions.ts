@@ -313,10 +313,17 @@ export const fromManualRecord = (r: any): Transaction => {
     depositAmount: type === "deposit" ? Math.abs(amount) : 0,
     balancePaid: type === "final" || type === "full" ? Math.abs(amount) : 0,
     refunds: [],
-    // A card refund recorded from the Payments screen stamps the original
-    // charge's payment_intent/charge here so mergeTransactions can collapse
-    // this optimistic row into the Stripe-surfaced refund for the same money.
-    stripeId: r.stripeId ?? r.stripe_id ?? null,
+    // The Stripe payment_intent this row corresponds to, so mergeTransactions
+    // can collapse the matching live Stripe charge into it instead of listing
+    // both. Two sources: a card refund recorded from the Payments screen
+    // stamps it at the top level; a Boss Checkout sale paid by card (Tap to
+    // Pay) carries it on data.stripePaymentIntentId (from buildSaleTransaction).
+    stripeId:
+      r.stripeId ??
+      r.stripe_id ??
+      r.data?.stripePaymentIntentId ??
+      r.data?.stripe_payment_intent_id ??
+      null,
     note: String(r.note || ""),
   };
 };
@@ -388,6 +395,18 @@ export const mergeTransactions = (
   for (const t of appointmentTxns) {
     if (t.stripeId) byIntent.set(t.stripeId, t);
     if (t.appointmentId) byApptKey.set(`${t.appointmentId}:${t.type}`, t);
+  }
+  // A Boss Checkout sale paid by card (Tap to Pay) is recorded as a manual
+  // ledger row AND surfaces again as the live Stripe charge for the same
+  // payment_intent. Register the manual row by its intent so the matching
+  // Stripe charge collapses into it — keeping the itemized ticket context
+  // and folding in the real Stripe fee/net — instead of showing twice.
+  // Refund rows are excluded: those collapse the other way (the Stripe
+  // refund row is canonical), handled below.
+  for (const t of manualTxns) {
+    if (t.type !== "refund" && t.stripeId && !byIntent.has(t.stripeId)) {
+      byIntent.set(t.stripeId, t);
+    }
   }
   const dedupedStripe = stripeTxns.filter((s) => {
     const match =

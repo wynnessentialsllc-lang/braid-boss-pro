@@ -236,6 +236,68 @@ describe("mergeTransactions refund de-dupe", () => {
   });
 });
 
+// Regression for the Tap-to-Pay checkout double: a Boss Checkout sale paid
+// by card is recorded as a manual ledger row (with the ticket context) AND
+// re-appears as the live Stripe charge for the same payment_intent. The two
+// must collapse into one row so the sale isn't listed (or counted) twice.
+describe("mergeTransactions Boss Checkout card-sale de-dupe", () => {
+  // What buildSaleTransaction persists for a Tap-to-Pay ticket: the
+  // payment_intent lives on data.stripePaymentIntentId.
+  const checkoutSale = () =>
+    fromManualRecord({
+      id: "sale_1",
+      clientName: "Walk-in",
+      serviceName: "Edge control ×2 + 1 more",
+      amount: 150,
+      paymentType: "full",
+      paymentMethod: "stripe",
+      data: { source: "boss_checkout", tender: "tap_to_pay", stripePaymentIntentId: "pi_ttp_1" },
+    });
+
+  // The same sale as it comes back from the connected account's charges.
+  const stripeCharge = () =>
+    fromStripeRecord({
+      id: "ch_ttp_1",
+      amount: 150,
+      fee: 4.5,
+      net: 145.5,
+      type: "charge",
+      payment_type: "full",
+      payment_intent: "pi_ttp_1",
+      appointment_id: null,
+      service_name: "Stripe payment",
+    });
+
+  it("collapses the Stripe charge into the checkout row (one entry, ticket kept)", () => {
+    const merged = mergeTransactions([], [stripeCharge()], [checkoutSale()]);
+    const sales = merged.filter((t) => t.amount > 0);
+    expect(sales).toHaveLength(1);
+    // The surviving row is the Boss Checkout one — it has the itemized
+    // ticket label, not the generic "Stripe payment" description.
+    expect(sales[0].source).toBe("manual");
+    expect(sales[0].serviceName).toBe("Edge control ×2 + 1 more");
+    // ...enriched with the live Stripe fee/net it otherwise wouldn't have.
+    expect(sales[0].fee).toBe(4.5);
+    expect(sales[0].net).toBe(145.5);
+  });
+
+  it("leaves a cash checkout sale (no payment_intent) and unrelated Stripe charge alone", () => {
+    const cashSale = fromManualRecord({
+      id: "sale_cash",
+      clientName: "Walk-in",
+      serviceName: "Bundle",
+      amount: 60,
+      paymentType: "full",
+      paymentMethod: "cash",
+      data: { source: "boss_checkout", tender: "cash" },
+    });
+    const merged = mergeTransactions([], [stripeCharge()], [cashSale]);
+    // No shared payment_intent — the cash sale and the card charge are
+    // different money, so both stay.
+    expect(merged.filter((t) => t.amount > 0)).toHaveLength(2);
+  });
+});
+
 // Regression for "Claudia paid but the schedule still shows a balance due":
 // the balance charge succeeds on Stripe (it's in the ledger) but the balance
 // webhook never marked the appointment paid, so the booking stays "due".
