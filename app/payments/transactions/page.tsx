@@ -824,6 +824,20 @@ function DetailSheet({
 }) {
   const isRefund = txn.type === "refund" || txn.amount < 0;
 
+  // Net payout the client's whole payment nets to, computed from exactly the
+  // rows shown below (deposit + balance + tip − Stripe fee) so the breakdown
+  // always reconciles. The persisted `net` can't be trusted here: when a
+  // deposit was collected separately, it only carries the card charge's net
+  // (e.g. a $309.74 Klarna leg → $290.89), which omits the deposit and makes
+  // the card read $25 short. Falls back to the charge amount for live Stripe
+  // rows that carry no deposit/balance split.
+  const collectedBase =
+    (txn.depositAmount > 0 ? txn.depositAmount : 0) +
+    (txn.balancePaid > 0 ? txn.balancePaid : 0);
+  const netPayout = isRefund
+    ? txn.net || txn.amount + txn.tip - txn.fee
+    : Math.round(((collectedBase > 0 ? collectedBase : Math.abs(txn.amount)) + txn.tip - txn.fee) * 100) / 100;
+
   // How much is still refundable: the (positive) charge minus anything
   // already refunded. Stripe charges carry their refund history; other
   // rows start from zero.
@@ -1002,7 +1016,7 @@ function DetailSheet({
             )}
             <Row
               label="Net payout"
-              value={formatMoney(txn.net || txn.amount + txn.tip - txn.fee, currency)}
+              value={formatMoney(netPayout, currency)}
               strong
             />
           </Section>
