@@ -126,6 +126,7 @@ function Inner() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [filter, setFilter] = useState<TxnFilter>("all");
+  const [period, setPeriod] = useState<"all" | "today" | "week" | "month">("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -245,6 +246,25 @@ function Inner() {
 
   const visible = useMemo(() => {
     let list = filterTransactions(allTxns, filter);
+    if (period !== "all") {
+      // Same period boundaries computeSummary uses, so tapping a card shows
+      // exactly the transactions behind that figure (local wall clock;
+      // Sunday-anchored week).
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      let start = startOfDay;
+      if (period === "week") {
+        start = new Date(startOfDay);
+        start.setDate(start.getDate() - start.getDay());
+      } else if (period === "month") {
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+      const startMs = start.getTime();
+      list = list.filter((t) => {
+        const ts = new Date(t.paidAt).getTime();
+        return !Number.isNaN(ts) && ts >= startMs;
+      });
+    }
     const q = query.trim().toLowerCase();
     if (q) {
       list = list.filter(
@@ -254,7 +274,12 @@ function Inner() {
       );
     }
     return list;
-  }, [allTxns, filter, query]);
+  }, [allTxns, filter, period, query]);
+
+  const togglePeriod = useCallback(
+    (p: "today" | "week" | "month") => setPeriod((cur) => (cur === p ? "all" : p)),
+    [],
+  );
 
   const flashToast = useCallback((msg: string) => {
     setToast(msg);
@@ -421,10 +446,14 @@ function Inner() {
           scrollbarWidth: "none", WebkitOverflowScrolling: "touch",
         }}
       >
-        {/* Revenue cards are NET of Stripe fees — what actually lands. */}
-        <SummaryCard label="Today (net)" value={formatMoney(summary.todayRevenue, currency)} lead />
-        <SummaryCard label="This Week (net)" value={formatMoney(summary.weekRevenue, currency)} />
-        <SummaryCard label="This Month (net)" value={formatMoney(summary.monthRevenue, currency)} />
+        {/* Revenue cards are NET of Stripe fees — what actually lands. Tap to
+            filter the list to that period. */}
+        <SummaryCard label="Today (net)" value={formatMoney(summary.todayRevenue, currency)} lead
+          onClick={() => togglePeriod("today")} active={period === "today"} />
+        <SummaryCard label="This Week (net)" value={formatMoney(summary.weekRevenue, currency)}
+          onClick={() => togglePeriod("week")} active={period === "week"} />
+        <SummaryCard label="This Month (net)" value={formatMoney(summary.monthRevenue, currency)}
+          onClick={() => togglePeriod("month")} active={period === "month"} />
         {/* Fee breakdown only appears once a card payment has been taken, so
             cash-only stylists don't see empty fee cards. */}
         {summary.monthFees > 0 && (
@@ -679,15 +708,21 @@ function Badge({ type }: { type: PaymentType }) {
 // ---- Summary card -------------------------------------------------------
 
 function SummaryCard({
-  label, value, lead, tone,
-}: { label: string; value: string; lead?: boolean; tone?: "warning" }) {
+  label, value, lead, tone, onClick, active,
+}: { label: string; value: string; lead?: boolean; tone?: "warning"; onClick?: () => void; active?: boolean }) {
+  const tappable = !!onClick;
   return (
-    <div
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!tappable}
       style={{
         flexShrink: 0, minWidth: 132, padding: "14px 16px", borderRadius: 16,
+        textAlign: "left", fontFamily: FONT_BODY, cursor: tappable ? "pointer" : "default",
         background: lead ? GRADIENT : C.paper,
-        border: lead ? 0 : `1px solid ${C.hairline}`,
+        border: active ? `2px solid ${C.gold}` : lead ? 0 : `1px solid ${C.hairline}`,
         boxShadow: lead ? "0 10px 28px -12px rgba(124,58,237,0.5)" : "none",
+        WebkitAppearance: "none", appearance: "none",
       }}
     >
       <p
@@ -697,7 +732,7 @@ function SummaryCard({
           color: lead ? "rgba(255,255,255,0.85)" : C.muted,
         }}
       >
-        {label}
+        {label}{tappable ? (active ? " ×" : " ›") : ""}
       </p>
       <p
         style={{
@@ -707,7 +742,7 @@ function SummaryCard({
       >
         {value}
       </p>
-    </div>
+    </button>
   );
 }
 
