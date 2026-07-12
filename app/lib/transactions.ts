@@ -171,8 +171,14 @@ const apptPaidAt = (a: any, fallbackToBalance: boolean): string => {
   for (const c of candidates) {
     if (!c) continue;
     const s = String(c);
-    const iso = s.length === 10 ? `${s}T12:00:00.000Z` : s;
-    const d = new Date(iso);
+    // A date-only value ("YYYY-MM-DD") has no time. Anchor it to LOCAL noon,
+    // not UTC noon — pinning to 12:00 UTC renders as 5:00 AM on the US West
+    // Coast, which reads as a bogus payment time. Local noon shows as midday
+    // in the stylist's own zone.
+    const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const d = dateOnly
+      ? new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10)), 12, 0, 0)
+      : new Date(s);
     if (!Number.isNaN(d.getTime())) return d.toISOString();
   }
   return new Date().toISOString();
@@ -313,11 +319,14 @@ export const deriveAppointmentTransactions = (appointments: any[]): Transaction[
 
 export const fromManualRecord = (r: any): Transaction => {
   const amount = roundCents(parseMoney(r.amount));
-  const tip = roundCents(parseMoney(r.tip_amount ?? r.tipAmount));
+  const rawTip = roundCents(parseMoney(r.tip_amount ?? r.tipAmount));
   const type = (["deposit", "final", "full", "refund"].includes(r.payment_type)
     ? r.payment_type
     : r.paymentType || "full") as PaymentType;
   const signed = type === "refund" ? -Math.abs(amount) : amount;
+  // A refund reverses the tip it returned, so store it signed-negative too —
+  // keeping "Tips Collected" net of refunded tips.
+  const tip = type === "refund" ? -Math.abs(rawTip) : rawTip;
   return {
     id: `manual-${String(r.id)}`,
     source: "manual",
@@ -360,21 +369,26 @@ export const fromManualRecord = (r: any): Transaction => {
 
 export const fromStripeRecord = (r: any): Transaction => {
   const rawAmount = roundCents(parseMoney(r.amount));
-  const fee = roundCents(parseMoney(r.fee));
-  const rawNet = roundCents(parseMoney(r.net ?? rawAmount - fee));
+  const rawFee = roundCents(parseMoney(r.fee));
+  const rawNet = roundCents(parseMoney(r.net ?? rawAmount - rawFee));
+  const rawTip = roundCents(parseMoney(r.tip));
   const isRefund = r.type === "refund" || rawAmount < 0;
-  // Refunds are money OUT: store them signed-negative (matching the
-  // manual-refund path) so they read as "−$X" and reduce revenue on the
-  // refund date instead of inflating it.
+  // Refunds are money OUT: store amount and tip signed-negative (matching the
+  // manual-refund path) so they read as "−$X" and reverse the charge's
+  // revenue + tip on the refund date. The processing fee is NOT reversed —
+  // Stripe keeps its fee even on a full refund, so it stays a real loss on
+  // the original charge (the refund row carries no fee of its own).
   const amount = isRefund ? -Math.abs(rawAmount) : rawAmount;
   const net = isRefund ? -Math.abs(rawNet) : rawNet;
+  const tip = isRefund ? -Math.abs(rawTip) : rawTip;
+  const fee = isRefund ? 0 : rawFee;
   return {
     id: `stripe-${String(r.id)}`,
     source: "stripe",
     type: isRefund ? "refund" : (r.payment_type as PaymentType) || "full",
     method: "stripe",
     amount,
-    tip: roundCents(parseMoney(r.tip)),
+    tip,
     fee,
     net,
     clientName: String(r.client_name || r.customer_name || "Stripe customer"),
@@ -684,16 +698,19 @@ export const computeSummary = (
   for (const t of txns) {
     const ts = new Date(t.paidAt).getTime();
     if (Number.isNaN(ts)) continue;
-    // Revenue = collected money (refunds reduce it via signed amount).
-    const gross = t.amount + (t.amount > 0 ? t.tip : 0);
-    // Stripe processing fee on collected (positive) money — what Stripe
-    // skims before the payout reaches the bank. Subtracted below so the
-    // revenue figures read as the true net that lands.
+    const isRefund = t.type === "refund";
+    // Revenue = collected money. A charge adds amount + tip; a refund carries
+    // signed-negative amount + tip, reversing its charge's revenue and tip.
+    const gross = t.amount + (isRefund || t.amount > 0 ? t.tip : 0);
+    // Stripe processing fee — what Stripe skims before the payout lands,
+    // subtracted below so revenue reads as the true net. Only a positive
+    // charge incurs a fee; a refund does NOT recover it (Stripe keeps its fee
+    // on refunds), so the fee stays a real loss on the refunded charge.
     const fee = t.amount > 0 ? t.fee || 0 : 0;
     if (ts >= dayStart) { today += gross; todayFees += fee; }
     if (ts >= weekStart) { week += gross; weekFees += fee; }
     if (ts >= monthStart) { month += gross; monthFees += fee; }
-    if (t.amount > 0) tips += t.tip;
+    if (isRefund || t.amount > 0) tips += t.tip;
     if (t.type === "deposit" && t.amount > 0) deposits += t.amount;
   }
 

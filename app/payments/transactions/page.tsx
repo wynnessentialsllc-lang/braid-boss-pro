@@ -288,7 +288,12 @@ function Inner() {
     let gross = 0;
     let fees = 0;
     for (const t of visible) {
-      gross += t.amount + (t.amount > 0 ? t.tip : 0);
+      // Refunds carry signed-negative amount + tip, reversing their charge's
+      // revenue and tip. The fee is not recovered on a refund (Stripe keeps
+      // it), so only positive charges add to fees — keeping this banner in
+      // step with the summary cards.
+      const isRefund = t.type === "refund";
+      gross += t.amount + (isRefund || t.amount > 0 ? t.tip : 0);
       if (t.amount > 0) fees += t.fee || 0;
     }
     const r = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -395,13 +400,22 @@ function Inner() {
         }
       }
 
+      // Reverse the share of the original tip this refund covers, so "Tips
+      // Collected" drops the moment the refund is issued (a full refund
+      // reverses the whole tip) instead of waiting for Stripe sync. A row's
+      // `amount` already excludes the tip, so it's the service figure the
+      // refund is measured against.
+      const service = Math.max(0, Math.round(txn.amount * 100) / 100);
+      const frac = service > 0 ? Math.min(1, amt / service) : txn.tip > 0 ? 1 : 0;
+      const tipReversed = Math.round((txn.tip || 0) * frac * 100) / 100;
+
       const record = {
         id: uid(),
         appointmentId: txn.appointmentId || null,
         clientName: txn.clientName,
         serviceName: txn.serviceName,
         amount: amt,
-        tipAmount: 0,
+        tipAmount: tipReversed,
         paymentType: "refund" as PaymentType,
         paymentMethod: txn.method,
         // Tie a card refund back to its original charge's
@@ -479,10 +493,13 @@ function Inner() {
         {summary.monthFees > 0 && (
           <SummaryCard label="Stripe Fees (mo)" value={`− ${formatMoney(summary.monthFees, currency)}`} />
         )}
-        <SummaryCard label="Tips Collected" value={formatMoney(summary.tips, currency)} />
-        <SummaryCard label="Deposits Collected" value={formatMoney(summary.deposits, currency)} />
+        {/* Unlike the period cards above, these three are all-time / live
+            snapshots — not scoped to today/week/month. The labels say so, so
+            they don't read as period figures. */}
+        <SummaryCard label="Tips (all-time)" value={formatMoney(summary.tips, currency)} />
+        <SummaryCard label="Deposits (all-time)" value={formatMoney(summary.deposits, currency)} />
         <SummaryCard
-          label="Outstanding"
+          label="Outstanding (total owed)"
           value={formatMoney(summary.outstanding, currency)}
           tone={summary.outstanding > 0 ? "warning" : undefined}
         />
@@ -807,6 +824,12 @@ function DetailSheet({
 }) {
   const isRefund = txn.type === "refund" || txn.amount < 0;
 
+  // Net payout = Stripe's own net for the charge when we have it (so the app
+  // agrees with the Stripe dashboard, e.g. a $309.74 Klarna charge − $18.85
+  // fee = $290.89), falling back to amount + tip − fee for rows without a
+  // persisted net.
+  const netPayout = txn.net || txn.amount + txn.tip - txn.fee;
+
   // How much is still refundable: the (positive) charge minus anything
   // already refunded. Stripe charges carry their refund history; other
   // rows start from zero.
@@ -985,7 +1008,7 @@ function DetailSheet({
             )}
             <Row
               label="Net payout"
-              value={formatMoney(txn.net || txn.amount + txn.tip - txn.fee, currency)}
+              value={formatMoney(netPayout, currency)}
               strong
             />
           </Section>
