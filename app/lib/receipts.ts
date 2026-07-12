@@ -209,16 +209,18 @@ export const buildReceiptSummaryText = (rcp: ReceiptRecord, currency: string = "
     `Client: ${rcp.clientName || "—"}`,
     `Service: ${rcp.service || "—"}`,
     rcp.serviceDate ? `Date: ${fmtDateLong(rcp.serviceDate)}${rcp.serviceTime ? ` ${fmtTime(rcp.serviceTime)}` : ""}` : null,
+    // The ticket — pricing record.
     rcp.discountAmount && rcp.subtotal ? `Subtotal: ${fmt(rcp.subtotal)}` : null,
     rcp.discountAmount ? `Discount${rcp.discountName ? ` (${rcp.discountName})` : ""}: − ${fmt(rcp.discountAmount)}` : null,
-    `Total: ${fmt(rcp.totalPrice)}`,
+    `Service total: ${fmt(rcp.totalPrice)}`,
     `Deposit paid: ${fmt(rcp.depositPaid)}`,
-    rcp.balancePaid ? `Balance paid: ${fmt(rcp.balancePaid)}` : null,
+    rcp.balancePaid ? `Balance: ${fmt(rcp.balancePaid)}` : null,
     rcp.balanceDue > 0 ? `Balance due: ${fmt(rcp.balanceDue)}` : null,
     rcp.tip ? `Tip: ${fmt(rcp.tip)}` : null,
-    rcp.type === "receipt" ? `Amount collected: ${fmt(rcp.amountCollected)}` : null,
-    rcp.stripeFee ? `Stripe fee: − ${fmt(rcp.stripeFee)}` : null,
-    rcp.netPayout != null ? `Net payout: ${fmt(rcp.netPayout)}` : null,
+    `Total: ${fmt(roundMoney(rcp.totalPrice + (rcp.tip || 0)))}`,
+    // The money — what landed.
+    rcp.type === "receipt" && rcp.stripeFee ? `Stripe fee: − ${fmt(rcp.stripeFee)}` : null,
+    rcp.type === "receipt" ? `In your bank: ${fmt(rcp.netPayout ?? rcp.amountCollected)}` : null,
     rcp.paymentMethod ? `Method: ${rcp.paymentMethod}` : null,
     rcp.paymentDate ? `Paid on: ${fmtDateLong(rcp.paymentDate)}` : null,
   ];
