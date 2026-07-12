@@ -491,10 +491,13 @@ function Inner() {
         {summary.monthFees > 0 && (
           <SummaryCard label="Stripe Fees (mo)" value={`− ${formatMoney(summary.monthFees, currency)}`} />
         )}
-        <SummaryCard label="Tips Collected" value={formatMoney(summary.tips, currency)} />
-        <SummaryCard label="Deposits Collected" value={formatMoney(summary.deposits, currency)} />
+        {/* Unlike the period cards above, these three are all-time / live
+            snapshots — not scoped to today/week/month. The labels say so, so
+            they don't read as period figures. */}
+        <SummaryCard label="Tips (all-time)" value={formatMoney(summary.tips, currency)} />
+        <SummaryCard label="Deposits (all-time)" value={formatMoney(summary.deposits, currency)} />
         <SummaryCard
-          label="Outstanding"
+          label="Outstanding (total owed)"
           value={formatMoney(summary.outstanding, currency)}
           tone={summary.outstanding > 0 ? "warning" : undefined}
         />
