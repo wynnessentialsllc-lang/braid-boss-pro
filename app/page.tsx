@@ -924,14 +924,25 @@ const normalizeAppointment = (raw: any): any => {
 // explicit depositPaid value (legacy data).
 const calculateCollectedAmount = (appt: any): number => {
   if (!appt || isCanceledAppointment(appt)) return 0;
+  // NET ticket (post-discount) — never gross, so a discount doesn't overstate.
+  const total = roundCents(Math.max(0, parseMoney(appt.totalPrice) - parseMoney(appt.discountAmount)));
   const deposit = parseMoney(appt.depositPaid);
-  if (deposit > 0) return roundCents(deposit);
-  if (parseMoney(appt.balanceDue) === 0 && parseMoney(appt.totalPrice) > 0) {
-    // Paid-in-full fallback for legacy/imported rows without an explicit
-    // depositPaid. Collected = NET (post-discount), not gross — otherwise
-    // a discounted appointment overstates revenue by the discount amount.
-    return roundCents(Math.max(0, parseMoney(appt.totalPrice) - parseMoney(appt.discountAmount)));
+  // Paid in full → the whole ticket is collected, even when the deposit is
+  // left at its original amount instead of being collapsed into the total.
+  // This lets us preserve the deposit-vs-balance breakdown (for receipts and
+  // the ledger) without under-counting revenue.
+  const paidInFull =
+    appt.balance_paid === true ||
+    appt.balancePaid === true ||
+    appt.paymentStatus === "paid" ||
+    (parseMoney(appt.balanceDue) === 0 && total > 0);
+  if (paidInFull && total > 0) {
+    // Store credit isn't cash collected, so exclude any applied credit —
+    // matching the amount the old "flatten" path used to store.
+    const credit = Math.max(0, parseMoney(appt.creditApplied));
+    return roundCents(Math.max(0, total - credit));
   }
+  if (deposit > 0) return roundCents(deposit);
   return 0;
 };
 
@@ -6027,12 +6038,14 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           shopRows={shopRows}
           onOpenAppointment={(a) => { closeKpi(); openAppointmentRecord?.(a); }}
           markAppointmentPaid={async (a) => {
-            const netTotal = Math.max(0, (Number(a.totalPrice) || 0) - (Number(a.discountAmount) || 0));
-            // Cash collected is net of any applied store credit.
-            const creditApplied = Math.max(0, Number(a.creditApplied) || 0);
             const next = {
               ...a,
-              depositPaid: Math.max(0, netTotal - creditApplied),
+              // Mark the balance collected without collapsing the deposit
+              // into the total, so the deposit-vs-balance split survives on
+              // the record. calculateCollectedAmount counts the full ticket
+              // for a paid appointment, so revenue stays right.
+              balance_paid: true,
+              balanceDue: 0,
               paymentStatus: "paid",
               paymentDate: a.paymentDate || todayISO(),
               status: a.status === "scheduled" || a.status === "confirmed" ? "completed" : a.status,
@@ -15968,7 +15981,16 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
     () => expensesForPeriod(store.businessExpenses || [], period as ReportingPeriod, range.start, range.end),
     [store.businessExpenses, period, range],
   );
-  const expenses = roundCents(txExpenses + businessExpensePeriod);
+  // Stripe processing fees for card payments in the window — a real cost, so
+  // fold them into expenses. This makes Net reflect the true payout ($281.61)
+  // rather than the $304.74 gross the client was charged.
+  const stripeFeesPeriod = useMemo(
+    () => roundCents((store.appointments as any[])
+      .filter((a: any) => isIncomeAppt(a) && a.date >= range.start && a.date <= range.end)
+      .reduce((s: number, a: any) => s + Math.max(0, parseMoney(a.stripeFee)), 0)),
+    [store.appointments, range],
+  );
+  const expenses = roundCents(txExpenses + businessExpensePeriod + stripeFeesPeriod);
   const net = income - expenses;
 
   const sessionsInRange = useMemo(() =>
@@ -16007,7 +16029,7 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
       </div>
 
       {tab === "money" ? (
-        <MoneyTab all={all} income={income} serviceIncome={serviceIncome} shopIncome={shopIncome} expenses={expenses} net={net} business={store.business}
+        <MoneyTab all={all} income={income} serviceIncome={serviceIncome} shopIncome={shopIncome} expenses={expenses} stripeFees={stripeFeesPeriod} net={net} business={store.business}
           editTx={editTx} openTxSheet={openTxSheet}
           receipts={store.receipts || []}
           openReceipt={openReceipt}
@@ -16022,12 +16044,13 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
   );
 };
 
-const MoneyTab = ({ all, income, serviceIncome = 0, shopIncome = 0, expenses, net, business, editTx, openTxSheet, receipts = [], openReceipt, businessExpenses = [], openProfitDetail, period = "week" }: {
+const MoneyTab = ({ all, income, serviceIncome = 0, shopIncome = 0, expenses, stripeFees = 0, net, business, editTx, openTxSheet, receipts = [], openReceipt, businessExpenses = [], openProfitDetail, period = "week" }: {
   all: any[];
   income: number;
   serviceIncome?: number;
   shopIncome?: number;
   expenses: number;
+  stripeFees?: number;
   net: number;
   business: any;
   editTx: any;
@@ -16084,7 +16107,12 @@ const MoneyTab = ({ all, income, serviceIncome = 0, shopIncome = 0, expenses, ne
                 <MetricRow label="Shop sales" value={fmtMoney(shopIncome, business.currency)} />
               </>
             )}
-            <MetricRow label="Expenses" value={fmtMoney(expenses, business.currency)} />
+            {stripeFees > 0 && (
+              <MetricRow label="Stripe fees" value={`− ${fmtMoney(stripeFees, business.currency)}`} />
+            )}
+            {/* `expenses` already includes Stripe fees; show the fee on its
+                own line above and the rest here so they don't double up. */}
+            <MetricRow label="Expenses" value={fmtMoney(roundCents(expenses - stripeFees), business.currency)} />
             <div className="mt-2 pt-2" style={{ borderTop: `1px solid rgba(21, 17, 26,0.08)` }}>
               <MetricRow
                 label={<><SectionEyebrow tone="muted">Net</SectionEyebrow></>}
@@ -21378,9 +21406,21 @@ const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: 
             <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
               <span>Deposit paid</span><span className="font-mono">{formatCurrency(receipt.depositPaid, currency)}</span>
             </div>
-            <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
-              <span>Balance due</span><span className="font-mono">{formatCurrency(receipt.balanceDue, currency)}</span>
-            </div>
+            {receipt.balancePaid ? (
+              <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
+                <span>Balance paid</span><span className="font-mono">{formatCurrency(receipt.balancePaid, currency)}</span>
+              </div>
+            ) : null}
+            {receipt.balanceDue > 0 && (
+              <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
+                <span>Balance due</span><span className="font-mono">{formatCurrency(receipt.balanceDue, currency)}</span>
+              </div>
+            )}
+            {receipt.tip ? (
+              <div className="flex justify-between text-sm" style={{ color: C.success }}>
+                <span>Tip</span><span className="font-mono">{formatCurrency(receipt.tip, currency)}</span>
+              </div>
+            ) : null}
             {!isInvoice && (
               <div className="flex justify-between pt-2 mt-2 text-base font-bold" style={{ borderTop: `1px solid ${C.hairline}`, color: C.espresso }}>
                 <span>Amount collected</span>
@@ -21389,6 +21429,18 @@ const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: 
                 </span>
               </div>
             )}
+            {!isInvoice && receipt.stripeFee ? (
+              <>
+                <div className="flex justify-between text-xs" style={{ color: C.muted }}>
+                  <span>Stripe fee</span><span className="font-mono">− {formatCurrency(receipt.stripeFee, currency)}</span>
+                </div>
+                {receipt.netPayout != null && (
+                  <div className="flex justify-between text-sm font-semibold" style={{ color: C.coffee }}>
+                    <span>Net payout</span><span className="font-mono">{formatCurrency(receipt.netPayout, currency)}</span>
+                  </div>
+                )}
+              </>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2 mt-4 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
             {receipt.paymentStatus && <Pill tone={receipt.paymentStatus === "paid" ? "success" : receipt.paymentStatus === "partial" ? "gold" : "warning"}>{String(receipt.paymentStatus).toUpperCase()}</Pill>}
@@ -36634,11 +36686,16 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
                   style={{ borderTop: i === 0 ? "none" : `1px solid ${C.hairline}` }}
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>
-                      {ledgerLabel(r)}
+                    <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>
+                      {ledgerLabel(r)}{r.reason === "send" && r.recipient ? ` · ${r.recipient}` : ""}
                     </p>
                     <p className="text-[11px]" style={{ color: C.muted }}>
-                      {r.createdAt ? new Date(r.createdAt).toLocaleDateString() : ""}
+                      {r.createdAt
+                        ? new Date(r.createdAt).toLocaleString([], {
+                            month: "short", day: "numeric",
+                            hour: "numeric", minute: "2-digit",
+                          })
+                        : ""}
                     </p>
                   </div>
                   <span
@@ -36678,6 +36735,15 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
                 {openEntry.delta >= 0 ? "+" : ""}{openEntry.delta} credit{Math.abs(openEntry.delta) === 1 ? "" : "s"}
               </span>
             </div>
+
+            {openEntry.reason === "send" && openEntry.recipient && (
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.muted, letterSpacing: "0.14em" }}>
+                  Sent to
+                </p>
+                <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>{openEntry.recipient}</p>
+              </div>
+            )}
 
             {openEntry.reason === "send" && (
               <div>

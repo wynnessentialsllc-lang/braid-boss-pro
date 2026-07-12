@@ -206,6 +206,14 @@ export const deriveAppointmentTransactions = (appointments: any[]): Transaction[
       ? roundCents(Math.max(0, netTotal - deposit))
       : 0;
 
+    // Stripe processing fee + true net payout, persisted on the appointment
+    // when a card balance/full payment is reconciled. Lets the payout-vs-
+    // gross split (e.g. $304.74 collected → $281.61 net) show on the ledger
+    // and receipt without a live Stripe round-trip. Applied to the payment
+    // row (full/final), never the deposit row.
+    const stripeFee = roundCents(parseMoney(a.stripeFee));
+    const stripeNet = roundCents(parseMoney(a.stripeNet));
+
     const base = {
       clientName,
       serviceName,
@@ -234,7 +242,8 @@ export const deriveAppointmentTransactions = (appointments: any[]): Transaction[
         method,
         amount,
         tip,
-        net: roundCents(amount + tip),
+        fee: stripeFee,
+        net: stripeNet > 0 ? stripeNet : roundCents(amount + tip - stripeFee),
         paidAt: apptPaidAt(a, true),
         stripeId: a.stripe_payment_intent_id || a.balance_payment_intent_id || null,
         depositAmount: 0,
@@ -260,7 +269,8 @@ export const deriveAppointmentTransactions = (appointments: any[]): Transaction[
       });
     }
 
-    // Final/balance payment row.
+    // Final/balance payment row — carries the Stripe fee/net, since the
+    // balance is the card charge.
     if (balancePaidAmount > 0) {
       out.push({
         ...base,
@@ -270,7 +280,8 @@ export const deriveAppointmentTransactions = (appointments: any[]): Transaction[
         method,
         amount: balancePaidAmount,
         tip,
-        net: roundCents(balancePaidAmount + tip),
+        fee: stripeFee,
+        net: stripeNet > 0 ? stripeNet : roundCents(balancePaidAmount + tip - stripeFee),
         paidAt: apptPaidAt(a, true),
         stripeId: a.balance_payment_intent_id || null,
         depositAmount: deposit,
@@ -434,20 +445,46 @@ export const mergeTransactions = (
   // A card refund issued from the Payments screen writes an optimistic
   // manual `refund` row so it shows the instant it's issued. Once Stripe
   // sync catches up, the now fully-refunded charge comes back as its own
-  // refund row (same money, now carrying the real fee/net) keyed by the
-  // same payment_intent/charge. Drop the optimistic manual duplicate so
-  // the refund isn't listed — or counted in the summary — twice. Partial
-  // card refunds never surface a Stripe refund row (the charge stays a
-  // positive row), so their manual row is kept; cash/Zelle/etc. refunds
-  // carry no stripeId and are always kept.
-  const stripeRefundKeys = new Set(
-    dedupedStripe
-      .filter((s) => s.type === "refund" && s.stripeId)
-      .map((s) => String(s.stripeId)),
-  );
-  const dedupedManual = manualTxns.filter(
-    (m) => !(m.type === "refund" && m.stripeId && stripeRefundKeys.has(String(m.stripeId))),
-  );
+  // refund row (same money, with the real fee/net), so the same refund
+  // would list — and count in the summary — twice. Collapse the manual
+  // duplicate into the Stripe row.
+  //
+  // Matching: newer manual refunds carry the charge's payment_intent, so
+  // they match exactly. Older ones (recorded before that stamp existed)
+  // have no intent, so a CARD refund also matches on amount + client + day
+  // — which identifies the same refund in practice. Each Stripe refund
+  // absorbs at most one manual row. Cash/Zelle/etc. refunds only match by
+  // intent (which they never have), so a genuine offline refund is never
+  // swallowed; a partial card refund keeps its manual row too, since a
+  // partially-refunded charge never surfaces a Stripe refund row to match.
+  const refundDayKey = (iso: string): string => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  };
+  const refundFuzzyKey = (t: Transaction): string =>
+    `${Math.abs(roundCents(t.amount))}|${(t.clientName || "").trim().toLowerCase()}|${refundDayKey(t.paidAt)}`;
+  const refundSlots = dedupedStripe
+    .filter((s) => s.type === "refund")
+    .map((s) => ({
+      intent: s.stripeId ? String(s.stripeId) : null,
+      fuzzy: refundFuzzyKey(s),
+      used: false,
+    }));
+  const dedupedManual = manualTxns.filter((m) => {
+    if (m.type !== "refund") return true;
+    const viaCard = m.method === "stripe" || m.method === "card";
+    const mFuzzy = refundFuzzyKey(m);
+    const slot = refundSlots.find(
+      (sl) =>
+        !sl.used &&
+        ((m.stripeId && sl.intent === String(m.stripeId)) || (viaCard && sl.fuzzy === mFuzzy)),
+    );
+    if (slot) {
+      slot.used = true;
+      return false;
+    }
+    return true;
+  });
   const all = [...appointmentTxns, ...dedupedStripe, ...dedupedManual];
   all.sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
   return all;
@@ -464,12 +501,13 @@ export const mergeTransactions = (
 // billing money that's already been collected.
 //
 // Given the live Stripe rows, return updated copies of any appointment a
-// linked, balance-covering Stripe payment proves is settled — carrying the
-// exact fields the in-app "mark paid" action writes (depositPaid bumped to
-// the net ticket so collected-revenue math is right, paymentStatus "paid",
-// balanceDue 0). Appointments that already read paid, aren't matched, or
-// whose payment doesn't cover the balance are left untouched. Pure so it
-// can be unit-tested and reused; the caller persists + syncs the results.
+// linked, balance-covering Stripe payment proves is settled: balance_paid
+// true, paymentStatus "paid", balanceDue 0, the tip and the Stripe fee/net
+// preserved — and, crucially, the original deposit left intact so the
+// deposit-vs-balance breakdown survives on the receipt and ledger.
+// Appointments that already read paid, aren't matched, or whose payment
+// doesn't cover the balance are left untouched. Pure so it can be
+// unit-tested and reused; the caller persists + syncs the results.
 export const reconcilePaidAppointments = (
   appointments: any[],
   stripeTxns: Transaction[],
@@ -510,15 +548,16 @@ export const reconcilePaidAppointments = (
     const collected = roundCents(s.amount - (s.tip > 0 ? s.tip : 0));
     if (collected + 0.01 < balance) continue;
 
-    const credit = Math.max(0, parseMoney(a.creditApplied));
     const pi = typeof s.stripeId === "string" && s.stripeId.startsWith("pi_") ? s.stripeId : null;
     seen.add(key);
     out.push({
       ...a,
-      // Mark collected-in-full the way the in-app "mark paid" action does,
-      // so calculateCollectedAmount counts the whole ticket, not just the
-      // original deposit.
-      depositPaid: roundCents(Math.max(0, netTotal - credit)),
+      // Preserve the original deposit — do NOT collapse it into the total.
+      // Marking balance_paid (rather than overwriting depositPaid) keeps the
+      // deposit-vs-balance split intact for the receipt and the ledger;
+      // calculateCollectedAmount counts the whole ticket for a paid
+      // appointment, so revenue stays right without the flatten.
+      balance_paid: true,
       balanceDue: 0,
       paymentStatus: "paid",
       paymentDate: a.paymentDate || todayYMD,
@@ -527,6 +566,12 @@ export const reconcilePaidAppointments = (
       // Stamp the balance payment_intent so mergeTransactions collapses the
       // Stripe row into this appointment row (no duplicate ledger entry).
       balance_payment_intent_id: a.balance_payment_intent_id || pi || null,
+      // Persist the Stripe processing fee + true net payout for this balance
+      // charge, so the receipt and the net-of-fees totals reflect what
+      // actually landed ($281.61), not the $304.74 gross — no live round-trip
+      // needed.
+      stripeFee: s.fee > 0 ? s.fee : parseMoney(a.stripeFee),
+      stripeNet: s.net > 0 ? s.net : parseMoney(a.stripeNet),
     });
   }
   return out;
@@ -567,6 +612,10 @@ export type Summary = {
   tips: number;
   deposits: number;
   outstanding: number;
+  // Stripe processing fees for the month, and the true net that landed
+  // after them (monthRevenue − monthFees) — what actually hits the bank.
+  monthFees: number;
+  monthNet: number;
 };
 
 // Local day boundaries so "today" matches the stylist's wall clock.
@@ -592,6 +641,7 @@ export const computeSummary = (
   let month = 0;
   let tips = 0;
   let deposits = 0;
+  let monthFees = 0;
 
   for (const t of txns) {
     const ts = new Date(t.paidAt).getTime();
@@ -603,6 +653,9 @@ export const computeSummary = (
     if (ts >= monthStart) month += gross;
     if (t.amount > 0) tips += t.tip;
     if (t.type === "deposit" && t.amount > 0) deposits += t.amount;
+    // Stripe processing fees on collected (positive) money this month —
+    // what Stripe skims before the payout reaches the bank.
+    if (ts >= monthStart && t.amount > 0) monthFees += t.fee || 0;
   }
 
   // Outstanding = sum of balance still due on non-cancelled, unpaid
@@ -623,6 +676,8 @@ export const computeSummary = (
     tips: roundCents(tips),
     deposits: roundCents(deposits),
     outstanding: roundCents(outstanding),
+    monthFees: roundCents(monthFees),
+    monthNet: roundCents(month - monthFees),
   };
 };
 

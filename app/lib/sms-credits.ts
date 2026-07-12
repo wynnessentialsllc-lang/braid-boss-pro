@@ -15,7 +15,8 @@ export type SmsLedgerEntry = {
   id: string;
   delta: number;            // +credits for purchase/refund, -1 for send
   reason: string;           // purchase | send | refund | adjustment
-  note: string | null;
+  note: string | null;      // the message text, for sends
+  recipient: string | null; // who the text went to, for sends
   createdAt: string;
 };
 
@@ -28,7 +29,7 @@ export const fetchSmsLedger = async (
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("sms_credit_ledger")
-    .select("id, delta, reason, note, created_at")
+    .select("id, delta, reason, note, recipient, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -38,6 +39,7 @@ export const fetchSmsLedger = async (
     delta: Number(r.delta) || 0,
     reason: String(r.reason || ""),
     note: r.note || null,
+    recipient: r.recipient || null,
     createdAt: String(r.created_at || ""),
   }));
 };

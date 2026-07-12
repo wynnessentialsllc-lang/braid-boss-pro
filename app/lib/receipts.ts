@@ -24,6 +24,14 @@ export type ReceiptRecord = {
   discountName?: string;
   depositPaid: number;
   balanceDue: number;
+  // Balance actually collected (vs. still due) — set once the balance is
+  // paid, so the receipt shows Deposit + Balance paid instead of collapsing
+  // them. Tip, and the Stripe processing fee + net payout, are surfaced when
+  // known so the receipt reads what the client paid and what actually landed.
+  balancePaid?: number;
+  tip?: number;
+  stripeFee?: number;
+  netPayout?: number;
   amountCollected: number;
   paymentStatus?: string;
   paymentMethod?: string;
@@ -43,6 +51,8 @@ const parseMoney = (raw: unknown): number => {
   const n = parseFloat(cleaned);
   return Number.isFinite(n) ? n : 0;
 };
+
+const roundMoney = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
 const formatCurrency = (n: number, currency: string = "USD"): string => {
   try {
@@ -114,7 +124,23 @@ export const buildReceiptFromAppointment = (
   // the math reads as if the client overpaid by the discount amount.
   const total = Math.max(0, subtotal - discountAmount);
   const deposit = parseMoney(a.depositPaid);
-  const balance = parseMoney(a.balanceDue ?? Math.max(0, total - deposit));
+  // Paid-in-full is now marked WITHOUT collapsing the deposit into the total,
+  // so read it from the paid flags — not from "deposit >= total".
+  const paidInFull =
+    a.balance_paid === true ||
+    a.balancePaid === true ||
+    a.paymentStatus === "paid" ||
+    (parseMoney(a.balanceDue) === 0 && total > 0);
+  const balancePaid = paidInFull ? Math.max(0, roundMoney(total - deposit)) : 0;
+  const balanceDue = paidInFull ? 0 : parseMoney(a.balanceDue ?? Math.max(0, total - deposit));
+  const tip = roundMoney(parseMoney(a.tipAmount ?? a.data?.tipAmount ?? a.tip));
+  const stripeFee = roundMoney(parseMoney(a.stripeFee ?? a.data?.stripeFee));
+  // Service dollars collected (deposit + any balance paid), plus tip = the
+  // full amount the client paid.
+  const collectedService = paidInFull ? total : deposit > 0 ? deposit : 0;
+  const amountCollected = type === "receipt" ? roundMoney(collectedService + tip) : 0;
+  const netPayout =
+    stripeFee > 0 ? roundMoney(Math.max(0, amountCollected - stripeFee)) : undefined;
   return {
     id: newId,
     type,
@@ -130,9 +156,13 @@ export const buildReceiptFromAppointment = (
     discountAmount: discountAmount > 0 ? discountAmount : undefined,
     discountName: discountAmount > 0 ? (a.discountName || undefined) : undefined,
     depositPaid: deposit,
-    balanceDue: balance,
-    amountCollected: type === "receipt" ? (deposit > 0 ? deposit : (balance === 0 ? total : 0)) : 0,
-    paymentStatus: a.paymentStatus || (balance === 0 && total > 0 ? "paid" : (deposit > 0 ? "partial" : "pending")),
+    balanceDue,
+    balancePaid: balancePaid > 0 ? balancePaid : undefined,
+    tip: tip > 0 ? tip : undefined,
+    stripeFee: stripeFee > 0 ? stripeFee : undefined,
+    netPayout,
+    amountCollected,
+    paymentStatus: a.paymentStatus || (paidInFull ? "paid" : (deposit > 0 ? "partial" : "pending")),
     paymentMethod: a.paymentMethod || "",
     paymentDate: a.paymentDate || "",
     notes: a.paymentNotes || a.notes || "",
@@ -183,8 +213,12 @@ export const buildReceiptSummaryText = (rcp: ReceiptRecord, currency: string = "
     rcp.discountAmount ? `Discount${rcp.discountName ? ` (${rcp.discountName})` : ""}: − ${fmt(rcp.discountAmount)}` : null,
     `Total: ${fmt(rcp.totalPrice)}`,
     `Deposit paid: ${fmt(rcp.depositPaid)}`,
-    `Balance due: ${fmt(rcp.balanceDue)}`,
+    rcp.balancePaid ? `Balance paid: ${fmt(rcp.balancePaid)}` : null,
+    rcp.balanceDue > 0 ? `Balance due: ${fmt(rcp.balanceDue)}` : null,
+    rcp.tip ? `Tip: ${fmt(rcp.tip)}` : null,
     rcp.type === "receipt" ? `Amount collected: ${fmt(rcp.amountCollected)}` : null,
+    rcp.stripeFee ? `Stripe fee: − ${fmt(rcp.stripeFee)}` : null,
+    rcp.netPayout != null ? `Net payout: ${fmt(rcp.netPayout)}` : null,
     rcp.paymentMethod ? `Method: ${rcp.paymentMethod}` : null,
     rcp.paymentDate ? `Paid on: ${fmtDateLong(rcp.paymentDate)}` : null,
   ];

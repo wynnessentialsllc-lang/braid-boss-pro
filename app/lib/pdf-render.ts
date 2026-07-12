@@ -152,8 +152,14 @@ export const renderReceiptPdf = async (
   }
   drawRow("Total price", fmt(rcp.totalPrice));
   drawRow("Deposit paid", fmt(rcp.depositPaid), { muted: rcp.depositPaid === 0 });
-  drawRow("Balance due", fmt(rcp.balanceDue), { muted: rcp.balanceDue === 0 });
+  if (rcp.balancePaid) drawRow("Balance paid", fmt(rcp.balancePaid));
+  if (rcp.balanceDue > 0) drawRow("Balance due", fmt(rcp.balanceDue));
+  if (rcp.tip) drawRow("Tip", fmt(rcp.tip));
   if (!isInvoice) drawRow("Amount collected", fmt(rcp.amountCollected), { bold: true });
+  if (!isInvoice && rcp.stripeFee) {
+    drawRow("Stripe fee", "− " + fmt(rcp.stripeFee), { muted: true });
+    if (rcp.netPayout != null) drawRow("Net payout", fmt(rcp.netPayout));
+  }
 
   y += 8;
   doc.line(M, y, W - M, y);

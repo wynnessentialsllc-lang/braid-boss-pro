@@ -424,6 +424,14 @@ function Inner() {
         <SummaryCard label="Today" value={formatMoney(summary.todayRevenue, currency)} lead />
         <SummaryCard label="This Week" value={formatMoney(summary.weekRevenue, currency)} />
         <SummaryCard label="This Month" value={formatMoney(summary.monthRevenue, currency)} />
+        {/* Stripe fees only appear once a card payment has actually been
+            taken, so cash-only stylists don't see empty fee cards. */}
+        {summary.monthFees > 0 && (
+          <SummaryCard label="Stripe Fees (mo)" value={`− ${formatMoney(summary.monthFees, currency)}`} />
+        )}
+        {summary.monthFees > 0 && (
+          <SummaryCard label="Net After Fees (mo)" value={formatMoney(summary.monthNet, currency)} />
+        )}
         <SummaryCard label="Tips Collected" value={formatMoney(summary.tips, currency)} />
         <SummaryCard label="Deposits Collected" value={formatMoney(summary.deposits, currency)} />
         <SummaryCard
