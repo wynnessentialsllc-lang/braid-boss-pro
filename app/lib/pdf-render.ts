@@ -157,6 +157,14 @@ export const renderReceiptPdf = async (
 
   // THE TICKET — the pricing record. No fees, so it always adds up.
   sectionLabel("The ticket");
+  // Itemized lines first (base service + each add-on) so the receipt reads
+  // what the client actually got. Add-ons are prefixed "+"; they sum to the
+  // subtotal below.
+  if (rcp.lineItems && rcp.lineItems.length > 0) {
+    for (const li of rcp.lineItems) {
+      drawRow(li.kind === "addon" ? `+ ${li.label}` : li.label, fmt(li.amount));
+    }
+  }
   if (rcp.discountAmount && rcp.subtotal) {
     drawRow("Subtotal", fmt(rcp.subtotal));
     drawRow(

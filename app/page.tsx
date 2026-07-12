@@ -21431,6 +21431,14 @@ const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: 
 
         <Card className="p-4">
           <div className="space-y-1.5">
+            {receipt.lineItems && receipt.lineItems.length > 0
+              ? receipt.lineItems.map((li, i) => (
+                  <div key={i} className="flex justify-between text-sm" style={{ color: C.coffee }}>
+                    <span className="truncate pr-2">{li.kind === "addon" ? `+ ${li.label}` : li.label}</span>
+                    <span className="font-mono">{formatCurrency(li.amount, currency)}</span>
+                  </div>
+                ))
+              : null}
             {receipt.discountAmount && receipt.subtotal ? (
               <>
                 <div className="flex justify-between text-sm" style={{ color: C.coffee }}>

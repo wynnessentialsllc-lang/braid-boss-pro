@@ -4,6 +4,17 @@
 // supabase.ts. This module is intentionally side-effect free and
 // has no React or DOM dependency, so it can be imported anywhere.
 
+// A single priced line on a receipt's ticket — the base service plus any
+// add-ons the client got. Recorded so the receipt reads what was actually
+// done ("Boho Knotless (Medium) $160 + Boho Max $50"), not just a lump sum.
+// `amount` is the GROSS charge for that line (pre-discount); the discount
+// still applies once to the whole ticket, below the line items.
+export type ReceiptLineItem = {
+  label: string;
+  amount: number;
+  kind: "service" | "addon";
+};
+
 export type ReceiptRecord = {
   id: string;
   type: "receipt" | "invoice";
@@ -15,6 +26,11 @@ export type ReceiptRecord = {
   service?: string;
   serviceDate?: string;
   serviceTime?: string;
+  // Itemized breakdown of the service dollars (base service + add-ons).
+  // Present only when the appointment carried add-ons — a lone base line
+  // would just restate "Service total", so it's omitted. The line amounts
+  // sum to `subtotal` (or `totalPrice` when there's no discount).
+  lineItems?: ReceiptLineItem[];
   // totalPrice is the NET total (post-discount). For receipts that
   // had a discount applied, subtotal + discount lines are surfaced
   // separately so the math reads honestly.
@@ -109,6 +125,56 @@ export const generateReceiptNumber = (
   return `${head}${seq}`;
 };
 
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Build the itemized ticket from an appointment's booked add-ons. Returns
+// undefined when there's nothing to itemize (no add-ons) so callers can fall
+// back to the single-line "Service total".
+//
+// The base service price is the gross subtotal minus the add-ons, so the
+// lines always reconcile to the ticket even when the recalled numbers are
+// fuzzy. The base label is the booked style with any " — Add-on" suffixes the
+// booking flow appended stripped off, so an add-on isn't named twice.
+const deriveReceiptLineItems = (
+  a: any,
+  grossSubtotal: number,
+): ReceiptLineItem[] | undefined => {
+  const raw = a?.addOns || a?.addons || a?.data?.addOns || a?.data?.addons;
+  if (!Array.isArray(raw)) return undefined;
+  const addOns = raw
+    .map((x: any) => ({
+      label: String(x?.name ?? "").trim(),
+      // Appointment add-ons store `price`; some flows use `amount`/`cost`.
+      amount: roundMoney(parseMoney(x?.price ?? x?.amount ?? x?.cost)),
+    }))
+    .filter((x: { label: string; amount: number }) => x.label !== "" || x.amount > 0);
+  if (addOns.length === 0) return undefined;
+
+  const addOnsTotal = addOns.reduce((s, x) => s + x.amount, 0);
+  const baseAmount = roundMoney(grossSubtotal - addOnsTotal);
+
+  let baseLabel = String(a?.style || a?.service || "Service").trim();
+  for (const ad of addOns) {
+    if (!ad.label) continue;
+    // Strip a trailing " — Boho Max" / " - Boho Max" the booking snapshot
+    // may have folded into the style string, so it isn't listed twice.
+    baseLabel = baseLabel
+      .replace(new RegExp(`\\s*[—–-]\\s*${escapeRegExp(ad.label)}\\s*$`, "i"), "")
+      .trim();
+  }
+
+  const items: ReceiptLineItem[] = [];
+  // Skip a zero/negative base (a ticket that's entirely add-ons) — the
+  // add-on lines alone already tell the story and still sum to the total.
+  if (baseAmount > 0.005) {
+    items.push({ label: baseLabel || "Service", amount: baseAmount, kind: "service" });
+  }
+  for (const ad of addOns) {
+    items.push({ label: ad.label || "Add-on", amount: ad.amount, kind: "addon" });
+  }
+  return items.length > 0 ? items : undefined;
+};
+
 export const buildReceiptFromAppointment = (
   a: any,
   type: "receipt" | "invoice",
@@ -149,6 +215,7 @@ export const buildReceiptFromAppointment = (
     clientId: a.clientId,
     clientName: clientName || a.clientName || "Client",
     service: a.style || "Service",
+    lineItems: deriveReceiptLineItems(a, subtotal),
     serviceDate: a.date || "",
     serviceTime: a.time || "",
     totalPrice: total,
@@ -215,7 +282,15 @@ export const buildReceiptSummaryText = (
     `Client: ${rcp.clientName || "—"}`,
     `Service: ${rcp.service || "—"}`,
     rcp.serviceDate ? `Date: ${fmtDateLong(rcp.serviceDate)}${rcp.serviceTime ? ` ${fmtTime(rcp.serviceTime)}` : ""}` : null,
-    // The ticket — pricing record.
+    // The ticket — pricing record. Itemized lines first (base + add-ons),
+    // so the client can see what each charge was for.
+    ...(rcp.lineItems && rcp.lineItems.length > 0
+      ? rcp.lineItems.map((li) =>
+          li.kind === "addon"
+            ? `+ ${li.label}: ${fmt(li.amount)}`
+            : `${li.label}: ${fmt(li.amount)}`,
+        )
+      : []),
     rcp.discountAmount && rcp.subtotal ? `Subtotal: ${fmt(rcp.subtotal)}` : null,
     rcp.discountAmount ? `Discount${rcp.discountName ? ` (${rcp.discountName})` : ""}: − ${fmt(rcp.discountAmount)}` : null,
     `Service total: ${fmt(rcp.totalPrice)}`,

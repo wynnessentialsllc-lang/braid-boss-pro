@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildReceiptFromAppointment } from "./receipts";
+import { buildReceiptFromAppointment, buildReceiptSummaryText } from "./receipts";
 
 // Claudia's booking: $325 subtotal, −$20.26 discount = $304.74 net, a $25
 // deposit, and a $279.74 balance later paid by card with a $30 tip. The
@@ -74,5 +74,56 @@ describe("buildReceiptFromAppointment — deposit only (unpaid balance)", () => 
   it("omits Stripe fee / net when there's no card fee", () => {
     expect(rcp.stripeFee).toBeUndefined();
     expect(rcp.netPayout).toBeUndefined();
+  });
+});
+
+// Danielle's booking (matches the shared receipt): medium Boho Knotless with
+// a Boho Max add-on, $210 total, paid in full by Zelle.
+describe("buildReceiptFromAppointment — itemized add-ons", () => {
+  const danielle = {
+    id: "appt_danielle",
+    clientName: "Danielle Vine",
+    style: "Boho Knotless Braids (Medium) — Boho Max",
+    date: "2026-07-12",
+    totalPrice: 210,
+    addons: [{ id: "x1", name: "Boho Max", price: 50 }],
+    depositPaid: 210,
+    balanceDue: 0,
+    paymentStatus: "paid",
+    paymentMethod: "zelle",
+  };
+  const rcp = buildReceiptFromAppointment(danielle, "receipt", [], "rcp_d", "Danielle Vine");
+
+  it("itemizes the base service and the add-on", () => {
+    expect(rcp.lineItems).toEqual([
+      { label: "Boho Knotless Braids (Medium)", amount: 160, kind: "service" },
+      { label: "Boho Max", amount: 50, kind: "addon" },
+    ]);
+  });
+
+  it("keeps the line items reconciled to the ticket total", () => {
+    const sum = (rcp.lineItems || []).reduce((s, li) => s + li.amount, 0);
+    expect(sum).toBe(rcp.totalPrice);
+    expect(rcp.totalPrice).toBe(210);
+  });
+
+  it("surfaces the add-on and base in the shareable summary text", () => {
+    const text = buildReceiptSummaryText(rcp);
+    expect(text).toContain("Boho Knotless Braids (Medium): $160.00");
+    expect(text).toContain("+ Boho Max: $50.00");
+  });
+});
+
+// An appointment with no add-ons stays a single-line ticket — a lone base
+// line would just restate "Service total".
+describe("buildReceiptFromAppointment — no add-ons", () => {
+  const rcp = buildReceiptFromAppointment(
+    { id: "a3", style: "Knotless Braids", totalPrice: 180, depositPaid: 60, balanceDue: 120 },
+    "receipt",
+    [],
+    "rcp_3",
+  );
+  it("leaves lineItems undefined", () => {
+    expect(rcp.lineItems).toBeUndefined();
   });
 });
