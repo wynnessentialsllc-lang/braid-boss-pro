@@ -41,6 +41,7 @@ import {
   fromManualRecord,
   fromStripeRecord,
   mergeTransactions,
+  reconcilePaidAppointments,
   filterTransactions,
   computeSummary,
   buildTransactionsCsv,
@@ -206,6 +207,37 @@ function Inner() {
     [appointmentTxns, stripeTxns, manualTxns],
   );
 
+  // Self-heal a stuck "balance due": when a live Stripe payment in this
+  // ledger proves an appointment's balance was collected but the record
+  // still reads unpaid (the balance webhook never landed), mark it paid and
+  // sync it — so the schedule, outstanding totals and home cards stop
+  // billing money that's already in. Re-runs harmlessly: once an
+  // appointment reads paid, reconcilePaidAppointments returns nothing for it.
+  useEffect(() => {
+    if (!userId) return;
+    const repaired = reconcilePaidAppointments(appointments, stripeTxns, localDateStr());
+    if (repaired.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (const r of repaired) {
+        try {
+          await syncAppointments.upsert(userId, r);
+        } catch {
+          /* offline — re-syncs when the connection returns */
+        }
+      }
+      if (cancelled) return;
+      // Reflect the repair locally so this list de-dupes the Stripe row and
+      // shows the booking as paid without waiting for a re-pull.
+      setAppointments((prev) => {
+        const m = new Map(prev.map((a) => [String(a.id), a]));
+        for (const r of repaired) m.set(String(r.id), r);
+        return Array.from(m.values());
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [userId, appointments, stripeTxns]);
+
   const summary = useMemo(
     () => computeSummary(allTxns, appointments),
     [allTxns, appointments],
@@ -330,6 +362,11 @@ function Inner() {
         tipAmount: 0,
         paymentType: "refund" as PaymentType,
         paymentMethod: txn.method,
+        // Tie a card refund back to its original charge's
+        // payment_intent/charge. Once Stripe sync surfaces the same refund
+        // as its own row, mergeTransactions collapses the two so the refund
+        // never shows (or counts) twice. Cash/Zelle/etc. leave this null.
+        stripeId: viaStripe && txn.stripeId ? String(txn.stripeId) : null,
         paidAt: new Date().toISOString(),
         note: reason
           ? `Refund · ${reason}`

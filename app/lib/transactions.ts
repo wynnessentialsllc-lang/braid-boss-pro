@@ -313,7 +313,17 @@ export const fromManualRecord = (r: any): Transaction => {
     depositAmount: type === "deposit" ? Math.abs(amount) : 0,
     balancePaid: type === "final" || type === "full" ? Math.abs(amount) : 0,
     refunds: [],
-    stripeId: null,
+    // The Stripe payment_intent this row corresponds to, so mergeTransactions
+    // can collapse the matching live Stripe charge into it instead of listing
+    // both. Two sources: a card refund recorded from the Payments screen
+    // stamps it at the top level; a Boss Checkout sale paid by card (Tap to
+    // Pay) carries it on data.stripePaymentIntentId (from buildSaleTransaction).
+    stripeId:
+      r.stripeId ??
+      r.stripe_id ??
+      r.data?.stripePaymentIntentId ??
+      r.data?.stripe_payment_intent_id ??
+      null,
     note: String(r.note || ""),
   };
 };
@@ -386,6 +396,18 @@ export const mergeTransactions = (
     if (t.stripeId) byIntent.set(t.stripeId, t);
     if (t.appointmentId) byApptKey.set(`${t.appointmentId}:${t.type}`, t);
   }
+  // A Boss Checkout sale paid by card (Tap to Pay) is recorded as a manual
+  // ledger row AND surfaces again as the live Stripe charge for the same
+  // payment_intent. Register the manual row by its intent so the matching
+  // Stripe charge collapses into it — keeping the itemized ticket context
+  // and folding in the real Stripe fee/net — instead of showing twice.
+  // Refund rows are excluded: those collapse the other way (the Stripe
+  // refund row is canonical), handled below.
+  for (const t of manualTxns) {
+    if (t.type !== "refund" && t.stripeId && !byIntent.has(t.stripeId)) {
+      byIntent.set(t.stripeId, t);
+    }
+  }
   const dedupedStripe = stripeTxns.filter((s) => {
     const match =
       (s.stripeId && byIntent.get(s.stripeId)) ||
@@ -409,9 +431,105 @@ export const mergeTransactions = (
     }
     return false;
   });
-  const all = [...appointmentTxns, ...dedupedStripe, ...manualTxns];
+  // A card refund issued from the Payments screen writes an optimistic
+  // manual `refund` row so it shows the instant it's issued. Once Stripe
+  // sync catches up, the now fully-refunded charge comes back as its own
+  // refund row (same money, now carrying the real fee/net) keyed by the
+  // same payment_intent/charge. Drop the optimistic manual duplicate so
+  // the refund isn't listed — or counted in the summary — twice. Partial
+  // card refunds never surface a Stripe refund row (the charge stays a
+  // positive row), so their manual row is kept; cash/Zelle/etc. refunds
+  // carry no stripeId and are always kept.
+  const stripeRefundKeys = new Set(
+    dedupedStripe
+      .filter((s) => s.type === "refund" && s.stripeId)
+      .map((s) => String(s.stripeId)),
+  );
+  const dedupedManual = manualTxns.filter(
+    (m) => !(m.type === "refund" && m.stripeId && stripeRefundKeys.has(String(m.stripeId))),
+  );
+  const all = [...appointmentTxns, ...dedupedStripe, ...dedupedManual];
   all.sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
   return all;
+};
+
+// =====================================================================
+// Reconcile appointment paid-state from live Stripe payments
+// =====================================================================
+// A balance (or full) payment can succeed on the connected Stripe account
+// — so it shows up in this ledger — while the appointment record still
+// reads "balance due" because the balance webhook never landed (e.g. the
+// endpoint secret isn't configured, or Stripe couldn't deliver the event).
+// That leaves the schedule, the outstanding totals and the home cards
+// billing money that's already been collected.
+//
+// Given the live Stripe rows, return updated copies of any appointment a
+// linked, balance-covering Stripe payment proves is settled — carrying the
+// exact fields the in-app "mark paid" action writes (depositPaid bumped to
+// the net ticket so collected-revenue math is right, paymentStatus "paid",
+// balanceDue 0). Appointments that already read paid, aren't matched, or
+// whose payment doesn't cover the balance are left untouched. Pure so it
+// can be unit-tested and reused; the caller persists + syncs the results.
+export const reconcilePaidAppointments = (
+  appointments: any[],
+  stripeTxns: Transaction[],
+  todayYMD: string,
+): any[] => {
+  const byId = new Map<string, any>();
+  for (const a of Array.isArray(appointments) ? appointments : []) {
+    if (a && a.id != null) byId.set(String(a.id), a);
+  }
+  const out: any[] = [];
+  const seen = new Set<string>();
+  for (const s of Array.isArray(stripeTxns) ? stripeTxns : []) {
+    // Only trust a live Stripe charge that's explicitly a full/balance
+    // payment linked to a specific appointment (the id our checkout route
+    // stamps into the charge's metadata).
+    if (s.source !== "stripe" || s.amount <= 0) continue;
+    if (s.type !== "final" && s.type !== "full") continue;
+    if (!s.appointmentId) continue;
+    const key = String(s.appointmentId);
+    if (seen.has(key)) continue;
+    const a = byId.get(key);
+    if (!a || isCanceled(a)) continue;
+    if (a.paymentStatus === "paid" || a.balance_paid === true || a.balancePaid === true) continue;
+
+    const total = Math.max(0, parseMoney(a.totalPrice));
+    const discount = Math.max(0, parseMoney(a.discountAmount));
+    const netTotal = roundCents(Math.max(0, total - discount));
+    if (!(netTotal > 0)) continue;
+    const deposit = Math.max(0, parseMoney(a.depositPaid));
+    const balance =
+      a.balanceDue == null
+        ? roundCents(Math.max(0, netTotal - deposit))
+        : Math.max(0, parseMoney(a.balanceDue));
+    if (!(balance > 0)) continue;
+
+    // The charge, net of tip, must cover the outstanding balance — so a
+    // partial charge/refund can't flip a still-owed booking to paid.
+    const collected = roundCents(s.amount - (s.tip > 0 ? s.tip : 0));
+    if (collected + 0.01 < balance) continue;
+
+    const credit = Math.max(0, parseMoney(a.creditApplied));
+    const pi = typeof s.stripeId === "string" && s.stripeId.startsWith("pi_") ? s.stripeId : null;
+    seen.add(key);
+    out.push({
+      ...a,
+      // Mark collected-in-full the way the in-app "mark paid" action does,
+      // so calculateCollectedAmount counts the whole ticket, not just the
+      // original deposit.
+      depositPaid: roundCents(Math.max(0, netTotal - credit)),
+      balanceDue: 0,
+      paymentStatus: "paid",
+      paymentDate: a.paymentDate || todayYMD,
+      status: a.status === "scheduled" || a.status === "confirmed" ? "completed" : a.status,
+      tipAmount: a.tipAmount != null ? a.tipAmount : s.tip > 0 ? s.tip : 0,
+      // Stamp the balance payment_intent so mergeTransactions collapses the
+      // Stripe row into this appointment row (no duplicate ledger entry).
+      balance_payment_intent_id: a.balance_payment_intent_id || pi || null,
+    });
+  }
+  return out;
 };
 
 // =====================================================================
