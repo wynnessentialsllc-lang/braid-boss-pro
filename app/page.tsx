@@ -15981,7 +15981,16 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
     () => expensesForPeriod(store.businessExpenses || [], period as ReportingPeriod, range.start, range.end),
     [store.businessExpenses, period, range],
   );
-  const expenses = roundCents(txExpenses + businessExpensePeriod);
+  // Stripe processing fees for card payments in the window — a real cost, so
+  // fold them into expenses. This makes Net reflect the true payout ($281.61)
+  // rather than the $304.74 gross the client was charged.
+  const stripeFeesPeriod = useMemo(
+    () => roundCents((store.appointments as any[])
+      .filter((a: any) => isIncomeAppt(a) && a.date >= range.start && a.date <= range.end)
+      .reduce((s: number, a: any) => s + Math.max(0, parseMoney(a.stripeFee)), 0)),
+    [store.appointments, range],
+  );
+  const expenses = roundCents(txExpenses + businessExpensePeriod + stripeFeesPeriod);
   const net = income - expenses;
 
   const sessionsInRange = useMemo(() =>
@@ -16020,7 +16029,7 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
       </div>
 
       {tab === "money" ? (
-        <MoneyTab all={all} income={income} serviceIncome={serviceIncome} shopIncome={shopIncome} expenses={expenses} net={net} business={store.business}
+        <MoneyTab all={all} income={income} serviceIncome={serviceIncome} shopIncome={shopIncome} expenses={expenses} stripeFees={stripeFeesPeriod} net={net} business={store.business}
           editTx={editTx} openTxSheet={openTxSheet}
           receipts={store.receipts || []}
           openReceipt={openReceipt}
@@ -16035,12 +16044,13 @@ const Money = ({ store, initialPeriod, onPeriodConsumed, openTxSheet, editTx, op
   );
 };
 
-const MoneyTab = ({ all, income, serviceIncome = 0, shopIncome = 0, expenses, net, business, editTx, openTxSheet, receipts = [], openReceipt, businessExpenses = [], openProfitDetail, period = "week" }: {
+const MoneyTab = ({ all, income, serviceIncome = 0, shopIncome = 0, expenses, stripeFees = 0, net, business, editTx, openTxSheet, receipts = [], openReceipt, businessExpenses = [], openProfitDetail, period = "week" }: {
   all: any[];
   income: number;
   serviceIncome?: number;
   shopIncome?: number;
   expenses: number;
+  stripeFees?: number;
   net: number;
   business: any;
   editTx: any;
@@ -16097,7 +16107,12 @@ const MoneyTab = ({ all, income, serviceIncome = 0, shopIncome = 0, expenses, ne
                 <MetricRow label="Shop sales" value={fmtMoney(shopIncome, business.currency)} />
               </>
             )}
-            <MetricRow label="Expenses" value={fmtMoney(expenses, business.currency)} />
+            {stripeFees > 0 && (
+              <MetricRow label="Stripe fees" value={`− ${fmtMoney(stripeFees, business.currency)}`} />
+            )}
+            {/* `expenses` already includes Stripe fees; show the fee on its
+                own line above and the rest here so they don't double up. */}
+            <MetricRow label="Expenses" value={fmtMoney(roundCents(expenses - stripeFees), business.currency)} />
             <div className="mt-2 pt-2" style={{ borderTop: `1px solid rgba(21, 17, 26,0.08)` }}>
               <MetricRow
                 label={<><SectionEyebrow tone="muted">Net</SectionEyebrow></>}
