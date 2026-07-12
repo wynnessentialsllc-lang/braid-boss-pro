@@ -202,23 +202,31 @@ export const buildInvoiceFromQuote = (
 };
 
 // Plain-text summary suitable for SMS / WhatsApp / clipboard fallback.
-export const buildReceiptSummaryText = (rcp: ReceiptRecord, currency: string = "USD"): string => {
+export const buildReceiptSummaryText = (
+  rcp: ReceiptRecord,
+  currency: string = "USD",
+  // Client-facing by default: the stylist's Stripe fee / net payout are hidden.
+  // Pass { includeNet: true } for an internal copy.
+  opts?: { includeNet?: boolean },
+): string => {
   const fmt = (n: number) => formatCurrency(n, currency);
   const lines: (string | null)[] = [
     `${rcp.type === "invoice" ? "Invoice" : "Receipt"} #${rcp.receiptNumber}`,
     `Client: ${rcp.clientName || "—"}`,
     `Service: ${rcp.service || "—"}`,
     rcp.serviceDate ? `Date: ${fmtDateLong(rcp.serviceDate)}${rcp.serviceTime ? ` ${fmtTime(rcp.serviceTime)}` : ""}` : null,
+    // The ticket — pricing record.
     rcp.discountAmount && rcp.subtotal ? `Subtotal: ${fmt(rcp.subtotal)}` : null,
     rcp.discountAmount ? `Discount${rcp.discountName ? ` (${rcp.discountName})` : ""}: − ${fmt(rcp.discountAmount)}` : null,
-    `Total: ${fmt(rcp.totalPrice)}`,
+    `Service total: ${fmt(rcp.totalPrice)}`,
     `Deposit paid: ${fmt(rcp.depositPaid)}`,
-    rcp.balancePaid ? `Balance paid: ${fmt(rcp.balancePaid)}` : null,
+    rcp.balancePaid ? `Balance: ${fmt(rcp.balancePaid)}` : null,
     rcp.balanceDue > 0 ? `Balance due: ${fmt(rcp.balanceDue)}` : null,
     rcp.tip ? `Tip: ${fmt(rcp.tip)}` : null,
-    rcp.type === "receipt" ? `Amount collected: ${fmt(rcp.amountCollected)}` : null,
-    rcp.stripeFee ? `Stripe fee: − ${fmt(rcp.stripeFee)}` : null,
-    rcp.netPayout != null ? `Net payout: ${fmt(rcp.netPayout)}` : null,
+    `Total: ${fmt(roundMoney(rcp.totalPrice + (rcp.tip || 0)))}`,
+    // The money — what landed. Hidden on client-facing copies.
+    opts?.includeNet && rcp.type === "receipt" && rcp.stripeFee ? `Stripe fee: − ${fmt(rcp.stripeFee)}` : null,
+    opts?.includeNet && rcp.type === "receipt" ? `In your bank: ${fmt(rcp.netPayout ?? rcp.amountCollected)}` : null,
     rcp.paymentMethod ? `Method: ${rcp.paymentMethod}` : null,
     rcp.paymentDate ? `Paid on: ${fmtDateLong(rcp.paymentDate)}` : null,
   ];

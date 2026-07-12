@@ -48,6 +48,10 @@ export const renderReceiptPdf = async (
   rcp: ReceiptRecord,
   business: any,
   policies?: any[],
+  // Receipts are client-facing, so the stylist's processing costs (Stripe fee
+  // and net payout) are hidden by default. Pass { includeNet: true } for an
+  // internal copy that shows what actually landed.
+  opts?: { includeNet?: boolean },
 ): Promise<{ blob: Blob; filename: string }> => {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt", format: "letter" });
@@ -62,6 +66,7 @@ export const renderReceiptPdf = async (
   const hairline = [220, 205, 180] as const;
   const currency = business?.currency || "USD";
   const fmt = (n: number) => formatCurrency(n, currency);
+  const r2 = (n: number) => Math.round(n * 100) / 100;
   const isInvoice = rcp.type === "invoice";
 
   // Page background
@@ -142,7 +147,16 @@ export const renderReceiptPdf = async (
     doc.text(value, W - M, y, { align: "right" });
     y += 22;
   };
+  const sectionLabel = (label: string) => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text(label.toUpperCase(), M, y);
+    y += 20;
+  };
 
+  // THE TICKET — the pricing record. No fees, so it always adds up.
+  sectionLabel("The ticket");
   if (rcp.discountAmount && rcp.subtotal) {
     drawRow("Subtotal", fmt(rcp.subtotal));
     drawRow(
@@ -150,15 +164,27 @@ export const renderReceiptPdf = async (
       "− " + fmt(rcp.discountAmount),
     );
   }
-  drawRow("Total price", fmt(rcp.totalPrice));
+  drawRow("Service total", fmt(rcp.totalPrice), { bold: true });
   drawRow("Deposit paid", fmt(rcp.depositPaid), { muted: rcp.depositPaid === 0 });
-  if (rcp.balancePaid) drawRow("Balance paid", fmt(rcp.balancePaid));
+  if (rcp.balancePaid) drawRow("Balance", fmt(rcp.balancePaid));
   if (rcp.balanceDue > 0) drawRow("Balance due", fmt(rcp.balanceDue));
   if (rcp.tip) drawRow("Tip", fmt(rcp.tip));
-  if (!isInvoice) drawRow("Amount collected", fmt(rcp.amountCollected), { bold: true });
-  if (!isInvoice && rcp.stripeFee) {
-    drawRow("Stripe fee", "− " + fmt(rcp.stripeFee), { muted: true });
-    if (rcp.netPayout != null) drawRow("Net payout", fmt(rcp.netPayout));
+  drawRow("Total", fmt(r2(rcp.totalPrice + (rcp.tip || 0))), { bold: true });
+
+  // THE MONEY — what was collected and what actually landed. Hidden by default
+  // because a receipt goes to the client, who shouldn't see the stylist's
+  // Stripe fee / net payout; the app's Payments view shows it. Only rendered
+  // for an explicit internal copy (opts.includeNet).
+  if (!isInvoice && opts?.includeNet) {
+    y += 8;
+    sectionLabel("The money");
+    const stripeCharge = r2((rcp.balancePaid || 0) + (rcp.tip || 0));
+    if (rcp.depositPaid > 0) drawRow("Deposit", fmt(rcp.depositPaid));
+    if (stripeCharge > 0) {
+      drawRow(rcp.stripeFee ? "Balance + tip (Stripe)" : "Balance + tip", fmt(stripeCharge));
+    }
+    if (rcp.stripeFee) drawRow("Stripe fee", "− " + fmt(rcp.stripeFee), { muted: true });
+    drawRow("In your bank", fmt(rcp.netPayout ?? rcp.amountCollected), { bold: true });
   }
 
   y += 8;
