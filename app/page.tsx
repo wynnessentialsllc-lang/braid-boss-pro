@@ -285,6 +285,7 @@ import {
   fromManualRecord,
   fromStripeRecord,
   mergeTransactions,
+  reconcilePaidAppointments,
   type Transaction,
 } from "./lib/transactions";
 import {
@@ -22000,6 +22001,53 @@ const useCloudSync = (userId: string | null, store: any) => {
     if (typeof window !== "undefined") window.localStorage.setItem(SYNC_LAST_OK_KEY, s);
   };
 
+  // Central Stripe reconciliation. Pulls the connected account's live
+  // charges and marks any appointment whose balance a Stripe payment has
+  // already covered as paid. The balance webhook can silently miss (secret
+  // not configured, event not delivered), which otherwise leaves the
+  // schedule, the Money tab and the home cards billing money that's already
+  // collected. Running it here — after the cloud pull and on refresh —
+  // heals every surface at once, so a Stripe payment shows up without the
+  // stylist opening Payments & Transactions. Best-effort: a Stripe or
+  // network hiccup never blocks or breaks the sync flow.
+  const reconcileStripePaidAppointments = useCallback(
+    async (apptsOverride?: any[]) => {
+      if (!userId || !store?.premium) return;
+      try {
+        const supabase = getSupabase();
+        const { data: sess } = await supabase.auth.getSession();
+        const token = sess?.session?.access_token;
+        if (!token) return;
+        const res = await fetch("/api/stripe-connect/transactions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ access_token: token }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !Array.isArray(body?.transactions)) return;
+        const stripeTxns = body.transactions.map(fromStripeRecord);
+        const appts = Array.isArray(apptsOverride) ? apptsOverride : store.appointments;
+        const repaired = reconcilePaidAppointments(appts, stripeTxns, localDateISO(new Date()));
+        for (const r of repaired) {
+          try { await store.upsertAppointment(r); }
+          catch { /* re-syncs on the next write */ }
+        }
+      } catch {
+        /* best-effort — Stripe/network hiccup shouldn't affect sync */
+      }
+    },
+    [userId, store],
+  );
+
+  // Heal once when the account first hydrates this session.
+  const stripeReconcileDone = useRef(false);
+  useEffect(() => {
+    if (!userId || !store?.premium) { stripeReconcileDone.current = false; return; }
+    if (stripeReconcileDone.current) return;
+    stripeReconcileDone.current = true;
+    void reconcileStripePaidAppointments();
+  }, [userId, store?.premium, reconcileStripePaidAppointments]);
+
   // Initial pull + one-time migration push on first authed render.
   // Skipped entirely for non-premium accounts — cloud sync is gated
   // behind lifetime access, so guest/free accounts work fully offline.
@@ -22218,6 +22266,9 @@ const useCloudSync = (userId: string | null, store: any) => {
           for (const r of fresh) {
             if (r?.id) snap.current.appointments.set(r.id, JSON.stringify(r));
           }
+          // Heal any appointment a Stripe payment already settled while the
+          // app was backgrounded (webhook missed / paid on another device).
+          void reconcileStripePaidAppointments(fresh);
         }
       } catch {
         /* best-effort — next foreground retries */
@@ -22275,6 +22326,11 @@ const useCloudSync = (userId: string | null, store: any) => {
         if (Array.isArray(inventoryFresh))  next.inventoryItems     = inventoryFresh;
         if (Array.isArray(movementsFresh))  next.inventoryMovements = movementsFresh;
         if (Object.keys(next).length > 0) store.replaceCloudState?.(next);
+
+        // A pull-to-refresh means "make everything current" — so also
+        // reconcile appointments against live Stripe charges, healing any
+        // balance a Stripe payment already covered but the webhook missed.
+        if (Array.isArray(apptsFresh)) void reconcileStripePaidAppointments(apptsFresh);
 
         // Re-seed the diff snapshot so the follow-up push can't push
         // stale fields back up over the fresh cloud state.
