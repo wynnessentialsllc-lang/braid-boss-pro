@@ -435,6 +435,85 @@ export const mergeTransactions = (
 };
 
 // =====================================================================
+// Reconcile appointment paid-state from live Stripe payments
+// =====================================================================
+// A balance (or full) payment can succeed on the connected Stripe account
+// — so it shows up in this ledger — while the appointment record still
+// reads "balance due" because the balance webhook never landed (e.g. the
+// endpoint secret isn't configured, or Stripe couldn't deliver the event).
+// That leaves the schedule, the outstanding totals and the home cards
+// billing money that's already been collected.
+//
+// Given the live Stripe rows, return updated copies of any appointment a
+// linked, balance-covering Stripe payment proves is settled — carrying the
+// exact fields the in-app "mark paid" action writes (depositPaid bumped to
+// the net ticket so collected-revenue math is right, paymentStatus "paid",
+// balanceDue 0). Appointments that already read paid, aren't matched, or
+// whose payment doesn't cover the balance are left untouched. Pure so it
+// can be unit-tested and reused; the caller persists + syncs the results.
+export const reconcilePaidAppointments = (
+  appointments: any[],
+  stripeTxns: Transaction[],
+  todayYMD: string,
+): any[] => {
+  const byId = new Map<string, any>();
+  for (const a of Array.isArray(appointments) ? appointments : []) {
+    if (a && a.id != null) byId.set(String(a.id), a);
+  }
+  const out: any[] = [];
+  const seen = new Set<string>();
+  for (const s of Array.isArray(stripeTxns) ? stripeTxns : []) {
+    // Only trust a live Stripe charge that's explicitly a full/balance
+    // payment linked to a specific appointment (the id our checkout route
+    // stamps into the charge's metadata).
+    if (s.source !== "stripe" || s.amount <= 0) continue;
+    if (s.type !== "final" && s.type !== "full") continue;
+    if (!s.appointmentId) continue;
+    const key = String(s.appointmentId);
+    if (seen.has(key)) continue;
+    const a = byId.get(key);
+    if (!a || isCanceled(a)) continue;
+    if (a.paymentStatus === "paid" || a.balance_paid === true || a.balancePaid === true) continue;
+
+    const total = Math.max(0, parseMoney(a.totalPrice));
+    const discount = Math.max(0, parseMoney(a.discountAmount));
+    const netTotal = roundCents(Math.max(0, total - discount));
+    if (!(netTotal > 0)) continue;
+    const deposit = Math.max(0, parseMoney(a.depositPaid));
+    const balance =
+      a.balanceDue == null
+        ? roundCents(Math.max(0, netTotal - deposit))
+        : Math.max(0, parseMoney(a.balanceDue));
+    if (!(balance > 0)) continue;
+
+    // The charge, net of tip, must cover the outstanding balance — so a
+    // partial charge/refund can't flip a still-owed booking to paid.
+    const collected = roundCents(s.amount - (s.tip > 0 ? s.tip : 0));
+    if (collected + 0.01 < balance) continue;
+
+    const credit = Math.max(0, parseMoney(a.creditApplied));
+    const pi = typeof s.stripeId === "string" && s.stripeId.startsWith("pi_") ? s.stripeId : null;
+    seen.add(key);
+    out.push({
+      ...a,
+      // Mark collected-in-full the way the in-app "mark paid" action does,
+      // so calculateCollectedAmount counts the whole ticket, not just the
+      // original deposit.
+      depositPaid: roundCents(Math.max(0, netTotal - credit)),
+      balanceDue: 0,
+      paymentStatus: "paid",
+      paymentDate: a.paymentDate || todayYMD,
+      status: a.status === "scheduled" || a.status === "confirmed" ? "completed" : a.status,
+      tipAmount: a.tipAmount != null ? a.tipAmount : s.tip > 0 ? s.tip : 0,
+      // Stamp the balance payment_intent so mergeTransactions collapses the
+      // Stripe row into this appointment row (no duplicate ledger entry).
+      balance_payment_intent_id: a.balance_payment_intent_id || pi || null,
+    });
+  }
+  return out;
+};
+
+// =====================================================================
 // Filtering
 // =====================================================================
 

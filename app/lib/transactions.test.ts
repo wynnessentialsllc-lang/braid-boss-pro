@@ -4,6 +4,7 @@ import {
   fromManualRecord,
   fromStripeRecord,
   mergeTransactions,
+  reconcilePaidAppointments,
 } from "./transactions";
 
 // Regression for the "unknown booking" duplicate: a Stripe deposit charge
@@ -232,5 +233,95 @@ describe("mergeTransactions refund de-dupe", () => {
     );
     // The cash refund isn't tied to the Stripe charge, so both survive.
     expect(merged.filter((t) => t.type === "refund")).toHaveLength(2);
+  });
+});
+
+// Regression for "Claudia paid but the schedule still shows a balance due":
+// the balance charge succeeds on Stripe (it's in the ledger) but the balance
+// webhook never marked the appointment paid, so the booking stays "due".
+describe("reconcilePaidAppointments", () => {
+  // Claudia's booking: $304.74 ticket, $25 deposit already down, $279.74 due.
+  const claudiaAppt = () => ({
+    id: "appt_claudia",
+    clientName: "Claudia Vine",
+    style: "Boho Knotless Braids (Small/Medium)",
+    totalPrice: 304.74,
+    depositPaid: 25,
+    balanceDue: 279.74,
+    status: "scheduled",
+    paymentStatus: "",
+  });
+
+  // The live balance charge: $309.74 = $279.74 balance + $30 tip.
+  const claudiaBalanceCharge = () =>
+    fromStripeRecord({
+      id: "ch_claudia_balance",
+      amount: 309.74,
+      tip: 30,
+      net: 290.89,
+      fee: 18.85,
+      type: "charge",
+      payment_type: "final",
+      payment_intent: "pi_claudia_balance",
+      appointment_id: "appt_claudia",
+      client_name: "Claudia Vine",
+    });
+
+  it("marks the appointment paid in full when a linked balance charge covers it", () => {
+    const [fixed] = reconcilePaidAppointments([claudiaAppt()], [claudiaBalanceCharge()], "2026-07-11");
+    expect(fixed).toBeTruthy();
+    expect(fixed.paymentStatus).toBe("paid");
+    expect(fixed.balanceDue).toBe(0);
+    // depositPaid is bumped to the net ticket so collected-revenue math is
+    // right (the whole $304.74, not just the original $25 deposit).
+    expect(fixed.depositPaid).toBe(304.74);
+    expect(fixed.status).toBe("completed");
+    // Tip is preserved and the balance intent stamped for ledger de-dupe.
+    expect(fixed.tipAmount).toBe(30);
+    expect(fixed.balance_payment_intent_id).toBe("pi_claudia_balance");
+  });
+
+  it("the reconciled appointment de-dupes the Stripe balance row (no double entry)", () => {
+    const [fixed] = reconcilePaidAppointments([claudiaAppt()], [claudiaBalanceCharge()], "2026-07-11");
+    const merged = mergeTransactions(
+      deriveAppointmentTransactions([fixed]),
+      [claudiaBalanceCharge()],
+      [],
+    );
+    // One row for Claudia's payment, sourced from the appointment, carrying
+    // the live Stripe fee/net that merge folds in.
+    const claudiaRows = merged.filter((t) => t.clientName === "Claudia Vine");
+    expect(claudiaRows).toHaveLength(1);
+    expect(claudiaRows[0].source).toBe("appointment");
+    expect(claudiaRows[0].stripeId).toBe("pi_claudia_balance");
+  });
+
+  it("leaves an already-paid appointment alone (idempotent)", () => {
+    const paid = { ...claudiaAppt(), paymentStatus: "paid", depositPaid: 304.74, balanceDue: 0 };
+    expect(reconcilePaidAppointments([paid], [claudiaBalanceCharge()], "2026-07-11")).toHaveLength(0);
+  });
+
+  it("does not flip a booking when the charge only partially covers the balance", () => {
+    const partial = fromStripeRecord({
+      id: "ch_partial",
+      amount: 100,
+      type: "charge",
+      payment_type: "final",
+      payment_intent: "pi_partial",
+      appointment_id: "appt_claudia",
+    });
+    expect(reconcilePaidAppointments([claudiaAppt()], [partial], "2026-07-11")).toHaveLength(0);
+  });
+
+  it("ignores a Stripe charge that isn't linked to any known appointment", () => {
+    const orphan = fromStripeRecord({
+      id: "ch_orphan",
+      amount: 500,
+      type: "charge",
+      payment_type: "full",
+      payment_intent: "pi_orphan",
+      appointment_id: "appt_missing",
+    });
+    expect(reconcilePaidAppointments([claudiaAppt()], [orphan], "2026-07-11")).toHaveLength(0);
   });
 });
