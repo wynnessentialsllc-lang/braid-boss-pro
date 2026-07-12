@@ -386,9 +386,30 @@ describe("reconcilePaidAppointments", () => {
     expect(Math.round(collected * 100) / 100).toBe(304.74);
   });
 
-  it("leaves an already-paid appointment alone (idempotent)", () => {
-    const paid = { ...claudiaAppt(), paymentStatus: "paid", balance_paid: true, balanceDue: 0 };
+  it("leaves an already-paid appointment that already has its fee alone (idempotent)", () => {
+    const paid = {
+      ...claudiaAppt(),
+      paymentStatus: "paid",
+      balance_paid: true,
+      balanceDue: 0,
+      stripeFee: 18.85,
+      stripeNet: 290.89,
+    };
     expect(reconcilePaidAppointments([paid], [claudiaBalanceCharge()], "2026-07-11")).toHaveLength(0);
+  });
+
+  it("back-fills the Stripe fee on an appointment the webhook paid without it", () => {
+    // The balance webhook marks it paid but doesn't know the Stripe fee, so
+    // the record has no fee and the net-of-fees totals would be wrong. The
+    // live charge supplies it on the next reconcile.
+    const paidNoFee = { ...claudiaAppt(), paymentStatus: "paid", balance_paid: true, balanceDue: 0 };
+    const [fixed] = reconcilePaidAppointments([paidNoFee], [claudiaBalanceCharge()], "2026-07-11");
+    expect(fixed).toBeTruthy();
+    expect(fixed.stripeFee).toBe(18.85);
+    expect(fixed.stripeNet).toBe(290.89);
+    // It doesn't disturb the existing paid state.
+    expect(fixed.paymentStatus).toBe("paid");
+    expect(fixed.depositPaid).toBe(25);
   });
 
   it("does not flip a booking when the charge only partially covers the balance", () => {

@@ -530,7 +530,25 @@ export const reconcilePaidAppointments = (
     if (seen.has(key)) continue;
     const a = byId.get(key);
     if (!a || isCanceled(a)) continue;
-    if (a.paymentStatus === "paid" || a.balance_paid === true || a.balancePaid === true) continue;
+
+    const alreadyPaid =
+      a.paymentStatus === "paid" || a.balance_paid === true || a.balancePaid === true;
+    if (alreadyPaid) {
+      // Already marked paid (e.g. by the balance webhook, which doesn't know
+      // the Stripe fee) — but if we're only now learning the fee from the
+      // live charge, persist it so the net-of-fees totals on the Home cards,
+      // the Schedule and the Money tab match what actually landed, instead of
+      // the fee only showing on this screen's live view.
+      if (parseMoney(a.stripeFee) <= 0 && s.fee > 0) {
+        seen.add(key);
+        out.push({
+          ...a,
+          stripeFee: s.fee,
+          stripeNet: s.net > 0 ? s.net : parseMoney(a.stripeNet),
+        });
+      }
+      continue;
+    }
 
     const total = Math.max(0, parseMoney(a.totalPrice));
     const discount = Math.max(0, parseMoney(a.discountAmount));
