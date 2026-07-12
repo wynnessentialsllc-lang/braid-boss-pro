@@ -208,22 +208,6 @@ function Inner() {
     [appointmentTxns, stripeTxns, manualTxns],
   );
 
-  // Total Stripe fees actually paid per appointment — the sum of every
-  // charge's fee, INCLUDING a charge that was later refunded. Stripe keeps
-  // its fee on a refund, so a refunded-then-repaid appointment paid the fee
-  // twice (e.g. $9.28 on a refunded Link charge + $18.85 on the Klarna
-  // re-payment = $28.13). The appointment only persists the surviving
-  // charge's fee, so the detail sheet reads this map to show the true net.
-  const feeByAppointment = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const t of allTxns) {
-      if (!t.appointmentId || t.amount <= 0 || !(t.fee > 0)) continue;
-      const next = (m.get(t.appointmentId) || 0) + t.fee;
-      m.set(t.appointmentId, Math.round(next * 100) / 100);
-    }
-    return m;
-  }, [allTxns]);
-
   // Self-heal a stuck "balance due": when a live Stripe payment in this
   // ledger proves an appointment's balance was collected but the record
   // still reads unpaid (the balance webhook never landed), mark it paid and
@@ -664,9 +648,6 @@ function Inner() {
         <DetailSheet
           txn={selected}
           currency={currency}
-          appointmentFee={
-            selected.appointmentId ? feeByAppointment.get(selected.appointmentId) : undefined
-          }
           onClose={() => setSelected(null)}
           onRefund={handleRefund}
           onToast={flashToast}
@@ -833,39 +814,21 @@ function SummaryCard({
 // ---- Detail sheet -------------------------------------------------------
 
 function DetailSheet({
-  txn, currency, appointmentFee, onClose, onRefund, onToast,
+  txn, currency, onClose, onRefund, onToast,
 }: {
   txn: Transaction;
   currency: string;
-  // Total Stripe fees for the whole appointment (sum of every charge's fee,
-  // including a refunded charge whose fee Stripe kept). When it exceeds this
-  // row's own fee, the difference is a refund's eaten fee — shown as its own
-  // line so the true net payout reconciles.
-  appointmentFee?: number;
   onClose: () => void;
   onRefund: (txn: Transaction, amount: number, reason: string) => Promise<{ ok: boolean; message: string }>;
   onToast: (msg: string) => void;
 }) {
   const isRefund = txn.type === "refund" || txn.amount < 0;
 
-  // Net payout = what actually lands, computed from exactly the rows shown
-  // below (deposit + balance + tip − every Stripe fee for the appointment) so
-  // the breakdown reconciles. The persisted `net` can't be trusted here: it
-  // only carries the surviving charge's net (e.g. a $309.74 Klarna leg →
-  // $290.89), omitting both the deposit and any fee Stripe kept on a refund.
-  const round2 = (n: number) => Math.round(n * 100) / 100;
-  const collectedBase =
-    (txn.depositAmount > 0 ? txn.depositAmount : 0) +
-    (txn.balancePaid > 0 ? txn.balancePaid : 0);
-  // Total fees for the appointment (falls back to this row's own fee). The
-  // extra over this row's fee is a refund's non-recovered fee.
-  const totalFee = !isRefund && appointmentFee != null && appointmentFee > txn.fee
-    ? appointmentFee
-    : txn.fee;
-  const refundFee = round2(Math.max(0, totalFee - txn.fee));
-  const netPayout = isRefund
-    ? txn.net || txn.amount + txn.tip - txn.fee
-    : round2((collectedBase > 0 ? collectedBase : Math.abs(txn.amount)) + txn.tip - totalFee);
+  // Net payout = Stripe's own net for the charge when we have it (so the app
+  // agrees with the Stripe dashboard, e.g. a $309.74 Klarna charge − $18.85
+  // fee = $290.89), falling back to amount + tip − fee for rows without a
+  // persisted net.
+  const netPayout = txn.net || txn.amount + txn.tip - txn.fee;
 
   // How much is still refundable: the (positive) charge minus anything
   // already refunded. Stripe charges carry their refund history; other
@@ -1042,12 +1005,6 @@ function DetailSheet({
             )}
             {txn.fee > 0 && (
               <Row label="Stripe fee" value={`− ${formatMoney(txn.fee, currency)}`} />
-            )}
-            {refundFee > 0 && (
-              <Row
-                label="Refund fee (kept by Stripe)"
-                value={`− ${formatMoney(refundFee, currency)}`}
-              />
             )}
             <Row
               label="Net payout"
