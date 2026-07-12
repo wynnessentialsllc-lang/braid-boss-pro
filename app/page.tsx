@@ -936,7 +936,12 @@ const calculateCollectedAmount = (appt: any): number => {
     appt.balancePaid === true ||
     appt.paymentStatus === "paid" ||
     (parseMoney(appt.balanceDue) === 0 && total > 0);
-  if (paidInFull && total > 0) return total;
+  if (paidInFull && total > 0) {
+    // Store credit isn't cash collected, so exclude any applied credit —
+    // matching the amount the old "flatten" path used to store.
+    const credit = Math.max(0, parseMoney(appt.creditApplied));
+    return roundCents(Math.max(0, total - credit));
+  }
   if (deposit > 0) return roundCents(deposit);
   return 0;
 };
@@ -6033,12 +6038,14 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           shopRows={shopRows}
           onOpenAppointment={(a) => { closeKpi(); openAppointmentRecord?.(a); }}
           markAppointmentPaid={async (a) => {
-            const netTotal = Math.max(0, (Number(a.totalPrice) || 0) - (Number(a.discountAmount) || 0));
-            // Cash collected is net of any applied store credit.
-            const creditApplied = Math.max(0, Number(a.creditApplied) || 0);
             const next = {
               ...a,
-              depositPaid: Math.max(0, netTotal - creditApplied),
+              // Mark the balance collected without collapsing the deposit
+              // into the total, so the deposit-vs-balance split survives on
+              // the record. calculateCollectedAmount counts the full ticket
+              // for a paid appointment, so revenue stays right.
+              balance_paid: true,
+              balanceDue: 0,
               paymentStatus: "paid",
               paymentDate: a.paymentDate || todayISO(),
               status: a.status === "scheduled" || a.status === "confirmed" ? "completed" : a.status,
