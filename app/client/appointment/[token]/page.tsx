@@ -206,7 +206,11 @@ const MessageThread = ({ token, studioName }: { token: string; studioName: strin
         )}
         {loaded && messages.length === 0 && (
           <p style={{ margin: 0, fontSize: 13, color: C.muted, textAlign: "center", lineHeight: 1.5, padding: "8px 0" }}>
-            Have a question about your appointment? Send {studioName} a message — they&apos;ll see it right away.
+            {/* Build the sentence as one JS string so the space around the
+                studio name can't be dropped by JSX whitespace handling — an
+                inline {studioName} was rendering as "…Send SBW Braidinga
+                message" with the space after the name eaten. */}
+            {`Have a question about your appointment? Send ${studioName} a message — they'll see it right away.`}
           </p>
         )}
         {messages.map((m) => {
