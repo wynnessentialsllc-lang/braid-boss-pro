@@ -101,39 +101,50 @@ export const renderReceiptPdf = async (
   doc.setLineWidth(1.5);
   doc.line(M, 132, W - M, 132);
 
-  // Bill-to block
-  let y = 162;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.setTextColor(muted[0], muted[1], muted[2]);
-  doc.text(isInvoice ? "BILL TO" : "RECEIVED FROM", M, y);
-  y += 16;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(13);
-  doc.setTextColor(espresso[0], espresso[1], espresso[2]);
-  doc.text(rcp.clientName || "Client", M, y);
+  // Header blocks — client (left) and service (right) share a top edge.
+  const blockTop = 162;
 
-  // Service block (right column)
-  y = 162;
+  // Bill-to block (left column)
+  let leftY = blockTop;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
   doc.setTextColor(muted[0], muted[1], muted[2]);
-  doc.text("SERVICE", W - M - 200, y);
-  y += 16;
+  doc.text(isInvoice ? "BILL TO" : "RECEIVED FROM", M, leftY);
+  leftY += 16;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(13);
   doc.setTextColor(espresso[0], espresso[1], espresso[2]);
-  doc.text(rcp.service || "Service", W - M - 200, y);
-  y += 16;
+  doc.text(rcp.clientName || "Client", M, leftY);
+  leftY += 16;
+
+  // Service block (right column). The service name can be long (service +
+  // option + add-on), so wrap it to the column width instead of letting it
+  // run off the right edge, and advance by however many lines it takes.
+  const svcColW = 230;
+  const svcX = W - M - svcColW;
+  let rightY = blockTop;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(muted[0], muted[1], muted[2]);
+  doc.text("SERVICE", svcX, rightY);
+  rightY += 16;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(13);
+  doc.setTextColor(espresso[0], espresso[1], espresso[2]);
+  const svcLines = doc.splitTextToSize(rcp.service || "Service", svcColW);
+  doc.text(svcLines, svcX, rightY);
+  rightY += svcLines.length * 16;
   doc.setFontSize(10);
   doc.setTextColor(coffee[0], coffee[1], coffee[2]);
   if (rcp.serviceDate) {
     const dateLine = `${fmtDateLong(rcp.serviceDate)}${rcp.serviceTime ? ` · ${fmtTime(rcp.serviceTime)}` : ""}`;
-    doc.text(dateLine, W - M - 200, y);
+    doc.text(dateLine, svcX, rightY);
+    rightY += 16;
   }
 
-  // Amounts table
-  y = 230;
+  // Amounts table — starts below the taller of the two header columns so a
+  // wrapped service name can never overlap it.
+  let y = Math.max(230, leftY, rightY) + 4;
   doc.setDrawColor(hairline[0], hairline[1], hairline[2]);
   doc.setLineWidth(0.5);
   doc.line(M, y, W - M, y);
