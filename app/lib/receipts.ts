@@ -268,6 +268,48 @@ export const buildInvoiceFromQuote = (
   };
 };
 
+// A payment row on the receipt's ticket — what was collected and how it
+// splits. `kind` lets renderers style specific rows (e.g. a still-owed balance).
+export type ReceiptPaymentLine = {
+  label: string;
+  amount: number;
+  kind: "deposit" | "balancePaid" | "balanceDue" | "paidInFull";
+};
+
+// Single source of truth for the deposit / balance / paid-in-full rows so the
+// PDF, the in-app sheet, and the text summary all read the same. The rules:
+//   • A deposit shows ONLY when one was actually taken (> 0) — a $0 deposit is
+//     noise, and dumping a full payment into the deposit field was the old bug.
+//   • When money was collected but there's no separate deposit, the row reads
+//     "Amount paid", not "Balance paid" (there was no balance to begin with).
+//   • When the whole ticket was paid in one shot (a payment, nothing
+//     outstanding, no separate balance), it collapses to a single "Paid in
+//     full" line instead of labeling the entire amount a "deposit".
+export const receiptPaymentLines = (rcp: ReceiptRecord): ReceiptPaymentLine[] => {
+  const deposit = roundMoney(parseMoney(rcp.depositPaid));
+  const balancePaid = roundMoney(parseMoney(rcp.balancePaid));
+  const balanceDue = roundMoney(parseMoney(rcp.balanceDue));
+
+  // Paid in one shot: a payment landed, nothing is still due, and there's no
+  // separate balance to itemize. Show it as one honest line.
+  if (deposit > 0 && balancePaid <= 0 && balanceDue <= 0) {
+    return [{ label: "Paid in full", amount: deposit, kind: "paidInFull" }];
+  }
+
+  const lines: ReceiptPaymentLine[] = [];
+  if (deposit > 0) lines.push({ label: "Deposit paid", amount: deposit, kind: "deposit" });
+  if (balancePaid > 0) {
+    // No deposit was taken → this payment IS the whole thing, not a "balance".
+    lines.push({
+      label: deposit > 0 ? "Balance paid" : "Amount paid",
+      amount: balancePaid,
+      kind: "balancePaid",
+    });
+  }
+  if (balanceDue > 0) lines.push({ label: "Balance due", amount: balanceDue, kind: "balanceDue" });
+  return lines;
+};
+
 // Plain-text summary suitable for SMS / WhatsApp / clipboard fallback.
 export const buildReceiptSummaryText = (
   rcp: ReceiptRecord,
@@ -294,9 +336,7 @@ export const buildReceiptSummaryText = (
     rcp.discountAmount && rcp.subtotal ? `Subtotal: ${fmt(rcp.subtotal)}` : null,
     rcp.discountAmount ? `Discount${rcp.discountName ? ` (${rcp.discountName})` : ""}: − ${fmt(rcp.discountAmount)}` : null,
     `Service total: ${fmt(rcp.totalPrice)}`,
-    `Deposit paid: ${fmt(rcp.depositPaid)}`,
-    rcp.balancePaid ? `Balance: ${fmt(rcp.balancePaid)}` : null,
-    rcp.balanceDue > 0 ? `Balance due: ${fmt(rcp.balanceDue)}` : null,
+    ...receiptPaymentLines(rcp).map((pl) => `${pl.label}: ${fmt(pl.amount)}`),
     rcp.tip ? `Tip: ${fmt(rcp.tip)}` : null,
     `Total: ${fmt(roundMoney(rcp.totalPrice + (rcp.tip || 0)))}`,
     // The money — what landed. Hidden on client-facing copies.

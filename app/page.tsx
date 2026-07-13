@@ -55,6 +55,7 @@ import {
   buildReceiptFromAppointment,
   buildInvoiceFromQuote,
   buildReceiptSummaryText,
+  receiptPaymentLines,
 } from "./lib/receipts";
 import { renderReceiptPdf, renderTaxPackPdf } from "./lib/pdf-render";
 import {
@@ -905,10 +906,22 @@ const normalizeAppointment = (raw: any): any => {
   let depositPaid = roundCents(parseMoney(raw.depositPaid));
   if (depositPaid > netTotal && netTotal > 0) depositPaid = netTotal;
   if (depositPaid < 0) depositPaid = 0;
-  const balanceDue = roundCents(Math.max(0, netTotal - depositPaid - Math.max(0, creditApplied)));
+  // A collected balance marks the ticket paid-in-full WITHOUT collapsing the
+  // deposit into the total, so the deposit-vs-balance split survives on the
+  // record (receipts + ledger read it). Without honoring this flag the
+  // recompute below would revive the balance and flip a paid record back to
+  // unpaid whenever the deposit is smaller than the ticket.
+  const balancePaidInFull = raw.balance_paid === true || raw.balancePaid === true;
+  let balanceDue: number;
   let paymentStatus: "paid" | "" | string = raw.paymentStatus || "";
-  if (netTotal > 0 && balanceDue === 0) paymentStatus = "paid";
-  else if (paymentStatus === "paid") paymentStatus = "";
+  if (balancePaidInFull && netTotal > 0) {
+    balanceDue = 0;
+    paymentStatus = "paid";
+  } else {
+    balanceDue = roundCents(Math.max(0, netTotal - depositPaid - Math.max(0, creditApplied)));
+    if (netTotal > 0 && balanceDue === 0) paymentStatus = "paid";
+    else if (paymentStatus === "paid") paymentStatus = "";
+  }
   return {
     ...raw,
     status: raw.status || "scheduled",
@@ -5821,18 +5834,14 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
   const markApptPaid = async (appt: any) => {
     const apptDate = appt.date || todayISO();
     const isPastOrToday = apptDate <= today;
-    // Net total = subtotal − discount. Without subtracting the
-    // discount, depositPaid would equal the gross subtotal and the
-    // appointment would render as "overpaid by $discount".
-    const netTotal = Math.max(0, parseMoney(appt.totalPrice) - parseMoney(appt.discountAmount));
-    // Any store credit already covers part of the ticket — depositPaid
-    // records CASH collected, so subtract the applied credit. Otherwise
-    // collected revenue double-counts the credit (once at credit purchase,
-    // once here).
-    const creditApplied = Math.max(0, parseMoney(appt.creditApplied));
     const updated = {
       ...appt,
-      depositPaid: Math.max(0, netTotal - creditApplied),
+      // Mark the remaining balance collected WITHOUT collapsing the deposit
+      // into the total, so the deposit-vs-balance split survives on the
+      // record. The real deposit (whatever was taken at booking, if any) is
+      // left untouched; calculateCollectedAmount counts the full ticket for a
+      // paid appointment, so collected revenue stays correct.
+      balance_paid: true,
       balanceDue: 0,
       paymentStatus: "paid",
       paymentDate: appt.paymentDate || todayISO(),
@@ -11652,9 +11661,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   // generate receipt" steps into a single Vagaro-style action.
   const handleCheckout = async () => {
     if (!form.id) return;
-    const netTotal = Math.max(0, parseMoney(form.totalPrice) - parseMoney(form.discountAmount));
     const creditApplied = Math.max(0, parseMoney(form.creditApplied));
-    const collected = Math.max(0, netTotal - creditApplied);
     const canonical = Array.isArray(store?.appointments)
       ? store.appointments.find((x: any) => x?.id === form.id)
       : null;
@@ -11663,7 +11670,11 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     const checkedOut: any = {
       ...original,
       ...form,
-      depositPaid: collected,
+      // Collect the outstanding balance without collapsing the deposit into the
+      // total — balance_paid marks it paid-in-full while the real deposit is
+      // preserved for the receipt's deposit-vs-balance split.
+      balance_paid: true,
+      balanceDue: 0,
       creditApplied,
       paymentStatus: "paid",
       paymentDate: form.paymentDate || todayISO(),
@@ -12683,14 +12694,14 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                 onClick={() => {
                   const apptDate = form.date || todayISO();
                   const isPastOrToday = apptDate <= todayISO();
-                  const netTotal = Math.max(0, parseMoney(form.totalPrice) - parseMoney(form.discountAmount));
-                  // Record CASH collected — net of any store credit already
-                  // applied — so collected revenue doesn't double-count the
-                  // credit. normalizeAppointment recomputes balanceDue to 0.
-                  const creditApplied = Math.max(0, parseMoney(form.creditApplied));
+                  // Mark the balance collected via the balance_paid flag so the
+                  // deposit stays as the real deposit instead of swallowing the
+                  // whole ticket. normalizeAppointment honors the flag and sets
+                  // balanceDue to 0.
                   setForm({
                     ...form,
-                    depositPaid: Math.max(0, netTotal - creditApplied),
+                    balance_paid: true,
+                    balanceDue: 0,
                     paymentStatus: "paid",
                     paymentDate: form.paymentDate || todayISO(),
                     status: isPastOrToday && !isCanceledAppointment(form) && form.status !== "no_show"
@@ -12840,13 +12851,15 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                         onStatus: (s) => setTtpStatus(s),
                       });
                       if (res.ok) {
-                        const netTotal = Math.max(0, parseMoney(form.totalPrice) - parseMoney(form.discountAmount));
-                        const creditUsed = Math.max(0, parseMoney(form.creditApplied));
                         const apptDate = form.date || todayISO();
                         const isPastOrToday = apptDate <= todayISO();
+                        // Charged the outstanding balance on the card, so mark
+                        // it collected via balance_paid and leave the deposit as
+                        // the real deposit — no collapsing into the total.
                         setForm({
                           ...form,
-                          depositPaid: Math.max(0, netTotal - creditUsed),
+                          balance_paid: true,
+                          balanceDue: 0,
                           paymentStatus: "paid",
                           paymentMethod: "tap_to_pay",
                           paymentDate: form.paymentDate || todayISO(),
@@ -21453,19 +21466,14 @@ const ReceiptSheet = ({ open, receipt, business, policies, onClose, onDelete }: 
             <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
               <span>Total price</span><span className="font-mono">{formatCurrency(receipt.totalPrice, currency)}</span>
             </div>
-            <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
-              <span>Deposit paid</span><span className="font-mono">{formatCurrency(receipt.depositPaid, currency)}</span>
-            </div>
-            {receipt.balancePaid ? (
-              <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
-                <span>Balance paid</span><span className="font-mono">{formatCurrency(receipt.balancePaid, currency)}</span>
+            {/* Deposit / balance / paid-in-full — a $0 deposit is hidden and a
+                full upfront payment reads "Paid in full", not a "deposit". */}
+            {receiptPaymentLines(receipt).map((pl, i) => (
+              <div key={i} className="flex justify-between text-sm" style={{ color: C.coffee }}>
+                <span>{pl.label}</span>
+                <span className="font-mono">{formatCurrency(pl.amount, currency)}</span>
               </div>
-            ) : null}
-            {receipt.balanceDue > 0 && (
-              <div className="flex justify-between text-sm" style={{ color: C.coffee }}>
-                <span>Balance due</span><span className="font-mono">{formatCurrency(receipt.balanceDue, currency)}</span>
-              </div>
-            )}
+            ))}
             {receipt.tip ? (
               <div className="flex justify-between text-sm" style={{ color: C.success }}>
                 <span>Tip</span><span className="font-mono">{formatCurrency(receipt.tip, currency)}</span>
@@ -40003,9 +40011,11 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentReco
     const updated = {
       ...appt,
       paymentStatus: "paid",
+      // Balance collected via checkout — mark it paid-in-full while leaving the
+      // deposit as the real deposit, so the receipt shows the split, not the
+      // whole ticket as a "deposit".
       balance_paid: true,
       balanceDue: 0,
-      depositPaid: netTotal,
       tipAmount: tipAmt,
       paymentMethod: methodLabel,
       paymentDate: todayISO(),

@@ -7,6 +7,7 @@
 // are click handlers.
 
 import type { ReceiptRecord } from "./receipts";
+import { receiptPaymentLines } from "./receipts";
 
 const fmtDateLong = (iso: string): string => {
   if (!iso) return "—";
@@ -173,9 +174,12 @@ export const renderReceiptPdf = async (
     );
   }
   drawRow("Service total", fmt(rcp.totalPrice), { bold: true });
-  drawRow("Deposit paid", fmt(rcp.depositPaid), { muted: rcp.depositPaid === 0 });
-  if (rcp.balancePaid) drawRow("Balance", fmt(rcp.balancePaid));
-  if (rcp.balanceDue > 0) drawRow("Balance due", fmt(rcp.balanceDue));
+  // Deposit / balance / paid-in-full rows — a $0 deposit is hidden and a full
+  // upfront payment reads "Paid in full" rather than the whole ticket as a
+  // "deposit".
+  for (const pl of receiptPaymentLines(rcp)) {
+    drawRow(pl.label, fmt(pl.amount));
+  }
   if (rcp.tip) drawRow("Tip", fmt(rcp.tip));
   drawRow("Total", fmt(r2(rcp.totalPrice + (rcp.tip || 0))), { bold: true });
 
