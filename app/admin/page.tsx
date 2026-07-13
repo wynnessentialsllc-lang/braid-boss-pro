@@ -121,13 +121,15 @@ const Skeleton = ({ h = 14, w = "100%", mt = 0 }: { h?: number; w?: number | str
 
 // ---- Money tile --------------------------------------------------------
 const Tile = ({ label, value, sub, accent = false }: { label: string; value: string; sub?: string; accent?: boolean }) => (
-  <PreviewStyleCard padding={16}>
-    <SectionEyebrow tone="muted">{label}</SectionEyebrow>
-    <p style={{ margin: "4px 0 0", fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: accent ? C.goldDeep : C.espresso, lineHeight: 1.05 }}>
-      {value}
-    </p>
-    {sub && <p style={{ margin: "2px 0 0", fontSize: 11, color: C.muted }}>{sub}</p>}
-  </PreviewStyleCard>
+  <div style={{ minWidth: 0 }}>
+    <PreviewStyleCard padding={16}>
+      <SectionEyebrow tone="muted">{label}</SectionEyebrow>
+      <p style={{ margin: "4px 0 0", fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: accent ? C.goldDeep : C.espresso, lineHeight: 1.05, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {value}
+      </p>
+      {sub && <p style={{ margin: "2px 0 0", fontSize: 11, color: C.muted }}>{sub}</p>}
+    </PreviewStyleCard>
+  </div>
 );
 
 export default function AdminCommandCenter() {
@@ -285,7 +287,7 @@ export default function AdminCommandCenter() {
               <Skeleton h={40} w={220} mt={12} />
               <Skeleton h={10} w={180} mt={12} />
             </PreviewStyleCard>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
               {[0, 1, 2].map((i) => (
                 <PreviewStyleCard key={i} padding={16}>
                   <Skeleton h={10} w={60} />
@@ -309,7 +311,8 @@ export default function AdminCommandCenter() {
               </p>
               <p style={{ margin: "6px 0 0", fontSize: 12.5, color: C.coffee }}>
                 Deposited booking revenue per active braider. {usd(ns.deposited_revenue)} collected
-                across {num(ns.deposit_count)} deposits from {num(ns.active_braiders)} active braiders.
+                across {num(ns.deposit_count)} {ns.deposit_count === 1 ? "deposit" : "deposits"} from{" "}
+                {num(ns.active_braiders)} active {ns.active_braiders === 1 ? "braider" : "braiders"}.
               </p>
               <div style={{ marginTop: 14 }}>
                 <MiniBarChart data={depositSeries} height={64} highlightIndex="last" ariaLabel={`Deposit revenue per day, last ${windowDays} days`} />
@@ -317,7 +320,9 @@ export default function AdminCommandCenter() {
             </PreviewStyleCard>
 
             {/* ---- Money moving through the platform ---- */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            {/* auto-fit + minmax(0,…) lets the tiles reflow (3→2→1 columns)
+                instead of overflowing the viewport on narrow phones. */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
               <Tile label="Booked value" value={usd(rev.booked_value)} sub="appointments made" accent />
               <Tile label="Deposits collected" value={usd(rev.deposits_collected)} sub="online booking flow" />
               <Tile label="Retail GMV" value={usd(rev.retail_gmv)} sub={`${num(rev.retail_orders)} orders`} />
