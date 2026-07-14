@@ -5,7 +5,7 @@
 // /api/stripe-connect/* routes so the publishable key isn't required
 // and the access token never leaves the device.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getSupabase } from "./supabase";
 
 export type ConnectStatus =
@@ -49,34 +49,25 @@ export const STATUS_TONE: Record<ConnectStatus, "neutral" | "gold" | "success" |
   disabled:      "danger",
 };
 
-// A fresh idempotency token for one cash-out "intent." Stripe collapses
-// any payout requests carrying the same Idempotency-Key into a single
-// payout, so a double-tap (or a network retry of the same intent) can
-// never move money twice. We rotate the token after each successful
-// payout so the *next* cash-out is treated as a distinct operation.
-const makeIdempotencyKey = (): string => {
-  try {
-    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-      return `bbp_instant_${crypto.randomUUID()}`;
-    }
-  } catch { /* fall through */ }
-  return `bbp_instant_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-};
-
 const getAccessToken = async (): Promise<string | null> => {
   const supabase = getSupabase();
   const { data } = await supabase.auth.getSession();
   return data?.session?.access_token || null;
 };
 
-// Result of an instant cash-out attempt — surfaced so the Payments page
-// can show a confirmation ("$X on its way to your card").
-export type InstantPayoutResult = {
-  id: string;
-  amount: number;
+// The stylist's next scheduled (automatic) payout — the amount Stripe
+// will deposit into their bank on the normal rolling schedule, and when
+// it's expected to land. Surfaced on the Payments page.
+export type NextPayoutInfo = {
   currency: string;
-  status: string;
+  amount: number;
+  pending: number;
   arrival_date: string | null;
+  // true when arrival_date is an estimate from the payout schedule rather
+  // than a concrete in-flight Stripe payout.
+  estimated: boolean;
+  interval: string;
+  schedule_label: string;
 };
 
 export const useStripeConnect = (userId: string | null): {
@@ -86,24 +77,15 @@ export const useStripeConnect = (userId: string | null): {
   refresh: () => Promise<void>;
   syncFromStripe: () => Promise<void>;
   startOnboarding: () => Promise<string | null>;
-  // Instant Payouts (subscriber-gated). `instantAvailable` is the
-  // dollar amount Stripe says can be swept to the debit card right now;
-  // null while it hasn't been probed yet.
-  instantAvailable: number | null;
-  payoutBusy: boolean;
-  payoutError: string | null;
-  refreshInstantBalance: () => Promise<void>;
-  cashOutNow: (amount?: number) => Promise<InstantPayoutResult | null>;
+  // Next scheduled payout. `nextPayout` is null until it's been fetched
+  // (or when the account can't yet receive payouts).
+  nextPayout: NextPayoutInfo | null;
+  refreshNextPayout: () => Promise<void>;
 } => {
   const [profile, setProfile] = useState<StripeConnectProfile>(EMPTY);
   const [loading, setLoading] = useState<boolean>(!!userId);
   const [error, setError] = useState<string | null>(null);
-  const [instantAvailable, setInstantAvailable] = useState<number | null>(null);
-  const [payoutBusy, setPayoutBusy] = useState<boolean>(false);
-  const [payoutError, setPayoutError] = useState<string | null>(null);
-  // Stable across re-renders so every tap of the same intent reuses one
-  // idempotency key; rotated only after a payout actually succeeds.
-  const idempotencyKeyRef = useRef<string>(makeIdempotencyKey());
+  const [nextPayout, setNextPayout] = useState<NextPayoutInfo | null>(null);
 
   const refresh = useCallback(async () => {
     if (!userId) { setProfile(EMPTY); setLoading(false); return; }
@@ -176,59 +158,36 @@ export const useStripeConnect = (userId: string | null): {
     }
   }, []);
 
-  // Probe the connected account's instant-available balance. Quiet on
-  // the gate/connect errors (subscriber-only, not yet onboarded) —
-  // those just mean "nothing to show," not a failure to report.
-  const refreshInstantBalance = useCallback(async () => {
+  // Fetch the next scheduled payout (amount + expected arrival). Quiet on
+  // the connect/onboarding errors (not yet onboarded, payouts not enabled)
+  // — those just mean "nothing to show," not a failure to report.
+  const refreshNextPayout = useCallback(async () => {
     const token = await getAccessToken();
-    if (!token) { setInstantAvailable(null); return; }
+    if (!token) { setNextPayout(null); return; }
     try {
-      const res = await fetch("/api/stripe-connect/payout", {
+      const res = await fetch("/api/stripe-connect/next-payout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ access_token: token, probe: true }),
+        body: JSON.stringify({ access_token: token }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setInstantAvailable(null); return; }
-      setInstantAvailable(typeof data?.instant_available === "number" ? data.instant_available : 0);
+      if (!res.ok) { setNextPayout(null); return; }
+      setNextPayout({
+        currency: typeof data?.currency === "string" ? data.currency : "usd",
+        amount: typeof data?.amount === "number" ? data.amount : 0,
+        pending: typeof data?.pending === "number" ? data.pending : 0,
+        arrival_date: typeof data?.arrival_date === "string" ? data.arrival_date : null,
+        estimated: !!data?.estimated,
+        interval: typeof data?.interval === "string" ? data.interval : "daily",
+        schedule_label: typeof data?.schedule_label === "string" ? data.schedule_label : "",
+      });
     } catch {
-      setInstantAvailable(null);
-    }
-  }, []);
-
-  const cashOutNow = useCallback(async (amount?: number): Promise<InstantPayoutResult | null> => {
-    const token = await getAccessToken();
-    if (!token) { setPayoutError("Sign in required."); return null; }
-    setPayoutBusy(true);
-    setPayoutError(null);
-    try {
-      const res = await fetch("/api/stripe-connect/payout", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          access_token: token,
-          amount,
-          idempotency_key: idempotencyKeyRef.current,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `payout_${res.status}`);
-      // The cash-out went through — rotate the key so the next one is a
-      // distinct Stripe operation, not a dedup of this one.
-      idempotencyKeyRef.current = makeIdempotencyKey();
-      // Server returns the remaining balance after the sweep.
-      if (typeof data?.instant_available === "number") setInstantAvailable(data.instant_available);
-      return (data.payout as InstantPayoutResult) ?? null;
-    } catch (e: any) {
-      setPayoutError(e?.message || "Couldn't complete the cash-out.");
-      return null;
-    } finally {
-      setPayoutBusy(false);
+      setNextPayout(null);
     }
   }, []);
 
   return {
     profile, loading, error, refresh, syncFromStripe, startOnboarding,
-    instantAvailable, payoutBusy, payoutError, refreshInstantBalance, cashOutNow,
+    nextPayout, refreshNextPayout,
   };
 };

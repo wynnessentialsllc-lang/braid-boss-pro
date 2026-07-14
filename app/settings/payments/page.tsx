@@ -22,9 +22,7 @@ import {
   STATUS_TONE,
   useStripeConnect,
   type ConnectStatus,
-  type InstantPayoutResult,
 } from "../../lib/stripe-connect";
-import { usePremiumStatus } from "../../lib/guest-limits";
 import { getSupabase } from "../../lib/supabase";
 
 const C = {
@@ -35,6 +33,18 @@ const C = {
 };
 const FONT_DISPLAY = `"Cormorant Garamond", Georgia, serif`;
 const FONT_BODY = `"DM Sans", "Inter", system-ui, sans-serif`;
+
+// Format a payout arrival date (ISO string) as e.g. "Fri, Jul 18".
+const formatPayoutDate = (iso: string): string => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+};
 
 const toneColor = (tone: "neutral" | "gold" | "success" | "warning" | "danger") => {
   switch (tone) {
@@ -89,35 +99,23 @@ function PaymentsInner() {
   const status: ConnectStatus = connect.profile.stripe_connect_status;
   const tone = STATUS_TONE[status];
 
-  // Instant Payouts are a paid-tier perk. `premium` covers lifetime /
-  // founding / live subscription — same gate the API enforces.
-  const { premium } = usePremiumStatus(userId);
-  const canCashOut =
-    premium && status === "active" && connect.profile.stripe_connect_payouts_enabled;
-  const [payout, setPayout] = useState<InstantPayoutResult | null>(null);
-
-  // Probe the instant-available balance once the account can actually
-  // pay out (and the user is on the paid plan). Re-probe on foreground
-  // so a newly-settled deposit shows up without a manual refresh.
-  const { refreshInstantBalance } = connect;
+  // Show the next scheduled payout once the account can actually receive
+  // payouts. Re-fetch on foreground so a newly-settled deposit shows up
+  // without a manual refresh.
+  const showPayout =
+    status === "active" && connect.profile.stripe_connect_payouts_enabled;
+  const { refreshNextPayout } = connect;
   useEffect(() => {
-    if (!canCashOut) return;
-    void refreshInstantBalance();
+    if (!showPayout) return;
+    void refreshNextPayout();
     const onVisibility = () => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        void refreshInstantBalance();
+        void refreshNextPayout();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [canCashOut, refreshInstantBalance]);
-
-  const handleCashOut = useCallback(async () => {
-    if (connect.payoutBusy) return;
-    setPayout(null);
-    const result = await connect.cashOutNow();
-    if (result) setPayout(result);
-  }, [connect]);
+  }, [showPayout, refreshNextPayout]);
 
   // On return from Stripe onboarding, pull the latest account state
   // (charges_enabled / payouts_enabled / details_submitted) and
@@ -320,12 +318,11 @@ function PaymentsInner() {
         )}
       </div>
 
-      {/* Instant cash-out — paid-tier perk. Sweeps the available Stripe
-          balance to the stylist's debit card in minutes instead of
-          waiting for the default rolling payout. Only rendered once the
-          account is active, payouts are enabled, and the user is on the
-          paid plan (the API enforces the same gate). */}
-      {canCashOut && (
+      {/* Next payout — the standard automatic payout every connected
+          account receives. Shows the amount Stripe will deposit into the
+          stylist's bank and when it's expected to land. Only rendered once
+          the account is active and payouts are enabled. */}
+      {showPayout && connect.nextPayout && (
         <div
           style={{
             padding: 16,
@@ -338,11 +335,14 @@ function PaymentsInner() {
         >
           <div>
             <p style={{ fontSize: 14, fontWeight: 700, color: C.espresso }}>
-              Cash out instantly
+              Next payout
             </p>
             <p style={{ fontSize: 12, color: C.muted, marginTop: 4, lineHeight: 1.5 }}>
-              Send your available Stripe balance to your debit card in minutes —
-              a Braid Boss Pro member perk. Stripe charges a small instant-payout fee.
+              Your deposits are paid out to your bank automatically
+              {connect.nextPayout.schedule_label
+                ? ` ${connect.nextPayout.schedule_label}`
+                : ""}
+              .
             </p>
           </div>
 
@@ -355,48 +355,47 @@ function PaymentsInner() {
             }}
           >
             <span style={{ fontSize: 11, color: C.muted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              Ready to cash out
+              Expected amount
             </span>
             <span style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 600, color: C.espresso }}>
-              {connect.instantAvailable == null
-                ? "—"
-                : `$${connect.instantAvailable.toFixed(2)}`}
+              {`$${connect.nextPayout.amount.toFixed(2)}`}
             </span>
           </div>
 
-          <button
-            type="button"
-            onClick={() => void handleCashOut()}
-            disabled={connect.payoutBusy || !connect.instantAvailable || connect.instantAvailable <= 0}
+          <div
             style={{
-              ...primaryButtonStyle,
-              opacity:
-                connect.payoutBusy || !connect.instantAvailable || connect.instantAvailable <= 0
-                  ? 0.55
-                  : 1,
-              cursor:
-                connect.payoutBusy || !connect.instantAvailable || connect.instantAvailable <= 0
-                  ? "default"
-                  : "pointer",
+              display: "flex",
+              alignItems: "baseline",
+              justifyContent: "space-between",
+              gap: 8,
             }}
           >
-            {connect.payoutBusy
-              ? "Sending…"
-              : connect.instantAvailable && connect.instantAvailable > 0
-                ? `Cash out $${connect.instantAvailable.toFixed(2)} now`
-                : "Nothing to cash out yet"}
-          </button>
+            <span style={{ fontSize: 11, color: C.muted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Expected date
+            </span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: C.espresso }}>
+              {connect.nextPayout.amount <= 0
+                ? "No payout scheduled"
+                : connect.nextPayout.arrival_date
+                  ? `${connect.nextPayout.estimated ? "Around " : ""}${formatPayoutDate(connect.nextPayout.arrival_date)}`
+                  : "—"}
+            </span>
+          </div>
 
-          {payout && (
-            <p style={{ fontSize: 12, color: C.success, lineHeight: 1.5 }}>
-              ${payout.amount.toFixed(2)} is on its way to your card
-              {payout.arrival_date
-                ? ` — expected by ${new Date(payout.arrival_date).toLocaleDateString()}.`
-                : "."}
+          {connect.nextPayout.pending > 0 && (
+            <p style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+              ${connect.nextPayout.pending.toFixed(2)} is still settling and will be
+              added to an upcoming payout.
             </p>
           )}
-          {connect.payoutError && (
-            <p style={{ fontSize: 12, color: C.danger, lineHeight: 1.5 }}>{connect.payoutError}</p>
+          {connect.nextPayout.amount <= 0 && connect.nextPayout.pending <= 0 && (
+            <p style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+              No funds are waiting to be paid out yet. New deposits are paid out
+              {connect.nextPayout.schedule_label
+                ? ` ${connect.nextPayout.schedule_label}`
+                : " automatically"}
+              .
+            </p>
           )}
         </div>
       )}
