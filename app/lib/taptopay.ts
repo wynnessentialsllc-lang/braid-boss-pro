@@ -75,9 +75,21 @@ const getPlugin = (): TapToPayPlugin | null => {
   }
 };
 
+// Master switch for the Tap to Pay feature. Turned off while the
+// platform's Stripe account doesn't have the `card_present` capability —
+// requesting it errors ("Received unknown parameter: capabilities
+// [card_present]"), so the whole feature is hidden until Stripe enables
+// it. Flip to `true` to bring back every Tap to Pay surface (settings
+// entry, awareness splash, and the in-person checkout buttons); no other
+// changes needed.
+export const TAP_TO_PAY_ENABLED = false;
+
 // True only on a native iOS build whose device + entitlement actually
 // support Tap to Pay. Safe to call anywhere; resolves false off-device.
+// Returns false whenever the feature is disabled (see TAP_TO_PAY_ENABLED),
+// which is what hides the in-person checkout buttons and awareness splash.
 export const tapToPaySupported = async (): Promise<boolean> => {
+  if (!TAP_TO_PAY_ENABLED) return false;
   const plugin = getPlugin();
   if (!plugin) return false;
   try {

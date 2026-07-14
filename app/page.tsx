@@ -191,7 +191,7 @@ import {
   computeDayStatus,
 } from "./lib/calendar";
 import { useIsNativePlatform, isNativePlatform } from "./lib/platform";
-import { tapToPaySupported, collectTapToPay, TAP_TO_PAY_STAGE_LABEL, type TapToPayStatus } from "./lib/taptopay";
+import { tapToPaySupported, collectTapToPay, TAP_TO_PAY_ENABLED, TAP_TO_PAY_STAGE_LABEL, type TapToPayStatus } from "./lib/taptopay";
 import {
   type Service,
   type ServiceInput,
@@ -12774,7 +12774,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
               <Input type="date" value={form.paymentDate || ""} onChange={e => setForm({ ...form, paymentDate: e.target.value })} />
             </Field>
             <Field label="Method" hint="optional">
-              <Select value={form.paymentMethod || ""} onChange={e => setForm({ ...form, paymentMethod: e.target.value })} options={PAYMENT_METHODS} />
+              <Select value={form.paymentMethod || ""} onChange={e => setForm({ ...form, paymentMethod: e.target.value })} options={TAP_TO_PAY_ENABLED ? PAYMENT_METHODS : PAYMENT_METHODS.filter((m) => m.value !== "tap_to_pay")} />
             </Field>
           </div>
           <div className="mt-3">
@@ -12817,7 +12817,9 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             <div className="flex items-center gap-2 mb-2">
               <DollarSign size={16} style={{ color: C.gold }} />
               <span className="font-semibold text-sm" style={{ color: C.espresso }}>In-person payment</span>
-              <Pill tone="gold">{isNative && ttpSupported && business?.tapToPayEnabled ? "Tap to Pay" : "Tap to Pay soon"}</Pill>
+              {TAP_TO_PAY_ENABLED && (
+                <Pill tone="gold">{isNative && ttpSupported && business?.tapToPayEnabled ? "Tap to Pay" : "Tap to Pay soon"}</Pill>
+              )}
             </div>
             {isNative && ttpSupported && business?.tapToPayEnabled ? (
               // Live Tap to Pay on iPhone. Charges the balance on the
@@ -12934,7 +12936,9 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             ) : (
               <>
                 <p className="text-[12px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
-                  {isNative && ttpSupported && !business?.tapToPayEnabled
+                  {!TAP_TO_PAY_ENABLED
+                    ? "Collect the balance in person:"
+                    : isNative && ttpSupported && !business?.tapToPayEnabled
                     ? "Tap to Pay on iPhone is available on this device — turn it on in Settings → Payments → Tap to Pay to charge cards right here. Until then, collect in person two ways:"
                     : isNative
                     ? "Tap to Pay on iPhone is coming to this app — accept cards on your phone, no reader needed. Until then, collect in person two ways:"
@@ -12945,10 +12949,12 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                     <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
                     <span><strong>Send the balance payment link</strong> above — your client taps to pay and it reconciles here automatically.</span>
                   </li>
-                  <li className="text-[12px] flex items-start gap-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
-                    <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
-                    <span>Tap the card in the <strong>Stripe Dashboard app</strong>, then hit <em>Checkout</em> here and set the method to <strong>Tap to Pay</strong> so your books stay accurate.</span>
-                  </li>
+                  {TAP_TO_PAY_ENABLED && (
+                    <li className="text-[12px] flex items-start gap-2" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                      <span aria-hidden style={{ marginTop: 6, width: 4, height: 4, borderRadius: 99, background: C.gold, flexShrink: 0 }} />
+                      <span>Tap the card in the <strong>Stripe Dashboard app</strong>, then hit <em>Checkout</em> here and set the method to <strong>Tap to Pay</strong> so your books stay accurate.</span>
+                    </li>
+                  )}
                 </ul>
               </>
             )}
@@ -19927,7 +19933,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               </div>
             </Card>
 
-            {settingsIsNative && openTapToPay && (
+            {TAP_TO_PAY_ENABLED && settingsIsNative && openTapToPay && (
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openTapToPay}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -40551,7 +40557,7 @@ const BossCheckoutScreen = ({ store, openReceipt, goToMoney, openAppointmentReco
                   );
                 })}
               </div>
-              <p className="text-[11px] mt-3" style={{ color: C.muted }}>Card (Tap to Pay) sales are refunded from your Stripe dashboard so the card is credited.</p>
+              <p className="text-[11px] mt-3" style={{ color: C.muted }}>Card sales are refunded from your Stripe dashboard so the card is credited.</p>
             </div>
           )}
         </div>
@@ -41307,7 +41313,7 @@ export default function App() {
     <Frame withTabBar={secondary === null}>
       <GlobalStyle />
 
-      {ttpAwareOpen && (
+      {TAP_TO_PAY_ENABLED && ttpAwareOpen && (
         <TapToPayAwareness
           onSetup={() => { markTtpAwareSeen(); setSecondary("tapToPay"); }}
           onDismiss={markTtpAwareSeen}
@@ -41417,7 +41423,7 @@ export default function App() {
         </>
       )}
 
-      {secondary === "tapToPay" && (
+      {TAP_TO_PAY_ENABLED && secondary === "tapToPay" && (
         <TapToPayScreen
           store={store}
           onBack={() => setSecondary("settings")}
