@@ -134,8 +134,13 @@ const scheduleLabel = (schedule: Schedule): string => {
 // only when there is no concrete in-flight payout to read a real
 // arrival_date from. Approximate — it doesn't account for bank holidays —
 // which is why the response flags it as `estimated`.
+//
+// Note: this estimates arrival for the *already-available* balance. The
+// account's `delay_days` governs how long a charge takes to become
+// available (i.e. move into that balance), so it's already been served by
+// the time funds are available — the next payout of available funds lands
+// the next business day (daily) or on the next schedule anchor.
 const estimateArrival = (schedule: Schedule, now: Date): Date | null => {
-  const delay = Number.isFinite(schedule.delay_days) ? Number(schedule.delay_days) : 2;
   switch (schedule.interval) {
     case "manual":
       return null;
@@ -147,9 +152,9 @@ const estimateArrival = (schedule: Schedule, now: Date): Date | null => {
       return nextMonthlyAnchor(now, schedule.monthly_anchor || 1);
     case "daily":
     default:
-      // Daily automatic payouts run each business day; the balance that's
-      // already available lands about `delay`/next business day out.
-      return addBusinessDays(now, Math.min(Math.max(delay, 1), 3));
+      // Daily automatic payouts run each business day; available funds land
+      // the next business day.
+      return addBusinessDays(now, 1);
   }
 };
 
@@ -221,45 +226,53 @@ export async function POST(req: Request) {
     if (s && typeof s === "object") schedule = s as Schedule;
   }
 
-  // ---- Any payout already in flight? Its arrival_date is authoritative.
-  let inFlight: { amount: number; arrival: number } | null = null;
+  // ---- Payouts already booked (on the way to the bank, or scheduled) --
+  // `in_transit` = money that has left the balance toward the bank.
+  // `pending`    = a payout Stripe has created but not yet sent; its
+  //                arrival_date is authoritative for the upcoming payout.
+  let onTheWayCents = 0;
+  let bookedArrival: number | null = null;
   {
-    const { ok, json } = await stripeGet("/payouts?limit=5", stripeSecret, accountId);
+    const { ok, json } = await stripeGet("/payouts?limit=10", stripeSecret, accountId);
     if (ok && Array.isArray(json?.data)) {
-      const upcoming = json.data.find(
-        (p: any) => p?.status === "pending" || p?.status === "in_transit",
-      );
-      if (upcoming && Number.isFinite(upcoming.arrival_date)) {
-        inFlight = {
-          amount: Math.round(Number(upcoming.amount) || 0),
-          arrival: Number(upcoming.arrival_date),
-        };
+      for (const p of json.data) {
+        const arrival = Number(p?.arrival_date);
+        if (p?.status === "in_transit") {
+          onTheWayCents += Math.max(0, Math.round(Number(p.amount) || 0));
+        }
+        if ((p?.status === "in_transit" || p?.status === "pending") && Number.isFinite(arrival)) {
+          bookedArrival = bookedArrival == null ? arrival : Math.min(bookedArrival, arrival);
+        }
       }
     }
   }
 
+  // The upcoming payout is the balance not yet sent to the bank — the
+  // funds that are available now plus those still settling. This mirrors
+  // Stripe's "Upcoming payout (estimated)" figure.
+  const upcomingCents = availableCents + pendingCents;
   const now = new Date();
-  let amountCents: number;
+
   let arrivalIso: string | null;
   let estimated: boolean;
-
-  if (inFlight) {
-    // Money is already on its way — use the real amount and arrival date.
-    amountCents = inFlight.amount;
-    arrivalIso = new Date(inFlight.arrival * 1000).toISOString();
-    estimated = false;
+  if (bookedArrival != null) {
+    // A real payout is booked — use its arrival date. Still an estimate if
+    // funds are pending, since the amount can grow as they settle.
+    arrivalIso = new Date(bookedArrival * 1000).toISOString();
+    estimated = pendingCents > 0;
   } else {
-    // Nothing in flight — the available balance is what pays out next.
-    amountCents = availableCents;
-    const est = amountCents > 0 ? estimateArrival(schedule, now) : null;
+    // Nothing booked yet — estimate the date from the payout schedule.
+    const est = upcomingCents > 0 ? estimateArrival(schedule, now) : null;
     arrivalIso = est ? est.toISOString() : null;
     estimated = est != null;
   }
 
   return NextResponse.json({
     currency,
-    amount: cents(amountCents),
+    amount: cents(upcomingCents),
+    available: cents(availableCents),
     pending: cents(pendingCents),
+    on_the_way: cents(onTheWayCents),
     arrival_date: arrivalIso,
     estimated,
     interval: schedule.interval || "daily",
