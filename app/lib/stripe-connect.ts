@@ -60,11 +60,15 @@ const getAccessToken = async (): Promise<string | null> => {
 // it's expected to land. Surfaced on the Payments page.
 export type NextPayoutInfo = {
   currency: string;
+  // Upcoming payout: funds not yet sent to the bank (available + pending).
   amount: number;
+  available: number;
   pending: number;
+  // Funds already in transit to the bank from an earlier payout.
+  on_the_way: number;
   arrival_date: string | null;
-  // true when arrival_date is an estimate from the payout schedule rather
-  // than a concrete in-flight Stripe payout.
+  // true when the amount/date is an estimate (funds still settling, or the
+  // date is derived from the payout schedule rather than a booked payout).
   estimated: boolean;
   interval: string;
   schedule_label: string;
@@ -175,7 +179,9 @@ export const useStripeConnect = (userId: string | null): {
       setNextPayout({
         currency: typeof data?.currency === "string" ? data.currency : "usd",
         amount: typeof data?.amount === "number" ? data.amount : 0,
+        available: typeof data?.available === "number" ? data.available : 0,
         pending: typeof data?.pending === "number" ? data.pending : 0,
+        on_the_way: typeof data?.on_the_way === "number" ? data.on_the_way : 0,
         arrival_date: typeof data?.arrival_date === "string" ? data.arrival_date : null,
         estimated: !!data?.estimated,
         interval: typeof data?.interval === "string" ? data.interval : "daily",

@@ -382,13 +382,19 @@ function PaymentsInner() {
             </span>
           </div>
 
-          {connect.nextPayout.pending > 0 && (
+          {connect.nextPayout.amount > 0 && connect.nextPayout.estimated && (
             <p style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-              ${connect.nextPayout.pending.toFixed(2)} is still settling and will be
-              added to an upcoming payout.
+              Estimated — some transactions are still processing, so the amount
+              may change slightly before it&apos;s paid out.
             </p>
           )}
-          {connect.nextPayout.amount <= 0 && connect.nextPayout.pending <= 0 && (
+          {connect.nextPayout.on_the_way > 0 && (
+            <p style={{ fontSize: 12, color: C.success, lineHeight: 1.5 }}>
+              ${connect.nextPayout.on_the_way.toFixed(2)} is already on its way to
+              your bank.
+            </p>
+          )}
+          {connect.nextPayout.amount <= 0 && connect.nextPayout.on_the_way <= 0 && (
             <p style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
               No funds are waiting to be paid out yet. New deposits are paid out
               {connect.nextPayout.schedule_label
