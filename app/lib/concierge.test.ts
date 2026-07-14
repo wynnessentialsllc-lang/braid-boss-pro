@@ -142,6 +142,17 @@ describe("buildAvailabilityNote", () => {
     expect(buildAvailabilityNote([{ day_iso: "2026-06-17", slot_count: 0 }], "2026-06-15")).toBeNull();
     expect(buildAvailabilityNote(null, "2026-06-15")).toBeNull();
   });
+  it("treats the real open statuses (available/limited) as open", () => {
+    // public_get_month_availability emits 'available'/'limited' for open
+    // days and 'booked'/'off' for full/closed ones.
+    const statusRows = [
+      { day_iso: "2026-06-17", slot_count: 8, status: "available" },
+      { day_iso: "2026-06-18", slot_count: 2, status: "limited" },
+      { day_iso: "2026-06-19", slot_count: 0, status: "booked" }, // excluded
+      { day_iso: "2026-06-20", slot_count: 0, status: "off" },    // excluded
+    ];
+    expect(buildAvailabilityNote(statusRows, "2026-06-15")).toBe("Wed Jun 17, Thu Jun 18");
+  });
 });
 
 describe("buildSystemPrompt with availability", () => {
