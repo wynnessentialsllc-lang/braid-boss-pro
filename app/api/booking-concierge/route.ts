@@ -157,15 +157,26 @@ export async function POST(req: Request) {
   // so it can answer "when are you free?". We pull this month + next month
   // (covers month-boundary questions) and summarize the soonest openings.
   // Any failure just falls back to "check the calendar".
+  //
+  // public_get_month_availability needs a duration to compute slots — with
+  // neither a service_id nor a duration it treats every day as full and the
+  // assistant wrongly says it can't see the calendar. We pass the SHORTEST
+  // active service's duration, so a day counts as open when it has room for
+  // at least the quickest style (the most permissive true answer to "any
+  // openings?"). Falls back to 120 min when no durations are configured.
   let availabilityNote: string | null = null;
   try {
+    const durations = services
+      .map((s) => Math.round((s.durationHours || 0) * 60))
+      .filter((d) => d > 0);
+    const durationMinutes = durations.length ? Math.min(...durations) : 120;
     const todayIso = new Date().toISOString().slice(0, 10);
     const [y, m] = todayIso.split("-").map(Number);
     const nextY = m === 12 ? y + 1 : y;
     const nextM = m === 12 ? 1 : m + 1;
     const months = await Promise.all([
-      admin.rpc("public_get_month_availability", { slug_in: slug, year_in: y, month_in: m }),
-      admin.rpc("public_get_month_availability", { slug_in: slug, year_in: nextY, month_in: nextM }),
+      admin.rpc("public_get_month_availability", { slug_in: slug, year_in: y, month_in: m, duration_minutes_in: durationMinutes }),
+      admin.rpc("public_get_month_availability", { slug_in: slug, year_in: nextY, month_in: nextM, duration_minutes_in: durationMinutes }),
     ]);
     const rows: MonthAvailabilityRow[] = [];
     for (const r of months) {

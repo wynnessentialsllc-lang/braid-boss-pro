@@ -241,9 +241,14 @@ export const buildAvailabilityNote = (
   maxDays = 6,
 ): string | null => {
   if (!Array.isArray(rows)) return null;
+  // A day is open when it has bookable slots. public_get_month_availability
+  // reports that as slot_count > 0 with status 'available' or 'limited'
+  // ('booked'/'off' are the full/closed days); accept the open statuses too
+  // so a change in how slot_count is surfaced can't silently hide openings.
+  const OPEN_STATUSES = new Set(["available", "limited", "open"]);
   const open = rows
     .filter((r) => r && typeof r.day_iso === "string" && r.day_iso >= todayIso)
-    .filter((r) => (Number(r.slot_count) || 0) > 0 || r.status === "open")
+    .filter((r) => (Number(r.slot_count) || 0) > 0 || OPEN_STATUSES.has(String(r.status)))
     .sort((a, b) => a.day_iso.localeCompare(b.day_iso))
     .slice(0, maxDays);
   if (!open.length) return null;
