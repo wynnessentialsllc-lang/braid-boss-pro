@@ -681,7 +681,7 @@ const renderBalancePaid = (p: Record<string, any>) => {
   const serviceName = p.serviceName || null;
   const amountPaid  = Number(p.amountPaid) > 0 ? Number(p.amountPaid) : null;
   const reviewUrl   = String(p.reviewUrl || "").trim();
-  const subject = `Thank you — your balance is paid, ${studioName}`;
+  const subject = `Thank you — your balance is paid · ${studioName}`;
   const amount = amountPaid
     ? `<p style="font-size:14px;line-height:22px;">We received <strong>$${amountPaid.toFixed(2)}</strong> for your${serviceName ? ` ${escape(serviceName)}` : ""} appointment. You're all set.</p>`
     : "";
@@ -1486,7 +1486,7 @@ const renderStylistLabelPrinted = (p: Record<string, any>) => {
 const renderRebookNudge = (p: Record<string, any>) => {
   const clientName  = p.clientName  || "there";
   const studioName  = p.studioName  || "your stylist";
-  const serviceName = p.serviceName || "your style";
+  const serviceName = p.serviceName || "style";
   const weeksSince  = Number(p.weeksSince) || null;
   const bookingSlug = String(p.bookingSlug || "").trim();
   const unsubscribeToken = String(p.unsubscribeToken || "").trim();
@@ -1501,7 +1501,7 @@ const renderRebookNudge = (p: Record<string, any>) => {
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Ready for a refresh</p>
     <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Hey ${escape(clientName)},</h1>
     <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
-      It's been ${weeksSince ? `<strong>${weeksSince} weeks</strong>` : "a while"} since your last <strong>${escape(serviceName)}</strong> with ${escape(studioName)}. Most clients book their refresh around now — tap below to grab your next spot.
+      It's been ${weeksSince ? `<strong>${weeksSince} week${weeksSince === 1 ? "" : "s"}</strong>` : "a while"} since your last <strong>${escape(serviceName)}</strong> with ${escape(studioName)}. Most clients book their refresh around now — tap below to grab your next spot.
     </p>
     ${bookUrl ? ctaButton("Book now", bookUrl) : ""}
     <p style="font-size:12px;color:${C.muted};line-height:18px;margin:18px 0 0;">
@@ -1711,7 +1711,7 @@ const renderMarketingCampaign = (p: Record<string, any>) => {
 const renderReorderNudge = (p: Record<string, any>) => {
   const clientName     = p.clientName     || "there";
   const studioName     = p.studioName     || "your stylist";
-  const productTitle   = p.productTitle   || "your product";
+  const productTitle   = p.productTitle   || "product";
   const productSlug    = String(p.productSlug || "").trim();
   const productImage   = String(p.productImage || "").trim();
   const weeksSince     = Number(p.weeksSince) || null;
@@ -1731,7 +1731,7 @@ const renderReorderNudge = (p: Record<string, any>) => {
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Time to restock</p>
     <h1 style="font-size:22px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">Running low, ${escape(clientName)}?</h1>
     <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">
-      ${weeksSince ? `It's been <strong>${weeksSince} weeks</strong> since` : "It's been a while since"}
+      ${weeksSince ? `It's been <strong>${weeksSince} week${weeksSince === 1 ? "" : "s"}</strong> since` : "It's been a while since"}
       you picked up your <strong>${escape(productTitle)}</strong> from ${escape(studioName)} — should be running low about now.
     </p>
     ${productImage ? `
