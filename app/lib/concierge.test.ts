@@ -111,6 +111,14 @@ describe("parseConciergeReply", () => {
     );
     expect(out?.suggestedServiceId).toBeNull();
   });
+
+  it("strips inline markdown so the chat bubble never shows literal markers", () => {
+    const out = parseConciergeReply(
+      { reply: "Our next days are **Sat Aug 1, Sun Aug 2** — pick a *time* on the `calendar`.", suggestedServiceId: "", readyToBook: false },
+      services,
+    );
+    expect(out?.reply).toBe("Our next days are Sat Aug 1, Sun Aug 2 — pick a time on the calendar.");
+  });
 });
 
 describe("formatOpenDay", () => {
