@@ -160,16 +160,17 @@ export async function POST(req: Request) {
   //
   // public_get_month_availability needs a duration to compute slots — with
   // neither a service_id nor a duration it treats every day as full and the
-  // assistant wrongly says it can't see the calendar. We pass the SHORTEST
-  // active service's duration, so a day counts as open when it has room for
-  // at least the quickest style (the most permissive true answer to "any
-  // openings?"). Falls back to 120 min when no durations are configured.
+  // assistant wrongly says it can't see the calendar. We use the SAME
+  // default the booking calendar uses before a service is picked
+  // (DEFAULT_DURATION_MIN = 60 in app/book/[slug]/page.tsx), so the days the
+  // assistant names match exactly what the client sees when they open the
+  // calendar. Anchoring to a real service's length instead (e.g. an 8-hour
+  // style) would wrongly show the calendar as full whenever no single day
+  // has that whole block free, even though shorter openings exist.
+  const CONCIERGE_AVAILABILITY_DURATION_MIN = 60;
   let availabilityNote: string | null = null;
   try {
-    const durations = services
-      .map((s) => Math.round((s.durationHours || 0) * 60))
-      .filter((d) => d > 0);
-    const durationMinutes = durations.length ? Math.min(...durations) : 120;
+    const durationMinutes = CONCIERGE_AVAILABILITY_DURATION_MIN;
     const todayIso = new Date().toISOString().slice(0, 10);
     const [y, m] = todayIso.split("-").map(Number);
     const nextY = m === 12 ? y + 1 : y;
