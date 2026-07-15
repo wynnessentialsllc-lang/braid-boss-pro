@@ -34,10 +34,17 @@ type ChatTurn = ConciergeMessage & { suggestedServiceId?: string | null };
 // Tappable starter questions shown on the empty chat so the answerable
 // topics are discoverable instead of relying on the client to guess what
 // to type. Each chip sends its full question as a normal user turn.
+//
+// Only surface topics the assistant can answer reliably from data that's
+// essentially always present (hours, days open, catalog, policy). A chip
+// must never lead to a non-answer, so "next opening" is intentionally NOT
+// a starter: live availability can be empty (fully booked, or outside the
+// booking window), which would make the chip deflect to the calendar. A
+// client can still type that question — the route answers it from live
+// availability when there is any.
 const STARTER_QUESTIONS: { label: string; question: string }[] = [
   { label: "Hours", question: "What are your hours?" },
   { label: "Days open", question: "What days are you open?" },
-  { label: "Next opening", question: "When's your next available opening?" },
   { label: "Styles", question: "What styles do you offer?" },
   { label: "Pricing", question: "How much do your styles cost?" },
   { label: "Cancellation policy", question: "What's your cancellation policy?" },
