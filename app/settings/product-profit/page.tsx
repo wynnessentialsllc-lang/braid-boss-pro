@@ -300,7 +300,7 @@ function ProductCard({
             {product.name || "Untitled product"}
           </p>
           <p style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>
-            {product.category} · makes {m.yield.units} {m.yield.units === 1 ? "unit" : "units"}
+            {product.category} · {product.input?.pricingMode === "unit" ? "" : "makes "}{m.yield.units} {m.yield.units === 1 ? (product.input?.pricingMode === "unit" ? "item" : "unit") : (product.input?.pricingMode === "unit" ? "items" : "units")}
           </p>
         </div>
         <button type="button" onClick={() => onEdit(product)} style={iconButton} aria-label="Edit">
@@ -403,67 +403,103 @@ function ProductEditor({
           {fmt$(m.cost.costPerUnit)}
         </p>
         <p style={{ fontSize: 12, color: "rgba(255,255,255,0.85)", marginTop: 4 }}>
-          {m.yield.units > 0
-            ? `Makes ~${m.yield.units} units · batch cost ${fmt$(m.cost.totalBatchCost)}`
-            : "Enter bulk & finished size to see your yield"}
+          {input.pricingMode === "unit"
+            ? (m.yield.units > 0
+                ? `${m.yield.units} items · total cost ${fmt$(m.cost.totalBatchCost)}`
+                : "Enter quantity & cost to see your cost per item")
+            : (m.yield.units > 0
+                ? `Makes ~${m.yield.units} units · batch cost ${fmt$(m.cost.totalBatchCost)}`
+                : "Enter bulk & finished size to see your yield")}
         </p>
       </div>
 
       {/* 1. Product information */}
       <Section title="Product information" icon={<Sparkles size={15} />}>
+        <Field label="Product type">
+          <ModeRow value={input.pricingMode === "unit" ? "unit" : "batch"} onChange={(mode) => set("pricingMode", mode)} />
+        </Field>
         <Field label="Product name">
-          <TextInput value={input.name} onChange={(v) => set("name", v)} placeholder="e.g. Nourish Oil" />
+          <TextInput value={input.name} onChange={(v) => set("name", v)} placeholder={input.pricingMode === "unit" ? "e.g. Satin Bonnet" : "e.g. Nourish Oil"} />
         </Field>
         <Field label="Category">
           <Select value={input.category} onChange={(v) => set("category", v)} options={PRODUCT_CATEGORIES.map((c) => ({ value: c, label: c }))} />
         </Field>
-        <Field label="Finished product size">
-          <SizeRow value={input.finishedSize} unit={input.finishedUnit} onValue={(v) => set("finishedSize", v)} onUnit={(u) => set("finishedUnit", u)} />
-        </Field>
-      </Section>
-
-      {/* 2. Bulk product */}
-      <Section title="Bulk product" icon={<Package size={15} />}>
-        <Field label="Bulk product cost">
-          <MoneyInput value={input.bulkCost} onChange={(v) => set("bulkCost", v)} />
-        </Field>
-        <Field label="Bulk product size">
-          <SizeRow value={input.bulkSize} unit={input.bulkUnit} onValue={(v) => set("bulkSize", v)} onUnit={(u) => set("bulkUnit", u)} />
-        </Field>
-        <CalloutRow label="Total possible units" value={`${m.yield.units}`} hint={m.yield.units > 0 ? "finished products" : "set sizes above"} />
-      </Section>
-
-      {/* 3. Dilution */}
-      <Section title="Dilution / water" icon={<Beaker size={15} />}
-        right={<Toggle checked={input.diluted} onChange={(v) => set("diluted", v)} />}>
-        <p style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-          Is this product diluted before bottling? Yield is gated by how much concentrate each bottle uses.
-        </p>
-        {input.diluted && (
-          <>
-            <Field label="Concentrate per bottle" hint={`in ${input.finishedUnit}`}>
-              <NumInput value={input.concentratePerBottle} onChange={(v) => set("concentratePerBottle", v)} />
-            </Field>
-            <Field label="Water added per bottle" hint={`in ${input.finishedUnit}`}>
-              <NumInput value={input.waterPerBottle} onChange={(v) => set("waterPerBottle", v)} />
-            </Field>
-          </>
+        {input.pricingMode !== "unit" && (
+          <Field label="Finished product size">
+            <SizeRow value={input.finishedSize} unit={input.finishedUnit} onValue={(v) => set("finishedSize", v)} onUnit={(u) => set("finishedUnit", u)} />
+          </Field>
         )}
       </Section>
 
+      {/* 2. Cost of goods — batch (bulk yield) vs unit (bought to resell) */}
+      {input.pricingMode === "unit" ? (
+        <Section title="What you paid" icon={<Package size={15} />}>
+          <Field label="How many did you buy?" hint="pieces in the pack / order">
+            <NumInput value={input.unitCount ?? 0} onChange={(v) => set("unitCount", v)} />
+          </Field>
+          <Field label="Total cost" hint="what you paid for all of them">
+            <MoneyInput value={input.bulkCost} onChange={(v) => set("bulkCost", v)} />
+          </Field>
+          <CalloutRow
+            label="Cost per item"
+            value={fmt$(m.yield.units > 0 ? (Number(input.bulkCost) || 0) / m.yield.units : 0)}
+            hint={m.yield.units > 0 ? `${m.yield.units} items · before add-ons below` : "enter quantity & cost"}
+          />
+        </Section>
+      ) : (
+        <Section title="Bulk product" icon={<Package size={15} />}>
+          <Field label="Bulk product cost">
+            <MoneyInput value={input.bulkCost} onChange={(v) => set("bulkCost", v)} />
+          </Field>
+          <Field label="Bulk product size">
+            <SizeRow value={input.bulkSize} unit={input.bulkUnit} onValue={(v) => set("bulkSize", v)} onUnit={(u) => set("bulkUnit", u)} />
+          </Field>
+          <CalloutRow label="Total possible units" value={`${m.yield.units}`} hint={m.yield.units > 0 ? "finished products" : "set sizes above"} />
+        </Section>
+      )}
+
+      {/* 3. Dilution — batch products only (resale items aren't mixed) */}
+      {input.pricingMode !== "unit" && (
+        <Section title="Dilution / water" icon={<Beaker size={15} />}
+          right={<Toggle checked={input.diluted} onChange={(v) => set("diluted", v)} />}>
+          <p style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+            Is this product diluted before bottling? Yield is gated by how much concentrate each bottle uses.
+          </p>
+          {input.diluted && (
+            <>
+              <Field label="Concentrate per bottle" hint={`in ${input.finishedUnit}`}>
+                <NumInput value={input.concentratePerBottle} onChange={(v) => set("concentratePerBottle", v)} />
+              </Field>
+              <Field label="Water added per bottle" hint={`in ${input.finishedUnit}`}>
+                <NumInput value={input.waterPerBottle} onChange={(v) => set("waterPerBottle", v)} />
+              </Field>
+            </>
+          )}
+        </Section>
+      )}
+
       {/* 4. Packaging */}
-      <Section title="Packaging costs" icon={<Package size={15} />}>
-        <CostLineField label="Bottle" line={input.packaging.bottle} onChange={(p) => setLine("bottle", p)} />
-        <CostLineField label="Label" line={input.packaging.label} onChange={(p) => setLine("label", p)} />
-        <CostLineField label="Cap / sprayer" line={input.packaging.sprayer} onChange={(p) => setLine("sprayer", p)} />
-        <CostLineField label="Safety seal" optional line={input.packaging.safetySeal} onChange={(p) => setLine("safetySeal", p)} />
-        <CostLineField label="Box / mailer / insert" optional line={input.packaging.box} onChange={(p) => setLine("box", p)} />
+      <Section title={input.pricingMode === "unit" ? "Packaging (optional)" : "Packaging costs"} icon={<Package size={15} />}>
+        {input.pricingMode === "unit" ? (
+          <>
+            <CostLineField label="Tag / label" optional line={input.packaging.label} onChange={(p) => setLine("label", p)} />
+            <CostLineField label="Bag / box / packaging" optional line={input.packaging.box} onChange={(p) => setLine("box", p)} />
+          </>
+        ) : (
+          <>
+            <CostLineField label="Bottle" line={input.packaging.bottle} onChange={(p) => setLine("bottle", p)} />
+            <CostLineField label="Label" line={input.packaging.label} onChange={(p) => setLine("label", p)} />
+            <CostLineField label="Cap / sprayer" line={input.packaging.sprayer} onChange={(p) => setLine("sprayer", p)} />
+            <CostLineField label="Safety seal" optional line={input.packaging.safetySeal} onChange={(p) => setLine("safetySeal", p)} />
+            <CostLineField label="Box / mailer / insert" optional line={input.packaging.box} onChange={(p) => setLine("box", p)} />
+          </>
+        )}
         <CalloutRow label="Packaging per unit" value={fmt$(m.cost.packagingPerUnit)} />
       </Section>
 
       {/* 5. Labor */}
       <Section title="Labor" icon={<Sparkles size={15} />}>
-        <Field label="Time to produce batch (minutes)">
+        <Field label={input.pricingMode === "unit" ? "Time to tag / prep them (minutes)" : "Time to produce batch (minutes)"}>
           <NumInput value={input.labor.batchMinutes} onChange={(v) => set("labor", { ...input.labor, batchMinutes: v })} />
         </Field>
         <Field label="Hourly labor rate">
@@ -751,6 +787,28 @@ function SizeRow({ value, unit, onValue, onUnit }: { value: number; unit: SizeUn
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ModeRow({ value, onChange }: { value: "batch" | "unit"; onChange: (m: "batch" | "unit") => void }) {
+  const opts: { v: "batch" | "unit"; label: string; hint: string }[] = [
+    { v: "batch", label: "Made in batches", hint: "Oils, sprays, butters" },
+    { v: "unit", label: "Bought to resell", hint: "Scrunchies, bonnets, combs" },
+  ];
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      {opts.map((o) => {
+        const on = value === o.v;
+        return (
+          <button key={o.v} type="button" onClick={() => onChange(o.v)} aria-pressed={on}
+            style={{ flex: 1, padding: "10px 12px", borderRadius: 12, cursor: "pointer", textAlign: "left",
+              border: `1px solid ${on ? C.goldDeep : C.hairline}`, background: on ? "rgba(124,58,237,0.06)" : C.paper }}>
+            <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: on ? C.goldDeep : C.coffee }}>{o.label}</span>
+            <span style={{ display: "block", fontSize: 11, color: C.muted, marginTop: 2 }}>{o.hint}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

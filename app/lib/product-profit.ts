@@ -65,6 +65,7 @@ export const PRODUCT_CATEGORIES = [
   "Edge Control",
   "Hair Butter",
   "Serum",
+  "Accessories",
   "Other",
 ] as const;
 export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
@@ -73,6 +74,17 @@ export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
 export type ProductProfitInput = {
   name: string;
   category: ProductCategory | string;
+
+  // How this product is costed:
+  //   "batch" — you MAKE it: a bulk base is divided by the finished size to
+  //             get the yield (the default; oils, sprays, butters).
+  //   "unit"  — you BUY finished goods to resell (scrunchies, combs, bonnets):
+  //             `unitCount` items cost `bulkCost` total, so cost-each is
+  //             bulkCost ÷ unitCount. Volume, yield, and dilution don't apply.
+  // Optional so products saved before this field default to "batch".
+  pricingMode?: "batch" | "unit";
+  /** Resale mode only: how many finished items the `bulkCost` purchase buys. */
+  unitCount?: number;
 
   // Finished bottle.
   finishedSize: number;
@@ -122,6 +134,8 @@ export const emptyCostLine = (): CostLine => ({ totalCost: 0, quantity: 0 });
 export const blankProduct = (): ProductProfitInput => ({
   name: "",
   category: "Hair Oil",
+  pricingMode: "batch",
+  unitCount: 0,
   finishedSize: 2,
   finishedUnit: "oz",
   bulkCost: 0,
@@ -169,6 +183,17 @@ export type YieldResult = {
  * than Infinity/NaN when sizes are unset.
  */
 export const computeYield = (input: ProductProfitInput): YieldResult => {
+  // Resale items aren't "made" — the purchase IS the finished stock, so the
+  // yield is simply the count of items bought. No volume/dilution math.
+  if (input.pricingMode === "unit") {
+    const units = Math.max(0, Math.floor(num(input.unitCount)));
+    return {
+      units: Number.isFinite(units) && units > 0 ? units : 0,
+      bulkInFinishedUnit: 0,
+      basePerBottle: 0,
+    };
+  }
+
   const finishedUnit = input.finishedUnit === "ml" ? "ml" : "oz";
   const bulkInFinishedUnit = convertVolume(
     num(input.bulkSize),
@@ -250,7 +275,7 @@ export const computeCostBreakdown = (
     totalBatchCost,
     costPerUnit,
     perUnitLines: [
-      { label: "Base product", amount: bulkPerUnit },
+      { label: input.pricingMode === "unit" ? "Item cost" : "Base product", amount: bulkPerUnit },
       { label: "Bottle", amount: bottle },
       { label: "Label", amount: label },
       { label: "Cap / sprayer", amount: sprayer },

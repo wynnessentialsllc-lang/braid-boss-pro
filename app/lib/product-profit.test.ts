@@ -96,6 +96,52 @@ describe("computeYield", () => {
   });
 });
 
+describe("resale / unit mode (bought to resell)", () => {
+  // 50 scrunchies bought for $30 total.
+  const scrunchies = (over: Partial<ProductProfitInput> = {}): ProductProfitInput => ({
+    ...blankProduct(),
+    name: "Scrunchie",
+    category: "Accessories",
+    pricingMode: "unit",
+    unitCount: 50,
+    bulkCost: 30,
+    ...over,
+  });
+
+  it("yields the count bought, ignoring volume/dilution", () => {
+    const y = computeYield(scrunchies({
+      // These liquid fields must be ignored in unit mode.
+      finishedSize: 0, bulkSize: 0, diluted: true, concentratePerBottle: 6,
+    }));
+    expect(y.units).toBe(50);
+  });
+
+  it("computes cost per item as total ÷ count (plus optional add-ons)", () => {
+    const c = computeCostBreakdown(scrunchies());
+    expect(c.units).toBe(50);
+    expect(c.costPerUnit).toBe(0.6); // 30 / 50, no add-ons
+    expect(c.perUnitLines.find((l) => l.label === "Item cost")?.amount).toBe(0.6);
+  });
+
+  it("folds optional packaging into the per-item cost", () => {
+    const c = computeCostBreakdown(scrunchies({
+      packaging: {
+        bottle: { totalCost: 0, quantity: 0 },
+        label: { totalCost: 10, quantity: 50 }, // $0.20 hang tag
+        sprayer: { totalCost: 0, quantity: 0 },
+        safetySeal: { totalCost: 0, quantity: 0 },
+        box: { totalCost: 0, quantity: 0 },
+      },
+    }));
+    expect(c.costPerUnit).toBe(0.8); // 0.60 item + 0.20 tag
+  });
+
+  it("is 0 (not NaN) before a quantity is entered", () => {
+    expect(computeYield(scrunchies({ unitCount: 0 })).units).toBe(0);
+    expect(computeCostBreakdown(scrunchies({ unitCount: 0 })).costPerUnit).toBe(0);
+  });
+});
+
 describe("computeCostBreakdown", () => {
   it("sums packaging per unit and computes true cost per unit", () => {
     const c = computeCostBreakdown(nourishOil());
