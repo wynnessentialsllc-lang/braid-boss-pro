@@ -25971,14 +25971,18 @@ const ReportsScreen = ({ store, onBack, focus, onFocusConsumed }: { store: any; 
 
   // Shop sales for the selected window — in-person Checkout sales plus
   // paid online store orders, kept separate from the service-driven sales
-  // summary above. `manualTxns` is the same payment_transactions ledger
-  // (it carries Boss Checkout rows); store.productOrders holds paid orders.
+  // summary above. Read from store.transactions (the local ledger the Home
+  // dashboard's Shop Sales tile uses), NOT the cloud-pulled `manualTxns`:
+  // Boss Checkout sales are written via store.upsertTransaction into that
+  // local ledger and are never upserted to the cloud payment_transactions
+  // table, so `manualTxns` structurally can't contain them — which made
+  // this card read $0 while the dashboard showed the real total.
   const shopSales = useMemo(
     () => {
       const win = rangeWindow(range, todayISO());
-      return shopSalesInRange(manualTxns, store.productOrders, win.start, win.end);
+      return shopSalesInRange((store.transactions as any[]) || [], store.productOrders, win.start, win.end);
     },
-    [range, manualTxns, store.productOrders],
+    [range, store.transactions, store.productOrders],
   );
 
   // Cancelled appointments are already excluded from the aggregators
