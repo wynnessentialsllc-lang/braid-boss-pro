@@ -191,6 +191,22 @@ export interface ConciergeReply {
 }
 
 /**
+ * Strip inline Markdown the model sometimes emits (**bold**, *italic*,
+ * `code`) so it doesn't reach the chat bubble as literal asterisks/backticks
+ * — the bubble renders plain text, so "**Sat Aug 1**" would show the stars.
+ * Conservative: only unwraps clearly paired inline markers and drops any
+ * leftover doubled stars; leaves ordinary punctuation and URLs untouched.
+ */
+export const stripReplyFormatting = (s: string): string =>
+  s
+    .replace(/\*\*([^*]+)\*\*/g, "$1")   // **bold**
+    .replace(/__([^_]+)__/g, "$1")       // __bold__
+    .replace(/\*([^*\n]+)\*/g, "$1")     // *italic*
+    .replace(/`([^`]+)`/g, "$1")         // `code`
+    .replace(/\*\*/g, "")                // any stray leftover **
+    .trim();
+
+/**
  * Validate the model's tool output. suggestedServiceId is pinned to a real
  * catalog id (anything else becomes null) so a hallucinated id can never
  * reach the UI.
@@ -200,7 +216,7 @@ export const parseConciergeReply = (
   services: ConciergeServiceLite[],
 ): ConciergeReply | null => {
   const obj = (input ?? {}) as Record<string, unknown>;
-  const reply = typeof obj.reply === "string" ? obj.reply.trim() : "";
+  const reply = typeof obj.reply === "string" ? stripReplyFormatting(obj.reply.trim()) : "";
   if (!reply) return null;
   const rawId = typeof obj.suggestedServiceId === "string" ? obj.suggestedServiceId : "";
   const suggestedServiceId = services.some((s) => s.id === rawId) ? rawId : null;
