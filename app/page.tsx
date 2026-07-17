@@ -38286,6 +38286,9 @@ const CareGuideScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [testEmail, setTestEmail] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
 
   const [enabled, setEnabled] = useState(false);
   const [enabledAt, setEnabledAt] = useState<string | null>(null);
@@ -38365,6 +38368,24 @@ const CareGuideScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
     setTimeout(() => setSaved(false), 1600);
   };
 
+  const sendTest = async () => {
+    setTesting(true);
+    setTestMsg(null);
+    try {
+      const { data, error } = await getSupabase().rpc("send_care_guide_test", {
+        content_in: buildContent(),
+        recipient_in: testEmail.trim() || null,
+      });
+      if (error) throw error;
+      if (data?.ok) setTestMsg(`Sent to ${data.email} — it should arrive within a minute.`);
+      else setTestMsg(`Couldn't send${data?.reason ? ` (${data.reason})` : ""}. Add an email and try again.`);
+    } catch (e: any) {
+      setTestMsg("Couldn't send: " + (e?.message || String(e)));
+    } finally {
+      setTesting(false);
+    }
+  };
+
   const addSection = () => setSections((p) => [...p, { id: `section-${p.length + 1}-${p.reduce((n, s) => n + s.title.length, 0)}`, title: "", itemsText: "" }]);
   const removeSection = (i: number) => setSections((p) => p.filter((_, x) => x !== i));
   const updateSection = (i: number, patch: Partial<{ title: string; itemsText: string }>) =>
@@ -38406,6 +38427,22 @@ const CareGuideScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
           <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>
             Tip: use {"{client}"}, {"{style}"} and {"{studio}"} anywhere — they fill in for each client.
           </p>
+        </Card>
+
+        <Card className="p-4 space-y-3">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: C.espresso }}>Preview a real send</p>
+            <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>Email yourself the guide exactly as a client sees it — using what's in the editor right now (no need to save first).</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input value={testEmail} onChange={(e) => setTestEmail(e.target.value)} placeholder="your email (defaults to your login)" style={lineInput} />
+            <button type="button" onClick={sendTest} disabled={testing}
+              className="py-2.5 px-4 rounded-xl text-sm font-semibold whitespace-nowrap"
+              style={{ border: `1px solid ${C.brandPrimary}`, color: C.brandPrimary, background: "#F6F2FF", opacity: testing ? 0.7 : 1 }}>
+              {testing ? "Sending…" : "Send test"}
+            </button>
+          </div>
+          {testMsg && <p className="text-[12px]" style={{ color: C.coffee }}>{testMsg}</p>}
         </Card>
 
         <SectionTitle>Opening</SectionTitle>
