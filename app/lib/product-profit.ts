@@ -509,6 +509,30 @@ export const rankProducts = (
     .sort((a, b) => b.unitProfit - a.unitProfit);
 };
 
+/**
+ * The "top earner" — the product projected to make the most TOTAL profit,
+ * i.e. sales volume × unit profit, read from each product's forecast
+ * (`forecastProfit`). This is what a stylist means by "earns the most",
+ * distinct from the highest profit *per unit*.
+ *
+ * Falls back to the highest unit profit when no product has a sales volume
+ * entered (every forecast is 0), so the dashboard never shows an arbitrary
+ * pick — and `basis` tells the UI which measure was actually used, so it
+ * can label the tile honestly ("by total projected profit" vs "per unit").
+ */
+export type TopEarner = RankedProduct & { basis: "total" | "unit" };
+
+export const topEarner = (
+  products: SavedProduct[] | null | undefined,
+): TopEarner | null => {
+  const ranked = rankProducts(products); // already sorted by unit profit desc
+  if (ranked.length === 0) return null;
+  const byTotal = [...ranked].sort((a, b) => b.forecastProfit - a.forecastProfit);
+  return byTotal[0].forecastProfit > 0
+    ? { ...byTotal[0], basis: "total" }
+    : { ...ranked[0], basis: "unit" };
+};
+
 /** Average true cost per unit across active products (dashboard KPI). */
 export const averageCostPerUnit = (
   products: SavedProduct[] | null | undefined,

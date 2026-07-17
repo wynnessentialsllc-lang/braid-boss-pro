@@ -37,6 +37,7 @@ import {
   computeCostBreakdown,
   PRODUCT_CATEGORIES,
   rankProducts,
+  topEarner,
   averageCostPerUnit,
   type CostLine,
   type ProductProfitInput,
@@ -231,24 +232,31 @@ export default function ProductProfitPage() {
 function SummaryStrip({ products }: { products: SavedProduct[] }) {
   const ranked = useMemo(() => rankProducts(products), [products]);
   const avgCost = useMemo(() => averageCostPerUnit(products), [products]);
+  const earner = useMemo(() => topEarner(products), [products]);
   const best = ranked[0];
+  const trunc = (s: string) => (s.length > 14 ? s.slice(0, 13) + "…" : s);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
       <MiniStat label="Active products" value={String(ranked.length)} />
       <MiniStat label="Avg cost / unit" value={fmt$(avgCost)} />
-      <MiniStat label="Top earner" value={best ? (best.name.length > 14 ? best.name.slice(0, 13) + "…" : best.name) : "—"} />
-      <MiniStat label="Best unit profit" value={best ? fmt$(best.unitProfit) : "—"} tone="success" />
+      <MiniStat
+        label="Top earner"
+        value={earner ? trunc(earner.name) : "—"}
+        hint={earner ? (earner.basis === "total" ? "most projected profit" : "highest profit / unit") : undefined}
+      />
+      <MiniStat label="Best unit profit" value={best ? fmt$(best.unitProfit) : "—"} tone="success" hint="per unit sold" />
     </div>
   );
 }
 
-function MiniStat({ label, value, tone }: { label: string; value: string; tone?: "success" }) {
+function MiniStat({ label, value, tone, hint }: { label: string; value: string; tone?: "success"; hint?: string }) {
   return (
     <div style={{ ...cardStyle, padding: 12 }}>
       <p style={labelStyle}>{label}</p>
       <p style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 600, color: tone === "success" ? C.success : C.espresso, marginTop: 2 }}>
         {value}
       </p>
+      {hint && <p style={{ fontSize: 10.5, color: C.muted, marginTop: 2 }}>{hint}</p>}
     </div>
   );
 }
