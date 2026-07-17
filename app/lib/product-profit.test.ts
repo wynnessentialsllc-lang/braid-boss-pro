@@ -10,6 +10,7 @@ import {
   pricingTable,
   psychologicalPrice,
   rankProducts,
+  topEarner,
   averageCostPerUnit,
   retailForMargin,
   wholesalePrice,
@@ -290,6 +291,38 @@ describe("rankProducts & averageCostPerUnit", () => {
     expect(avg).toBeGreaterThan(0);
     expect(rankProducts(null)).toEqual([]);
     expect(averageCostPerUnit([])).toBe(0);
+  });
+});
+
+describe("topEarner", () => {
+  const saved = (id: string, over: Partial<ProductProfitInput>): SavedProduct => ({
+    id, name: over.name || id, category: "Hair Oil", archived: false,
+    updatedAt: "2026-06-20", input: nourishOil(over),
+  });
+
+  it("picks the highest TOTAL projected profit when volumes are set", () => {
+    // "premium" has the higher unit profit but sells few; "bulk" has a lower
+    // unit profit but sells enough to earn more overall.
+    const e = topEarner([
+      saved("premium", { name: "Premium", marginPct: 80, unitsToSell: 5 }),
+      saved("bulk", { name: "Bulk", marginPct: 40, unitsToSell: 100 }),
+    ]);
+    expect(e?.name).toBe("Bulk");
+    expect(e?.basis).toBe("total");
+  });
+
+  it("falls back to highest unit profit when no volumes are entered", () => {
+    const e = topEarner([
+      saved("cheap", { name: "Cheap", marginPct: 30 }),
+      saved("rich", { name: "Rich", marginPct: 80 }),
+    ]);
+    expect(e?.name).toBe("Rich");
+    expect(e?.basis).toBe("unit");
+  });
+
+  it("returns null with no active products", () => {
+    expect(topEarner([])).toBeNull();
+    expect(topEarner(null)).toBeNull();
   });
 });
 
