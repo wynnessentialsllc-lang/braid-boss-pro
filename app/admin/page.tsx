@@ -163,22 +163,30 @@ export default function AdminCommandCenter() {
   useEffect(() => { void load(); }, [load]);
 
   // Deposit-revenue series padded to one bucket per day in the window.
-  const depositSeries = useMemo((): number[] => {
-    if (!data?.trend?.deposits_by_day) return [];
+  // Carries the day alongside each value so the chart can label its
+  // axis and per-bar tooltips instead of showing anonymous bars.
+  const depositSeries = useMemo((): { values: number[]; days: Date[] } => {
+    if (!data?.trend?.deposits_by_day) return { values: [], days: [] };
     const map = new Map<string, number>();
     for (const r of data.trend.deposits_by_day) {
       const d = new Date(r.day);
       if (!Number.isNaN(d.getTime())) map.set(d.toISOString().slice(0, 10), r.cents);
     }
-    const out: number[] = [];
+    const values: number[] = [];
+    const days: Date[] = [];
     const now = new Date();
     for (let i = windowDays - 1; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
-      out.push(map.get(d.toISOString().slice(0, 10)) || 0);
+      values.push(map.get(d.toISOString().slice(0, 10)) || 0);
+      days.push(d);
     }
-    return out;
+    return { values, days };
   }, [data, windowDays]);
+
+  // "Jul 11"-style day label for chart axis captions and tooltips.
+  const fmtDay = (d: Date): string =>
+    d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
   const ns = data?.north_star;
   const rev = data?.revenue;
@@ -315,7 +323,16 @@ export default function AdminCommandCenter() {
                 {num(ns.active_braiders)} active {ns.active_braiders === 1 ? "braider" : "braiders"}.
               </p>
               <div style={{ marginTop: 14 }}>
-                <MiniBarChart data={depositSeries} height={64} highlightIndex="last" ariaLabel={`Deposit revenue per day, last ${windowDays} days`} />
+                <MiniBarChart
+                  data={depositSeries.values}
+                  height={64}
+                  highlightIndex="last"
+                  labels={depositSeries.days.map(fmtDay)}
+                  valueFormat={(cents) => usd(cents / 100)}
+                  startLabel={depositSeries.days.length ? fmtDay(depositSeries.days[0]) : undefined}
+                  endLabel="Today"
+                  ariaLabel={`Deposit revenue per day, last ${windowDays} days`}
+                />
               </div>
             </PreviewStyleCard>
 

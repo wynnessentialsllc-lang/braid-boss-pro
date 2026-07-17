@@ -215,12 +215,25 @@ export const MetricRow = ({
 // card — a solid ivory fill vanishes against that surface. Heights
 // are auto-scaled to the max value so the chart reads even with a
 // single dominant day.
+//
+// Optional labelling makes the sparkline self-explanatory instead of a
+// row of anonymous bars: pass `labels` (one per bar, e.g. a formatted
+// date) and `valueFormat` to get a per-bar hover/readout tooltip and a
+// floating value label over the peak day, plus `startLabel`/`endLabel`
+// to caption the date range under the axis.
 
 export type MiniBarChartProps = {
   data: number[];
   height?: number;
   highlightIndex?: number | "last";
   ariaLabel?: string;
+  /** Per-bar caption (e.g. a formatted date) — surfaced on hover/focus. */
+  labels?: string[];
+  /** Formats a bar value for the tooltip and the peak label. */
+  valueFormat?: (n: number) => string;
+  /** Small captions under the axis marking the range ends. */
+  startLabel?: ReactNode;
+  endLabel?: ReactNode;
 };
 
 export const MiniBarChart = ({
@@ -228,39 +241,98 @@ export const MiniBarChart = ({
   height = 64,
   highlightIndex = "last",
   ariaLabel,
+  labels,
+  valueFormat,
+  startLabel,
+  endLabel,
 }: MiniBarChartProps) => {
   const max = Math.max(1, ...data);
   const hl = highlightIndex === "last" ? data.length - 1 : highlightIndex;
+  // The tallest day carries the floating value readout. Ties resolve to
+  // the earliest so the label sits over the first visible spike.
+  const peak = data.reduce((best, v, i) => (v > data[best] ? i : best), 0);
+  const showPeak = valueFormat != null && data.length > 0 && data[peak] > 0;
+  // Anchor the peak label so it never clips off the chart's edges.
+  const peakPct = data.length > 1 ? (peak + 0.5) / data.length : 0.5;
+  const peakAnchor =
+    peakPct < 0.15 ? "left" : peakPct > 0.85 ? "right" : "center";
+  const hasAxis = startLabel != null || endLabel != null;
+
   return (
-    <div
-      aria-label={ariaLabel}
-      role={ariaLabel ? "img" : undefined}
-      style={{
-        display: "flex",
-        alignItems: "flex-end",
-        gap: 6,
-        height,
-      }}
-    >
-      {data.map((v, i) => {
-        const isHl = i === hl;
-        // Minimum visible nub of 6px so empty days don't disappear.
-        const h = Math.max(6, Math.round((v / max) * height));
-        return (
-          <div
-            key={i}
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {/* Reserve headroom for the floating peak label above the bars. */}
+      <div style={{ position: "relative", paddingTop: showPeak ? 16 : 0 }}>
+        {showPeak && (
+          <span
+            aria-hidden
             style={{
-              flex: 1,
-              height: h,
-              borderRadius: 4,
-              background: isHl
-                ? `linear-gradient(180deg, ${P.gold} 0%, ${P.goldDeep} 100%)`
-                : "rgba(124, 58, 237, 0.22)",
-              border: isHl ? "none" : "1px solid rgba(124, 58, 237, 0.32)",
+              position: "absolute",
+              top: 0,
+              left: peakAnchor === "center" ? `${peakPct * 100}%` : undefined,
+              right: peakAnchor === "right" ? 0 : undefined,
+              ...(peakAnchor === "left" ? { left: 0 } : null),
+              transform:
+                peakAnchor === "center" ? "translateX(-50%)" : undefined,
+              fontSize: 11,
+              fontWeight: 700,
+              lineHeight: 1,
+              color: P.goldDeep,
+              whiteSpace: "nowrap",
             }}
-          />
-        );
-      })}
+          >
+            {valueFormat!(data[peak])}
+          </span>
+        )}
+        <div
+          aria-label={ariaLabel}
+          role={ariaLabel ? "img" : undefined}
+          style={{
+            display: "flex",
+            alignItems: "flex-end",
+            gap: 6,
+            height,
+          }}
+        >
+          {data.map((v, i) => {
+            const isHl = i === hl;
+            // Minimum visible nub of 6px so empty days don't disappear.
+            const h = Math.max(6, Math.round((v / max) * height));
+            const label = labels?.[i];
+            const valueText = valueFormat ? valueFormat(v) : String(v);
+            const title = label ? `${label} · ${valueText}` : valueText;
+            return (
+              <div
+                key={i}
+                title={title}
+                style={{
+                  flex: 1,
+                  height: h,
+                  borderRadius: 4,
+                  background: isHl
+                    ? `linear-gradient(180deg, ${P.gold} 0%, ${P.goldDeep} 100%)`
+                    : "rgba(124, 58, 237, 0.22)",
+                  border: isHl ? "none" : "1px solid rgba(124, 58, 237, 0.32)",
+                }}
+              />
+            );
+          })}
+        </div>
+      </div>
+      {hasAxis && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            fontSize: 10.5,
+            fontWeight: 600,
+            letterSpacing: "0.02em",
+            color: P.muted,
+          }}
+        >
+          <span>{startLabel}</span>
+          <span>{endLabel}</span>
+        </div>
+      )}
     </div>
   );
 };
