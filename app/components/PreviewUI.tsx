@@ -208,9 +208,13 @@ export const MetricRow = ({
 );
 
 // ===== MiniBarChart ===================================================
-// Compact 7-ish bar chart. The last bar pops in gold to indicate
-// "now"; everything else is ivory. Heights are auto-scaled to the
-// max value so the chart reads even with a single dominant day.
+// Compact 7-ish bar chart. The last bar pops in the brand violet to
+// indicate "now"; resting bars are a muted violet tint. Using a
+// translucent violet (rather than a solid cream) keeps the resting
+// bars legible on both white cards and the light-violet "highlight"
+// card — a solid ivory fill vanishes against that surface. Heights
+// are auto-scaled to the max value so the chart reads even with a
+// single dominant day.
 
 export type MiniBarChartProps = {
   data: number[];
@@ -251,8 +255,8 @@ export const MiniBarChart = ({
               borderRadius: 4,
               background: isHl
                 ? `linear-gradient(180deg, ${P.gold} 0%, ${P.goldDeep} 100%)`
-                : P.ivory,
-              border: isHl ? "none" : `1px solid ${P.hairlineSoft}`,
+                : "rgba(124, 58, 237, 0.22)",
+              border: isHl ? "none" : "1px solid rgba(124, 58, 237, 0.32)",
             }}
           />
         );
