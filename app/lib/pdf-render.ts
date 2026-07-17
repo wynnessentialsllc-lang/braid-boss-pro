@@ -45,6 +45,61 @@ const formatCurrency = (n: number, currency: string = "USD"): string => {
   }
 };
 
+// ---- Braid Boss Pro brand kit ----------------------------------------
+//
+// The app's aesthetic is a white paper with the purple → coral brand
+// gradient (see the `C` / `GRADIENTS` tokens in app/page.tsx). These
+// helpers let the PDF renderers speak that same language: solid brand
+// swatches for body text and section labels, plus true multicolored
+// wordmarks and rules built out of the gradient.
+
+type RGB = readonly [number, number, number];
+
+const hexToRgb = (hex: string): RGB => {
+  const h = hex.replace("#", "");
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ] as const;
+};
+
+// Mirrors the brand tokens in app/page.tsx so the paper matches the screen.
+const BRAND = {
+  white: [255, 255, 255] as RGB,
+  ink: hexToRgb("#15111A"),      // near-black body text (brandText)
+  muted: hexToRgb("#6F6477"),    // secondary labels (brandMuted)
+  mutedSoft: hexToRgb("#9F95A8"),
+  purple: hexToRgb("#7C3AED"),   // brandPrimary
+  purpleDeep: hexToRgb("#5B21B6"), // brandPrimaryDeep
+  lavender: hexToRgb("#B14BE0"),
+  coral: hexToRgb("#FF4D6D"),    // brandSecondary
+  coralDeep: hexToRgb("#E0354F"),
+  orange: hexToRgb("#FF7A45"),
+  mint: hexToRgb("#22C55E"),     // brandSuccess
+  hairline: hexToRgb("#ECE7F2"), // brandBorder — soft lavender rule
+};
+
+// The signature purple → lavender → coral wordmark gradient.
+const BRAND_STOPS: readonly RGB[] = [BRAND.purple, BRAND.lavender, BRAND.coral];
+
+// Sample a multi-stop gradient at t ∈ [0, 1] with linear interpolation.
+const gradientColorAt = (stops: readonly RGB[], t: number): RGB => {
+  const clamped = t <= 0 ? 0 : t >= 1 ? 1 : t;
+  if (clamped <= 0) return stops[0];
+  if (clamped >= 1) return stops[stops.length - 1];
+  const seg = 1 / (stops.length - 1);
+  const idx = Math.min(stops.length - 2, Math.floor(clamped / seg));
+  const local = (clamped - idx * seg) / seg;
+  const a = stops[idx];
+  const b = stops[idx + 1];
+  return [
+    a[0] + (b[0] - a[0]) * local,
+    a[1] + (b[1] - a[1]) * local,
+    a[2] + (b[2] - a[2]) * local,
+  ] as const;
+};
+
 export const renderReceiptPdf = async (
   rcp: ReceiptRecord,
   business: any,
@@ -59,26 +114,64 @@ export const renderReceiptPdf = async (
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const M = 48;
-  const cream = [250, 245, 236] as const;
-  const espresso = [42, 24, 16] as const;
-  const coffee = [74, 44, 26] as const;
-  const muted = [139, 115, 85] as const;
-  const goldDeep = [168, 137, 63] as const;
-  const hairline = [220, 205, 180] as const;
+  const ink = BRAND.ink;
+  const muted = BRAND.muted;
+  const purple = BRAND.purple;
+  const purpleDeep = BRAND.purpleDeep;
+  const hairline = BRAND.hairline;
   const currency = business?.currency || "USD";
   const fmt = (n: number) => formatCurrency(n, currency);
   const r2 = (n: number) => Math.round(n * 100) / 100;
   const isInvoice = rcp.type === "invoice";
 
-  // Page background
-  doc.setFillColor(cream[0], cream[1], cream[2]);
+  // Render text with a left→right gradient across its characters — the
+  // "multicolored" Braid Boss Pro wordmark look. The font + size must be
+  // set before calling, since character widths depend on them.
+  const gradientText = (
+    text: string,
+    x: number,
+    y: number,
+    opts?: { align?: "left" | "right" | "center"; stops?: readonly RGB[] },
+  ) => {
+    const stops = opts?.stops ?? BRAND_STOPS;
+    const chars = Array.from(text);
+    const widths = chars.map((ch) => doc.getTextWidth(ch));
+    const total = widths.reduce((s, w) => s + w, 0);
+    let cx = x;
+    if (opts?.align === "right") cx = x - total;
+    else if (opts?.align === "center") cx = x - total / 2;
+    const startX = cx;
+    for (let i = 0; i < chars.length; i++) {
+      const mid = total > 0 ? (cx - startX + widths[i] / 2) / total : 0;
+      const [r, g, b] = gradientColorAt(stops, mid);
+      doc.setTextColor(r, g, b);
+      doc.text(chars[i], cx, y);
+      cx += widths[i];
+    }
+  };
+
+  // A thin horizontal gradient rule (purple → coral), drawn as abutting
+  // short segments since jsPDF has no gradient stroke.
+  const gradientRule = (x1: number, x2: number, yy: number, lineWidth: number) => {
+    const segs = 64;
+    doc.setLineWidth(lineWidth);
+    for (let i = 0; i < segs; i++) {
+      const t0 = i / segs;
+      const t1 = (i + 1) / segs;
+      const [r, g, b] = gradientColorAt(BRAND_STOPS, (t0 + t1) / 2);
+      doc.setDrawColor(r, g, b);
+      doc.line(x1 + (x2 - x1) * t0, yy, x1 + (x2 - x1) * t1, yy);
+    }
+  };
+
+  // Page background — clean white paper.
+  doc.setFillColor(BRAND.white[0], BRAND.white[1], BRAND.white[2]);
   doc.rect(0, 0, W, H, "F");
 
-  // Header
+  // Header — business name as a multicolored gradient wordmark.
   doc.setFont("helvetica", "bold");
   doc.setFontSize(22);
-  doc.setTextColor(espresso[0], espresso[1], espresso[2]);
-  doc.text(business?.businessName || "Braid Boss Pro", M, 80);
+  gradientText(business?.businessName || "Braid Boss Pro", M, 80);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
@@ -87,19 +180,17 @@ export const renderReceiptPdf = async (
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(28);
-  doc.setTextColor(goldDeep[0], goldDeep[1], goldDeep[2]);
-  doc.text(isInvoice ? "INVOICE" : "RECEIPT", W - M, 80, { align: "right" });
+  gradientText(isInvoice ? "INVOICE" : "RECEIPT", W - M, 80, { align: "right" });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  doc.setTextColor(coffee[0], coffee[1], coffee[2]);
+  doc.setTextColor(purpleDeep[0], purpleDeep[1], purpleDeep[2]);
   doc.text(`#${rcp.receiptNumber}`, W - M, 98, { align: "right" });
+  doc.setTextColor(muted[0], muted[1], muted[2]);
   doc.text(`Issued ${fmtDate(rcp.createdAt.slice(0, 10))}`, W - M, 112, { align: "right" });
 
-  // Gold rule
-  doc.setDrawColor(goldDeep[0], goldDeep[1], goldDeep[2]);
-  doc.setLineWidth(1.5);
-  doc.line(M, 132, W - M, 132);
+  // Brand gradient rule
+  gradientRule(M, W - M, 132, 1.5);
 
   // Header blocks — client (left) and service (right) share a top edge.
   const blockTop = 162;
@@ -108,12 +199,12 @@ export const renderReceiptPdf = async (
   let leftY = blockTop;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.setTextColor(muted[0], muted[1], muted[2]);
+  doc.setTextColor(purple[0], purple[1], purple[2]);
   doc.text(isInvoice ? "BILL TO" : "RECEIVED FROM", M, leftY);
   leftY += 16;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(13);
-  doc.setTextColor(espresso[0], espresso[1], espresso[2]);
+  doc.setTextColor(ink[0], ink[1], ink[2]);
   doc.text(rcp.clientName || "Client", M, leftY);
   leftY += 16;
 
@@ -125,17 +216,17 @@ export const renderReceiptPdf = async (
   let rightY = blockTop;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.setTextColor(muted[0], muted[1], muted[2]);
+  doc.setTextColor(purple[0], purple[1], purple[2]);
   doc.text("SERVICE", svcX, rightY);
   rightY += 16;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(13);
-  doc.setTextColor(espresso[0], espresso[1], espresso[2]);
+  doc.setTextColor(ink[0], ink[1], ink[2]);
   const svcLines = doc.splitTextToSize(rcp.service || "Service", svcColW);
   doc.text(svcLines, svcX, rightY);
   rightY += svcLines.length * 16;
   doc.setFontSize(10);
-  doc.setTextColor(coffee[0], coffee[1], coffee[2]);
+  doc.setTextColor(muted[0], muted[1], muted[2]);
   if (rcp.serviceDate) {
     const dateLine = `${fmtDateLong(rcp.serviceDate)}${rcp.serviceTime ? ` · ${fmtTime(rcp.serviceTime)}` : ""}`;
     doc.text(dateLine, svcX, rightY);
@@ -150,11 +241,15 @@ export const renderReceiptPdf = async (
   doc.line(M, y, W - M, y);
   y += 24;
 
-  const drawRow = (label: string, value: string, opts?: { bold?: boolean; muted?: boolean }) => {
+  const drawRow = (
+    label: string,
+    value: string,
+    opts?: { bold?: boolean; muted?: boolean; color?: RGB },
+  ) => {
     doc.setFont("helvetica", opts?.bold ? "bold" : "normal");
     doc.setFontSize(opts?.bold ? 12 : 11);
-    if (opts?.muted) doc.setTextColor(muted[0], muted[1], muted[2]);
-    else doc.setTextColor(espresso[0], espresso[1], espresso[2]);
+    const c = opts?.color ?? (opts?.muted ? muted : ink);
+    doc.setTextColor(c[0], c[1], c[2]);
     doc.text(label, M, y);
     doc.text(value, W - M, y, { align: "right" });
     y += 22;
@@ -162,7 +257,7 @@ export const renderReceiptPdf = async (
   const sectionLabel = (label: string) => {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
-    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.setTextColor(purple[0], purple[1], purple[2]);
     doc.text(label.toUpperCase(), M, y);
     y += 20;
   };
@@ -181,7 +276,7 @@ export const renderReceiptPdf = async (
     drawRow("Subtotal", fmt(rcp.subtotal));
     drawRow(
       "Discount" + (rcp.discountName ? ` — ${rcp.discountName}` : ""),
-      "− " + fmt(rcp.discountAmount),
+      "- " + fmt(rcp.discountAmount),
     );
   }
   drawRow("Service total", fmt(rcp.totalPrice), { bold: true });
@@ -192,7 +287,7 @@ export const renderReceiptPdf = async (
     drawRow(pl.label, fmt(pl.amount));
   }
   if (rcp.tip) drawRow("Tip", fmt(rcp.tip));
-  drawRow("Total", fmt(r2(rcp.totalPrice + (rcp.tip || 0))), { bold: true });
+  drawRow("Total", fmt(r2(rcp.totalPrice + (rcp.tip || 0))), { bold: true, color: purpleDeep });
 
   // THE MONEY — what was collected and what actually landed. Hidden by default
   // because a receipt goes to the client, who shouldn't see the stylist's
@@ -206,15 +301,29 @@ export const renderReceiptPdf = async (
     if (stripeCharge > 0) {
       drawRow(rcp.stripeFee ? "Balance + tip (Stripe)" : "Balance + tip", fmt(stripeCharge));
     }
-    if (rcp.stripeFee) drawRow("Stripe fee", "− " + fmt(rcp.stripeFee), { muted: true });
+    if (rcp.stripeFee) drawRow("Stripe fee", "- " + fmt(rcp.stripeFee), { muted: true });
     drawRow("In your bank", fmt(rcp.netPayout ?? rcp.amountCollected), { bold: true });
   }
 
   y += 8;
+  doc.setDrawColor(hairline[0], hairline[1], hairline[2]);
+  doc.setLineWidth(0.5);
   doc.line(M, y, W - M, y);
   y += 22;
 
-  if (rcp.paymentStatus) drawRow("Payment status", String(rcp.paymentStatus).toUpperCase(), { muted: true });
+  // Payment status pops in brand color — mint when paid, coral otherwise.
+  if (rcp.paymentStatus) {
+    const st = String(rcp.paymentStatus).toUpperCase();
+    const statusColor = st === "PAID" ? BRAND.mint : BRAND.coralDeep;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text("Payment status", M, y);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
+    doc.text(st, W - M, y, { align: "right" });
+    y += 22;
+  }
   if (rcp.paymentMethod) drawRow("Payment method", rcp.paymentMethod);
   if (rcp.paymentDate) drawRow("Payment date", fmtDateLong(rcp.paymentDate));
 
@@ -222,12 +331,12 @@ export const renderReceiptPdf = async (
     y += 12;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.setTextColor(purple[0], purple[1], purple[2]);
     doc.text("NOTES", M, y);
     y += 14;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(11);
-    doc.setTextColor(espresso[0], espresso[1], espresso[2]);
+    doc.setTextColor(ink[0], ink[1], ink[2]);
     const wrapped = doc.splitTextToSize(rcp.notes, W - 2 * M);
     doc.text(wrapped, M, y);
     y += wrapped.length * 14;
@@ -237,12 +346,12 @@ export const renderReceiptPdf = async (
     y += 16;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.setTextColor(purple[0], purple[1], purple[2]);
     doc.text("POLICIES", M, y);
     y += 14;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
-    doc.setTextColor(coffee[0], coffee[1], coffee[2]);
+    doc.setTextColor(muted[0], muted[1], muted[2]);
     for (const p of policies.slice(0, 3)) {
       const heading = p.title || p.category || "Policy";
       const wrapped = doc.splitTextToSize(`${heading}: ${p.body || ""}`, W - 2 * M);
@@ -252,14 +361,11 @@ export const renderReceiptPdf = async (
     }
   }
 
-  // Footer
-  doc.setDrawColor(goldDeep[0], goldDeep[1], goldDeep[2]);
-  doc.setLineWidth(1);
-  doc.line(M, H - 80, W - M, H - 80);
+  // Footer — brand gradient rule + a multicolored thank-you.
+  gradientRule(M, W - M, H - 80, 1);
   doc.setFont("helvetica", "italic");
   doc.setFontSize(11);
-  doc.setTextColor(goldDeep[0], goldDeep[1], goldDeep[2]);
-  doc.text(
+  gradientText(
     isInvoice ? "Thank you — payment due upon service." : "Thank you for your business.",
     W / 2,
     H - 60,
@@ -288,19 +394,52 @@ export const renderTaxPackPdf = async (
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const M = 48;
-  const cream = [250, 245, 236] as const;
-  const espresso = [42, 24, 16] as const;
-  const coffee = [74, 44, 26] as const;
-  const muted = [139, 115, 85] as const;
-  const goldDeep = [168, 137, 63] as const;
-  const hairline = [220, 205, 180] as const;
-  const green = [60, 110, 70] as const;
-  const red = [150, 60, 50] as const;
+  const espresso = BRAND.ink;
+  const muted = BRAND.muted;
+  const purple = BRAND.purple;
+  const hairline = BRAND.hairline;
+  const green = BRAND.mint;
+  const red = BRAND.coralDeep;
   const currency = business?.currency || "USD";
   const fmt = (n: number) => formatCurrency(n, currency);
 
+  // Multicolored gradient wordmark (see renderReceiptPdf for the rationale).
+  const gradientText = (
+    text: string,
+    x: number,
+    yy: number,
+    opts?: { align?: "left" | "right" | "center"; stops?: readonly RGB[] },
+  ) => {
+    const stops = opts?.stops ?? BRAND_STOPS;
+    const chars = Array.from(text);
+    const widths = chars.map((ch) => doc.getTextWidth(ch));
+    const total = widths.reduce((s, w) => s + w, 0);
+    let cx = x;
+    if (opts?.align === "right") cx = x - total;
+    else if (opts?.align === "center") cx = x - total / 2;
+    const startX = cx;
+    for (let i = 0; i < chars.length; i++) {
+      const mid = total > 0 ? (cx - startX + widths[i] / 2) / total : 0;
+      const [r, g, b] = gradientColorAt(stops, mid);
+      doc.setTextColor(r, g, b);
+      doc.text(chars[i], cx, yy);
+      cx += widths[i];
+    }
+  };
+  const gradientRule = (x1: number, x2: number, yy: number, lineWidth: number) => {
+    const segs = 64;
+    doc.setLineWidth(lineWidth);
+    for (let i = 0; i < segs; i++) {
+      const t0 = i / segs;
+      const t1 = (i + 1) / segs;
+      const [r, g, b] = gradientColorAt(BRAND_STOPS, (t0 + t1) / 2);
+      doc.setDrawColor(r, g, b);
+      doc.line(x1 + (x2 - x1) * t0, yy, x1 + (x2 - x1) * t1, yy);
+    }
+  };
+
   const paintBackground = () => {
-    doc.setFillColor(cream[0], cream[1], cream[2]);
+    doc.setFillColor(BRAND.white[0], BRAND.white[1], BRAND.white[2]);
     doc.rect(0, 0, W, H, "F");
   };
   paintBackground();
@@ -308,8 +447,7 @@ export const renderTaxPackPdf = async (
   // Header
   doc.setFont("helvetica", "bold");
   doc.setFontSize(22);
-  doc.setTextColor(espresso[0], espresso[1], espresso[2]);
-  doc.text(business?.businessName || "Braid Boss Pro", M, 80);
+  gradientText(business?.businessName || "Braid Boss Pro", M, 80);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.setTextColor(muted[0], muted[1], muted[2]);
@@ -317,16 +455,13 @@ export const renderTaxPackPdf = async (
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(26);
-  doc.setTextColor(goldDeep[0], goldDeep[1], goldDeep[2]);
-  doc.text(`${summary.year} TAX PACK`, W - M, 80, { align: "right" });
+  gradientText(`${summary.year} TAX PACK`, W - M, 80, { align: "right" });
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  doc.setTextColor(coffee[0], coffee[1], coffee[2]);
+  doc.setTextColor(muted[0], muted[1], muted[2]);
   doc.text("Profit & Loss · Schedule C map", W - M, 98, { align: "right" });
 
-  doc.setDrawColor(goldDeep[0], goldDeep[1], goldDeep[2]);
-  doc.setLineWidth(1.5);
-  doc.line(M, 120, W - M, 120);
+  gradientRule(M, W - M, 120, 1.5);
 
   let y = 156;
   const ensureRoom = (needed: number) => {
@@ -340,7 +475,7 @@ export const renderTaxPackPdf = async (
     ensureRoom(40);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.setTextColor(purple[0], purple[1], purple[2]);
     doc.text(label.toUpperCase(), M, y);
     y += 18;
   };
