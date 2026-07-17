@@ -38293,6 +38293,9 @@ const CareGuideScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
   const [enabled, setEnabled] = useState(false);
   const [enabledAt, setEnabledAt] = useState<string | null>(null);
   const [delayDays, setDelayDays] = useState(CARE_GUIDE_DEFAULT_DELAY);
+  // Free-typing draft for the day field so a braider can clear it and type
+  // e.g. 1 or 10; it clamps to range only on blur, never mid-keystroke.
+  const [delayDraft, setDelayDraft] = useState(String(CARE_GUIDE_DEFAULT_DELAY));
   const [intro, setIntro] = useState("");
   const [sections, setSections] = useState<{ id: string; title: string; itemsText: string }[]>([]);
   const [mythsText, setMythsText] = useState("");
@@ -38325,6 +38328,7 @@ const CareGuideScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
       setEnabled(!!data?.enabled);
       setEnabledAt(data?.enabled_at ?? null);
       setDelayDays(s.delayDays);
+      setDelayDraft(String(s.delayDays));
       // Seed the editor from saved content, or the default when never customized.
       hydrate(data?.content && Object.keys(data.content).length ? s.content : DEFAULT_CARE_GUIDE_CONTENT);
       setLoading(false);
@@ -38417,12 +38421,30 @@ const CareGuideScreen = ({ store, onBack }: { store: any; onBack: () => void }) 
             </div>
             <Toggle checked={enabled} onChange={setEnabled} />
           </div>
-          <Field label="Send this many days after the appointment">
-            <MoneyInput prefix="" suffix="days" allowDecimal={false} value={delayDays}
-              onChange={(v: any) => {
-                const n = parseInt(String(v).replace(/[^\d]/g, ""), 10);
-                setDelayDays(Number.isFinite(n) ? Math.min(CARE_GUIDE_MAX_DELAY, Math.max(CARE_GUIDE_MIN_DELAY, n)) : CARE_GUIDE_DEFAULT_DELAY);
-              }} />
+          <Field label="Send this many days after the appointment" hint={`${CARE_GUIDE_MIN_DELAY}–${CARE_GUIDE_MAX_DELAY} days`}>
+            <div style={{ position: "relative" }}>
+              <input
+                inputMode="numeric"
+                value={delayDraft}
+                placeholder={String(CARE_GUIDE_DEFAULT_DELAY)}
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/[^\d]/g, "").slice(0, 2);
+                  setDelayDraft(digits);
+                  const n = parseInt(digits, 10);
+                  if (Number.isFinite(n)) setDelayDays(Math.min(CARE_GUIDE_MAX_DELAY, Math.max(CARE_GUIDE_MIN_DELAY, n)));
+                }}
+                onBlur={() => {
+                  const n = parseInt(delayDraft, 10);
+                  const clamped = Number.isFinite(n)
+                    ? Math.min(CARE_GUIDE_MAX_DELAY, Math.max(CARE_GUIDE_MIN_DELAY, n))
+                    : CARE_GUIDE_DEFAULT_DELAY;
+                  setDelayDays(clamped);
+                  setDelayDraft(String(clamped));
+                }}
+                style={{ ...lineInput, paddingRight: 52 }}
+              />
+              <span style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", color: C.muted, fontSize: 13, pointerEvents: "none" }}>days</span>
+            </div>
           </Field>
           <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>
             Tip: use {"{client}"}, {"{style}"} and {"{studio}"} anywhere — they fill in for each client.
