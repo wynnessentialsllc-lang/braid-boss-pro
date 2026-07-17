@@ -439,6 +439,15 @@ import {
 import { buildDayReport } from "./lib/day-report";
 import { computeShopSales, shopSalesInRange, txnStream, txnIncomeAmount, isCheckoutSale, localDayKey } from "./lib/shop-sales";
 import {
+  type CareGuideContent,
+  DEFAULT_CARE_GUIDE_CONTENT,
+  normalizeCareGuideContent,
+  normalizeCareGuideSettings,
+  CARE_GUIDE_DEFAULT_DELAY,
+  CARE_GUIDE_MIN_DELAY,
+  CARE_GUIDE_MAX_DELAY,
+} from "./lib/care-guide";
+import {
   type ClientLike,
   matchClientByContact,
 } from "./lib/clients-match";
@@ -38266,7 +38275,200 @@ const SocialTemplatesScreen = ({ store, onBack }: { store: any; onBack: () => vo
 // ============================================================
 //  MARKETING — auto-rebook nudges, opt-out, per-service windows
 // ============================================================
-const MarketingScreen = ({ store, onBack, openSocialTemplates }: { store: any; onBack: () => void; openSocialTemplates?: () => void }) => {
+// Braid Care Guide editor — opt-in aftercare email a braider fully controls.
+// Off by default; content is stored per-studio in braid_care_guides.content
+// and normalized on save via app/lib/care-guide.ts. Items are edited one per
+// line (add a line = add an item, delete = remove) so the whole guide is
+// editable without a heavy per-item form.
+const CareGuideScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const [enabled, setEnabled] = useState(false);
+  const [enabledAt, setEnabledAt] = useState<string | null>(null);
+  const [delayDays, setDelayDays] = useState(CARE_GUIDE_DEFAULT_DELAY);
+  const [intro, setIntro] = useState("");
+  const [sections, setSections] = useState<{ id: string; title: string; itemsText: string }[]>([]);
+  const [mythsText, setMythsText] = useState("");
+  const [reachText, setReachText] = useState("");
+  const [reachNote, setReachNote] = useState("");
+  const [closing, setClosing] = useState("");
+  const [ctaLabel, setCtaLabel] = useState("");
+
+  const hydrate = (c: CareGuideContent) => {
+    setIntro(c.intro);
+    setSections(c.sections.map((s) => ({ id: s.id, title: s.title, itemsText: s.items.join("\n") })));
+    setMythsText(c.myths.map((m) => `${m.myth} | ${m.truth}`).join("\n"));
+    setReachText(c.reachOut.join("\n"));
+    setReachNote(c.reachOutNote);
+    setClosing(c.closing);
+    setCtaLabel(c.ctaLabel);
+  };
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await getSupabase()
+        .from("braid_care_guides")
+        .select("enabled, enabled_at, delay_days, content")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (cancelled) return;
+      const s = normalizeCareGuideSettings({ enabled: data?.enabled, delayDays: data?.delay_days, content: data?.content });
+      setEnabled(!!data?.enabled);
+      setEnabledAt(data?.enabled_at ?? null);
+      setDelayDays(s.delayDays);
+      // Seed the editor from saved content, or the default when never customized.
+      hydrate(data?.content && Object.keys(data.content).length ? s.content : DEFAULT_CARE_GUIDE_CONTENT);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const buildContent = (): CareGuideContent =>
+    normalizeCareGuideContent({
+      intro,
+      sections: sections.map((s) => ({ id: s.id, title: s.title, items: s.itemsText.split("\n") })),
+      myths: mythsText.split("\n").map((line) => {
+        const idx = line.indexOf("|");
+        return idx < 0
+          ? { myth: line.trim(), truth: "" }
+          : { myth: line.slice(0, idx).trim(), truth: line.slice(idx + 1).trim() };
+      }),
+      reachOut: reachText.split("\n"),
+      reachOutNote: reachNote,
+      closing,
+      ctaLabel,
+    });
+
+  const save = async () => {
+    if (!userId) return;
+    setSaving(true);
+    setErr(null);
+    const content = buildContent();
+    const nextEnabledAt = enabled ? (enabledAt || new Date().toISOString()) : enabledAt;
+    const { error } = await getSupabase()
+      .from("braid_care_guides")
+      .upsert(
+        { user_id: userId, enabled, enabled_at: nextEnabledAt, delay_days: delayDays, content, updated_at: new Date().toISOString() },
+        { onConflict: "user_id" },
+      );
+    setSaving(false);
+    if (error) { setErr(error.message); return; }
+    setEnabledAt(nextEnabledAt);
+    hydrate(content); // reflect normalization (dropped blanks, etc.)
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1600);
+  };
+
+  const addSection = () => setSections((p) => [...p, { id: `section-${p.length + 1}-${p.reduce((n, s) => n + s.title.length, 0)}`, title: "", itemsText: "" }]);
+  const removeSection = (i: number) => setSections((p) => p.filter((_, x) => x !== i));
+  const updateSection = (i: number, patch: Partial<{ title: string; itemsText: string }>) =>
+    setSections((p) => p.map((s, x) => (x === i ? { ...s, ...patch } : s)));
+
+  const lineInput: React.CSSProperties = {
+    width: "100%", borderRadius: 12, padding: "11px 14px", fontSize: 15,
+    background: C.paper, border: `1px solid ${C.hairline}`, color: C.espresso, outline: "none",
+  };
+
+  if (loading) {
+    return (
+      <div className="bbp-fade pb-32">
+        <Header title="Braid care guide" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
+        <div className="px-5 pt-6 text-sm" style={{ color: C.muted }}>Loading…</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bbp-fade pb-32">
+      <Header title="Braid care guide" subtitle="Automated aftercare email" leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }} />
+      <div className="px-5 pt-2 space-y-4">
+        <Card className="p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex-1 pr-3">
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Send the care guide</p>
+              <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>Off by default. When on, clients get this email a few days after a completed appointment.</p>
+            </div>
+            <Toggle checked={enabled} onChange={setEnabled} />
+          </div>
+          <Field label="Send this many days after the appointment">
+            <MoneyInput prefix="" suffix="days" allowDecimal={false} value={delayDays}
+              onChange={(v: any) => {
+                const n = parseInt(String(v).replace(/[^\d]/g, ""), 10);
+                setDelayDays(Number.isFinite(n) ? Math.min(CARE_GUIDE_MAX_DELAY, Math.max(CARE_GUIDE_MIN_DELAY, n)) : CARE_GUIDE_DEFAULT_DELAY);
+              }} />
+          </Field>
+          <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+            Tip: use {"{client}"}, {"{style}"} and {"{studio}"} anywhere — they fill in for each client.
+          </p>
+        </Card>
+
+        <SectionTitle>Opening</SectionTitle>
+        <Card className="p-4">
+          <Field label="Intro line"><Textarea value={intro} onChange={(e) => setIntro(e.target.value)} rows={3} /></Field>
+        </Card>
+
+        <SectionTitle>Care sections</SectionTitle>
+        {sections.map((s, i) => (
+          <Card key={s.id} className="p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.muted }}>Section {i + 1}</p>
+              <button type="button" onClick={() => removeSection(i)}
+                className="text-xs px-2.5 py-1 rounded-lg" style={{ color: C.danger, border: `1px solid ${C.hairline}` }}>Remove</button>
+            </div>
+            <input value={s.title} placeholder="Section title (e.g. How to care for your braids)"
+              onChange={(e) => updateSection(i, { title: e.target.value })} style={lineInput} />
+            <Field label="Items — one per line (add a line to add an item)">
+              <Textarea value={s.itemsText} onChange={(e) => updateSection(i, { itemsText: e.target.value })} rows={5} />
+            </Field>
+          </Card>
+        ))}
+        <button type="button" onClick={addSection}
+          className="w-full py-3 rounded-xl text-sm font-semibold"
+          style={{ border: `1px dashed ${C.brandPrimary}`, color: C.brandPrimary, background: "#F6F2FF" }}>
+          + Add a section
+        </button>
+
+        <SectionTitle>Myth check</SectionTitle>
+        <Card className="p-4 space-y-2">
+          <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.5 }}>One per line as <b>myth | truth</b>. Delete a line to remove it; leave empty to hide the whole section.</p>
+          <Textarea value={mythsText} onChange={(e) => setMythsText(e.target.value)} rows={5} />
+        </Card>
+
+        <SectionTitle>When to reach out</SectionTitle>
+        <Card className="p-4 space-y-3">
+          <Field label="Warning signs — one per line"><Textarea value={reachText} onChange={(e) => setReachText(e.target.value)} rows={4} /></Field>
+          <Field label="Note under the list"><input value={reachNote} onChange={(e) => setReachNote(e.target.value)} style={lineInput} /></Field>
+        </Card>
+
+        <SectionTitle>Closing</SectionTitle>
+        <Card className="p-4 space-y-3">
+          <Field label="Button label"><input value={ctaLabel} placeholder="Book my refresh" onChange={(e) => setCtaLabel(e.target.value)} style={lineInput} /></Field>
+          <Field label="Sign-off line"><input value={closing} onChange={(e) => setClosing(e.target.value)} style={lineInput} /></Field>
+        </Card>
+
+        {err && <p className="text-[12px]" style={{ color: C.danger }}>Couldn't save: {err}</p>}
+        <div className="flex items-center gap-3 pt-1">
+          <button type="button" onClick={save} disabled={saving}
+            className="flex-1 py-3 rounded-xl text-sm font-bold" style={{ background: GRADIENTS.hero, color: "#fff", opacity: saving ? 0.7 : 1 }}>
+            {saving ? "Saving…" : saved ? "Saved ✓" : "Save"}
+          </button>
+          <button type="button" onClick={() => hydrate(DEFAULT_CARE_GUIDE_CONTENT)}
+            className="py-3 px-4 rounded-xl text-sm font-semibold" style={{ border: `1px solid ${C.hairline}`, color: C.coffee }}>
+            Reset to default
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const MarketingScreen = ({ store, onBack, openSocialTemplates, openCareGuide }: { store: any; onBack: () => void; openSocialTemplates?: () => void; openCareGuide?: () => void }) => {
   const userId: string | null = store.userId;
   const services: any[] = store.servicesApi?.services || [];
   const updateService = store.servicesApi?.upsert;
@@ -38482,6 +38684,24 @@ const MarketingScreen = ({ store, onBack, openSocialTemplates }: { store: any; o
                 </div>
               </div>
               <ChevronRight size={18} style={{ color: "rgba(255,255,255,0.9)" }} />
+            </div>
+          </Card>
+        )}
+
+        {/* Braid care guide — opt-in aftercare email, fully editable. */}
+        {openCareGuide && (
+          <Card className="p-4 active:scale-[0.99]" onClick={openCareGuide}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div aria-hidden style={{ width: 36, height: 36, borderRadius: 999, display: "grid", placeItems: "center", background: "#F6F2FF", color: C.brandPrimary, flexShrink: 0 }}>
+                  <Sparkles size={17} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold" style={{ color: C.espresso }}>Braid care guide</p>
+                  <p className="text-[11px]" style={{ color: C.muted }}>Auto-send aftercare tips a few days after each appointment</p>
+                </div>
+              </div>
+              <ChevronRight size={18} style={{ color: C.muted }} />
             </div>
           </Card>
         )}
@@ -41437,7 +41657,8 @@ export default function App() {
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
       {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openSupport={() => setSecondary("support")} openTapToPay={() => setSecondary("tapToPay")} />}
-      {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} openSocialTemplates={() => setSecondary("socialTemplates")} />}
+      {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} openSocialTemplates={() => setSecondary("socialTemplates")} openCareGuide={() => setSecondary("careGuide")} />}
+      {secondary === "careGuide" && <CareGuideScreen store={store} onBack={() => setSecondary("marketing")} />}
       {secondary === "socialTemplates" && <SocialTemplatesScreen store={store} onBack={() => setSecondary("marketing")} />}
       {secondary === "referrals" && <ReferralsScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "marketplace" && <MarketplaceScreen store={store} onBack={() => setSecondary("settings")} onOpenRequests={() => setSecondary("marketplaceRequests")} />}

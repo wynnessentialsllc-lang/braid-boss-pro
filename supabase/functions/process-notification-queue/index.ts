@@ -106,6 +106,7 @@ const MARKETING_NOTIFICATION_TYPES = new Set<string>([
   "new_client_welcome",
   "marketing_campaign",
   "reorder_nudge",
+  "braid_care_guide",
 ]);
 // .trim() every Twilio credential: dashboard paste regularly tacks a
 // trailing newline/space onto a secret, and Twilio rejects e.g. a
@@ -1869,6 +1870,87 @@ const renderGeneric = (row: ClaimedRow) => {
 // ---- dispatcher -----------------------------------------------------
 type Rendered = { subject: string; html: string };
 
+// ---- braid_care_guide (editable post-service aftercare guide) --------
+// Renders the studio's stored, editable care-guide content (see
+// app/lib/care-guide.ts) into the branded email. Email-safe markup only —
+// inline styles, real bullet cells (no CSS pseudo-elements). Content is
+// defensively read so a partially-edited payload can't break the send.
+const renderBraidCareGuide = (p: Record<string, any>) => {
+  const clientName = String(p.clientName || "there").trim() || "there";
+  const studioName = String(p.studioName || "your stylist").trim() || "your stylist";
+  const styleName  = String(p.serviceName || "your braids").trim() || "your braids";
+  const content    = (p.content && typeof p.content === "object") ? p.content : {};
+  const base = (Deno.env.get("NEXT_PUBLIC_SITE_URL") || String(p.appBase || "") || "https://braidbosspro.app").replace(/\/$/, "");
+  const bookingSlug = String(p.bookingSlug || "").trim();
+  const bookUrl = bookingSlug ? `${base}/book/${encodeURIComponent(bookingSlug)}` : "";
+  const unsubToken = String(p.unsubscribeToken || "").trim();
+  const unsubUrl = unsubToken ? `${base}/unsubscribe?token=${encodeURIComponent(unsubToken)}` : "";
+
+  const tok = (s: unknown) => String(s ?? "")
+    .replace(/\{client\}/g, clientName)
+    .replace(/\{style\}/g, styleName)
+    .replace(/\{studio\}/g, studioName);
+
+  const ACCENTS = [C.purple, C.lavender, C.coral, C.purpleDeep, C.coralDeep];
+  const sections: any[] = Array.isArray(content.sections) ? content.sections : [];
+  const sectionsHtml = sections.map((s, i) => {
+    const items: string[] = Array.isArray(s?.items) ? s.items.filter((x: unknown) => String(x ?? "").trim()) : [];
+    if (!s?.title || items.length === 0) return "";
+    const acc = ACCENTS[i % ACCENTS.length];
+    const rows = items.map((it) =>
+      `<tr><td style="vertical-align:top;padding:0 8px 9px 0;width:10px;"><span style="display:inline-block;width:7px;height:7px;border-radius:999px;background:${acc};margin-top:7px;"></span></td>`
+      + `<td style="vertical-align:top;padding:0 0 9px;font-size:14.5px;line-height:1.55;color:${C.coffee};">${escape(tok(it))}</td></tr>`,
+    ).join("");
+    return `<div style="border-top:1px solid ${C.hairline};padding-top:18px;margin-top:18px;">
+      <table style="border-collapse:collapse;margin:0 0 12px;"><tr>
+        <td style="width:26px;height:26px;border-radius:999px;background:${acc};color:#fff;font-size:13px;font-weight:700;text-align:center;">${i + 1}</td>
+        <td style="padding-left:10px;font-size:16px;font-weight:700;color:${acc};">${escape(tok(s.title))}</td>
+      </tr></table>
+      <table style="width:100%;border-collapse:collapse;">${rows}</table>
+    </div>`;
+  }).join("");
+
+  const myths: any[] = Array.isArray(content.myths)
+    ? content.myths.filter((m: any) => String(m?.myth ?? "").trim() && String(m?.truth ?? "").trim()) : [];
+  const mythHtml = myths.length ? `<div style="margin-top:22px;background:${C.tint};border:1px solid ${C.hairline};border-radius:14px;padding:16px 16px 6px;">
+    <p style="font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:${C.purpleDeep};margin:0 0 12px;">Myth check — what most people get wrong</p>
+    ${myths.map((m) => `<div style="margin:0 0 12px;">
+      <p style="font-size:14px;color:${C.muted};font-style:italic;margin:0 0 3px;">✕ &ldquo;${escape(tok(m.myth))}&rdquo;</p>
+      <p style="font-size:14.5px;color:${C.espresso};font-weight:600;margin:0;line-height:1.5;">✓ ${escape(tok(m.truth))}</p>
+    </div>`).join("")}
+  </div>` : "";
+
+  const reachOut: string[] = Array.isArray(content.reachOut) ? content.reachOut.filter((x: unknown) => String(x ?? "").trim()) : [];
+  const reachNote = tok(content.reachOutNote);
+  const reachHtml = reachOut.length ? `<div style="margin-top:20px;border-radius:14px;padding:16px 16px 14px;background:#FFF1F3;border:1px solid rgba(255,77,109,0.22);">
+    <p style="font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:${C.coralDeep};margin:0 0 10px;">When to reach out</p>
+    <table style="width:100%;border-collapse:collapse;">${reachOut.map((it) =>
+      `<tr><td style="vertical-align:top;padding:0 8px 7px 0;width:10px;"><span style="display:inline-block;width:6px;height:6px;border-radius:999px;background:${C.coral};margin-top:7px;"></span></td>`
+      + `<td style="vertical-align:top;padding:0 0 7px;font-size:14px;line-height:1.5;color:${C.coffee};">${escape(tok(it))}</td></tr>`).join("")}
+    </table>
+    ${reachNote ? `<p style="font-size:13px;color:${C.muted};margin:8px 0 0;line-height:1.5;">${escape(reachNote)}</p>` : ""}
+  </div>` : "";
+
+  const intro = tok(content.intro);
+  const closing = tok(content.closing);
+  const cta = bookUrl ? ctaButton(tok(content.ctaLabel) || "Book my refresh", bookUrl) : "";
+  const subject = "Caring for your new braids";
+
+  const body = `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Aftercare guide</p>
+    <h1 style="font-size:24px;line-height:1.2;margin:0 0 12px;color:${C.espresso};">Caring for your new braids 💛</h1>
+    ${intro ? `<p style="font-size:15px;line-height:1.6;margin:0 0 4px;color:${C.coffee};">${escape(intro)}</p>` : ""}
+    ${sectionsHtml}
+    ${mythHtml}
+    ${reachHtml}
+    ${cta}
+    ${closing ? `<p style="text-align:center;font-size:13px;color:${C.muted};margin:12px 0 0;">${escape(closing)} 💛</p>` : ""}
+    ${unsubUrl ? `<hr style="border:none;border-top:1px solid ${C.hairline};margin:22px 0 14px;" />
+      <p style="font-size:11px;color:${C.muted};line-height:18px;text-align:center;margin:0;">You're getting this because you visited ${escape(studioName)}. <a href="${escape(unsubUrl)}" style="color:${C.muted};text-decoration:underline;">Unsubscribe from care tips</a>.</p>` : ""}
+  `;
+  return { subject, html: wrapHtml(subject, body) };
+};
+
 const renderForRow = (row: ClaimedRow): Rendered => {
   // Backward compatibility: rows enqueued by older app builds put a
   // pre-rendered html string into payload.html. Honor that if
@@ -1948,6 +2030,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderCartAbandoned(row.payload || {});
     case "rebook_nudge":
       return renderRebookNudge(row.payload || {});
+    case "braid_care_guide":
+      return renderBraidCareGuide(row.payload || {});
     case "birthday_greeting":
       return renderBirthdayGreeting(row.payload || {});
     case "winback":
