@@ -259,7 +259,9 @@ import {
   useMyClasses,
   useMyVideos,
   fetchClassRoster,
+  fetchClassWaitlist,
   fetchVideoSales,
+  refundSale,
   isoToLocalInput,
   localInputToIso,
   videoAccessLabel,
@@ -268,6 +270,7 @@ import {
   type MyVideo,
   type MyVideoDraft,
   type ClassRosterEntry,
+  type ClassWaitlistEntry,
   type VideoSaleEntry,
 } from "./lib/academy";
 import {
@@ -35063,6 +35066,8 @@ const ClassesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
   const [err, setErr] = useState<string | null>(null);
   const [rosterFor, setRosterFor] = useState<string | null>(null);
   const [roster, setRoster] = useState<ClassRosterEntry[] | null>(null);
+  const [waitlist, setWaitlist] = useState<ClassWaitlistEntry[] | null>(null);
+  const [refundingId, setRefundingId] = useState<string | null>(null);
   const [shopSlug, setShopSlug] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -35123,10 +35128,25 @@ const ClassesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
 
   const openRoster = async (id: string) => {
     if (rosterFor === id) { setRosterFor(null); return; }
-    setRosterFor(id); setRoster(null);
+    setRosterFor(id); setRoster(null); setWaitlist(null);
     if (!userId) return;
-    const r = await fetchClassRoster(userId, id);
+    const [r, w] = await Promise.all([fetchClassRoster(userId, id), fetchClassWaitlist(userId, id)]);
     setRoster(r.ok ? r.roster : []);
+    setWaitlist(w.ok ? w.waitlist : []);
+  };
+
+  const refundClass = async (registrationId: string, classId: string) => {
+    if (refundingId) return;
+    if (typeof window !== "undefined" && !window.confirm("Refund this sign-up? The money goes back to the student's card and their seat is released.")) return;
+    setRefundingId(registrationId);
+    const r = await refundSale("class", registrationId);
+    setRefundingId(null);
+    if (!r.ok) { if (typeof window !== "undefined") window.alert(r.error); return; }
+    if (userId) {
+      const rr = await fetchClassRoster(userId, classId);
+      setRoster(rr.ok ? rr.roster : []);
+    }
+    await api.refresh();
   };
 
   // ── Editor ───────────────────────────────────────────────────────
@@ -35261,7 +35281,7 @@ const ClassesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
                   <button type="button" onClick={() => del(c.id)} className="ml-auto p-2 rounded-lg" style={{ color: C.brandError }} aria-label="Delete class"><Trash2 size={16} /></button>
                 </div>
                 {isOpen && (
-                  <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
+                  <div className="mt-3 pt-3 space-y-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
                     {roster === null ? (
                       <p className="text-[12px]" style={{ color: C.muted }}>Loading sign-ups…</p>
                     ) : (() => {
@@ -35270,22 +35290,53 @@ const ClassesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
                       const revenue = paid.reduce((s, r) => s + Number(r.amount_total || 0), 0);
                       if (paid.length === 0) return <p className="text-[12px]" style={{ color: C.muted }}>No paid sign-ups yet.</p>;
                       return (
-                        <>
+                        <div>
                           <p className="text-[12px] font-semibold mb-2" style={{ color: C.espresso }}>
                             {seatsSold} seat{seatsSold === 1 ? "" : "s"} sold · {fmtMoney(revenue, currency)}
                             {c.capacity != null ? ` · ${Math.max(0, c.capacity - seatsSold)} left` : ""}
                           </p>
                           <div className="space-y-1.5">
                             {paid.map((r) => (
-                              <div key={r.id} className="flex items-center justify-between text-[12px]">
+                              <div key={r.id} className="flex items-center justify-between gap-2 text-[12px]">
                                 <span className="truncate" style={{ color: C.coffee }}>{r.student_name || r.student_email || "Guest"}{r.seats > 1 ? ` ×${r.seats}` : ""}</span>
-                                <span style={{ color: C.muted }}>{fmtMoney(Number(r.amount_total || 0), currency)}</span>
+                                <span className="flex items-center gap-2 shrink-0">
+                                  <span style={{ color: C.muted }}>{fmtMoney(Number(r.amount_total || 0), currency)}</span>
+                                  <button type="button" onClick={() => refundClass(r.id, c.id)} disabled={!!refundingId} className="font-semibold" style={{ color: C.brandError, opacity: refundingId ? 0.5 : 1 }}>
+                                    {refundingId === r.id ? "…" : "Refund"}
+                                  </button>
+                                </span>
                               </div>
                             ))}
                           </div>
-                        </>
+                          {roster.some((r) => r.status === "refunded") && (
+                            <p className="text-[11px] mt-2" style={{ color: C.mutedSoft }}>
+                              {roster.filter((r) => r.status === "refunded").length} refunded
+                            </p>
+                          )}
+                        </div>
                       );
                     })()}
+
+                    {waitlist && waitlist.length > 0 && (
+                      <div className="pt-2" style={{ borderTop: `1px dashed ${C.hairline}` }}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <p className="text-[12px] font-semibold" style={{ color: C.espresso }}>
+                            Waitlist · {waitlist.length}
+                          </p>
+                          <button type="button" onClick={() => copyLink(waitlist.map((w) => w.email).join(", "), `wl-${c.id}`)} className="text-[11px] font-semibold" style={{ color: C.brandPrimary }}>
+                            {copied === `wl-${c.id}` ? "Copied!" : "Copy emails"}
+                          </button>
+                        </div>
+                        <div className="space-y-1">
+                          {waitlist.map((w) => (
+                            <div key={w.id} className="flex items-center justify-between text-[12px]">
+                              <span className="truncate" style={{ color: C.coffee }}>{w.name || "—"}</span>
+                              <span className="truncate ml-2" style={{ color: C.muted }}>{w.email}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </Card>
@@ -35313,6 +35364,7 @@ const VideosScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
   const [err, setErr] = useState<string | null>(null);
   const [salesFor, setSalesFor] = useState<string | null>(null);
   const [sales, setSales] = useState<VideoSaleEntry[] | null>(null);
+  const [refundingId, setRefundingId] = useState<string | null>(null);
   const [shopSlug, setShopSlug] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -35374,6 +35426,19 @@ const VideosScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
     if (!userId) return;
     const r = await fetchVideoSales(userId, id);
     setSales(r.ok ? r.sales : []);
+  };
+
+  const refundVideo = async (purchaseId: string, videoId: string) => {
+    if (refundingId) return;
+    if (typeof window !== "undefined" && !window.confirm("Refund this purchase? The money goes back to the buyer's card and their access is revoked.")) return;
+    setRefundingId(purchaseId);
+    const r = await refundSale("video", purchaseId);
+    setRefundingId(null);
+    if (!r.ok) { if (typeof window !== "undefined") window.alert(r.error); return; }
+    if (userId) {
+      const rr = await fetchVideoSales(userId, videoId);
+      setSales(rr.ok ? rr.sales : []);
+    }
   };
 
   // ── Editor ───────────────────────────────────────────────────────
@@ -35509,12 +35574,22 @@ const VideosScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
                           <p className="text-[12px] font-semibold mb-2" style={{ color: C.espresso }}>{paid.length} sale{paid.length === 1 ? "" : "s"} · {fmtMoney(revenue, currency)}</p>
                           <div className="space-y-1.5">
                             {paid.map((s) => (
-                              <div key={s.id} className="flex items-center justify-between text-[12px]">
+                              <div key={s.id} className="flex items-center justify-between gap-2 text-[12px]">
                                 <span className="truncate" style={{ color: C.coffee }}>{s.buyer_name || s.buyer_email || "Guest"}</span>
-                                <span style={{ color: C.muted }}>{fmtMoney(Number(s.amount_total || 0), currency)}</span>
+                                <span className="flex items-center gap-2 shrink-0">
+                                  <span style={{ color: C.muted }}>{fmtMoney(Number(s.amount_total || 0), currency)}</span>
+                                  <button type="button" onClick={() => refundVideo(s.id, v.id)} disabled={!!refundingId} className="font-semibold" style={{ color: C.brandError, opacity: refundingId ? 0.5 : 1 }}>
+                                    {refundingId === s.id ? "…" : "Refund"}
+                                  </button>
+                                </span>
                               </div>
                             ))}
                           </div>
+                          {sales.some((s) => s.status === "refunded") && (
+                            <p className="text-[11px] mt-2" style={{ color: C.mutedSoft }}>
+                              {sales.filter((s) => s.status === "refunded").length} refunded
+                            </p>
+                          )}
                         </>
                       );
                     })()}

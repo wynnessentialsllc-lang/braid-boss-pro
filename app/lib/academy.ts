@@ -690,3 +690,84 @@ export const localInputToIso = (local: string): string | null => {
   if (isNaN(d.getTime())) return null;
   return d.toISOString();
 };
+
+// ============================================================
+// Class waitlist (Phase 3)
+// ============================================================
+
+// Public: join a full class's waitlist. Resolves + inserts via the
+// SECURITY DEFINER RPC; a repeat email for the same class is a no-op.
+export const joinClassWaitlist = async (input: {
+  handle: string;
+  classSlug: string;
+  name: string;
+  email: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> => {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("public_join_class_waitlist", {
+    slug_in: input.handle,
+    class_slug_in: input.classSlug,
+    name_in: input.name || null,
+    email_in: input.email,
+  });
+  if (error) return { ok: false, error: error.message };
+  if (data === false) return { ok: false, error: "Couldn't join the waitlist. Check your email and try again." };
+  return { ok: true };
+};
+
+export type ClassWaitlistEntry = {
+  id: string;
+  name: string | null;
+  email: string;
+  created_at: string;
+  notified_at: string | null;
+};
+
+// Owner: read a class's waitlist (RLS scopes to the braider's rows).
+export const fetchClassWaitlist = async (
+  userId: string,
+  classId: string,
+): Promise<{ ok: true; waitlist: ClassWaitlistEntry[] } | { ok: false; error: string }> => {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("class_waitlist")
+    .select("id, name, email, created_at, notified_at")
+    .eq("user_id", userId)
+    .eq("class_id", classId)
+    .order("created_at", { ascending: true });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, waitlist: (data || []) as ClassWaitlistEntry[] };
+};
+
+// ============================================================
+// Refunds (Phase 3)
+// ============================================================
+
+// Owner: refund a paid class registration or video purchase. The API
+// route re-checks ownership from the Bearer token before touching
+// Stripe, so this just needs the current session's access token.
+export const refundSale = async (
+  kind: "class" | "video",
+  id: string,
+): Promise<{ ok: true; refunded: number } | { ok: false; error: string }> => {
+  const supabase = getSupabase();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) return { ok: false, error: "You need to be signed in to issue a refund." };
+  try {
+    const res = await fetch("/api/academy/refund", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ kind, id }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body?.ok) {
+      return { ok: false, error: body?.error || "Couldn't issue the refund." };
+    }
+    return { ok: true, refunded: Number(body.refunded || 0) };
+  } catch {
+    return { ok: false, error: "Network error — try again in a moment." };
+  }
+};

@@ -26,6 +26,7 @@ import {
   fetchPublicClass,
   fetchClassRegistration,
   startClassCheckout,
+  joinClassWaitlist,
   formatClassWhen,
   type PublicClassDetail,
   type ClassRegistration,
@@ -223,9 +224,7 @@ function ClassBooking({
             {"This braider isn't accepting payments yet. Please check back soon."}
           </p>
         ) : full ? (
-          <p className="text-[15px] font-semibold" style={{ color: C.brandError }}>
-            This class is full.
-          </p>
+          <WaitlistForm handle={handle} classSlug={klass.slug} />
         ) : (
           <>
             <label className="block text-[12px] font-bold uppercase tracking-widest mb-1" style={{ color: C.muted }}>
@@ -401,6 +400,78 @@ function ConfirmationPanel({ token }: { token: string }) {
         </p>
       )}
     </div>
+  );
+}
+
+function WaitlistForm({ handle, classSlug }: { handle: string; classSlug: string }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [joined, setJoined] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) return setError("Please enter a valid email.");
+    setSubmitting(true);
+    const r = await joinClassWaitlist({ handle, classSlug, name: name.trim(), email: email.trim() });
+    setSubmitting(false);
+    if (!r.ok) return setError(r.error);
+    setJoined(true);
+  };
+
+  if (joined) {
+    return (
+      <div className="text-center py-2">
+        <p className="text-[15px] font-semibold" style={{ color: C.brandText }}>
+          You&apos;re on the waitlist 🙌
+        </p>
+        <p className="text-[13px] mt-1" style={{ color: C.muted }}>
+          If a seat opens up, your braider will reach out at {email.trim()}.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <p className="text-[15px] font-semibold mb-1" style={{ color: C.brandText }}>
+        This class is full
+      </p>
+      <p className="text-[13px] mb-3" style={{ color: C.muted }}>
+        Join the waitlist and your braider will reach out if a seat opens up.
+      </p>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Your name"
+        className="w-full mb-3 px-3 py-2.5 rounded-lg text-[15px]"
+        style={{ border: `1px solid ${C.brandBorder}`, background: C.paper, color: C.brandText }}
+      />
+      <input
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        type="email"
+        inputMode="email"
+        placeholder="you@email.com"
+        className="w-full mb-3 px-3 py-2.5 rounded-lg text-[15px]"
+        style={{ border: `1px solid ${C.brandBorder}`, background: C.paper, color: C.brandText }}
+      />
+      {error && (
+        <p className="text-[13px] mb-2" style={{ color: C.brandError }}>
+          {error}
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={submit}
+        disabled={submitting}
+        className="w-full py-3 rounded-xl text-[15px] font-bold text-white transition"
+        style={{ background: GRADIENTS.primary, boxShadow: SHADOWS.primaryGlow, opacity: submitting ? 0.7 : 1 }}
+      >
+        {submitting ? "Joining…" : "Join the waitlist"}
+      </button>
+    </>
   );
 }
 
