@@ -140,10 +140,11 @@ security definer
 set search_path = public
 as $$
 declare
-  cap     integer;
-  taken   integer;
-  new_id  uuid;
-  seats   integer := greatest(1, coalesce(seats_in, 1));
+  cap         integer;
+  taken       integer;
+  new_id      uuid;
+  email_holds integer;
+  seats       integer := greatest(1, coalesce(seats_in, 1));
 begin
   -- Lock the class row so two concurrent reservations can't both pass
   -- the capacity check. A missing row → no class → no reservation.
@@ -153,6 +154,21 @@ begin
   end if;
 
   perform public.expire_stale_class_holds(class_id_in);
+
+  -- Anti-abuse: cap how many unpaid holds one email can stack on a class,
+  -- so a script can't reserve every seat with throwaway addresses. (Broad
+  -- IP-based flooding is an edge/rate-limit concern outside this function.)
+  if student_email_in is not null and length(trim(student_email_in)) > 0 then
+    select count(*) into email_holds
+      from public.class_registrations
+      where class_id = class_id_in
+        and lower(student_email) = lower(student_email_in)
+        and status = 'pending'
+        and created_at > now() - interval '30 minutes';
+    if email_holds >= 3 then
+      return null;
+    end if;
+  end if;
 
   if cap is not null then
     select coalesce(sum(cr.seats), 0) into taken

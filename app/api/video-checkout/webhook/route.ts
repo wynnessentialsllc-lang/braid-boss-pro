@@ -100,23 +100,6 @@ export async function POST(req: Request) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const eventId: string | undefined = typeof evt?.id === "string" ? evt.id : undefined;
-  if (eventId) {
-    const { data: firstTime, error: dedupeErr } = await admin.rpc("record_stripe_webhook_event", {
-      event_id_in: eventId,
-      event_type_in: evt.type,
-      endpoint_in: "video_checkout",
-      account_id_in: typeof evt?.account === "string" ? evt.account : null,
-    });
-    if (dedupeErr) {
-      console.error("[video-checkout/webhook] dedupe failed:", dedupeErr.message);
-      return NextResponse.json({ error: dedupeErr.message }, { status: 500 });
-    }
-    if (firstTime === false) {
-      return NextResponse.json({ received: true, duplicate: true }, { status: 200 });
-    }
-  }
-
   const session = evt?.data?.object;
   const sessionId: string | undefined = session?.id;
   if (!sessionId) {
@@ -128,6 +111,10 @@ export async function POST(req: Request) {
   const email = session?.customer_details?.email || session?.customer_email || null;
   const name = session?.customer_details?.name || null;
 
+  // Do the (idempotent) work FIRST, so a transient failure returns 500
+  // with nothing committed and Stripe's redelivery re-runs it, instead of
+  // a dedupe row silently dropping a paid purchase. mark_video_purchase_paid
+  // flips a pending row only once (retry → already_paid).
   const { data: rows, error: markErr } = await admin.rpc("mark_video_purchase_paid", {
     session_id_in: sessionId,
     payment_intent_in: paymentIntent,
@@ -142,6 +129,22 @@ export async function POST(req: Request) {
   const result = Array.isArray(rows) ? rows[0] : rows;
   if (!result) {
     return NextResponse.json({ received: true, skipped: "no_purchase" }, { status: 200 });
+  }
+
+  // Best-effort audit dedupe AFTER the work; email is gated on already_paid
+  // (only the flipping delivery emails), not on the shared event table.
+  const eventId: string | undefined = typeof evt?.id === "string" ? evt.id : undefined;
+  if (eventId) {
+    try {
+      await admin.rpc("record_stripe_webhook_event", {
+        event_id_in: eventId,
+        event_type_in: evt.type,
+        endpoint_in: "video_checkout",
+        account_id_in: typeof evt?.account === "string" ? evt.account : null,
+      });
+    } catch {
+      /* best-effort audit — never fail the ack over it */
+    }
   }
 
   if (!result.already_paid && result.buyer_email && result.access_token) {

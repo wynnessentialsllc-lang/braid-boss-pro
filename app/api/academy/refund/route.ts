@@ -38,6 +38,9 @@ const refundIntent = async (
     const params = new URLSearchParams();
     params.set("payment_intent", paymentIntentId);
     params.set("reason", "requested_by_customer");
+    // Also return the platform application fee to the connected account,
+    // so refunding a sale doesn't leave the braider out-of-pocket our cut.
+    params.set("refund_application_fee", "true");
     const res = await fetch(`${STRIPE_API}/refunds`, {
       method: "POST",
       headers: {
@@ -143,23 +146,36 @@ export async function POST(req: Request) {
     profile?.stripe_connect_account_id || (row.stripe_account_id ? String(row.stripe_account_id) : null);
   if (!acctId) return fail(409, "No connected Stripe account found for this sale.");
 
+  // Atomically claim the refund: flip paid → refunded, conditional on it
+  // still being paid. This serializes concurrent refund clicks — only the
+  // request that wins the conditional update calls Stripe, so the same
+  // payment_intent is never refunded twice.
+  const { data: claimed, error: claimErr } = await admin
+    .from(table)
+    .update({ status: "refunded", updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .eq("status", "paid")
+    .select("id")
+    .maybeSingle();
+  if (claimErr) return fail(500, "Couldn't start the refund. Try again in a moment.");
+  if (!claimed) {
+    // Another request already claimed it (or it's no longer paid).
+    return NextResponse.json({ ok: true, disposition: "already_refunded", refunded: 0 });
+  }
+
   const attempt = await refundIntent(stripeSecret, acctId, paymentIntentId);
   if (!attempt.ok) {
+    // Roll the claim back so a later retry can refund.
+    await admin
+      .from(table)
+      .update({ status: "paid", updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("user_id", user.id);
     return fail(502, `Stripe couldn't process the refund: ${attempt.error}`);
   }
 
   const refundedAmount = attempt.amount > 0 ? attempt.amount : Number(row.amount_total) || 0;
-
-  const { error: updErr } = await admin
-    .from(table)
-    .update({ status: "refunded", updated_at: new Date().toISOString() })
-    .eq("id", id)
-    .eq("user_id", user.id);
-  if (updErr) {
-    // The money is already back with the buyer; surface the bookkeeping
-    // gap rather than pretending it failed.
-    console.error("[academy/refund] refunded but status update failed:", updErr.message);
-  }
 
   // Best-effort buyer email — never fail the refund because of it.
   try {

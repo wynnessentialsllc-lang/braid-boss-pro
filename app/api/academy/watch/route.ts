@@ -70,9 +70,17 @@ export async function POST(req: Request) {
   };
 
   if (row.source_type === "upload" && row.storage_path) {
+    // Cap the signed-URL lifetime so a rental link can't play past its
+    // expiry: min(6h, time left in the rental). admin_get_video_access
+    // already rejects an expired purchase, so any expiry here is future.
+    let ttl = SIGNED_URL_TTL;
+    if (row.access_expires_at) {
+      const remaining = Math.floor((new Date(row.access_expires_at).getTime() - Date.now()) / 1000);
+      if (remaining > 0) ttl = Math.min(SIGNED_URL_TTL, remaining);
+    }
     const { data: signed, error: signErr } = await admin.storage
       .from("academy-videos")
-      .createSignedUrl(String(row.storage_path), SIGNED_URL_TTL);
+      .createSignedUrl(String(row.storage_path), ttl);
     if (signErr || !signed?.signedUrl) {
       return NextResponse.json({ ok: false, reason: "unavailable" }, { status: 200 });
     }

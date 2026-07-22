@@ -110,23 +110,6 @@ export async function POST(req: Request) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const eventId: string | undefined = typeof evt?.id === "string" ? evt.id : undefined;
-  if (eventId) {
-    const { data: firstTime, error: dedupeErr } = await admin.rpc("record_stripe_webhook_event", {
-      event_id_in: eventId,
-      event_type_in: evt.type,
-      endpoint_in: "class_checkout",
-      account_id_in: typeof evt?.account === "string" ? evt.account : null,
-    });
-    if (dedupeErr) {
-      console.error("[class-checkout/webhook] dedupe failed:", dedupeErr.message);
-      return NextResponse.json({ error: dedupeErr.message }, { status: 500 });
-    }
-    if (firstTime === false) {
-      return NextResponse.json({ received: true, duplicate: true }, { status: 200 });
-    }
-  }
-
   const session = evt?.data?.object;
   const sessionId: string | undefined = session?.id;
   if (!sessionId) {
@@ -138,6 +121,11 @@ export async function POST(req: Request) {
   const email = session?.customer_details?.email || session?.customer_email || null;
   const name = session?.customer_details?.name || null;
 
+  // Do the (idempotent) work FIRST. mark_class_registration_paid only
+  // flips a pending row once — a Stripe retry lands as already_paid — so
+  // if this transient-fails we return 500 with nothing committed and
+  // Stripe's redelivery re-runs it. (Recording dedupe before the work,
+  // as the older webhooks do, would let a blip here drop a paid sale.)
   const { data: rows, error: markErr } = await admin.rpc("mark_class_registration_paid", {
     session_id_in: sessionId,
     payment_intent_in: paymentIntent,
@@ -151,9 +139,26 @@ export async function POST(req: Request) {
   }
   const result = Array.isArray(rows) ? rows[0] : rows;
   if (!result) {
-    // No matching registration — checkout was never recorded. Ack so
-    // Stripe stops retrying.
+    // Not our session (or no matching row). Ack so Stripe stops retrying.
     return NextResponse.json({ received: true, skipped: "no_registration" }, { status: 200 });
+  }
+
+  // Best-effort audit + belt-and-suspenders dedupe, AFTER the work. Email
+  // is gated on already_paid (only the delivery that flips the row emails),
+  // so we don't depend on the shared event table to avoid a double send —
+  // and a foreign endpoint claiming the shared event id can't suppress it.
+  const eventId: string | undefined = typeof evt?.id === "string" ? evt.id : undefined;
+  if (eventId) {
+    try {
+      await admin.rpc("record_stripe_webhook_event", {
+        event_id_in: eventId,
+        event_type_in: evt.type,
+        endpoint_in: "class_checkout",
+        account_id_in: typeof evt?.account === "string" ? evt.account : null,
+      });
+    } catch {
+      /* best-effort audit — never fail the ack over it */
+    }
   }
 
   // Only email on the first transition to paid, not on Stripe retries.
