@@ -274,6 +274,11 @@ import {
   type VideoSaleEntry,
 } from "./lib/academy";
 import {
+  uploadAcademyVideo,
+  validateVideoFile,
+  VIDEO_MAX_MB,
+} from "./lib/academy-video-storage";
+import {
   type DashboardRevenue,
   type RepeatClientStats,
   computeDashboardRevenue,
@@ -35367,6 +35372,8 @@ const VideosScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
   const [refundingId, setRefundingId] = useState<string | null>(null);
   const [shopSlug, setShopSlug] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (!userId) return;
@@ -35401,12 +35408,29 @@ const VideosScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
     }
   };
 
-  const startNew = () => setEditing({ price: null, access_model: "buy", rental_days: 30, status: "draft", is_featured: false });
+  const startNew = () => { setUploadErr(null); setEditing({ price: null, access_model: "buy", rental_days: 30, status: "draft", is_featured: false, source_type: "link" }); };
+
+  const onPickVideo = async (file: File | null) => {
+    if (!file || !editing) return;
+    setUploadErr(null);
+    const v = validateVideoFile(file);
+    if (v) { setUploadErr(v); return; }
+    setUploading(true);
+    const r = await uploadAcademyVideo(userId, file);
+    setUploading(false);
+    if (!r.ok) { setUploadErr(r.error); return; }
+    setEditing({ ...editing, source_type: "upload", storage_path: r.path, access_url: null });
+  };
 
   const save = async () => {
     if (!editing || busy) return;
+    if (editing.source_type === "upload") {
+      if (!editing.storage_path) { setErr("Upload a video file, or switch to a link."); return; }
+    } else if (!editing.access_url?.trim()) {
+      setErr("Paste the video link students will get after paying — or upload a file.");
+      return;
+    }
     setBusy(true); setErr(null);
-    if (!editing.access_url?.trim()) { setBusy(false); setErr("Paste the video link students will get after paying."); return; }
     const saved = await api.upsert(editing);
     setBusy(false);
     if (!saved) { setErr(api.error || "Couldn't save."); return; }
@@ -35458,9 +35482,59 @@ const VideosScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
           <Field label="Description" help="What the lesson covers and who it's for.">
             <Textarea value={editing.description ?? ""} onChange={(e) => setEditing({ ...editing, description: e.target.value })} rows={4} placeholder="A 40-minute walkthrough of…" />
           </Field>
-          <Field label="Video link" help="Unlisted YouTube / Vimeo / Loom / Drive link. Kept private — only paid buyers see it on a token-gated watch page.">
-            <Input value={editing.access_url ?? ""} onChange={(e) => setEditing({ ...editing, access_url: e.target.value })} placeholder="https://youtu.be/…" />
-          </Field>
+          <div>
+            <p className="text-[13px] font-semibold tracking-wide uppercase mb-1.5" style={{ color: C.coffee, letterSpacing: "0.06em" }}>Video source</p>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {([["link", "Paste a link"], ["upload", "Upload a file"]] as const).map(([val, label]) => {
+                const activeSrc = (editing.source_type || "link") === val;
+                return (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => { setUploadErr(null); setEditing({ ...editing, source_type: val }); }}
+                    className="py-2.5 rounded-xl text-[13px] font-semibold transition"
+                    style={{
+                      background: activeSrc ? GRADIENTS.primary : C.paper,
+                      color: activeSrc ? "#FFFFFF" : C.coffee,
+                      border: `1px solid ${activeSrc ? "transparent" : C.hairline}`,
+                      boxShadow: activeSrc ? SHADOWS.primaryGlow : "none",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {(editing.source_type || "link") === "link" ? (
+              <Field label="Video link" help="Unlisted YouTube / Vimeo / Loom / Drive link. Kept private — only paid buyers see it on a token-gated watch page.">
+                <Input value={editing.access_url ?? ""} onChange={(e) => setEditing({ ...editing, access_url: e.target.value })} placeholder="https://youtu.be/…" />
+              </Field>
+            ) : (
+              <Field label="Video file" help={`We host it privately and stream it only to paid buyers. MP4/MOV/WebM up to ${VIDEO_MAX_MB} MB — for longer videos, use a link.`}>
+                {editing.storage_path ? (
+                  <div className="flex items-center justify-between gap-2 rounded-xl px-3.5 py-3" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+                    <span className="text-[13px] font-medium truncate" style={{ color: C.success }}>✓ Video uploaded</span>
+                    <button type="button" onClick={() => setEditing({ ...editing, storage_path: null })} className="text-[12px] font-semibold shrink-0" style={{ color: C.brandError }}>Replace</button>
+                  </div>
+                ) : (
+                  <label
+                    className="flex items-center justify-center gap-2 rounded-xl px-3.5 py-4 cursor-pointer text-[14px] font-semibold"
+                    style={{ background: C.paper, border: `1.5px dashed ${C.hairline}`, color: uploading ? C.muted : C.brandPrimary }}
+                  >
+                    {uploading ? "Uploading… keep this screen open" : "Choose a video to upload"}
+                    <input
+                      type="file"
+                      accept="video/mp4,video/quicktime,video/webm,video/x-m4v"
+                      className="hidden"
+                      disabled={uploading}
+                      onChange={(e) => { const f = e.target.files?.[0] || null; e.currentTarget.value = ""; onPickVideo(f); }}
+                    />
+                  </label>
+                )}
+                {uploadErr && <p className="text-[12px] mt-1.5" style={{ color: C.brandError }}>{uploadErr}</p>}
+              </Field>
+            )}
+          </div>
           <Field label="Free preview link" hint="optional" help="A short teaser shown on the buy page before purchase.">
             <Input value={editing.preview_url ?? ""} onChange={(e) => setEditing({ ...editing, preview_url: e.target.value })} placeholder="https://youtu.be/…" />
           </Field>

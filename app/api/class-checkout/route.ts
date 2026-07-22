@@ -152,29 +152,31 @@ export async function POST(req: Request) {
 
   const accessToken = genAccessToken();
 
-  // Create the pending registration BEFORE Stripe so the webhook always
-  // has a row to flip. A registration that never gets a paid webhook
-  // stays 'pending' and simply doesn't consume a seat.
-  const { data: reg, error: insErr } = await admin
-    .from("class_registrations")
-    .insert({
-      user_id: stylistUserId,
-      class_id: cls.id,
-      status: "pending",
-      seats,
-      amount_total: totalCents / 100,
-      application_fee: applicationFeeCents > 0 ? applicationFeeCents / 100 : null,
-      currency,
-      student_name: studentName,
-      student_email: studentEmail,
-      access_token: accessToken,
-      stripe_account_id: stylistAccountId,
-    })
-    .select("id, access_token")
-    .maybeSingle();
-  if (insErr || !reg) {
+  // Reserve the seat(s) atomically BEFORE Stripe. create_class_registration
+  // locks the class row, clears stale holds, re-checks capacity, and
+  // inserts the pending registration in one transaction — so two
+  // simultaneous buyers can never oversell. It returns null when the
+  // class would go over capacity. The pending row holds the seat during
+  // checkout and is released automatically if payment never completes.
+  const { data: newRegId, error: rpcErr } = await admin.rpc("create_class_registration", {
+    class_id_in: cls.id,
+    user_id_in: stylistUserId,
+    seats_in: seats,
+    amount_total_in: totalCents / 100,
+    application_fee_in: applicationFeeCents > 0 ? applicationFeeCents / 100 : null,
+    currency_in: currency,
+    student_name_in: studentName,
+    student_email_in: studentEmail,
+    access_token_in: accessToken,
+    stripe_account_id_in: stylistAccountId,
+  });
+  if (rpcErr) {
     return fail(500, "Couldn't start your sign-up. Try again in a moment.");
   }
+  if (!newRegId) {
+    return fail(409, "This class just filled up — try another date or join the waitlist.");
+  }
+  const reg = { id: String(newRegId), access_token: accessToken };
 
   const baseUrl = baseUrlOf(req);
   const productName = `${cls.title}${seats > 1 ? ` — ${seats} seats` : ""}`;

@@ -8,7 +8,8 @@
 // keeps Next.js from registering this directory as a route.
 
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useState } from "react";
+import { fetchStorefrontSections } from "../../../lib/academy";
 
 // 2026 brand tokens, mirrored from app/page.tsx. Re-declared inline
 // so the public storefront never has to import the 18k-line admin
@@ -96,6 +97,30 @@ export const StorefrontShell = ({
     const t = businessName?.trim();
     document.title = t ? `${t} · Braid Boss Pro` : "Braid Boss Pro";
   }, [businessName]);
+
+  // Conditional tabs: only surface Classes / Videos once the braider has
+  // published something, so a storefront that doesn't use them stays a
+  // clean Profile/Shop. Seed from `active` so a direct link to the
+  // classes/videos page always shows its own tab even before the fetch
+  // resolves, and never hide a tab we've already shown.
+  const [sections, setSections] = useState<{ hasClasses: boolean; hasVideos: boolean }>({
+    hasClasses: active === "classes",
+    hasVideos: active === "videos",
+  });
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      const s = await fetchStorefrontSections(handle);
+      if (off) return;
+      setSections((prev) => ({
+        hasClasses: prev.hasClasses || s.hasClasses,
+        hasVideos: prev.hasVideos || s.hasVideos,
+      }));
+    })();
+    return () => {
+      off = true;
+    };
+  }, [handle]);
 
   const go = (path: string) => {
     router.push(`/@${encodeURIComponent(handle)}${path}`);
@@ -283,11 +308,11 @@ export const StorefrontShell = ({
           style={{ borderColor: C.brandBorder }}
         >
           {([
-            ["profile", "Profile"],
-            ["shop", "Shop"],
-            ["classes", "Classes"],
-            ["videos", "Videos"],
-          ] as const).map(([t, label]) => {
+            ["profile", "Profile"] as const,
+            ["shop", "Shop"] as const,
+            ...(sections.hasClasses ? [["classes", "Classes"] as const] : []),
+            ...(sections.hasVideos ? [["videos", "Videos"] as const] : []),
+          ]).map(([t, label]) => {
             const isActive = active === t;
             return (
               <button

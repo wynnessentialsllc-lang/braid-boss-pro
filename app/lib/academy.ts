@@ -226,35 +226,61 @@ export const fetchPublicVideo = async (
   };
 };
 
-export type VideoAccess =
+// Which Academy sections a storefront should surface. Drives the
+// conditional Classes / Videos tabs so a braider who hasn't published
+// anything shows a clean Profile/Shop storefront.
+export type StorefrontSections = { hasClasses: boolean; hasVideos: boolean };
+
+export const fetchStorefrontSections = async (slug: string): Promise<StorefrontSections> => {
+  if (!slug) return { hasClasses: false, hasVideos: false };
+  try {
+    const supabase = getSupabase();
+    const { data, error } = await supabase.rpc("public_storefront_sections", { slug_in: slug });
+    if (error) return { hasClasses: false, hasVideos: false };
+    const r = Array.isArray(data) ? data[0] : data;
+    return { hasClasses: !!r?.has_classes, hasVideos: !!r?.has_videos };
+  } catch {
+    return { hasClasses: false, hasVideos: false };
+  }
+};
+
+// Resolved, playable video for the /watch page. Goes through the server
+// route so uploads get a fresh signed URL and links stay server-gated.
+export type WatchResolved =
   | {
       ok: true;
+      kind: "link" | "file";
+      url: string | null;
       title: string;
       description: string | null;
-      access_url: string | null;
       access_model: "buy" | "rent";
       access_expires_at: string | null;
-      buyer_name: string | null;
     }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; access_expires_at?: string | null };
 
-export const fetchVideoAccess = async (token: string): Promise<VideoAccess> => {
+export const fetchWatch = async (token: string): Promise<WatchResolved> => {
   if (!token) return { ok: false, reason: "invalid_token" };
-  const supabase = getSupabase();
-  const { data, error } = await supabase.rpc("public_get_video_access", { token_in: token });
-  if (error) return { ok: false, reason: "error" };
-  const r = Array.isArray(data) ? data[0] : data;
-  if (!r) return { ok: false, reason: "not_found" };
-  if (!r.ok) return { ok: false, reason: String(r.reason || "unavailable") };
-  return {
-    ok: true,
-    title: String(r.title || ""),
-    description: r.description ?? null,
-    access_url: r.access_url ?? null,
-    access_model: r.access_model === "rent" ? "rent" : "buy",
-    access_expires_at: r.access_expires_at ?? null,
-    buyer_name: r.buyer_name ?? null,
-  };
+  try {
+    const res = await fetch("/api/academy/watch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!body || typeof body.ok !== "boolean") return { ok: false, reason: "error" };
+    if (!body.ok) return { ok: false, reason: String(body.reason || "unavailable"), access_expires_at: body.access_expires_at ?? null };
+    return {
+      ok: true,
+      kind: body.kind === "file" ? "file" : "link",
+      url: body.url ?? null,
+      title: String(body.title || ""),
+      description: body.description ?? null,
+      access_model: body.access_model === "rent" ? "rent" : "buy",
+      access_expires_at: body.access_expires_at ?? null,
+    };
+  } catch {
+    return { ok: false, reason: "error" };
+  }
 };
 
 export const startVideoCheckout = async (input: {
@@ -519,6 +545,10 @@ export type MyVideo = {
   cover_image_url: string | null;
   preview_url: string | null;
   access_url: string | null;
+  // 'link' = external URL in access_url; 'upload' = hosted file at
+  // storage_path in the private academy-videos bucket.
+  source_type: "link" | "upload";
+  storage_path: string | null;
   price: number;
   currency: string;
   access_model: "buy" | "rent";
@@ -578,12 +608,18 @@ export const useMyVideos = (userId: string | null) => {
       model === "rent"
         ? Math.max(1, Math.floor(Number(draft.rental_days || 30)))
         : null;
+    const sourceType = draft.source_type === "upload" ? "upload" : "link";
     const payload: Record<string, unknown> = {
       title: (draft.title || "").trim(),
       description: draft.description?.trim() || null,
       cover_image_url: draft.cover_image_url || null,
       preview_url: draft.preview_url?.trim() || null,
-      access_url: draft.access_url?.trim() || null,
+      // For an upload lesson the playback comes from storage_path, so the
+      // external access_url is cleared; for a link lesson storage_path is
+      // cleared. This keeps the two sources from ever both being set.
+      access_url: sourceType === "link" ? draft.access_url?.trim() || null : null,
+      source_type: sourceType,
+      storage_path: sourceType === "upload" ? draft.storage_path || null : null,
       price: Number(draft.price || 0),
       access_model: model,
       rental_days: rentalDays,

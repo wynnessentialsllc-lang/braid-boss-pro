@@ -1,13 +1,11 @@
 "use client";
 
-// Token-gated watch page at /watch/<token>. The ONLY place a paid
-// video's playback link is revealed — public_get_video_access checks
-// the purchase is paid and unexpired server-side (SECURITY DEFINER),
-// so the raw access_url never ships to an unpaid visitor.
-//
-// Known providers (YouTube / Vimeo / Loom) render inline as an embed;
-// anything else (a Drive link, a direct file) shows a prominent
-// "Open video" button. Right after checkout the redirect can beat the
+// Token-gated watch page at /watch/<token>. Everything is resolved by
+// /api/academy/watch server-side: a paid, unexpired purchase yields
+// either an external link (rendered as a provider embed or an
+// "Open video" button) or a fresh signed URL for an uploaded file
+// (rendered in a native <video> player). Nothing playable ships to an
+// unpaid visitor. Right after checkout the redirect can beat the
 // webhook, so a 'not_paid' result polls a few times before giving up.
 
 import { useEffect, useMemo, useState } from "react";
@@ -19,7 +17,7 @@ import {
   FONT_DISPLAY,
   FONT_BODY,
 } from "../../u/[handle]/_components/StorefrontShell";
-import { fetchVideoAccess, type VideoAccess } from "../../lib/academy";
+import { fetchWatch, type WatchResolved } from "../../lib/academy";
 
 // Convert a share URL to an inline-embeddable one for the providers
 // braiders actually use. Returns null when the URL isn't a known
@@ -61,6 +59,10 @@ const REASON_COPY: Record<string, { title: string; body: string }> = {
     title: "Access expired",
     body: "Your rental window has ended. You can purchase access again from the braider's storefront.",
   },
+  revoked: {
+    title: "Access ended",
+    body: "Access to this video is no longer active — it may have been refunded. Contact your braider if you think this is a mistake.",
+  },
   invalid_token: { title: "Invalid link", body: "This watch link is malformed." },
   error: { title: "Something went wrong", body: "We couldn't load your video. Please try again in a moment." },
   unavailable: { title: "Unavailable", body: "This video isn't available right now." },
@@ -74,7 +76,7 @@ export default function WatchPage() {
     return decodeURIComponent(v);
   }, [params]);
 
-  const [access, setAccess] = useState<VideoAccess | null>(null);
+  const [access, setAccess] = useState<WatchResolved | null>(null);
 
   // Poll while the webhook catches up on a fresh purchase (not_paid).
   // State is only ever set inside the async runner, never synchronously
@@ -84,11 +86,11 @@ export default function WatchPage() {
     let count = 0;
     const run = () => {
       void (async () => {
-        const r = await fetchVideoAccess(token);
+        const r = await fetchWatch(token);
         if (stop) return;
         setAccess(r);
-        // Stop polling once we have a terminal answer (paid, or a hard
-        // failure that won't change). Keep polling only while not_paid.
+        // Stop polling once we have a terminal answer. Keep polling only
+        // while the purchase is still confirming (not_paid).
         if (r.ok || r.reason !== "not_paid") clearInterval(id);
       })();
     };
@@ -150,11 +152,21 @@ export default function WatchPage() {
     );
   }
 
-  const embedUrl = toEmbedUrl(access.access_url);
+  const embedUrl = access.kind === "link" ? toEmbedUrl(access.url) : null;
 
   return shell(
     <>
-      {embedUrl ? (
+      {access.kind === "file" && access.url ? (
+        <div style={{ borderRadius: 16, overflow: "hidden", boxShadow: SHADOWS.cardLifted, background: "#000" }}>
+          <video
+            src={access.url}
+            controls
+            controlsList="nodownload"
+            playsInline
+            style={{ width: "100%", maxHeight: "70vh", display: "block", background: "#000" }}
+          />
+        </div>
+      ) : embedUrl ? (
         <div style={{ borderRadius: 16, overflow: "hidden", boxShadow: SHADOWS.cardLifted }}>
           <div style={{ position: "relative", aspectRatio: "16 / 9", background: "#000" }}>
             <iframe
@@ -175,9 +187,9 @@ export default function WatchPage() {
           <p className="mt-3 text-[15px]" style={{ color: "rgba(255,255,255,0.8)" }}>
             Your video is ready to watch.
           </p>
-          {access.access_url && (
+          {access.url && (
             <a
-              href={access.access_url}
+              href={access.url}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-block mt-4 py-3 px-6 rounded-xl text-[15px] font-bold text-white"
