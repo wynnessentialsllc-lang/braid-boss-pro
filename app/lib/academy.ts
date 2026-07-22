@@ -306,3 +306,387 @@ export const videoAccessLabel = (model: "buy" | "rent", rentalDays: number | nul
   model === "rent" && rentalDays
     ? `${rentalDays}-day access`
     : "Lifetime access";
+
+// ============================================================
+// Owner-side management (braider dashboard, Phase 2)
+// ============================================================
+//
+// These talk directly to the RLS'd tables via the authenticated
+// Supabase client: class_offerings / video_lessons carry an owner-all
+// policy (the braider CRUDs their own catalog), and class_registrations
+// / video_purchases carry an owner-select policy (the braider reads
+// their own rosters + sales). Mirrors app/lib/storefront.ts useProducts.
+
+import { useEffect, useState } from "react";
+
+// Slugify a title the same shape the storefront uses, then de-dupe
+// against slugs already in the caller's list so a new row never
+// collides with the (user_id, slug) unique index.
+const slugify = (s: string): string =>
+  s
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60) || "item";
+
+const uniqueSlug = (title: string, taken: Set<string>): string => {
+  const base = slugify(title);
+  if (!taken.has(base)) return base;
+  for (let i = 2; i < 500; i++) {
+    const candidate = `${base}-${i}`.slice(0, 63);
+    if (!taken.has(candidate)) return candidate;
+  }
+  // Astronomically unlikely fallback — keep it deterministic-ish by
+  // length so we never loop forever.
+  return `${base}-${taken.size + 1}`;
+};
+
+export type MyClass = {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  cover_image_url: string | null;
+  format: "in_person" | "virtual";
+  price: number;
+  currency: string;
+  capacity: number | null;
+  starts_at: string | null;
+  duration_minutes: number | null;
+  timezone: string | null;
+  location_text: string | null;
+  meeting_url: string | null;
+  status: "draft" | "published" | "canceled";
+  is_featured: boolean;
+  sort_order: number;
+};
+
+// price is non-null on a saved row, but the editor holds `null` for an
+// empty field until save (upsert coerces null → 0).
+export type MyClassDraft = Partial<Omit<MyClass, "id" | "price">> & { id?: string; price?: number | null };
+
+export const useMyClasses = (userId: string | null) => {
+  const [classes, setClasses] = useState<MyClass[]>([]);
+  const [loading, setLoading] = useState<boolean>(!!userId);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = async () => {
+    if (!userId) {
+      setClasses([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const supabase = getSupabase();
+    const { data, error: err } = await supabase
+      .from("class_offerings")
+      .select("*")
+      .eq("user_id", userId)
+      .order("starts_at", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: false });
+    if (err) {
+      setError(err.message);
+      setLoading(false);
+      return;
+    }
+    setClasses((data || []) as MyClass[]);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!cancelled) await refresh();
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  const upsert = async (draft: MyClassDraft): Promise<MyClass | null> => {
+    if (!userId) return null;
+    const supabase = getSupabase();
+    // Normalize the payload columns from the draft.
+    const payload: Record<string, unknown> = {
+      title: (draft.title || "").trim(),
+      description: draft.description?.trim() || null,
+      cover_image_url: draft.cover_image_url || null,
+      format: draft.format === "virtual" ? "virtual" : "in_person",
+      price: Number(draft.price || 0),
+      capacity:
+        draft.capacity == null || draft.capacity === ("" as unknown)
+          ? null
+          : Math.max(0, Math.floor(Number(draft.capacity))),
+      starts_at: draft.starts_at || null,
+      duration_minutes:
+        draft.duration_minutes == null || draft.duration_minutes === ("" as unknown)
+          ? null
+          : Math.max(1, Math.floor(Number(draft.duration_minutes))),
+      timezone: draft.timezone || null,
+      location_text: draft.location_text?.trim() || null,
+      meeting_url: draft.meeting_url?.trim() || null,
+      status: draft.status || "draft",
+      is_featured: !!draft.is_featured,
+    };
+    if (!payload.title) {
+      setError("Give your class a title.");
+      return null;
+    }
+    if (draft.id) {
+      const { data, error: err } = await supabase
+        .from("class_offerings")
+        .update(payload)
+        .eq("id", draft.id)
+        .eq("user_id", userId)
+        .select("*")
+        .maybeSingle();
+      if (err || !data) {
+        setError(err?.message || "Couldn't save.");
+        return null;
+      }
+      await refresh();
+      return data as MyClass;
+    }
+    const taken = new Set(classes.map((c) => c.slug));
+    payload.user_id = userId;
+    payload.slug = uniqueSlug(String(payload.title), taken);
+    const { data, error: err } = await supabase
+      .from("class_offerings")
+      .insert(payload)
+      .select("*")
+      .maybeSingle();
+    if (err || !data) {
+      setError(err?.message || "Couldn't create the class.");
+      return null;
+    }
+    await refresh();
+    return data as MyClass;
+  };
+
+  const remove = async (id: string): Promise<boolean> => {
+    if (!userId) return false;
+    const supabase = getSupabase();
+    const { error: err } = await supabase
+      .from("class_offerings")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", userId);
+    if (err) {
+      setError(err.message);
+      return false;
+    }
+    setClasses((prev) => prev.filter((c) => c.id !== id));
+    return true;
+  };
+
+  return { classes, loading, error, refresh, upsert, remove };
+};
+
+export type ClassRosterEntry = {
+  id: string;
+  student_name: string | null;
+  student_email: string | null;
+  seats: number;
+  amount_total: number;
+  status: string;
+  paid_at: string | null;
+  created_at: string;
+};
+
+export const fetchClassRoster = async (
+  userId: string,
+  classId: string,
+): Promise<{ ok: true; roster: ClassRosterEntry[] } | { ok: false; error: string }> => {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("class_registrations")
+    .select("id, student_name, student_email, seats, amount_total, status, paid_at, created_at")
+    .eq("user_id", userId)
+    .eq("class_id", classId)
+    .order("created_at", { ascending: false });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, roster: (data || []) as ClassRosterEntry[] };
+};
+
+export type MyVideo = {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  cover_image_url: string | null;
+  preview_url: string | null;
+  access_url: string | null;
+  price: number;
+  currency: string;
+  access_model: "buy" | "rent";
+  rental_days: number | null;
+  status: "draft" | "published";
+  is_featured: boolean;
+  sort_order: number;
+};
+
+export type MyVideoDraft = Partial<Omit<MyVideo, "id" | "price">> & { id?: string; price?: number | null };
+
+export const useMyVideos = (userId: string | null) => {
+  const [videos, setVideos] = useState<MyVideo[]>([]);
+  const [loading, setLoading] = useState<boolean>(!!userId);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = async () => {
+    if (!userId) {
+      setVideos([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const supabase = getSupabase();
+    const { data, error: err } = await supabase
+      .from("video_lessons")
+      .select("*")
+      .eq("user_id", userId)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: false });
+    if (err) {
+      setError(err.message);
+      setLoading(false);
+      return;
+    }
+    setVideos((data || []) as MyVideo[]);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!cancelled) await refresh();
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  const upsert = async (draft: MyVideoDraft): Promise<MyVideo | null> => {
+    if (!userId) return null;
+    const supabase = getSupabase();
+    const model = draft.access_model === "rent" ? "rent" : "buy";
+    const rentalDays =
+      model === "rent"
+        ? Math.max(1, Math.floor(Number(draft.rental_days || 30)))
+        : null;
+    const payload: Record<string, unknown> = {
+      title: (draft.title || "").trim(),
+      description: draft.description?.trim() || null,
+      cover_image_url: draft.cover_image_url || null,
+      preview_url: draft.preview_url?.trim() || null,
+      access_url: draft.access_url?.trim() || null,
+      price: Number(draft.price || 0),
+      access_model: model,
+      rental_days: rentalDays,
+      status: draft.status || "draft",
+      is_featured: !!draft.is_featured,
+    };
+    if (!payload.title) {
+      setError("Give your video a title.");
+      return null;
+    }
+    if (draft.id) {
+      const { data, error: err } = await supabase
+        .from("video_lessons")
+        .update(payload)
+        .eq("id", draft.id)
+        .eq("user_id", userId)
+        .select("*")
+        .maybeSingle();
+      if (err || !data) {
+        setError(err?.message || "Couldn't save.");
+        return null;
+      }
+      await refresh();
+      return data as MyVideo;
+    }
+    const taken = new Set(videos.map((v) => v.slug));
+    payload.user_id = userId;
+    payload.slug = uniqueSlug(String(payload.title), taken);
+    const { data, error: err } = await supabase
+      .from("video_lessons")
+      .insert(payload)
+      .select("*")
+      .maybeSingle();
+    if (err || !data) {
+      setError(err?.message || "Couldn't create the video.");
+      return null;
+    }
+    await refresh();
+    return data as MyVideo;
+  };
+
+  const remove = async (id: string): Promise<boolean> => {
+    if (!userId) return false;
+    const supabase = getSupabase();
+    const { error: err } = await supabase
+      .from("video_lessons")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", userId);
+    if (err) {
+      setError(err.message);
+      return false;
+    }
+    setVideos((prev) => prev.filter((v) => v.id !== id));
+    return true;
+  };
+
+  return { videos, loading, error, refresh, upsert, remove };
+};
+
+export type VideoSaleEntry = {
+  id: string;
+  buyer_name: string | null;
+  buyer_email: string | null;
+  amount_total: number;
+  status: string;
+  access_expires_at: string | null;
+  paid_at: string | null;
+  created_at: string;
+};
+
+export const fetchVideoSales = async (
+  userId: string,
+  videoId: string,
+): Promise<{ ok: true; sales: VideoSaleEntry[] } | { ok: false; error: string }> => {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("video_purchases")
+    .select("id, buyer_name, buyer_email, amount_total, status, access_expires_at, paid_at, created_at")
+    .eq("user_id", userId)
+    .eq("video_id", videoId)
+    .order("created_at", { ascending: false });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, sales: (data || []) as VideoSaleEntry[] };
+};
+
+// datetime-local <-> ISO helpers for the class start-time field.
+// The <input type="datetime-local"> value is wall-clock in the
+// braider's own timezone; we round-trip through the Date constructor
+// so what they pick is what gets stored (as an absolute instant).
+export const isoToLocalInput = (iso: string | null): string => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
+    d.getMinutes(),
+  )}`;
+};
+
+export const localInputToIso = (local: string): string | null => {
+  if (!local) return null;
+  const d = new Date(local);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
+};
