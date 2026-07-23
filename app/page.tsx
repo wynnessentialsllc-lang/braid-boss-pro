@@ -256,6 +256,29 @@ import {
   type ProductVariant,
 } from "./lib/storefront";
 import {
+  useMyClasses,
+  useMyVideos,
+  fetchClassRoster,
+  fetchClassWaitlist,
+  fetchVideoSales,
+  refundSale,
+  isoToLocalInput,
+  localInputToIso,
+  videoAccessLabel,
+  type MyClass,
+  type MyClassDraft,
+  type MyVideo,
+  type MyVideoDraft,
+  type ClassRosterEntry,
+  type ClassWaitlistEntry,
+  type VideoSaleEntry,
+} from "./lib/academy";
+import {
+  uploadAcademyVideo,
+  validateVideoFile,
+  VIDEO_MAX_MB,
+} from "./lib/academy-video-storage";
+import {
   type DashboardRevenue,
   type RepeatClientStats,
   computeDashboardRevenue,
@@ -18970,7 +18993,7 @@ const SupportCenterScreen = ({
   );
 };
 
-const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openSupport, openTapToPay }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openSupport?: () => void; openTapToPay?: () => void }) => {
+const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openClasses, openVideos, openSupport, openTapToPay }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openClasses?: () => void; openVideos?: () => void; openSupport?: () => void; openTapToPay?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
   // disagree with that page. Authed-only; in guest mode userId is null
@@ -19822,6 +19845,54 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Shop</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
                         Products, pricing, inventory & storefront checkout
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openClasses && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openClasses}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
+                      }}
+                    >
+                      <Calendar size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Classes</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        Host workshops — students sign up & pay online
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: C.muted }} />
+                </div>
+              </Card>
+            )}
+            {openVideos && (
+              <Card className="p-4 active:scale-[0.99] mt-2" onClick={openVideos}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
+                      }}
+                    >
+                      <PlayCircle size={15} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: C.espresso }}>Video Lessons</p>
+                      <p className="text-[11px]" style={{ color: C.muted }}>
+                        Sell tutorials — buyers watch on a private link
                       </p>
                     </div>
                   </div>
@@ -34984,6 +35055,629 @@ const ORDER_LABEL: Record<string, string> = {
   failed: "Failed",
 };
 
+// ── Academy: Classes management (Phase 2) ───────────────────────────
+// Braider-facing CRUD for ticketed workshops. Create/edit an offering,
+// publish it to the /@handle/classes storefront, and view the paid
+// roster per class. Money flows through the existing Stripe Connect
+// checkout — this screen only manages the catalog + reads sign-ups.
+const ClassesScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const currency = store.business?.currency || "USD";
+  const api = useMyClasses(userId);
+  const items = api.classes;
+
+  const [editing, setEditing] = useState<MyClassDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [rosterFor, setRosterFor] = useState<string | null>(null);
+  const [roster, setRoster] = useState<ClassRosterEntry[] | null>(null);
+  const [waitlist, setWaitlist] = useState<ClassWaitlistEntry[] | null>(null);
+  const [refundingId, setRefundingId] = useState<string | null>(null);
+  const [shopSlug, setShopSlug] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const localTz =
+    typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : null;
+
+  useEffect(() => {
+    if (!userId) return;
+    let off = false;
+    (async () => {
+      try {
+        const { data } = await getSupabase()
+          .from("booking_links")
+          .select("slug, active")
+          .eq("user_id", userId)
+          .eq("active", true)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (!off) setShopSlug((data as any)?.slug || null);
+      } catch { /* no storefront slug yet */ }
+    })();
+    return () => { off = true; };
+  }, [userId]);
+
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const shareUrl = (c: MyClass): string | null =>
+    shopSlug && c.slug ? `${origin}/@${shopSlug}/classes/${c.slug}` : null;
+  const copyLink = async (url: string | null, key: string) => {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(key);
+      setTimeout(() => setCopied((k) => (k === key ? null : k)), 1600);
+    } catch {
+      try { window.prompt("Copy this link:", url); } catch { /* ignore */ }
+    }
+  };
+
+  const startNew = () =>
+    setEditing({ format: "in_person", price: null, status: "draft", timezone: localTz, is_featured: false });
+
+  const save = async () => {
+    if (!editing || busy) return;
+    setBusy(true); setErr(null);
+    const saved = await api.upsert(editing);
+    setBusy(false);
+    if (!saved) { setErr(api.error || "Couldn't save."); return; }
+    setEditing(null);
+  };
+  const del = async (id: string) => {
+    if (busy) return;
+    if (typeof window !== "undefined" && !window.confirm("Delete this class? Existing sign-ups keep their records, but the class comes off your storefront.")) return;
+    setBusy(true);
+    await api.remove(id);
+    setBusy(false);
+  };
+
+  const openRoster = async (id: string) => {
+    if (rosterFor === id) { setRosterFor(null); return; }
+    setRosterFor(id); setRoster(null); setWaitlist(null);
+    if (!userId) return;
+    const [r, w] = await Promise.all([fetchClassRoster(userId, id), fetchClassWaitlist(userId, id)]);
+    setRoster(r.ok ? r.roster : []);
+    setWaitlist(w.ok ? w.waitlist : []);
+  };
+
+  const refundClass = async (registrationId: string, classId: string) => {
+    if (refundingId) return;
+    if (typeof window !== "undefined" && !window.confirm("Refund this sign-up? The money goes back to the student's card and their seat is released.")) return;
+    setRefundingId(registrationId);
+    const r = await refundSale("class", registrationId);
+    setRefundingId(null);
+    if (!r.ok) { if (typeof window !== "undefined") window.alert(r.error); return; }
+    if (userId) {
+      const rr = await fetchClassRoster(userId, classId);
+      setRoster(rr.ok ? rr.roster : []);
+    }
+    await api.refresh();
+  };
+
+  // ── Editor ───────────────────────────────────────────────────────
+  if (editing) {
+    const isVirtual = editing.format === "virtual";
+    return (
+      <div className="bbp-fade pb-32">
+        <Header
+          title={editing.id ? "Edit class" : "New class"}
+          subtitle="Workshops your students sign up + pay for"
+          leftAction={{ icon: <ChevronLeft size={20} />, onClick: () => { setEditing(null); setErr(null); } }}
+        />
+        <div className="px-5 pt-2 space-y-4">
+          <Field label="Title">
+            <Input value={editing.title ?? ""} onChange={(e) => setEditing({ ...editing, title: e.target.value })} placeholder="Beginner Knotless Intensive" />
+          </Field>
+          <Field label="Description" help="What students will learn, what to bring, skill level.">
+            <Textarea value={editing.description ?? ""} onChange={(e) => setEditing({ ...editing, description: e.target.value })} rows={4} placeholder="A hands-on class covering…" />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Format">
+              <Select
+                value={editing.format || "in_person"}
+                onChange={(e) => setEditing({ ...editing, format: e.target.value as "in_person" | "virtual" })}
+                options={[{ value: "in_person", label: "In person" }, { value: "virtual", label: "Virtual" }]}
+              />
+            </Field>
+            <Field label={`Price (${currency})`}>
+              <MoneyInput value={editing.price ?? ""} onChange={(c) => setEditing({ ...editing, price: c === "" ? null : Number(c) })} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Capacity" hint="blank = unlimited">
+              <Input type="number" inputMode="numeric" value={editing.capacity ?? ""} onChange={(e) => setEditing({ ...editing, capacity: e.target.value === "" ? null : Number(e.target.value) })} placeholder="e.g. 8" />
+            </Field>
+            <Field label="Duration (min)">
+              <Input type="number" inputMode="numeric" value={editing.duration_minutes ?? ""} onChange={(e) => setEditing({ ...editing, duration_minutes: e.target.value === "" ? null : Number(e.target.value) })} placeholder="e.g. 180" />
+            </Field>
+          </div>
+          <Field label="Date & time" help={editing.timezone ? `Shown to students in ${editing.timezone}.` : undefined}>
+            <Input type="datetime-local" value={isoToLocalInput(editing.starts_at ?? null)} onChange={(e) => setEditing({ ...editing, starts_at: localInputToIso(e.target.value) })} />
+          </Field>
+          {isVirtual ? (
+            <Field label="Meeting link" help="Revealed to students only after they pay (Zoom, Meet, etc.).">
+              <Input value={editing.meeting_url ?? ""} onChange={(e) => setEditing({ ...editing, meeting_url: e.target.value })} placeholder="https://zoom.us/j/…" />
+            </Field>
+          ) : (
+            <Field label="Location" help="Revealed to students only after they pay.">
+              <Input value={editing.location_text ?? ""} onChange={(e) => setEditing({ ...editing, location_text: e.target.value })} placeholder="123 Main St, Suite 4, Atlanta GA" />
+            </Field>
+          )}
+          <Field label="Cover image" hint="Shown on the storefront card.">
+            <ProductImageUploader
+              mode="single"
+              userId={userId}
+              value={editing.cover_image_url ?? null}
+              onChange={(url) => setEditing({ ...editing, cover_image_url: url })}
+              tokens={{ border: C.hairline, muted: C.muted, error: C.brandError, primary: C.brandPrimary, paper: C.paper }}
+            />
+          </Field>
+          <Card className="p-4 flex items-center justify-between">
+            <div className="flex-1 min-w-0 pr-3">
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Published</p>
+              <p className="text-[11px]" style={{ color: C.muted }}>Live on your storefront and open for sign-ups.</p>
+            </div>
+            <Toggle checked={editing.status === "published"} onChange={(v) => setEditing({ ...editing, status: v ? "published" : "draft" })} />
+          </Card>
+
+          {err && <p className="text-[13px]" style={{ color: C.brandError }}>{err}</p>}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => { setEditing(null); setErr(null); }} fullWidth>Cancel</Button>
+            <Button onClick={save} disabled={busy} fullWidth>{busy ? "Saving…" : "Save class"}</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── List ─────────────────────────────────────────────────────────
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Classes"
+        subtitle="Host workshops — students sign up + pay online"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        rightAction={
+          <button type="button" onClick={startNew} className="p-2 rounded-full" style={{ background: C.gold, color: C.espresso, border: 0 }} aria-label="Add class">
+            <Plus size={20} />
+          </button>
+        }
+      />
+      <div className="px-5 pt-2 space-y-3">
+        {api.loading ? (
+          <p className="text-[13px] py-6 text-center" style={{ color: C.muted }}>Loading…</p>
+        ) : items.length === 0 ? (
+          <Card className="p-6 text-center">
+            <div className="mx-auto mb-3 grid place-items-center rounded-full" style={{ width: 48, height: 48, background: "rgba(124,58,237,0.10)" }}>
+              <Calendar size={22} style={{ color: C.brandPrimary }} />
+            </div>
+            <p className="text-[15px] font-semibold" style={{ color: C.espresso }}>Host your first class</p>
+            <p className="text-[13px] mt-1" style={{ color: C.muted }}>Teach a workshop and take sign-ups + payment right from your storefront.</p>
+            <div className="mt-4"><Button onClick={startNew} icon={<Plus size={16} />}>New class</Button></div>
+          </Card>
+        ) : (
+          items.map((c) => {
+            const url = shareUrl(c);
+            const isOpen = rosterFor === c.id;
+            return (
+              <Card key={c.id} className="p-4">
+                <div className="flex items-start gap-3">
+                  <div style={{ width: 52, height: 52, borderRadius: 12, flexShrink: 0, background: c.cover_image_url ? `url(${c.cover_image_url}) center/cover no-repeat` : GRADIENTS.hero }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-[15px] font-semibold truncate" style={{ color: C.espresso }}>{c.title || "Untitled"}</p>
+                      <Pill tone={c.status === "published" ? "success" : "neutral"}>{c.status === "published" ? "Live" : "Draft"}</Pill>
+                    </div>
+                    <p className="text-[12px] mt-0.5" style={{ color: C.muted }}>
+                      {c.format === "virtual" ? "Virtual" : "In person"} · {fmtMoney(c.price, currency)}
+                      {c.capacity != null ? ` · ${c.capacity} seats` : ""}
+                    </p>
+                    <p className="text-[12px]" style={{ color: C.muted }}>
+                      {c.starts_at ? new Date(c.starts_at).toLocaleString() : "Date TBA"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 mt-3 flex-wrap">
+                  <Button variant="outline" size="sm" onClick={() => setEditing({ ...c })}>Edit</Button>
+                  <Button variant="ghost" size="sm" onClick={() => openRoster(c.id)} icon={<Users size={15} />}>{isOpen ? "Hide sign-ups" : "Sign-ups"}</Button>
+                  {c.status === "published" && url && (
+                    <Button variant="ghost" size="sm" onClick={() => copyLink(url, c.id)} icon={<Copy size={15} />}>{copied === c.id ? "Copied!" : "Share"}</Button>
+                  )}
+                  <button type="button" onClick={() => del(c.id)} className="ml-auto p-2 rounded-lg" style={{ color: C.brandError }} aria-label="Delete class"><Trash2 size={16} /></button>
+                </div>
+                {isOpen && (
+                  <div className="mt-3 pt-3 space-y-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
+                    {roster === null ? (
+                      <p className="text-[12px]" style={{ color: C.muted }}>Loading sign-ups…</p>
+                    ) : (() => {
+                      const paid = roster.filter((r) => r.status === "paid");
+                      const seatsSold = paid.reduce((s, r) => s + Number(r.seats || 0), 0);
+                      const revenue = paid.reduce((s, r) => s + Number(r.amount_total || 0), 0);
+                      if (paid.length === 0) return <p className="text-[12px]" style={{ color: C.muted }}>No paid sign-ups yet.</p>;
+                      return (
+                        <div>
+                          <p className="text-[12px] font-semibold mb-2" style={{ color: C.espresso }}>
+                            {seatsSold} seat{seatsSold === 1 ? "" : "s"} sold · {fmtMoney(revenue, currency)}
+                            {c.capacity != null ? ` · ${Math.max(0, c.capacity - seatsSold)} left` : ""}
+                          </p>
+                          <div className="space-y-1.5">
+                            {paid.map((r) => (
+                              <div key={r.id} className="flex items-center justify-between gap-2 text-[12px]">
+                                <span className="truncate" style={{ color: C.coffee }}>{r.student_name || r.student_email || "Guest"}{r.seats > 1 ? ` ×${r.seats}` : ""}</span>
+                                <span className="flex items-center gap-2 shrink-0">
+                                  <span style={{ color: C.muted }}>{fmtMoney(Number(r.amount_total || 0), currency)}</span>
+                                  <button type="button" onClick={() => refundClass(r.id, c.id)} disabled={!!refundingId} className="font-semibold" style={{ color: C.brandError, opacity: refundingId ? 0.5 : 1 }}>
+                                    {refundingId === r.id ? "…" : "Refund"}
+                                  </button>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                          {roster.some((r) => r.status === "refunded") && (
+                            <p className="text-[11px] mt-2" style={{ color: C.mutedSoft }}>
+                              {roster.filter((r) => r.status === "refunded").length} refunded
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {waitlist && waitlist.length > 0 && (
+                      <div className="pt-2" style={{ borderTop: `1px dashed ${C.hairline}` }}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <p className="text-[12px] font-semibold" style={{ color: C.espresso }}>
+                            Waitlist · {waitlist.length}
+                          </p>
+                          <button type="button" onClick={() => copyLink(waitlist.map((w) => w.email).join(", "), `wl-${c.id}`)} className="text-[11px] font-semibold" style={{ color: C.brandPrimary }}>
+                            {copied === `wl-${c.id}` ? "Copied!" : "Copy emails"}
+                          </button>
+                        </div>
+                        <div className="space-y-1">
+                          {waitlist.map((w) => (
+                            <div key={w.id} className="flex items-center justify-between text-[12px]">
+                              <span className="truncate" style={{ color: C.coffee }}>{w.name || "—"}</span>
+                              <span className="truncate ml-2" style={{ color: C.muted }}>{w.email}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ── Academy: Video Lessons management (Phase 2) ─────────────────────
+// Braider-facing CRUD for paid tutorials. Paste an unlisted video link,
+// price it (buy or time-limited rent), publish to /@handle/videos, and
+// track sales. The secret access_url lives here + on the token-gated
+// /watch page — never on the public storefront.
+const VideosScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store.userId;
+  const currency = store.business?.currency || "USD";
+  const api = useMyVideos(userId);
+  const items = api.videos;
+
+  const [editing, setEditing] = useState<MyVideoDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [salesFor, setSalesFor] = useState<string | null>(null);
+  const [sales, setSales] = useState<VideoSaleEntry[] | null>(null);
+  const [refundingId, setRefundingId] = useState<string | null>(null);
+  const [shopSlug, setShopSlug] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!userId) return;
+    let off = false;
+    (async () => {
+      try {
+        const { data } = await getSupabase()
+          .from("booking_links")
+          .select("slug, active")
+          .eq("user_id", userId)
+          .eq("active", true)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (!off) setShopSlug((data as any)?.slug || null);
+      } catch { /* no storefront slug yet */ }
+    })();
+    return () => { off = true; };
+  }, [userId]);
+
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const shareUrl = (v: MyVideo): string | null =>
+    shopSlug && v.slug ? `${origin}/@${shopSlug}/videos/${v.slug}` : null;
+  const copyLink = async (url: string | null, key: string) => {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(key);
+      setTimeout(() => setCopied((k) => (k === key ? null : k)), 1600);
+    } catch {
+      try { window.prompt("Copy this link:", url); } catch { /* ignore */ }
+    }
+  };
+
+  const startNew = () => { setUploadErr(null); setEditing({ price: null, access_model: "buy", rental_days: 30, status: "draft", is_featured: false, source_type: "link" }); };
+
+  const onPickVideo = async (file: File | null) => {
+    if (!file || !editing) return;
+    setUploadErr(null);
+    const v = validateVideoFile(file);
+    if (v) { setUploadErr(v); return; }
+    setUploading(true);
+    const r = await uploadAcademyVideo(userId, file);
+    setUploading(false);
+    if (!r.ok) { setUploadErr(r.error); return; }
+    setEditing({ ...editing, source_type: "upload", storage_path: r.path, access_url: null });
+  };
+
+  const save = async () => {
+    if (!editing || busy) return;
+    if (editing.source_type === "upload") {
+      if (!editing.storage_path) { setErr("Upload a video file, or switch to a link."); return; }
+    } else if (!editing.access_url?.trim()) {
+      setErr("Paste the video link students will get after paying — or upload a file.");
+      return;
+    }
+    setBusy(true); setErr(null);
+    const saved = await api.upsert(editing);
+    setBusy(false);
+    if (!saved) { setErr(api.error || "Couldn't save."); return; }
+    setEditing(null);
+  };
+  const del = async (id: string) => {
+    if (busy) return;
+    if (typeof window !== "undefined" && !window.confirm("Delete this video? Past buyers keep their access records.")) return;
+    setBusy(true);
+    await api.remove(id);
+    setBusy(false);
+  };
+
+  const openSales = async (id: string) => {
+    if (salesFor === id) { setSalesFor(null); return; }
+    setSalesFor(id); setSales(null);
+    if (!userId) return;
+    const r = await fetchVideoSales(userId, id);
+    setSales(r.ok ? r.sales : []);
+  };
+
+  const refundVideo = async (purchaseId: string, videoId: string) => {
+    if (refundingId) return;
+    if (typeof window !== "undefined" && !window.confirm("Refund this purchase? The money goes back to the buyer's card and their access is revoked.")) return;
+    setRefundingId(purchaseId);
+    const r = await refundSale("video", purchaseId);
+    setRefundingId(null);
+    if (!r.ok) { if (typeof window !== "undefined") window.alert(r.error); return; }
+    if (userId) {
+      const rr = await fetchVideoSales(userId, videoId);
+      setSales(rr.ok ? rr.sales : []);
+    }
+  };
+
+  // ── Editor ───────────────────────────────────────────────────────
+  if (editing) {
+    const isRent = editing.access_model === "rent";
+    return (
+      <div className="bbp-fade pb-32">
+        <Header
+          title={editing.id ? "Edit video" : "New video lesson"}
+          subtitle="Sell access to a tutorial"
+          leftAction={{ icon: <ChevronLeft size={20} />, onClick: () => { setEditing(null); setErr(null); } }}
+        />
+        <div className="px-5 pt-2 space-y-4">
+          <Field label="Title">
+            <Input value={editing.title ?? ""} onChange={(e) => setEditing({ ...editing, title: e.target.value })} placeholder="Perfect Feed-In Braids — Full Tutorial" />
+          </Field>
+          <Field label="Description" help="What the lesson covers and who it's for.">
+            <Textarea value={editing.description ?? ""} onChange={(e) => setEditing({ ...editing, description: e.target.value })} rows={4} placeholder="A 40-minute walkthrough of…" />
+          </Field>
+          <div>
+            <p className="text-[13px] font-semibold tracking-wide uppercase mb-1.5" style={{ color: C.coffee, letterSpacing: "0.06em" }}>Video source</p>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {([["link", "Paste a link"], ["upload", "Upload a file"]] as const).map(([val, label]) => {
+                const activeSrc = (editing.source_type || "link") === val;
+                return (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => { setUploadErr(null); setEditing({ ...editing, source_type: val }); }}
+                    className="py-2.5 rounded-xl text-[13px] font-semibold transition"
+                    style={{
+                      background: activeSrc ? GRADIENTS.primary : C.paper,
+                      color: activeSrc ? "#FFFFFF" : C.coffee,
+                      border: `1px solid ${activeSrc ? "transparent" : C.hairline}`,
+                      boxShadow: activeSrc ? SHADOWS.primaryGlow : "none",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {(editing.source_type || "link") === "link" ? (
+              <Field label="Video link" help="Unlisted YouTube / Vimeo / Loom / Drive link. Kept private — only paid buyers see it on a token-gated watch page.">
+                <Input value={editing.access_url ?? ""} onChange={(e) => setEditing({ ...editing, access_url: e.target.value })} placeholder="https://youtu.be/…" />
+              </Field>
+            ) : (
+              <Field label="Video file" help={`We host it privately and stream it only to paid buyers. MP4/MOV/WebM up to ${VIDEO_MAX_MB} MB — for longer videos, use a link.`}>
+                {editing.storage_path ? (
+                  <div className="flex items-center justify-between gap-2 rounded-xl px-3.5 py-3" style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+                    <span className="text-[13px] font-medium truncate" style={{ color: C.success }}>✓ Video uploaded</span>
+                    <button type="button" onClick={() => setEditing({ ...editing, storage_path: null })} className="text-[12px] font-semibold shrink-0" style={{ color: C.brandError }}>Replace</button>
+                  </div>
+                ) : (
+                  <label
+                    className="flex items-center justify-center gap-2 rounded-xl px-3.5 py-4 cursor-pointer text-[14px] font-semibold"
+                    style={{ background: C.paper, border: `1.5px dashed ${C.hairline}`, color: uploading ? C.muted : C.brandPrimary }}
+                  >
+                    {uploading ? "Uploading… keep this screen open" : "Choose a video to upload"}
+                    <input
+                      type="file"
+                      accept="video/mp4,video/quicktime,video/webm,video/x-m4v"
+                      className="hidden"
+                      disabled={uploading}
+                      onChange={(e) => { const f = e.target.files?.[0] || null; e.currentTarget.value = ""; onPickVideo(f); }}
+                    />
+                  </label>
+                )}
+                {uploadErr && <p className="text-[12px] mt-1.5" style={{ color: C.brandError }}>{uploadErr}</p>}
+              </Field>
+            )}
+          </div>
+          <Field label="Free preview link" hint="optional" help="A short teaser shown on the buy page before purchase.">
+            <Input value={editing.preview_url ?? ""} onChange={(e) => setEditing({ ...editing, preview_url: e.target.value })} placeholder="https://youtu.be/…" />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={`Price (${currency})`}>
+              <MoneyInput value={editing.price ?? ""} onChange={(c) => setEditing({ ...editing, price: c === "" ? null : Number(c) })} />
+            </Field>
+            <Field label="Access">
+              <Select
+                value={editing.access_model || "buy"}
+                onChange={(e) => setEditing({ ...editing, access_model: e.target.value as "buy" | "rent" })}
+                options={[{ value: "buy", label: "Buy (forever)" }, { value: "rent", label: "Rent (limited)" }]}
+              />
+            </Field>
+          </div>
+          {isRent && (
+            <Field label="Rental length (days)" help="How long access lasts after purchase.">
+              <Input type="number" inputMode="numeric" value={editing.rental_days ?? 30} onChange={(e) => setEditing({ ...editing, rental_days: e.target.value === "" ? null : Number(e.target.value) })} placeholder="30" />
+            </Field>
+          )}
+          <Field label="Cover image" hint="Thumbnail on the storefront grid.">
+            <ProductImageUploader
+              mode="single"
+              userId={userId}
+              value={editing.cover_image_url ?? null}
+              onChange={(url) => setEditing({ ...editing, cover_image_url: url })}
+              tokens={{ border: C.hairline, muted: C.muted, error: C.brandError, primary: C.brandPrimary, paper: C.paper }}
+            />
+          </Field>
+          <Card className="p-4 flex items-center justify-between">
+            <div className="flex-1 min-w-0 pr-3">
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Published</p>
+              <p className="text-[11px]" style={{ color: C.muted }}>Live on your storefront and open for purchase.</p>
+            </div>
+            <Toggle checked={editing.status === "published"} onChange={(v) => setEditing({ ...editing, status: v ? "published" : "draft" })} />
+          </Card>
+
+          {err && <p className="text-[13px]" style={{ color: C.brandError }}>{err}</p>}
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => { setEditing(null); setErr(null); }} fullWidth>Cancel</Button>
+            <Button onClick={save} disabled={busy} fullWidth>{busy ? "Saving…" : "Save video"}</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── List ─────────────────────────────────────────────────────────
+  return (
+    <div className="bbp-fade pb-32">
+      <Header
+        title="Video Lessons"
+        subtitle="Sell tutorials — buyers watch on a private link"
+        leftAction={{ icon: <ChevronLeft size={20} />, onClick: onBack }}
+        rightAction={
+          <button type="button" onClick={startNew} className="p-2 rounded-full" style={{ background: C.gold, color: C.espresso, border: 0 }} aria-label="Add video">
+            <Plus size={20} />
+          </button>
+        }
+      />
+      <div className="px-5 pt-2 space-y-3">
+        {api.loading ? (
+          <p className="text-[13px] py-6 text-center" style={{ color: C.muted }}>Loading…</p>
+        ) : items.length === 0 ? (
+          <Card className="p-6 text-center">
+            <div className="mx-auto mb-3 grid place-items-center rounded-full" style={{ width: 48, height: 48, background: "rgba(124,58,237,0.10)" }}>
+              <PlayCircle size={22} style={{ color: C.brandPrimary }} />
+            </div>
+            <p className="text-[15px] font-semibold" style={{ color: C.espresso }}>Sell your first tutorial</p>
+            <p className="text-[13px] mt-1" style={{ color: C.muted }}>Paste an unlisted video link, set a price, and buyers get a private watch page.</p>
+            <div className="mt-4"><Button onClick={startNew} icon={<Plus size={16} />}>New video</Button></div>
+          </Card>
+        ) : (
+          items.map((v) => {
+            const url = shareUrl(v);
+            const isOpen = salesFor === v.id;
+            return (
+              <Card key={v.id} className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className="relative" style={{ width: 64, height: 40, borderRadius: 8, flexShrink: 0, background: v.cover_image_url ? `url(${v.cover_image_url}) center/cover no-repeat` : GRADIENTS.hero }}>
+                    <span aria-hidden className="absolute inset-0 grid place-items-center" style={{ color: "rgba(255,255,255,0.9)", fontSize: 16 }}>▶</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-[15px] font-semibold truncate" style={{ color: C.espresso }}>{v.title || "Untitled"}</p>
+                      <Pill tone={v.status === "published" ? "success" : "neutral"}>{v.status === "published" ? "Live" : "Draft"}</Pill>
+                    </div>
+                    <p className="text-[12px] mt-0.5" style={{ color: C.muted }}>
+                      {fmtMoney(v.price, currency)} · {videoAccessLabel(v.access_model, v.rental_days)}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 mt-3 flex-wrap">
+                  <Button variant="outline" size="sm" onClick={() => setEditing({ ...v })}>Edit</Button>
+                  <Button variant="ghost" size="sm" onClick={() => openSales(v.id)} icon={<Users size={15} />}>{isOpen ? "Hide sales" : "Sales"}</Button>
+                  {v.status === "published" && url && (
+                    <Button variant="ghost" size="sm" onClick={() => copyLink(url, v.id)} icon={<Copy size={15} />}>{copied === v.id ? "Copied!" : "Share"}</Button>
+                  )}
+                  <button type="button" onClick={() => del(v.id)} className="ml-auto p-2 rounded-lg" style={{ color: C.brandError }} aria-label="Delete video"><Trash2 size={16} /></button>
+                </div>
+                {isOpen && (
+                  <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
+                    {sales === null ? (
+                      <p className="text-[12px]" style={{ color: C.muted }}>Loading sales…</p>
+                    ) : (() => {
+                      const paid = sales.filter((s) => s.status === "paid");
+                      const revenue = paid.reduce((sum, s) => sum + Number(s.amount_total || 0), 0);
+                      if (paid.length === 0) return <p className="text-[12px]" style={{ color: C.muted }}>No sales yet.</p>;
+                      return (
+                        <>
+                          <p className="text-[12px] font-semibold mb-2" style={{ color: C.espresso }}>{paid.length} sale{paid.length === 1 ? "" : "s"} · {fmtMoney(revenue, currency)}</p>
+                          <div className="space-y-1.5">
+                            {paid.map((s) => (
+                              <div key={s.id} className="flex items-center justify-between gap-2 text-[12px]">
+                                <span className="truncate" style={{ color: C.coffee }}>{s.buyer_name || s.buyer_email || "Guest"}</span>
+                                <span className="flex items-center gap-2 shrink-0">
+                                  <span style={{ color: C.muted }}>{fmtMoney(Number(s.amount_total || 0), currency)}</span>
+                                  <button type="button" onClick={() => refundVideo(s.id, v.id)} disabled={!!refundingId} className="font-semibold" style={{ color: C.brandError, opacity: refundingId ? 0.5 : 1 }}>
+                                    {refundingId === s.id ? "…" : "Refund"}
+                                  </button>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                          {sales.some((s) => s.status === "refunded") && (
+                            <p className="text-[11px] mt-2" style={{ color: C.mutedSoft }}>
+                              {sales.filter((s) => s.status === "refunded").length} refunded
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+              </Card>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+};
+
 const OrdersScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
   const userId: string | null = store.userId;
   const [orders, setOrders] = useState<OrderRow[]>([]);
@@ -41654,6 +42348,8 @@ export default function App() {
               openContracts={() => setSecondary("contracts")}
               openReviews={() => setSecondary("reviews")}
               openProducts={() => setSecondary("products")}
+              openClasses={() => setSecondary("classes")}
+              openVideos={() => setSecondary("videos")}
               openSupport={() => setSecondary("support")}
               openTapToPay={() => setSecondary("tapToPay")}
             />
@@ -41821,6 +42517,8 @@ export default function App() {
       {secondary === "inbox" && <InboxScreen store={store} onBack={() => setSecondary(null)} />}
       {secondary === "intakeForm" && <IntakeFormScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "packages" && <PackagesScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "classes" && <ClassesScreen store={store} onBack={() => setSecondary("settings")} />}
+      {secondary === "videos" && <VideosScreen store={store} onBack={() => setSecondary("settings")} />}
       {secondary === "products" && (
         <ProductsScreen
           store={store}

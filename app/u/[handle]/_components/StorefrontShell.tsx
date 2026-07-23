@@ -8,7 +8,8 @@
 // keeps Next.js from registering this directory as a route.
 
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useState } from "react";
+import { fetchStorefrontSections } from "../../../lib/academy";
 
 // 2026 brand tokens, mirrored from app/page.tsx. Re-declared inline
 // so the public storefront never has to import the 18k-line admin
@@ -65,7 +66,7 @@ export const fmtMoney = (
   }
 };
 
-type Tab = "profile" | "shop";
+type Tab = "profile" | "shop" | "classes" | "videos";
 
 export const StorefrontShell = ({
   handle,
@@ -96,6 +97,30 @@ export const StorefrontShell = ({
     const t = businessName?.trim();
     document.title = t ? `${t} · Braid Boss Pro` : "Braid Boss Pro";
   }, [businessName]);
+
+  // Conditional tabs: only surface Classes / Videos once the braider has
+  // published something, so a storefront that doesn't use them stays a
+  // clean Profile/Shop. Seed from `active` so a direct link to the
+  // classes/videos page always shows its own tab even before the fetch
+  // resolves, and never hide a tab we've already shown.
+  const [sections, setSections] = useState<{ hasClasses: boolean; hasVideos: boolean }>({
+    hasClasses: active === "classes",
+    hasVideos: active === "videos",
+  });
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      const s = await fetchStorefrontSections(handle);
+      if (off) return;
+      setSections((prev) => ({
+        hasClasses: prev.hasClasses || s.hasClasses,
+        hasVideos: prev.hasVideos || s.hasVideos,
+      }));
+    })();
+    return () => {
+      off = true;
+    };
+  }, [handle]);
 
   const go = (path: string) => {
     router.push(`/@${encodeURIComponent(handle)}${path}`);
@@ -142,6 +167,8 @@ export const StorefrontShell = ({
         @media (prefers-reduced-motion: reduce) {
           .bbp-brand-wordmark { animation: none; }
         }
+        .bbp-no-scrollbar::-webkit-scrollbar { display: none; }
+        .bbp-no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
       {/* Banner — falls back to a brand gradient when the stylist
           hasn't uploaded one. */}
@@ -270,21 +297,29 @@ export const StorefrontShell = ({
           </div>
         </div>
 
-        {/* Tab nav: Profile / Shop. Mounting a third "Book" tab is
-            on the roadmap for Phase 2 — for now the existing book
-            button on the profile card carries that flow. */}
+        {/* Tab nav: Profile / Shop / Classes / Videos. Classes and
+            Videos always render (like Shop) — each destination shows
+            its own "coming soon" empty state when the braider hasn't
+            published anything yet, so the nav stays consistent across
+            storefronts. The nav is horizontally scrollable on narrow
+            phones so four tabs never wrap. */}
         <nav
-          className="mt-5 flex gap-2 border-b"
+          className="mt-5 flex gap-2 border-b overflow-x-auto bbp-no-scrollbar"
           style={{ borderColor: C.brandBorder }}
         >
-          {(["profile", "shop"] as const).map((t) => {
+          {([
+            ["profile", "Profile"] as const,
+            ["shop", "Shop"] as const,
+            ...(sections.hasClasses ? [["classes", "Classes"] as const] : []),
+            ...(sections.hasVideos ? [["videos", "Videos"] as const] : []),
+          ]).map(([t, label]) => {
             const isActive = active === t;
             return (
               <button
                 key={t}
                 type="button"
                 onClick={() => go(t === "profile" ? "" : `/${t}`)}
-                className="px-3 py-3 text-[13px] font-bold uppercase tracking-widest transition"
+                className="shrink-0 px-3 py-3 text-[13px] font-bold uppercase tracking-widest transition"
                 style={{
                   color: isActive ? C.brandPrimary : C.muted,
                   letterSpacing: "0.14em",
@@ -292,7 +327,7 @@ export const StorefrontShell = ({
                   marginBottom: -1,
                 }}
               >
-                {t === "profile" ? "Profile" : "Shop"}
+                {label}
               </button>
             );
           })}
