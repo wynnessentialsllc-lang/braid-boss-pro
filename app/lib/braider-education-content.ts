@@ -1216,6 +1216,52 @@ export const EDUCATION_CATEGORIES: EducationCategory[] = [
       },
     ],
   },
+  {
+    id: "teach-earn",
+    name: "Teach & Earn",
+    blurb: "Turn your skills into income — host classes and sell video tutorials.",
+    lessons: [
+      {
+        id: "host-paid-classes",
+        title: "Hosting paid braiding classes",
+        readMinutes: 3,
+        body: [
+          "A class is a workshop students sign up and pay for — in person at your space, or virtual over a video call. Braid Boss Pro handles the sign-up and the payment through your own Stripe account, and only shows the student the exact location (or the meeting link) after they've paid.",
+          "Set a capacity so a class can't oversell, a clear date and time, and a price that reflects your time preparing and teaching — not just the hours in the room. Publishing a class adds it to your storefront so you can share one link.",
+          "Once it's live, your roster shows who signed up and how many seats are left, and you can refund a seat if someone can't make it — their spot reopens automatically.",
+        ],
+        tryThisWeek:
+          "Publish one small class — even 3–4 seats — for the style you're asked about most, and share the link on your booking page.",
+        relatedTool: "Settings → Classes",
+      },
+      {
+        id: "sell-video-tutorials",
+        title: "Selling video tutorials",
+        readMinutes: 4,
+        body: [
+          "A video tutorial is a recorded lesson people buy access to. When they pay, Braid Boss Pro sends them to a private watch page — the video link is never shown publicly, so it can't be found without paying.",
+          "The easiest way to host is a free YouTube video set to 'Unlisted'. Unlisted means it won't show up in search or on your channel — only someone with the exact link can watch it. You keep that link private and paste it into your video lesson; buyers receive it only after checkout. (You can also upload the file straight into Braid Boss Pro for a shorter clip you want to keep tighter control over.)",
+          "One honest thing to know: an unlisted link is a gate, not a lock — a buyer could reshare their link. To limit that, you can sell access as a 'Rent' that expires after a set number of days instead of a permanent buy.",
+        ],
+        tryThisWeek:
+          "Record one short how-to, upload it to YouTube as Unlisted, and add it as a video lesson at a test price.",
+        relatedTool: "Settings → Video Lessons",
+      },
+      {
+        id: "price-teaching",
+        title: "Pricing classes and tutorials",
+        readMinutes: 3,
+        body: [
+          "Teaching is priced differently from a service. You're selling knowledge that took years to build, and — unlike a style — a class or a video can be sold to many people, so the price can reflect the value to the student, not just your time in the room.",
+          "For a class, consider what a student gains by learning from you — a faster technique, or a new style they can start charging for — and price against that rather than your hourly braiding rate. Small, capped classes can often carry a higher per-seat price than a large one.",
+          "For a video, a common approach is to start a little lower to build reviews and reputation, then raise the price as demand grows — the same way you'd raise a style that's always booked out.",
+        ],
+        tryThisWeek:
+          "Set a price for one class and one video, then check back in a month — if they sell out or sell fast, that's your signal to raise it.",
+        relatedTool: "Boss Growth Guide",
+      },
+    ],
+  },
 ];
 
 export const EDUCATION_TOTAL_LESSONS = EDUCATION_CATEGORIES.reduce(

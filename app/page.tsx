@@ -35506,7 +35506,7 @@ const VideosScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
               })}
             </div>
             {(editing.source_type || "link") === "link" ? (
-              <Field label="Video link" help="Unlisted YouTube / Vimeo / Loom / Drive link. Kept private — only paid buyers see it on a token-gated watch page.">
+              <Field label="Video link" help="Set your video to Unlisted on YouTube/Vimeo (so only people with the link can watch), then paste the link here. It stays private — only paid buyers get it, on a token-gated watch page.">
                 <Input value={editing.access_url ?? ""} onChange={(e) => setEditing({ ...editing, access_url: e.target.value })} placeholder="https://youtu.be/…" />
               </Field>
             ) : (
