@@ -251,6 +251,37 @@ export default function ContractSigningPage() {
           </div>
         )}
 
+        {/* After signing, keep the full agreement readable so the client
+            can always return to it — e.g. to retrieve the service address
+            saved in the contract body. Read-only: no fields, no actions. */}
+        {!loading && contract && (outcome === "signed" || contract.status === "signed") && (
+          <div style={{ marginTop: 18 }}>
+            <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: C.coffee, marginBottom: 8 }}>
+              Your signed agreement
+            </p>
+            <div
+              style={{
+                padding: 18,
+                borderRadius: 16,
+                background: C.paper,
+                border: `1px solid ${C.hairline}`,
+                whiteSpace: "pre-wrap",
+                lineHeight: 1.55,
+                fontSize: 14,
+                color: C.coffee,
+              }}
+            >
+              {contract.body_snapshot}
+            </div>
+            {contract.signed_date && (
+              <p style={{ fontSize: 12, color: C.muted, marginTop: 10, textAlign: "center" }}>
+                Signed {fmtDate(contract.signed_date)}
+                {contract.client_name ? ` by ${contract.client_name}` : ""}
+              </p>
+            )}
+          </div>
+        )}
+
         {!loading && contract && !terminalState && (
           <>
             {apptLine && (
