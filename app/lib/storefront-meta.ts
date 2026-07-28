@@ -55,7 +55,14 @@ const cleanHandle = (raw: string | string[] | undefined): string => {
 
 export type StorefrontMeta = {
   handle: string;
+  // Brand-first name for the shop/storefront pages: shop_name → business_name.
   studioName: string;
+  // Person-first name for the booking page's "Book with …" title: the
+  // stylist's studio name (business_name, e.g. "Sheree") is preferred over
+  // the shop/brand name. Mirrors the in-app booking-page tab title and the
+  // "Studio name" field, which the app documents as "shown on your booking
+  // page — your stylist name."
+  bookingName: string;
   description: string | null;
   imageUrl: string | null;
   locationText: string | null;
@@ -97,10 +104,16 @@ export const getStorefrontMeta = async (
       /* extended fields are optional */
     }
 
-    const studioName =
-      (shopName && shopName.trim()) ||
-      (row.business_name && String(row.business_name).trim()) ||
-      `@${handle}`;
+    const businessName =
+      row.business_name && String(row.business_name).trim()
+        ? String(row.business_name).trim()
+        : null;
+    const trimmedShopName = shopName && shopName.trim() ? shopName.trim() : null;
+    // Storefront/shop pages lead with the brand; the booking page leads with
+    // the stylist's studio (personal) name. Both fall back to the other name,
+    // then to the @handle, so neither is ever blank.
+    const studioName = trimmedShopName || businessName || `@${handle}`;
+    const bookingName = businessName || trimmedShopName || `@${handle}`;
     const description =
       (shopDescription && shopDescription.trim()) ||
       (row.intro && String(row.intro).trim()) ||
@@ -113,6 +126,7 @@ export const getStorefrontMeta = async (
     return {
       handle,
       studioName,
+      bookingName,
       description,
       imageUrl,
       locationText: row.location_text ? String(row.location_text) : null,
