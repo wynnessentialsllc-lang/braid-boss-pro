@@ -27,10 +27,13 @@ export async function generateMetadata({
   const meta = await loadMeta(slug);
   if (!meta) return {};
   const canonical = `${SITE_URL}/book/${encodeURIComponent(slug)}`;
-  const title = `Book with ${meta.studioName}`;
+  // Lead with the stylist's studio (personal) name — e.g. "Book with Sheree" —
+  // matching the in-app booking-page title and the "Studio name" setting,
+  // rather than the shop/brand name used on the storefront pages.
+  const title = `Book with ${meta.bookingName}`;
   const description =
     clampDescription(meta.description) ||
-    `Request an appointment with ${meta.studioName} — pick a service, date, and time online.`;
+    `Request an appointment with ${meta.bookingName} — pick a service, date, and time online.`;
   const images = meta.imageUrl ? [{ url: meta.imageUrl }] : undefined;
 
   return {
@@ -68,7 +71,7 @@ export default async function BookingLayout({
     ? {
         "@context": "https://schema.org",
         "@type": "HealthAndBeautyBusiness",
-        name: meta.studioName,
+        name: meta.bookingName,
         url: `${SITE_URL}/book/${encodeURIComponent(slug)}`,
         ...(meta.description ? { description: meta.description } : {}),
         ...(meta.imageUrl ? { image: meta.imageUrl } : {}),
