@@ -6,6 +6,9 @@ import {
   CtaFooter,
 } from "../../components/marketing/MarketingShell";
 import { ComparisonTable, type ComparisonRow } from "../../components/marketing/ComparisonTable";
+import { FaqAccordion } from "../../components/marketing/FeaturePageKit";
+import CompareSchema from "../../components/marketing/CompareSchema";
+import { type FaqEntry } from "../../components/marketing/FeatureSchema";
 
 export const metadata: Metadata = {
   title: "Braid Boss Pro vs Square Appointments · Which is better for braiders?",
@@ -42,9 +45,37 @@ const rows: ComparisonRow[] = [
   { feature: "PWA install — no app store", bbp: { mark: "yes" }, them: { mark: "no" } },
 ];
 
+const FAQS: FaqEntry[] = [
+  {
+    q: "Square Appointments is free — is Braid Boss Pro still worth $14.99/month?",
+    a: "Square's free tier looks cheaper until you add the features braiders actually need. SMS reminders, marketing automation, and contracts are all paid add-ons on Square, often $15–40/month combined. Braid Boss Pro includes reminders, marketing, contracts, retail, analytics, and a braid pricing calculator in the single $14.99 flat price.",
+  },
+  {
+    q: "Is Braid Boss Pro or Square Appointments better for braiders?",
+    a: "Square Appointments is generic appointment and retail software tuned for quick chair turnover. Braid Boss Pro is built for braid work — hair-included vs hair-billed pricing, variations like length and take-down, long-appointment deposit windows, and allergy/aftercare contract clauses.",
+  },
+  {
+    q: "Does Braid Boss Pro charge per staff member like Square?",
+    a: "No. Braid Boss Pro is a flat $14.99/month with no per-staff fees. Square Appointments charges roughly $20–35/month for each additional team member on the paid tiers.",
+  },
+  {
+    q: "How do payments and payouts compare?",
+    a: "Braid Boss Pro uses Stripe Connect, so you own your Stripe account and payouts land there, usually same-day. Square keeps payment processing inside the Square ecosystem. Processing rates are similar (~2.9% + 30¢ online), but with Braid Boss Pro the relationship and the money are yours.",
+  },
+  {
+    q: "Does Braid Boss Pro have a retail storefront like Square?",
+    a: "Yes. Braid Boss Pro includes a retail storefront with product variants and inventory so you can sell hair, edge control, and aftercare alongside your services. Square also has strong retail tools, especially with its hardware — but those live behind Square's paid stack rather than in one flat braider-focused price.",
+  },
+];
+
 export default function VsSquarePage() {
   return (
     <MarketingShell>
+      <CompareSchema
+        path="/compare/braid-boss-pro-vs-square-appointments"
+        breadcrumbName="Braid Boss Pro vs Square Appointments"
+        faqs={FAQS}
+      />
       <MarketingHero
         eyebrow="Comparison"
         title={
@@ -71,6 +102,10 @@ export default function VsSquarePage() {
         <p style={{ fontSize: 15.5, lineHeight: 1.7, color: "#3D3447", maxWidth: 720, margin: "0 auto" }}>
           Braid Boss Pro is $14.99/month all-in — reminders, marketing, contracts, retail storefront, analytics, and pricing calculator are all included from day one. The data model understands hair-included vs hair-billed pricing, variations like length + take-down + parting, and long-appointment deposit windows. Stripe Connect lets you own your payouts directly. A /@handle booking link feels like Linktree, not a Square sub-site. And no per-staff fees if you grow to a small team.
         </p>
+      </Section>
+
+      <Section eyebrow="FAQ" title="Square Appointments vs Braid Boss Pro, answered." background="#FBFAFD">
+        <FaqAccordion items={FAQS} />
       </Section>
 
       <CtaFooter

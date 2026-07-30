@@ -6,6 +6,9 @@ import {
   CtaFooter,
 } from "../../components/marketing/MarketingShell";
 import { ComparisonTable, type ComparisonRow } from "../../components/marketing/ComparisonTable";
+import { FaqAccordion } from "../../components/marketing/FeaturePageKit";
+import CompareSchema from "../../components/marketing/CompareSchema";
+import { type FaqEntry } from "../../components/marketing/FeatureSchema";
 
 export const metadata: Metadata = {
   title: "Braid Boss Pro vs Vagaro · Which is better for braiders?",
@@ -43,9 +46,37 @@ const rows: ComparisonRow[] = [
   { feature: "Public stylist reviews", bbp: { mark: "yes" }, them: { mark: "yes" } },
 ];
 
+const FAQS: FaqEntry[] = [
+  {
+    q: "Is Braid Boss Pro cheaper than Vagaro?",
+    a: "Yes. Braid Boss Pro is $14.99/month flat with no per-staff fees. Vagaro starts around $30/month and charges per user, so the cost climbs every time you add a chair. For a solo braider or a small braid-focused team, Braid Boss Pro is typically less than half the price.",
+  },
+  {
+    q: "Is Vagaro or Braid Boss Pro better for braiders?",
+    a: "Vagaro is broad salon software built for multi-service shops (hair, nails, skin, lashes) and generic 60-minute appointments. Braid Boss Pro is built specifically for braiders — service variations for length and density, hair-included pricing, and long-appointment deposit logic for styles that take all day.",
+  },
+  {
+    q: "Does Braid Boss Pro charge per staff member like Vagaro?",
+    a: "No. Braid Boss Pro is one flat $14.99/month price with no per-staff or per-user add-ons. Vagaro's pricing scales with the number of service providers on the account.",
+  },
+  {
+    q: "Do I own my payouts on Braid Boss Pro?",
+    a: "Yes. Braid Boss Pro uses Stripe Connect, so deposits and balance payments land in your own Stripe account, usually same-day, and Braid Boss Pro never holds your funds. Vagaro processes payments through Vagaro Pay on its own schedule.",
+  },
+  {
+    q: "Can I move to Braid Boss Pro if I already use Vagaro?",
+    a: "Yes. You can set up your services, booking link, and policies on Braid Boss Pro and run the 14-day free trial alongside your current tools before switching. Your client list stays in your own account and is exportable at any time.",
+  },
+];
+
 export default function VsVagaroPage() {
   return (
     <MarketingShell>
+      <CompareSchema
+        path="/compare/braid-boss-pro-vs-vagaro"
+        breadcrumbName="Braid Boss Pro vs Vagaro"
+        faqs={FAQS}
+      />
       <MarketingHero
         eyebrow="Comparison"
         title={
@@ -72,6 +103,10 @@ export default function VsVagaroPage() {
         <p style={{ fontSize: 15.5, lineHeight: 1.7, color: "#3D3447", maxWidth: 720, margin: "0 auto" }}>
           Every feature in Braid Boss Pro starts from how braiders actually work. Service variations for take-down + length + hair type. Hair-included or hair-billed pricing per style. Long-appointment deposit logic that respects realistic timeline windows. A /@handle booking link that feels like Linktree, not a clinic intake form. Stripe Connect so payouts land in YOUR own Stripe account same-day. Contracts built for natural hair work, including allergy and aftercare clauses. And it&apos;s $14.99/month flat — less than half of Vagaro&apos;s entry tier, with no per-staff penalty if you add a chair.
         </p>
+      </Section>
+
+      <Section eyebrow="FAQ" title="Vagaro vs Braid Boss Pro, answered." background="#FBFAFD">
+        <FaqAccordion items={FAQS} />
       </Section>
 
       <CtaFooter

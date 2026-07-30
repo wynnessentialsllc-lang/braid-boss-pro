@@ -1,7 +1,0 @@
-# Braid Boss Pro is a public site — allow all crawlers and compliance
-# reviewers (e.g. A2P/10DLC vetting) to read every public page,
-# including the privacy policy, terms, and public booking pages.
-User-agent: *
-Allow: /
-
-Sitemap: https://braidbosspro.app/sitemap.xml
