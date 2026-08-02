@@ -18,6 +18,7 @@ const ROUTES: Array<{ path: string; priority: number; changeFrequency: MetadataR
   { path: "/features", priority: 0.9, changeFrequency: "monthly" },
   { path: "/why-braid-boss-pro", priority: 0.9, changeFrequency: "monthly" },
   { path: "/pricing", priority: 0.9, changeFrequency: "monthly" },
+  { path: "/about", priority: 0.6, changeFrequency: "monthly" },
   // Dedicated SEO feature pages — generated from the shared registry so
   // adding a page in app/lib/feature-pages.ts lists it here automatically.
   ...FEATURE_PAGES.map((p) => ({
@@ -26,6 +27,7 @@ const ROUTES: Array<{ path: string; priority: number; changeFrequency: MetadataR
     changeFrequency: "monthly" as const,
   })),
   { path: "/how-it-works", priority: 0.7, changeFrequency: "monthly" },
+  { path: "/tour", priority: 0.6, changeFrequency: "monthly" },
   { path: "/guides", priority: 0.6, changeFrequency: "monthly" },
   { path: "/compare/braid-boss-pro-vs-styleseat", priority: 0.8, changeFrequency: "monthly" },
   { path: "/compare/braid-boss-pro-vs-vagaro", priority: 0.8, changeFrequency: "monthly" },

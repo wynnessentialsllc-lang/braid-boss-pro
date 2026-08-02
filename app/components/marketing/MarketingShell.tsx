@@ -341,6 +341,9 @@ const MarketingFooter = () => (
         <Link href="/how-it-works" style={footerLink}>
           How it works
         </Link>
+        <Link href="/about" style={footerLink}>
+          About
+        </Link>
         <Link href="/pricing" style={footerLink}>
           Pricing
         </Link>

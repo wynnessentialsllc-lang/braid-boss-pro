@@ -43,6 +43,7 @@ import {
   Section,
   CtaFooter,
 } from "./MarketingShell";
+import { FounderStory } from "./FounderStory";
 import { FeatureCard, FeatureGrid } from "./FeatureCard";
 import {
   AppointmentActionShowcase,
@@ -329,6 +330,10 @@ export default function FeaturesContent({ directory }: { directory?: React.React
           />
         </FeatureGrid>
       </Section>
+
+      {/* Founder story — the site's honest, first-party social proof
+          (built by a working braider) in place of invented testimonials. */}
+      <FounderStory variant="home" />
 
       {directory}
 
