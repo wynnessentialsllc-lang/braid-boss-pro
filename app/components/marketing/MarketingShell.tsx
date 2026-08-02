@@ -335,6 +335,9 @@ const MarketingFooter = () => (
         <Link href="/discover" style={footerLink}>
           Find a Braider
         </Link>
+        <Link href="/braiders" style={footerLink}>
+          Browse by City &amp; Style
+        </Link>
         <Link href="/features" style={footerLink}>
           Features
         </Link>
