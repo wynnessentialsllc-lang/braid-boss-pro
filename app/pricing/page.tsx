@@ -13,6 +13,8 @@ import {
   Section,
   CtaFooter,
 } from "../components/marketing/MarketingShell";
+import { PricingPlanCard } from "../components/marketing/PricingPlanCard";
+import { PricingComparison } from "../components/marketing/PricingComparison";
 import { C, FONT_DISPLAY, GRADIENTS, SHADOWS } from "../components/marketing/tokens";
 
 export const metadata: Metadata = {
@@ -47,7 +49,6 @@ export const metadata: Metadata = {
   },
 };
 
-const MONTHLY_PRICE_DOLLARS = 14.99;
 const TRIAL_DAYS = 14;
 
 export default function PricingPage() {
@@ -107,28 +108,7 @@ export default function PricingPage() {
             alignItems: "stretch",
           }}
         >
-          <PricingCard
-            tone="founding"
-            badge="14-Day Free Trial"
-            title="Braid Boss Pro"
-            subtitle="14-day free trial · cancel anytime"
-            price={`$${MONTHLY_PRICE_DOLLARS.toFixed(2)}`}
-            cadence="/month"
-            description={`Try every feature free for ${TRIAL_DAYS} days — no charge until your trial ends. Then $${MONTHLY_PRICE_DOLLARS.toFixed(2)}/month. No contracts. Cancel anytime.`}
-            features={[
-              "Online Booking",
-              "Deposits & Payments",
-              "Digital Contracts",
-              "Email & SMS Reminders",
-              "Client Management CRM",
-              "Reviews & Testimonials",
-              "Business Analytics",
-              "Expense Tracking",
-              "Education Hub",
-              "Mobile App Access",
-            ]}
-            cta={{ label: "Start Your Free Trial", href: "/?signup=1" }}
-          />
+          <PricingPlanCard />
           <PricingCard
             tone="future"
             badge="Grandfathered members"
@@ -169,12 +149,29 @@ export default function PricingPage() {
         </div>
       </Section>
 
+      {/* At-a-glance comparison vs the tools braiders usually evaluate */}
+      <Section
+        eyebrow="How we compare"
+        title="One flat price against the usual alternatives."
+        intro="Braiders usually weigh StyleSeat, Vagaro, and Square Appointments. Here's how Braid Boss Pro stacks up on the things that actually cost you money."
+        background="#FBFAFD"
+      >
+        <PricingComparison />
+        <p style={{ marginTop: 16, textAlign: "center", fontSize: 13.5, color: C.coffee }}>
+          Want the detail?{" "}
+          <a href="/compare/braid-boss-pro-vs-styleseat" style={{ color: C.brandPrimary, fontWeight: 700, textDecoration: "underline" }}>vs StyleSeat</a>
+          {" · "}
+          <a href="/compare/braid-boss-pro-vs-vagaro" style={{ color: C.brandPrimary, fontWeight: 700, textDecoration: "underline" }}>vs Vagaro</a>
+          {" · "}
+          <a href="/compare/braid-boss-pro-vs-square-appointments" style={{ color: C.brandPrimary, fontWeight: 700, textDecoration: "underline" }}>vs Square</a>
+        </p>
+      </Section>
+
       {/* Why Braid Boss Pro */}
       <Section
         eyebrow="Why Braid Boss Pro?"
         title="More than booking — your whole business."
         intro="Most salon apps charge $24–$48/month and tack on per-staff fees. Braid Boss Pro is one flat $14.99 — bookings, payments, contracts, storefront, and marketing — built around how braiders actually work."
-        background="#FBFAFD"
       >
         <div
           style={{
