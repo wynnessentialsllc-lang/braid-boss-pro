@@ -33,7 +33,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Does Braid Boss Pro process payments?",
-    a: "No. There's no Stripe and no payment-card collection inside the app. Receipts and invoices are PDFs you generate locally; collection still happens off-app via cash, CashApp, Zelle, or whichever method you prefer.",
+    a: "Yes — through Stripe Connect. You connect your own Stripe account, and card deposits, balance payments, and storefront checkout are paid directly into it (same-day payouts on Stripe's schedule). Braid Boss Pro never custodies your funds or takes a cut of your services; Stripe's standard processing fee (~2.9% + 30¢) applies. Prefer cash, CashApp, or Zelle? You can skip Stripe entirely and just log those payments in the ledger — deposits and card payments are optional, not required.",
   },
 ];
 

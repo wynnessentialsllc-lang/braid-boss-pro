@@ -93,6 +93,14 @@ export default function RootLayout({
       className="h-full antialiased"
     >
       <body className="min-h-full flex flex-col">
+        {/* Preconnect to the Google Fonts hosts. The marketing shell,
+            booking page, and storefront pull Cormorant Garamond + DM Sans
+            from Google Fonts via CSS @import (allow-listed in the CSP,
+            see next.config.ts). @import is discovered late, so opening the
+            TLS connections early shaves the font-load waterfall. React 19
+            hoists these <link> tags into <head>. */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {/* SoftwareApplication structured data — gives LLMs and
             search engines a machine-readable summary of what this
             product is, who it's for, and what it costs. Emitted once

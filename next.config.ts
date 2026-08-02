@@ -20,17 +20,22 @@ import type { NextConfig } from "next";
 //   • 'unsafe-inline' is required because the UI uses inline style
 //     attributes throughout and Next injects inline bootstrap scripts;
 //     tightening to nonces/hashes is a follow-up, not a launch blocker.
-// Fonts resolve from the system stack (no external font CDN), so no
-// font/style host needs allow-listing.
+// Fonts: the marketing shell, booking page, and storefront load
+// Cormorant Garamond + DM Sans from Google Fonts via CSS @import, so
+// the stylesheet host (fonts.googleapis.com) must be allow-listed on
+// style-src and the font-file host (fonts.gstatic.com) on font-src —
+// otherwise the CSP silently blocks them and the brand type falls back
+// to Georgia/system. (A future move to next/font would self-host these
+// and let us drop both hosts again.)
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-  "style-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob: https:",
-  "font-src 'self' data:",
+  "font-src 'self' data: https://fonts.gstatic.com",
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://*.stripe.com",
   "frame-src https://*.stripe.com",
   "form-action 'self' https://*.stripe.com",

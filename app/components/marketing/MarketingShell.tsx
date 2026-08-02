@@ -8,6 +8,22 @@
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { C, FONT_BODY, FONT_DISPLAY, GRADIENTS, SHADOWS } from "./tokens";
+import { trackEvent } from "../../lib/track";
+
+// Conversion instrumentation for the marketing surface. Every "start
+// trial" / "sign in" CTA on every marketing page flows through the
+// shared MarketingHero, CtaFooter, and header below, so tracking here
+// covers the whole funnel from one place. `intent` is derived from the
+// destination so we can see which buttons drive signups vs sign-ins.
+// Fire-and-forget (trackEvent never throws) and non-blocking, so it
+// can't interfere with the CTA's own navigation.
+const ctaIntent = (href: string): "signup" | "signin" | "nav" =>
+  href.includes("signup") ? "signup" : href.includes("signin") ? "signin" : "nav";
+const trackCta = (location: string, cta: { label: string; href: string }): void =>
+  trackEvent("marketing_cta_click", {
+    category: "activation",
+    metadata: { location, intent: ctaIntent(cta.href), label: cta.label, href: cta.href },
+  });
 
 export const MarketingShell = ({ children }: { children: ReactNode }) => {
   // IntersectionObserver-driven reveal: any element with .bbp-reveal
@@ -143,6 +159,7 @@ const MarketingHeader = () => {
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- intentional full reload to remount the app gate */}
           <a
             href="/?signin=1"
+            onClick={() => trackCta("header", { label: "Sign in", href: "/?signin=1" })}
             style={{
               ...marketingNavLink,
               padding: "8px 14px",
@@ -234,7 +251,7 @@ const MarketingHeader = () => {
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- intentional full reload to remount the app gate */}
             <a
               href="/?signin=1"
-              onClick={() => setOpen(false)}
+              onClick={() => { setOpen(false); trackCta("mobile_nav", { label: "Sign in", href: "/?signin=1" }); }}
               style={{
                 ...mobileDrawerLink,
                 color: "#FFFFFF",
@@ -491,6 +508,7 @@ export const MarketingHero = ({
       <div className="flex flex-wrap items-center justify-center" style={{ gap: 10, marginTop: 26 }}>
         <a
           href={primaryCta.href}
+          onClick={() => trackCta("hero_primary", primaryCta)}
           style={{
             padding: "14px 22px",
             borderRadius: 14,
@@ -509,6 +527,7 @@ export const MarketingHero = ({
         {secondaryCta && (
           <a
             href={secondaryCta.href}
+            onClick={() => trackCta("hero_secondary", secondaryCta)}
             style={{
               padding: "14px 22px",
               borderRadius: 14,
@@ -534,6 +553,7 @@ export const MarketingHero = ({
           Already have an account?{" "}
           <a
             href={signInHref}
+            onClick={() => trackCta("hero_signin", { label: "Sign in", href: signInHref })}
             style={{ color: C.brandPrimary, fontWeight: 700, textDecoration: "underline" }}
           >
             Sign in
@@ -681,6 +701,7 @@ export const CtaFooter = ({
         <div className="flex flex-wrap items-center justify-center" style={{ gap: 10, marginTop: 24 }}>
           <a
             href={primaryCta.href}
+            onClick={() => trackCta("cta_footer_primary", primaryCta)}
             style={{
               padding: "14px 24px",
               borderRadius: 14,
@@ -699,6 +720,7 @@ export const CtaFooter = ({
           {secondaryCta && (
             <a
               href={secondaryCta.href}
+              onClick={() => trackCta("cta_footer_secondary", secondaryCta)}
               style={{
                 padding: "14px 24px",
                 borderRadius: 14,
