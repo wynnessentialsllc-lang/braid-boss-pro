@@ -356,6 +356,9 @@ const MarketingFooter = () => (
         <Link href="/guides" style={footerLink}>
           Guides
         </Link>
+        <Link href="/security" style={footerLink}>
+          Security
+        </Link>
         <Link href="/privacy" style={footerLink}>
           Privacy
         </Link>

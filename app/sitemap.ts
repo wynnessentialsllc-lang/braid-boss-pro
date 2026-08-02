@@ -37,6 +37,7 @@ const ROUTES: Array<{ path: string; priority: number; changeFrequency: MetadataR
   { path: "/faq", priority: 0.6, changeFrequency: "monthly" },
   { path: "/founding-access", priority: 0.6, changeFrequency: "monthly" },
   { path: "/support", priority: 0.4, changeFrequency: "yearly" },
+  { path: "/security", priority: 0.4, changeFrequency: "yearly" },
   { path: "/privacy", priority: 0.3, changeFrequency: "yearly" },
   { path: "/terms", priority: 0.3, changeFrequency: "yearly" },
 ];

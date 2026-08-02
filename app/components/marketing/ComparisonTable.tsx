@@ -49,50 +49,62 @@ export const ComparisonTable = ({
   competitorName: string;
   rows: ComparisonRow[];
 }) => {
+  // Rendered as a real <table> (th scope="col"/"row") so crawlers and
+  // assistive tech parse it as tabular data. The wrapper scrolls
+  // horizontally on narrow screens instead of overflowing the page.
+  const th: React.CSSProperties = {
+    textAlign: "left",
+    padding: "14px 18px",
+    fontWeight: 800,
+    fontSize: 12,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: C.coffee,
+  };
+  const cell: React.CSSProperties = { padding: "14px 18px", verticalAlign: "middle" };
   return (
     <div
       style={{
         background: C.paper,
         border: `1px solid ${C.brandBorder}`,
         borderRadius: 18,
-        overflow: "hidden",
+        overflowX: "auto",
       }}
     >
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1.5fr 1fr 1fr",
-          background: C.brandSurface,
-          padding: "14px 18px",
-          borderBottom: `1px solid ${C.brandBorder}`,
-          fontWeight: 800,
-          fontSize: 12,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          color: C.coffee,
-        }}
+      <table
+        style={{ width: "100%", minWidth: 520, borderCollapse: "collapse", tableLayout: "fixed" }}
+        aria-label={`Braid Boss Pro compared with ${competitorName}`}
       >
-        <div>Feature</div>
-        <div>Braid Boss Pro</div>
-        <div>{competitorName}</div>
-      </div>
-      {rows.map((row, i) => (
-        <div
-          key={row.feature}
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1.5fr 1fr 1fr",
-            padding: "14px 18px",
-            borderBottom: i === rows.length - 1 ? "none" : `1px solid ${C.brandBorder}`,
-            alignItems: "center",
-            background: i % 2 === 1 ? "#FBFAFD" : "transparent",
-          }}
-        >
-          <div style={{ fontWeight: 600, fontSize: 13, color: C.ink }}>{row.feature}</div>
-          <Cell value={row.bbp} />
-          <Cell value={row.them} />
-        </div>
-      ))}
+        <colgroup>
+          <col style={{ width: "42%" }} />
+          <col style={{ width: "29%" }} />
+          <col style={{ width: "29%" }} />
+        </colgroup>
+        <thead>
+          <tr style={{ background: C.brandSurface, borderBottom: `1px solid ${C.brandBorder}` }}>
+            <th scope="col" style={th}>Feature</th>
+            <th scope="col" style={{ ...th, color: C.brandPrimary }}>Braid Boss Pro</th>
+            <th scope="col" style={th}>{competitorName}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr
+              key={row.feature}
+              style={{
+                borderBottom: i === rows.length - 1 ? "none" : `1px solid ${C.brandBorder}`,
+                background: i % 2 === 1 ? "#FBFAFD" : "transparent",
+              }}
+            >
+              <th scope="row" style={{ ...cell, fontWeight: 600, fontSize: 13, color: C.ink, textAlign: "left" }}>
+                {row.feature}
+              </th>
+              <td style={cell}><Cell value={row.bbp} /></td>
+              <td style={cell}><Cell value={row.them} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 };
