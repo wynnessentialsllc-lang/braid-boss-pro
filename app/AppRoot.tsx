@@ -637,10 +637,20 @@ const GRADIENTS = {
 
 // Shared elevation tokens. Used by primary buttons + lifted cards so
 // the same soft glow shows up everywhere instead of one-off shadows.
+//
+// 2026 depth pass: elevation is now built from *layered* shadows —
+// a tight contact shadow for edge definition plus a wide, soft ambient
+// shadow for the floating "raised glass" look. This is the single
+// biggest tell of a modern app vs. the old single flat drop shadow.
+// Existing keys keep their names so every call site upgrades at once.
 const SHADOWS = {
   primaryGlow: "0 10px 28px -10px rgba(124, 58, 237, 0.45), 0 4px 12px -4px rgba(255, 77, 109, 0.30)",
-  card:        "0 4px 14px rgba(21, 17, 26, 0.06)",
-  cardLifted:  "0 12px 32px -12px rgba(21, 17, 26, 0.18)",
+  card:        "0 1px 2px rgba(21, 17, 26, 0.04), 0 10px 26px -14px rgba(21, 17, 26, 0.14)",
+  cardLifted:  "0 2px 6px rgba(21, 17, 26, 0.05), 0 22px 48px -22px rgba(21, 17, 26, 0.24)",
+  // New named tokens for the glass surfaces (header / tab bar / sheets)
+  // and hover-raised interactive cards.
+  glass:       "0 1px 0 rgba(255, 255, 255, 0.55) inset, 0 8px 30px -16px rgba(21, 17, 26, 0.22)",
+  cardHover:   "0 4px 10px rgba(21, 17, 26, 0.06), 0 28px 56px -24px rgba(124, 58, 237, 0.28)",
 };
 const FONT_DISPLAY = `"Cormorant Garamond", Georgia, serif`;
 const FONT_BODY = `"DM Sans", "Inter", system-ui, sans-serif`;
@@ -688,6 +698,49 @@ const GlobalStyle = () => (
     input, textarea, select, button { font-family: inherit; }
     input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     input[type=number] { -moz-appearance: textfield; }
+
+    /* 2026 glass surfaces — frosted, translucent panels that blur the
+       content scrolling behind them. Used by the app shell (header +
+       tab bar) and available to any screen that wants a "floating"
+       chrome. This is the core of the modern look; it falls back to a
+       near-solid tint on browsers without backdrop-filter, so nothing
+       ever becomes unreadable. */
+    .bbp-glass {
+      background: rgba(255, 255, 255, 0.72);
+      -webkit-backdrop-filter: saturate(180%) blur(18px);
+      backdrop-filter: saturate(180%) blur(18px);
+    }
+    .bbp-glass-strong {
+      background: rgba(255, 255, 255, 0.85);
+      -webkit-backdrop-filter: saturate(180%) blur(24px);
+      backdrop-filter: saturate(180%) blur(24px);
+    }
+    @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+      .bbp-glass, .bbp-glass-strong { background: rgba(255, 255, 255, 0.96); }
+    }
+
+    /* Brand gradient text — clips the purple→coral gradient into the
+       glyphs. For hero numerals / section titles that used to be flat
+       ink. Used opt-in via className so nothing changes unless asked. */
+    .bbp-gradient-text {
+      background: linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+    }
+
+    /* Refined interactive lift with a gentle spring. Complements the
+       existing .bbp-tap (scale-on-press) with a hover raise + shadow
+       bloom for pointer devices, honoring reduced-motion. */
+    .bbp-lift { transition: transform 220ms cubic-bezier(.2,.9,.25,1.15), box-shadow 220ms ease; will-change: transform; }
+    @media (hover: hover) {
+      .bbp-lift:hover { transform: translateY(-3px); box-shadow: 0 4px 10px rgba(21,17,26,0.06), 0 28px 56px -24px rgba(124,58,237,0.28); }
+    }
+    .bbp-lift:active { transform: translateY(-1px) scale(0.995); }
+    @media (prefers-reduced-motion: reduce) {
+      .bbp-lift, .bbp-lift:hover, .bbp-lift:active { transform: none; transition: none; }
+    }
   `}</style>
 );
 
@@ -2627,7 +2680,12 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
   const overlay = (
     <div className="fixed left-0 right-0 z-50 flex items-end justify-center"
       style={{
-        background: "rgba(26, 15, 8, 0.45)",
+        // Brand-ink scrim (was a leftover warm-brown) with a soft
+        // backdrop blur so the screen behind the sheet defocuses —
+        // the depth cue modern apps use to pull focus to the dialog.
+        background: "rgba(21, 17, 26, 0.48)",
+        WebkitBackdropFilter: "blur(6px)",
+        backdropFilter: "blur(6px)",
         top: overlayTop,
         height: overlayHeight ? `${overlayHeight}px` : "100dvh",
       }}
@@ -2641,7 +2699,9 @@ const Sheet = ({ open, onClose, title, children, maxHeight, rightAction, leftAct
         style={{
           background: C.cream,
           maxHeight: sheetMaxHeight,
-          boxShadow: "0 -20px 60px -20px rgba(0,0,0,0.3)",
+          // Deeper, softer layered lift so the panel reads as floating
+          // glass above the blurred scrim rather than a flat card.
+          boxShadow: "0 -1px 0 rgba(21,17,26,0.04), 0 -24px 70px -24px rgba(21,17,26,0.42)",
           // Reserve room for the notch + dynamic island so the
           // grabber and the "Edit Appointment" header are never
           // hidden behind the browser chrome.
@@ -2758,10 +2818,15 @@ const Header = ({ title, subtitle, leftAction, rightAction }: {
   const hasTitle = title !== undefined && title !== null && title !== "";
   return (
     <header
-      className="px-4 sticky top-0 z-10"
+      className="bbp-glass-strong px-4 sticky top-0 z-10"
       style={{
-        background: C.cream,
-        borderBottom: `1px solid ${C.hairline}`,
+        // Frosted translucent chrome — content scrolls under it with a
+        // soft blur (see .bbp-glass-strong). Replaces the flat opaque
+        // cream + hard hairline that read as a dated toolbar. A
+        // hairline border stays for edge definition; the shadow lifts
+        // it off the page.
+        borderBottom: `1px solid rgba(21, 17, 26, 0.06)`,
+        boxShadow: "0 6px 20px -16px rgba(21, 17, 26, 0.35)",
         // Honor iOS notch / dynamic island. Adds the env inset on
         // top of a flat 12px so the brand line never collides with
         // the status bar but doesn't add dead space when the safe
@@ -2835,14 +2900,17 @@ const TabBar = ({ active, setActive }: {
     // centered inside the 480px shell on tablet / desktop. Z-index sits
     // below the sheet overlay (z-50) so modals always cover it.
     <nav
-      className="bbp-tabbar fixed left-1/2 z-40 w-full max-w-[480px]"
+      className="bbp-tabbar bbp-glass-strong fixed left-1/2 z-40 w-full max-w-[480px]"
       style={{
         bottom: 0,
         transform: "translateX(-50%)",
-        background: `linear-gradient(180deg, ${C.cream} 0%, ${C.paper} 100%)`,
-        borderTop: `1px solid ${C.hairline}`,
+        // Frosted floating dock — the screen content blurs beneath it
+        // (see .bbp-glass-strong) instead of the old flat cream gradient
+        // strip. A whisper-thin top hairline + soft ambient shadow give
+        // it the raised-glass feel of a modern mobile app.
+        borderTop: `1px solid rgba(21, 17, 26, 0.05)`,
         paddingBottom: "env(safe-area-inset-bottom, 0px)",
-        boxShadow: "0 -8px 24px -16px rgba(21, 17, 26, 0.18)",
+        boxShadow: "0 -12px 30px -18px rgba(21, 17, 26, 0.22)",
       }}>
       <div className="flex items-center justify-around px-2 py-2">
         {tabs.map(t => {

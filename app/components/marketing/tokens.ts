@@ -35,12 +35,16 @@ export const GRADIENTS = {
   softC: "linear-gradient(135deg, rgba(34, 197, 94, 0.10), rgba(124, 58, 237, 0.10))",
 };
 
+// 2026 depth pass — layered elevation (tight contact + wide soft
+// ambient) so marketing cards float like the app's, and the hover
+// state blooms a brand-tinted glow. Kept in lockstep with the app's
+// SHADOWS in AppRoot.tsx so both surfaces share one design language.
 export const SHADOWS = {
   primaryGlow:
     "0 10px 28px -10px rgba(124, 58, 237, 0.45), 0 4px 12px -4px rgba(255, 77, 109, 0.30)",
-  card: "0 4px 14px rgba(21, 17, 26, 0.06)",
-  cardLifted: "0 12px 32px -12px rgba(21, 17, 26, 0.18)",
-  cardHover: "0 18px 36px -16px rgba(21, 17, 26, 0.22)",
+  card: "0 1px 2px rgba(21, 17, 26, 0.04), 0 10px 26px -14px rgba(21, 17, 26, 0.14)",
+  cardLifted: "0 2px 6px rgba(21, 17, 26, 0.05), 0 22px 48px -22px rgba(21, 17, 26, 0.24)",
+  cardHover: "0 4px 10px rgba(21, 17, 26, 0.06), 0 28px 56px -24px rgba(124, 58, 237, 0.28)",
 };
 
 export const FONT_DISPLAY = `"Cormorant Garamond", Georgia, serif`;
