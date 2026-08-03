@@ -6216,6 +6216,7 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           today={today}
           business={business}
           rebookDueCount={rebookingSummary.total}
+          rebookingOpportunities={rebookingOpportunities}
           setActive={setActive}
         />
 
@@ -6586,7 +6587,176 @@ const BossInsightsCard = ({ clients, appointments, commLog, settings, today, set
   );
 };
 
-const RetentionInsights = ({ clients, appointments, today, business, rebookDueCount, setActive }: {
+// Which retention tile the drill-down sheet is showing (null = closed).
+type RetentionDetailKind = "rebook" | "repeat" | "inactive";
+
+// Drill-down sheet for the three Retention Insights tiles. Each tile
+// (Rebook due / Repeat % / Inactive) opens this with a `kind`, and the
+// sheet names the exact clients behind that number so the stylist can
+// act on them — with a one-tap jump to the Clients tab to follow up.
+const RetentionDetailSheet = ({
+  kind, onClose, insights, rebookingOpportunities, business, onViewClients,
+}: {
+  kind: RetentionDetailKind | null;
+  onClose: () => void;
+  insights: {
+    inactiveList: Array<{ client: any; metrics: ClientMetrics; status: ClientStatus }>;
+    repeatList: Array<{ client: any; metrics: ClientMetrics; status: ClientStatus }>;
+    withHistory: number;
+    repeatCount: number;
+    repeatPct: number;
+    inactiveCount: number;
+  };
+  rebookingOpportunities: RebookingOpportunity[];
+  business: any;
+  onViewClients: () => void;
+}) => {
+  const currency = business?.currency || "USD";
+  const oneTimeCount = Math.max(0, insights.withHistory - insights.repeatCount);
+
+  const META: Record<RetentionDetailKind, { title: string; icon: React.ComponentType<{ size?: number }>; blurb: string }> = {
+    rebook: {
+      title: "Rebook due",
+      icon: Clock,
+      blurb: "Clients whose usual rebooking window has arrived or passed. A quick nudge now keeps them on your books.",
+    },
+    repeat: {
+      title: "Repeat clients",
+      icon: Repeat,
+      blurb: "How many of your clients with a visit history have come back for a second appointment — or more.",
+    },
+    inactive: {
+      title: "Inactive clients",
+      icon: AlertCircle,
+      blurb: "Clients who've gone quiet or are slipping away. A win-back message can bring them back in.",
+    },
+  };
+  const meta = kind ? META[kind] : null;
+  const Icon = meta?.icon;
+
+  // Compact list row shared by all three breakdowns.
+  const Row = ({ name, sub, right, pill }: { name: string; sub?: React.ReactNode; right?: React.ReactNode; pill?: React.ReactNode }) => (
+    <div className="flex items-center gap-3 py-2.5" style={{ borderBottom: `1px solid ${C.hairline}` }}>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold truncate" style={{ color: C.espresso }}>{name}</p>
+        {sub && <p className="text-[11px] mt-0.5 truncate" style={{ color: C.muted }}>{sub}</p>}
+      </div>
+      <div className="flex flex-col items-end gap-1 shrink-0">
+        {pill}
+        {right && <span className="text-[11px] font-mono font-bold" style={{ color: C.coffee }}>{right}</span>}
+      </div>
+    </div>
+  );
+
+  const Empty = ({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) => (
+    <div className="text-center py-8 px-4">
+      <div className="mx-auto mb-2 flex items-center justify-center rounded-full" style={{ width: 44, height: 44, background: "rgba(124, 58, 237, 0.08)", color: C.brandPrimary }}>{icon}</div>
+      <p className="text-sm font-semibold" style={{ color: C.espresso }}>{title}</p>
+      <p className="text-xs mt-1" style={{ color: C.muted }}>{body}</p>
+    </div>
+  );
+
+  const renderBody = () => {
+    if (kind === "rebook") {
+      const ops = Array.isArray(rebookingOpportunities) ? rebookingOpportunities : [];
+      if (ops.length === 0) {
+        return <Empty icon={<Clock size={20} />} title="Nobody's overdue" body="No rebookings are due right now — you're on top of it." />;
+      }
+      return (
+        <div>
+          {ops.slice(0, 30).map(op => {
+            const overdue = op.days_overdue;
+            const tone = op.urgency === "high" || overdue > 14 ? "danger" : overdue >= 0 ? "warning" : "neutral";
+            const text = overdue > 0 ? `${overdue}d overdue` : overdue === 0 ? "Due today" : `Due in ${Math.abs(overdue)}d`;
+            const sub = [op.last_style, op.last_appointment_date ? `Last visit ${formatAppointmentDateShort(op.last_appointment_date)}` : null].filter(Boolean).join(" · ");
+            return (
+              <Row key={op.client_id} name={op.client_name || "Client"} sub={sub || undefined}
+                pill={<Pill tone={tone}>{text}</Pill>}
+                right={op.estimated_value ? fmtMoney(op.estimated_value, currency) : undefined} />
+            );
+          })}
+          {ops.length > 30 && <p className="text-[11px] text-center mt-3" style={{ color: C.muted }}>+{ops.length - 30} more — see the Clients tab</p>}
+        </div>
+      );
+    }
+    if (kind === "repeat") {
+      const list = insights.repeatList;
+      return (
+        <div>
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            <div className="p-3 text-center rounded-2xl" style={{ background: C.ivory }}>
+              <p className="text-lg font-bold" style={{ color: C.brandPrimary, fontFamily: FONT_DISPLAY }}>{insights.repeatPct}%</p>
+              <p className="text-[9px] uppercase tracking-widest font-bold mt-0.5" style={{ color: C.muted }}>Repeat rate</p>
+            </div>
+            <div className="p-3 text-center rounded-2xl" style={{ background: C.ivory }}>
+              <p className="text-lg font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{insights.repeatCount}</p>
+              <p className="text-[9px] uppercase tracking-widest font-bold mt-0.5" style={{ color: C.muted }}>Repeat</p>
+            </div>
+            <div className="p-3 text-center rounded-2xl" style={{ background: C.ivory }}>
+              <p className="text-lg font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{oneTimeCount}</p>
+              <p className="text-[9px] uppercase tracking-widest font-bold mt-0.5" style={{ color: C.muted }}>One-time</p>
+            </div>
+          </div>
+          {list.length === 0 ? (
+            <Empty icon={<Repeat size={20} />} title="No repeat clients yet" body="Everyone's booked once so far. Rebooking nudges help turn first visits into regulars." />
+          ) : (
+            <>
+              <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Your regulars</p>
+              {list.slice(0, 20).map(({ client, metrics }) => (
+                <Row key={client.id} name={client.name || "Client"}
+                  sub={`${metrics.completedAppts} visits${metrics.mostBookedStyle ? " · " + metrics.mostBookedStyle : ""}`}
+                  pill={<Pill tone="success">{metrics.completedAppts}×</Pill>}
+                  right={metrics.lifetimeValue ? fmtMoney(metrics.lifetimeValue, currency) : undefined} />
+              ))}
+              {list.length > 20 && <p className="text-[11px] text-center mt-3" style={{ color: C.muted }}>+{list.length - 20} more</p>}
+            </>
+          )}
+        </div>
+      );
+    }
+    if (kind === "inactive") {
+      const list = insights.inactiveList;
+      if (list.length === 0) {
+        return <Empty icon={<Sparkles size={20} />} title="Book looks healthy" body="No clients are inactive right now — everyone's been in recently." />;
+      }
+      return (
+        <div>
+          {list.slice(0, 30).map(({ client, metrics, status }) => (
+            <Row key={client.id} name={client.name || "Client"}
+              sub={metrics.lastAppointmentDate ? `Last visit ${formatAppointmentDateShort(metrics.lastAppointmentDate)}` : "No completed visits"}
+              pill={<Pill tone={status === "inactive" ? "danger" : "warning"}>{metrics.daysSinceLast != null ? `${metrics.daysSinceLast}d ago` : (status === "inactive" ? "Inactive" : "At risk")}</Pill>}
+              right={metrics.lifetimeValue ? fmtMoney(metrics.lifetimeValue, currency) : undefined} />
+          ))}
+          {list.length > 30 && <p className="text-[11px] text-center mt-3" style={{ color: C.muted }}>+{list.length - 30} more — see the Clients tab</p>}
+        </div>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <Sheet open={kind !== null} onClose={onClose} title={meta?.title || ""}>
+      {meta && (
+        <div className="space-y-3 pb-2">
+          <div className="flex gap-3 items-start p-3.5 rounded-2xl" style={{ background: "rgba(124, 58, 237, 0.06)" }}>
+            {Icon && (
+              <div className="shrink-0 flex items-center justify-center rounded-xl" style={{ width: 34, height: 34, background: C.paper, color: C.brandPrimary }}>
+                <Icon size={18} />
+              </div>
+            )}
+            <p className="text-[12.5px] leading-relaxed" style={{ color: C.coffee }}>{meta.blurb}</p>
+          </div>
+          {renderBody()}
+          <div className="pt-1">
+            <Button variant="outline" fullWidth onClick={onViewClients} icon={<Users size={16} />}>View all clients</Button>
+          </div>
+        </div>
+      )}
+    </Sheet>
+  );
+};
+
+const RetentionInsights = ({ clients, appointments, today, business, rebookDueCount, rebookingOpportunities, setActive }: {
   clients: any[];
   appointments: any[];
   today: string;
@@ -6595,13 +6765,22 @@ const RetentionInsights = ({ clients, appointments, today, business, rebookDueCo
   // (computeRebookingOpportunities), passed in so this tile shows the
   // exact same number as the Rebooking opportunities card below.
   rebookDueCount: number;
+  // The full opportunity list behind `rebookDueCount`, so the tile's
+  // drill-down sheet lists the same clients it's counting.
+  rebookingOpportunities: RebookingOpportunity[];
   setActive: (tab: string) => void;
 }) => {
+  // Which stat tile's detail sheet is open.
+  const [detail, setDetail] = useState<RetentionDetailKind | null>(null);
+
   const insights = useMemo(() => {
     const safeClients = Array.isArray(clients) ? clients : [];
     const safeAppts = Array.isArray(appointments) ? appointments : [];
     if (safeClients.length === 0) {
-      return { hasData: false, topClients: [], inactiveCount: 0, repeatPct: 0, vipThreshold: 0 };
+      return {
+        hasData: false, topClients: [], inactiveCount: 0, repeatPct: 0, vipThreshold: 0,
+        inactiveList: [], repeatList: [], withHistory: 0, repeatCount: 0,
+      };
     }
     // VIP threshold = 75th percentile of lifetime value across clients
     // who have at least one completed appointment. Falls back to a flat
@@ -6620,12 +6799,20 @@ const RetentionInsights = ({ clients, appointments, today, business, rebookDueCo
       })
       .filter(x => x.metrics.totalAppts > 0);
 
-    const inactiveCount = enriched.filter(x => x.status === "inactive" || x.status === "at_risk").length;
+    // Inactive / at-risk clients — most overdue first — so the tile's
+    // drill-down can name exactly who's slipping away.
+    const inactiveList = enriched
+      .filter(x => x.status === "inactive" || x.status === "at_risk")
+      .sort((a, b) => (b.metrics.daysSinceLast ?? 0) - (a.metrics.daysSinceLast ?? 0));
+    const inactiveCount = inactiveList.length;
 
     // Repeat booking %: clients with 2+ completed visits / clients with any history.
     const withHistory = enriched.length;
-    const repeats = enriched.filter(x => x.metrics.completedAppts >= 2).length;
-    const repeatPct = withHistory > 0 ? Math.round((repeats / withHistory) * 100) : 0;
+    const repeatList = enriched
+      .filter(x => x.metrics.completedAppts >= 2)
+      .sort((a, b) => b.metrics.completedAppts - a.metrics.completedAppts);
+    const repeatCount = repeatList.length;
+    const repeatPct = withHistory > 0 ? Math.round((repeatCount / withHistory) * 100) : 0;
 
     // Top 3 clients this month by collected amount.
     const monthStart = today.slice(0, 7) + "-01";
@@ -6640,7 +6827,10 @@ const RetentionInsights = ({ clients, appointments, today, business, rebookDueCo
       .sort((a, b) => b.monthValue - a.monthValue)
       .slice(0, 3);
 
-    return { hasData: true, topClients, inactiveCount, repeatPct, vipThreshold };
+    return {
+      hasData: true, topClients, inactiveCount, repeatPct, vipThreshold,
+      inactiveList, repeatList, withHistory, repeatCount,
+    };
   }, [clients, appointments, today]);
 
   return (
@@ -6654,20 +6844,41 @@ const RetentionInsights = ({ clients, appointments, today, business, rebookDueCo
         </Card>
       ) : (
         <>
+          {/* Each tile is tappable — the chevron signals there's a
+              client-level breakdown behind the number, opened in a
+              drill-down sheet below. */}
           <div className="grid grid-cols-3 gap-2 mb-3">
-            <Card className="p-3" style={{ background: C.ivory }}>
-              <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Rebook due</p>
+            <Card className="p-3 bbp-tap" style={{ background: C.ivory }} onClick={() => setDetail("rebook")}>
+              <div className="flex items-start justify-between">
+                <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Rebook due</p>
+                <ChevronRight size={13} style={{ color: C.mutedSoft, flexShrink: 0, marginTop: 1 }} />
+              </div>
               <p className="text-base font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{rebookDueCount}</p>
             </Card>
-            <Card className="p-3" style={{ background: C.ivory }}>
-              <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Repeat %</p>
+            <Card className="p-3 bbp-tap" style={{ background: C.ivory }} onClick={() => setDetail("repeat")}>
+              <div className="flex items-start justify-between">
+                <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Repeat %</p>
+                <ChevronRight size={13} style={{ color: C.mutedSoft, flexShrink: 0, marginTop: 1 }} />
+              </div>
               <p className="text-base font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{insights.repeatPct}%</p>
             </Card>
-            <Card className="p-3" style={{ background: C.ivory }}>
-              <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Inactive</p>
+            <Card className="p-3 bbp-tap" style={{ background: C.ivory }} onClick={() => setDetail("inactive")}>
+              <div className="flex items-start justify-between">
+                <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>Inactive</p>
+                <ChevronRight size={13} style={{ color: C.mutedSoft, flexShrink: 0, marginTop: 1 }} />
+              </div>
               <p className="text-base font-bold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>{insights.inactiveCount}</p>
             </Card>
           </div>
+
+          <RetentionDetailSheet
+            kind={detail}
+            onClose={() => setDetail(null)}
+            insights={insights}
+            rebookingOpportunities={rebookingOpportunities}
+            business={business}
+            onViewClients={() => { setDetail(null); setActive("clients"); }}
+          />
 
           {/* "Time to rebook" list removed — it duplicated the
               "Rebooking opportunities" card below. The Overdue tile
