@@ -263,20 +263,16 @@ export async function POST(req: Request) {
           });
         }
         // Stylist/admin: manual refund needed — clear, actionable.
-        let stylistEmail: string | null = null;
+        // Resolve the stylist email SERVER-SIDE via queue_stylist_email_alert.
+        // admin.auth.admin.getUserById returns no email in this runtime, so the
+        // old `if (stylistEmail)` guard silently dropped this critical
+        // "manual refund needed" alert every time. Isolated in its own try.
         try {
-          const { data: u } = await admin.auth.admin.getUserById(user.id);
-          stylistEmail = u?.user?.email || null;
-        } catch { /* stylist email best-effort */ }
-        if (stylistEmail) {
-          await admin.rpc("queue_notification", {
+          await admin.rpc("queue_stylist_email_alert", {
             user_id_in: user.id,
-            channel_in: "email",
             notification_type_in: "booking_refund_manual_stylist",
-            body_in: "Manual refund needed: a denied booking's deposit could not be auto-refunded.",
             subject_in: "Action needed: manual deposit refund — Braid Boss Pro",
-            recipient_email_in: stylistEmail,
-            recipient_name_in: null,
+            body_in: "Manual refund needed: a denied booking's deposit could not be auto-refunded.",
             payload_in: {
               clientName: reqRow.client_name || "the client",
               serviceName,
@@ -288,6 +284,8 @@ export async function POST(req: Request) {
             dedupe_key_in: `booking_refund_manual_stylist:${requestId}`,
             booking_request_id_in: requestId,
           });
+        } catch (e) {
+          console.warn("[booking-deposit/refund] stylist alert enqueue failed:", e);
         }
       }
     }
