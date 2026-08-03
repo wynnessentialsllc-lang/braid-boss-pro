@@ -111,9 +111,12 @@ const extractFunctionError = async (error: unknown): Promise<string> => {
     try {
       const body = await ctx.clone().json();
       if (body && typeof body === "object") {
-        const b = body as { error?: string; detail?: string; message?: string };
+        const b = body as { error?: string; detail?: string; message?: string; hint?: string };
         const text = b.error || b.detail || b.message;
-        if (text) return text;
+        // send-push attaches an actionable `hint` on config errors
+        // (e.g. "Set VAPID_PUBLIC_KEY … via supabase secrets set").
+        // Surface it so the owner sees the exact fix, not just the code.
+        if (text) return b.hint ? `${text} — ${b.hint}` : text;
       }
     } catch {
       try {
