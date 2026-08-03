@@ -2849,11 +2849,10 @@ const Header = ({ title, subtitle, leftAction, rightAction }: {
             // header stays compact (one row of brand + a date
             // subtitle).
             <h1
-              className="font-bold uppercase truncate"
+              className="font-bold uppercase truncate bbp-gradient-text"
               style={{
                 fontSize: 17,
                 letterSpacing: "0.12em",
-                color: C.brandPrimary,
                 lineHeight: 1.2,
               }}
             >
@@ -42765,15 +42764,37 @@ export default function App() {
 }
 
 const Frame = ({ children, withTabBar = false }: { children: React.ReactNode; withTabBar?: boolean }) => (
-  <div style={{ minHeight: "100dvh", background: C.cream, fontFamily: FONT_BODY, color: C.espresso }}>
+  <div
+    style={{
+      minHeight: "100dvh",
+      fontFamily: FONT_BODY,
+      color: C.espresso,
+      // 2026 depth: the app canvas was flat pure-white, which made
+      // every white card, the glass chrome and the shadows disappear
+      // into it. This soft brand "aurora" — a whisper of purple in the
+      // top-left and rose in the bottom-right over a cool off-white —
+      // gives the whole surface atmosphere and lets the phone-width
+      // column read as a lifted panel on tablet/desktop. Fully on
+      // palette; content sits on solid cards above it, so contrast is
+      // untouched.
+      background:
+        "radial-gradient(1200px 620px at 12% -8%, rgba(124, 58, 237, 0.12), transparent 60%), " +
+        "radial-gradient(1100px 640px at 100% 108%, rgba(255, 77, 109, 0.10), transparent 58%), " +
+        "#EFEAF7",
+    }}
+  >
     <GlobalStyle />
     <div
       className="mx-auto relative"
       style={{
         maxWidth: 480,
         minHeight: "100dvh",
-        background: C.cream,
-        boxShadow: "0 0 60px -10px rgba(21, 17, 26,0.12)",
+        // Faintly tinted content column (not pure white) with its own
+        // gentle top-down wash, so the white cards inside visibly float
+        // and the frosted header/tab bar read as glass against it.
+        background:
+          "linear-gradient(180deg, #FBFAFE 0%, #F5F1FB 46%, #F1ECF9 100%)",
+        boxShadow: "0 0 80px -12px rgba(124, 58, 237, 0.18)",
         // Reserve space at the bottom so primary-screen content can scroll
         // past the fixed tab bar without being hidden behind it. Each
         // screen still sets its own `pb-XX` for in-flow spacing; this
