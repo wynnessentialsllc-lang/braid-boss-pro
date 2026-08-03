@@ -32,6 +32,14 @@ const isNativePlatform = (): boolean => {
 // Capacitor still work because they don't need VAPID.
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_PUSH_VAPID_PUBLIC_KEY || "";
 
+// True when the build-time VAPID public key is present. When it's
+// missing, a browser/PWA can't create a Web Push subscription at all —
+// iOS/Safari REQUIRE an applicationServerKey, so pushManager.subscribe
+// throws and enabling notifications silently fails. The Settings UI
+// reads this so it can show an honest "server setup isn't finished yet"
+// message instead of wrongly blaming the browser.
+export const WEB_PUSH_PUBLIC_KEY_CONFIGURED = VAPID_PUBLIC_KEY.length > 0;
+
 const urlBase64ToUint8Array = (base64: string): Uint8Array => {
   const padding = "=".repeat((4 - (base64.length % 4)) % 4);
   const b64 = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");

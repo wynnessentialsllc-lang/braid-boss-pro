@@ -565,6 +565,7 @@ import {
   subscribeWebPush,
   unsubscribeWebPush,
   refreshSubscriptionHeartbeat,
+  WEB_PUSH_PUBLIC_KEY_CONFIGURED,
   type PushCapability,
 } from "./lib/push";
 import {
@@ -23788,8 +23789,13 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
           setPushError("Notifications are off. Enable them in iOS Settings → Braid Boss Pro → Notifications, then try again.");
         } else if (typeof Notification !== "undefined" && Notification.permission === "denied") {
           setPushError("Notifications are off. Re-enable them for this site in your browser settings, or turn them on later in Account & Sync.");
+        } else if (!WEB_PUSH_PUBLIC_KEY_CONFIGURED) {
+          // The real reason on a supported PWA: the deploy is missing
+          // the VAPID public key, so the browser can't create a push
+          // subscription. Say that plainly instead of blaming the device.
+          setPushError("Push isn't finished setting up on the server yet — the web-push key (VAPID) is missing from this deploy. Once it's added, enabling notifications here will work.");
         } else {
-          setPushError("This browser does not currently support web push. Install Braid Boss Pro to your home screen to unlock the full mobile app experience on supported devices.");
+          setPushError("This browser can't create a push subscription. On iPhone, add Braid Boss Pro to your Home Screen first, then enable notifications from the installed app.");
         }
       }
       const cap = await detectPushCapability();
@@ -24333,6 +24339,28 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
               </Button>
             )}
             {pushError && <p className="text-[11px] mt-2" style={{ color: C.danger }}>{pushError}</p>}
+
+            {/* Honest setup state: if this deploy is missing the VAPID
+                public key, NO browser can create a subscription — say so
+                instead of letting "Enable" fail with a vague error. */}
+            {!WEB_PUSH_PUBLIC_KEY_CONFIGURED && pushCap !== "subscribed" && (
+              <p className="text-[11px] mt-2" style={{ color: C.warning }}>
+                Server setup unfinished: the web-push key isn&apos;t configured on this deploy yet, so notifications can&apos;t be delivered until it&apos;s added.
+              </p>
+            )}
+
+            {/* Let the owner probe the server before they're subscribed,
+                so each setup step can be verified without guessing. Uses
+                the same send-push call as the subscribed "Test" button;
+                the exact server reason (or success) shows below. */}
+            {pushCap !== "subscribed" && pushCap !== "unsupported" && (
+              <>
+                <Button variant="outline" icon={<Bell size={14} />} fullWidth className="mt-2" disabled={pushBusy} onClick={handleTestNotification}>
+                  Send test / diagnose
+                </Button>
+                {testStatus && <p className="text-[11px] mt-2 text-center" style={{ color: testStatus.startsWith("Couldn't") ? C.danger : C.success }}>{testStatus}</p>}
+              </>
+            )}
 
             {pushCap === "subscribed" && (
               <>
