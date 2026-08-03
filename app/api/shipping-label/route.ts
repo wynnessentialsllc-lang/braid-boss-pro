@@ -334,46 +334,43 @@ export async function POST(req: Request) {
   // re-open the Orders screen. We pull the email from auth.users (same
   // canonical source the rate-shopping route uses).
   try {
-    const { data: who2 } = await admin.auth.admin.getUserById(userId);
-    const stylistEmail = String(who2?.user?.email || "").trim();
-    if (stylistEmail) {
-      const shipTo = order.shipping_address as any | null;
-      const cityState = shipTo
-        ? [shipTo.city, shipTo.state].filter(Boolean).join(", ")
-        : "";
-      // Reuse the buyer's customer_token so the View order link is the
-      // same public tracking page the buyer sees. The stylist's Orders
-      // screen has its own deep links, but the public page is enough for
-      // a quick "did the label go through?" check.
-      const baseUrl =
-        process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || new URL(req.url).origin;
-      const viewOrderUrl = `${baseUrl}/orders/${encodeURIComponent(String((order as any).customer_token || ""))}`;
-      await admin.rpc("queue_notification", {
-        user_id_in: userId,
-        channel_in: "email",
-        notification_type_in: "stylist_label_printed",
-        body_in: `Label printed for ${order.customer_name || "a customer"}.`,
-        subject_in: `Label printed · #${String(order.id).slice(0, 8).toUpperCase()}`,
-        recipient_email_in: stylistEmail,
-        recipient_name_in: null,
-        payload_in: {
-          orderRef: String(order.id).slice(0, 8).toUpperCase(),
-          customerName: order.customer_name || order.customer_email || "Customer",
-          shipToCityState: cityState,
-          carrier: order.shipping_carrier || null,
-          service: order.shipping_service || null,
-          trackingNumber: label.tracking_number,
-          trackingUrl: label.tracking_url,
-          labelUrl: label.label_url,
-          viewOrderUrl,
-          // Label cost isn't on the order row — Shippo charged it to the
-          // stylist's Shippo balance, separate from Stripe. Best effort:
-          // omit when we don't have it, the template renders without.
-          labelCostUsd: null,
-        },
-        dedupe_key_in: `stylist_label_printed:${order.id}`,
-      });
-    }
+    const shipTo = order.shipping_address as any | null;
+    const cityState = shipTo
+      ? [shipTo.city, shipTo.state].filter(Boolean).join(", ")
+      : "";
+    // Reuse the buyer's customer_token so the View order link is the
+    // same public tracking page the buyer sees. The stylist's Orders
+    // screen has its own deep links, but the public page is enough for
+    // a quick "did the label go through?" check.
+    const baseUrl =
+      process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || new URL(req.url).origin;
+    const viewOrderUrl = `${baseUrl}/orders/${encodeURIComponent(String((order as any).customer_token || ""))}`;
+    // Resolve the stylist email SERVER-SIDE via queue_stylist_email_alert.
+    // admin.auth.admin.getUserById returns no email in this runtime, so the
+    // old `if (stylistEmail)` guard silently dropped this "label printed"
+    // receipt every time.
+    await admin.rpc("queue_stylist_email_alert", {
+      user_id_in: userId,
+      notification_type_in: "stylist_label_printed",
+      subject_in: `Label printed · #${String(order.id).slice(0, 8).toUpperCase()}`,
+      body_in: `Label printed for ${order.customer_name || "a customer"}.`,
+      payload_in: {
+        orderRef: String(order.id).slice(0, 8).toUpperCase(),
+        customerName: order.customer_name || order.customer_email || "Customer",
+        shipToCityState: cityState,
+        carrier: order.shipping_carrier || null,
+        service: order.shipping_service || null,
+        trackingNumber: label.tracking_number,
+        trackingUrl: label.tracking_url,
+        labelUrl: label.label_url,
+        viewOrderUrl,
+        // Label cost isn't on the order row — Shippo charged it to the
+        // stylist's Shippo balance, separate from Stripe. Best effort:
+        // omit when we don't have it, the template renders without.
+        labelCostUsd: null,
+      },
+      dedupe_key_in: `stylist_label_printed:${order.id}`,
+    });
   } catch (e: any) {
     console.warn(`[shipping-label] stylist email enqueue failed: ${e?.message || e}`);
   }

@@ -330,21 +330,24 @@ export async function POST(req: Request) {
       }
 
       // Stylist — notify now that a real (paid) booking has landed and
-      // needs review. A stylist-addressed notification_queue row is
-      // turned into a push automatically by the insert trigger
-      // (trg_push_stylist_addressed), so this is the stylist's first
-      // ping about the request. Dedupes on `deposit_paid_owner:<id>`.
-      const { data: ownerInfo } = await admin.auth.admin.getUserById(br.user_id);
-      const ownerEmail = ownerInfo?.user?.email || null;
-      if (ownerEmail) {
-        await admin.rpc("queue_notification", {
+      // needs review. This is the stylist's first ping about the
+      // request, and the resulting stylist-addressed row is turned into
+      // a web push by trg_push_stylist_addressed.
+      //
+      // Resolve the owner email SERVER-SIDE via queue_stylist_email_alert
+      // instead of admin.auth.admin.getUserById(): that call returns no
+      // email in this runtime, so the old `if (ownerEmail)` guard skipped
+      // the alert on every paid booking (stylist_deposit_paid was never
+      // enqueued). The RPC reads auth.users.email in Postgres — the same
+      // reliable path the no-deposit flow already uses. Isolated in its
+      // own try so it can't be skipped by, or skip, the client receipt
+      // enqueue above. Dedupes on `deposit_paid_owner:<id>`.
+      try {
+        await admin.rpc("queue_stylist_email_alert", {
           user_id_in: br.user_id,
-          channel_in: "email",
           notification_type_in: "stylist_deposit_paid",
-          body_in: ownerPaidBody,
           subject_in: "New paid booking — ready to review",
-          recipient_email_in: ownerEmail,
-          recipient_name_in: null,
+          body_in: ownerPaidBody,
           payload_in: {
             clientName: br.client_name || "A client",
             studioName: studioName || "your studio",
@@ -355,6 +358,8 @@ export async function POST(req: Request) {
           dedupe_key_in: `deposit_paid_owner:${requestId}`,
           booking_request_id_in: requestId,
         });
+      } catch (e) {
+        console.warn("[booking-deposit/webhook] stylist alert enqueue failed:", e);
       }
     }
   } catch (e) {
