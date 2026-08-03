@@ -24,7 +24,18 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Modern system-native sans as the base. The app + marketing
+     surfaces set DM Sans on their own containers; this stack governs
+     everywhere nothing overrides it, replacing the old Arial default
+     (a dated, heavier fallback) with the crisp platform UI face. */
+  font-family: var(--font-geist-sans);
+  /* Crisp type rendering. Antialiasing + optimizeLegibility make the
+     brand's DM Sans / Cormorant read sharp and light rather than the
+     chunky default weight browsers paint without it — one of the
+     biggest "modern app" tells vs. the old look. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   /* Reserve room for the iOS status bar / dynamic island when the
      app runs inside the Capacitor shell or as an installed PWA.
      viewport-fit: cover (set in layout.tsx) makes these env() values
@@ -68,4 +79,70 @@ input::placeholder,
 textarea::placeholder {
   color: #6F6477;
   opacity: 1;
+}
+
+/* ============================================================
+   2026 modernization — universal polish layer.
+   Purely presentational; cascades to every page (app + marketing)
+   without touching any component logic. Keeps the exact brand
+   palette (purple #7C3AED / rose #FF4D6D).
+   ============================================================ */
+
+/* Branded text selection — swaps the OS default (harsh blue) for a
+   soft purple tint that matches the brand. A small detail that makes
+   the whole product feel considered and current. */
+::selection {
+  background: rgba(124, 58, 237, 0.18);
+  color: #15111A;
+}
+
+/* Keyboard focus rings. Only show on keyboard navigation
+   (:focus-visible), never on touch/mouse, so the UI stays clean for
+   the common case while remaining fully accessible — a modern +
+   inclusive default the old build lacked entirely. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid rgba(124, 58, 237, 0.55);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Slim, unobtrusive scrollbars on desktop. Chunky default gutters
+   read as dated; a thin brand-tinted thumb feels like a native 2026
+   app. Mobile/WebKit-touch already hides these via .bbp-scroll. */
+@media (pointer: fine) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(124, 58, 237, 0.30) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgba(124, 58, 237, 0.28);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(124, 58, 237, 0.45);
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* Smooth in-page anchor scrolling, but never fight users who ask the
+   OS to reduce motion. */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
 }
