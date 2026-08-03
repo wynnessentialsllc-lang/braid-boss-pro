@@ -141,9 +141,14 @@ export const dispatchPush = async (
     });
     if (error) return { ok: false, reason: await extractFunctionError(error) };
     if (data && typeof data === "object") {
-      const r = data as { ok?: number; total?: number; errors?: { message?: string }[] };
+      const r = data as { ok?: number; total?: number; errors?: { message?: string; status?: number }[] };
       if (typeof r.total === "number" && r.total > 0 && r.ok === 0) {
-        return { ok: false, reason: r.errors?.[0]?.message || "no successful delivery" };
+        const first = r.errors?.[0];
+        const base = first?.message || "no successful delivery";
+        // Surface the push-service HTTP status (e.g. 403 = VAPID key /
+        // subject mismatch, 410 = stale subscription) so the exact
+        // failure is obvious instead of a generic library message.
+        return { ok: false, reason: first?.status ? `${base} (HTTP ${first.status})` : base };
       }
     }
     return { ok: true };
@@ -164,12 +169,16 @@ export const sendTestPush = async (): Promise<{ ok: boolean; reason?: string }> 
     });
     if (error) return { ok: false, reason: await extractFunctionError(error) };
     if (data && typeof data === "object") {
-      const r = data as { ok?: number; total?: number; message?: string; errors?: { message?: string }[] };
+      const r = data as { ok?: number; total?: number; message?: string; errors?: { message?: string; status?: number }[] };
       if (r.total === 0) {
         return { ok: false, reason: r.message || "No push subscription on this device. Enable push first." };
       }
       if (typeof r.total === "number" && r.total > 0 && r.ok === 0) {
-        return { ok: false, reason: r.errors?.[0]?.message || "no successful delivery" };
+        const first = r.errors?.[0];
+        const base = first?.message || "no successful delivery";
+        // Include the push-service HTTP status (403 = VAPID key/subject
+        // mismatch, 410 = dead subscription) for one-glance diagnosis.
+        return { ok: false, reason: first?.status ? `${base} (HTTP ${first.status})` : base };
       }
     }
     return { ok: true };
