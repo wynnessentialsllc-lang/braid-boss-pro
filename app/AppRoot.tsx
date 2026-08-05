@@ -262,6 +262,7 @@ import {
   fetchClassWaitlist,
   fetchVideoSales,
   refundSale,
+  resendAccessEmail,
   isoToLocalInput,
   localInputToIso,
   videoAccessLabel,
@@ -35379,6 +35380,8 @@ const ClassesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
   const [roster, setRoster] = useState<ClassRosterEntry[] | null>(null);
   const [waitlist, setWaitlist] = useState<ClassWaitlistEntry[] | null>(null);
   const [refundingId, setRefundingId] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [resentId, setResentId] = useState<string | null>(null);
   const [shopSlug, setShopSlug] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -35458,6 +35461,19 @@ const ClassesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
       setRoster(rr.ok ? rr.roster : []);
     }
     await api.refresh();
+  };
+
+  const resendClass = async (registrationId: string) => {
+    if (resendingId) return;
+    setResendingId(registrationId);
+    const r = await resendAccessEmail("class", registrationId);
+    setResendingId(null);
+    if (!r.ok) {
+      if (typeof window !== "undefined") window.alert(r.error);
+      return;
+    }
+    setResentId(registrationId);
+    setTimeout(() => setResentId((k) => (k === registrationId ? null : k)), 1800);
   };
 
   // ── Editor ───────────────────────────────────────────────────────
@@ -35612,6 +35628,9 @@ const ClassesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
                                 <span className="truncate" style={{ color: C.coffee }}>{r.student_name || r.student_email || "Guest"}{r.seats > 1 ? ` ×${r.seats}` : ""}</span>
                                 <span className="flex items-center gap-2 shrink-0">
                                   <span style={{ color: C.muted }}>{fmtMoney(Number(r.amount_total || 0), currency)}</span>
+                                  <button type="button" onClick={() => resendClass(r.id)} disabled={!!resendingId} className="font-semibold" style={{ color: C.brandPrimary, opacity: resendingId ? 0.5 : 1 }}>
+                                    {resendingId === r.id ? "…" : resentId === r.id ? "Sent!" : "Resend"}
+                                  </button>
                                   <button type="button" onClick={() => refundClass(r.id, c.id)} disabled={!!refundingId} className="font-semibold" style={{ color: C.brandError, opacity: refundingId ? 0.5 : 1 }}>
                                     {refundingId === r.id ? "…" : "Refund"}
                                   </button>
@@ -35676,6 +35695,8 @@ const VideosScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
   const [salesFor, setSalesFor] = useState<string | null>(null);
   const [sales, setSales] = useState<VideoSaleEntry[] | null>(null);
   const [refundingId, setRefundingId] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [resentId, setResentId] = useState<string | null>(null);
   const [shopSlug, setShopSlug] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -35769,6 +35790,19 @@ const VideosScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
       const rr = await fetchVideoSales(userId, videoId);
       setSales(rr.ok ? rr.sales : []);
     }
+  };
+
+  const resendVideo = async (purchaseId: string) => {
+    if (resendingId) return;
+    setResendingId(purchaseId);
+    const r = await resendAccessEmail("video", purchaseId);
+    setResendingId(null);
+    if (!r.ok) {
+      if (typeof window !== "undefined") window.alert(r.error);
+      return;
+    }
+    setResentId(purchaseId);
+    setTimeout(() => setResentId((k) => (k === purchaseId ? null : k)), 1800);
   };
 
   // ── Editor ───────────────────────────────────────────────────────
@@ -35958,6 +35992,9 @@ const VideosScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
                                 <span className="truncate" style={{ color: C.coffee }}>{s.buyer_name || s.buyer_email || "Guest"}</span>
                                 <span className="flex items-center gap-2 shrink-0">
                                   <span style={{ color: C.muted }}>{fmtMoney(Number(s.amount_total || 0), currency)}</span>
+                                  <button type="button" onClick={() => resendVideo(s.id)} disabled={!!resendingId} className="font-semibold" style={{ color: C.brandPrimary, opacity: resendingId ? 0.5 : 1 }}>
+                                    {resendingId === s.id ? "…" : resentId === s.id ? "Sent!" : "Resend"}
+                                  </button>
                                   <button type="button" onClick={() => refundVideo(s.id, v.id)} disabled={!!refundingId} className="font-semibold" style={{ color: C.brandError, opacity: refundingId ? 0.5 : 1 }}>
                                     {refundingId === s.id ? "…" : "Refund"}
                                   </button>

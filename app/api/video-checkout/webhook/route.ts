@@ -9,6 +9,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createHmac, timingSafeEqual } from "crypto";
 import { sendEmail } from "../../../lib/email";
+import { buildVideoAccessEmail } from "../../../lib/academy-emails";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -148,30 +149,23 @@ export async function POST(req: Request) {
   }
 
   if (!result.already_paid && result.buyer_email && result.access_token) {
-    const watchUrl = `${baseUrlOf(req)}/watch/${encodeURIComponent(result.access_token)}`;
-    const expiryLine =
-      result.access_model === "rent" && result.access_expires_at
-        ? `<p style="margin:0 0 12px;font-size:13px;color:#6F6477;">Your access is available until ${new Date(
-            result.access_expires_at,
-          ).toLocaleString()}.</p>`
-        : `<p style="margin:0 0 12px;font-size:13px;color:#6F6477;">You have permanent access — save this link.</p>`;
-
-    await sendEmail({
-      to: result.buyer_email,
-      subject: `Your video access: ${result.video_title}`,
-      html: `
-        <h1 style="font-size:20px;margin:0 0 12px;">Thanks for your purchase! 🎬</h1>
-        <p style="margin:0 0 12px;">You now have access to <strong>${result.video_title}</strong>.</p>
-        <p style="margin:0 0 16px;">
-          <a href="${watchUrl}" style="display:inline-block;background:#7C3AED;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:600;">
-            Watch now
-          </a>
-        </p>
-        ${expiryLine}
-        <p style="margin:0;font-size:12px;color:#9A8B72;word-break:break-all;">Or paste this link: ${watchUrl}</p>
-      `,
-      text: `Thanks for your purchase! Watch ${result.video_title} here: ${watchUrl}`,
+    const mail = buildVideoAccessEmail({
+      videoTitle: result.video_title,
+      accessToken: result.access_token,
+      accessModel: result.access_model,
+      accessExpiresAt: result.access_expires_at ?? null,
+      baseUrl: baseUrlOf(req),
     });
+    const sent = await sendEmail({ to: result.buyer_email, ...mail });
+    // Stamp only on an accepted send, so the reconcile sweep retries a
+    // skipped/failed delivery instead of the buyer being locked out.
+    if (sent.ok) {
+      await admin
+        .from("video_purchases")
+        .update({ access_email_sent_at: new Date().toISOString() })
+        .eq("id", result.purchase_id)
+        .is("access_email_sent_at", null);
+    }
   }
 
   return NextResponse.json({ received: true, purchase_id: result.purchase_id }, { status: 200 });

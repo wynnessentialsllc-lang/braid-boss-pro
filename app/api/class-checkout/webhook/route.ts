@@ -13,6 +13,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createHmac, timingSafeEqual } from "crypto";
 import { sendEmail } from "../../../lib/email";
+import { buildClassAccessEmail } from "../../../lib/academy-emails";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,20 +59,6 @@ const verifySignature = (
     }
   }
   return { ok: false, reason: "no signature match" };
-};
-
-// Format the class start for a human, in the braider's timezone when set.
-const fmtWhen = (startsAt: string | null, tz: string | null): string => {
-  if (!startsAt) return "Time TBA — the braider will be in touch.";
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      dateStyle: "full",
-      timeStyle: "short",
-      timeZone: tz || undefined,
-    }).format(new Date(startsAt));
-  } catch {
-    return new Date(startsAt).toLocaleString();
-  }
 };
 
 export async function POST(req: Request) {
@@ -163,33 +150,25 @@ export async function POST(req: Request) {
 
   // Only email on the first transition to paid, not on Stripe retries.
   if (!result.already_paid && result.student_email) {
-    const when = fmtWhen(result.starts_at, result.timezone);
-    const isVirtual = result.format === "virtual";
-    const accessLine = isVirtual
-      ? result.meeting_url
-        ? `<p style="margin:0 0 6px;"><strong>Join link:</strong> <a href="${result.meeting_url}">${result.meeting_url}</a></p>`
-        : `<p style="margin:0 0 6px;">Your join link will be sent before the class.</p>`
-      : result.location_text
-        ? `<p style="margin:0 0 6px;"><strong>Location:</strong> ${result.location_text}</p>`
-        : `<p style="margin:0 0 6px;">Location details will follow from your braider.</p>`;
-    const seatLine =
-      Number(result.seats) > 1 ? `<p style="margin:0 0 6px;"><strong>Seats:</strong> ${result.seats}</p>` : "";
-
-    await sendEmail({
-      to: result.student_email,
-      subject: `You're signed up: ${result.class_title}`,
-      html: `
-        <h1 style="font-size:20px;margin:0 0 12px;">You're in! 🎉</h1>
-        <p style="margin:0 0 12px;">Your spot in <strong>${result.class_title}</strong> is confirmed.</p>
-        <p style="margin:0 0 6px;"><strong>When:</strong> ${when}</p>
-        ${seatLine}
-        ${accessLine}
-        <p style="margin:16px 0 0;font-size:13px;color:#6F6477;">See you there!</p>
-      `,
-      text: `You're signed up for ${result.class_title}. When: ${when}. ${
-        isVirtual ? `Join: ${result.meeting_url || "link to follow"}` : `Location: ${result.location_text || "details to follow"}`
-      }`,
+    const mail = buildClassAccessEmail({
+      classTitle: result.class_title,
+      startsAt: result.starts_at ?? null,
+      timezone: result.timezone ?? null,
+      format: result.format,
+      meetingUrl: result.meeting_url ?? null,
+      locationText: result.location_text ?? null,
+      seats: Number(result.seats || 1),
     });
+    const sent = await sendEmail({ to: result.student_email, ...mail });
+    // Stamp only on an accepted send, so the reconcile sweep retries a
+    // skipped/failed delivery.
+    if (sent.ok) {
+      await admin
+        .from("class_registrations")
+        .update({ access_email_sent_at: new Date().toISOString() })
+        .eq("id", result.registration_id)
+        .is("access_email_sent_at", null);
+    }
   }
 
   return NextResponse.json({ received: true, registration_id: result.registration_id }, { status: 200 });
