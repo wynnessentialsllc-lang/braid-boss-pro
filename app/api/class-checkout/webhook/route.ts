@@ -13,7 +13,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createHmac, timingSafeEqual } from "crypto";
 import { sendEmail } from "../../../lib/email";
-import { buildClassAccessEmail } from "../../../lib/academy-emails";
+import { buildClassAccessEmail, buildClassSaleAlert } from "../../../lib/academy-emails";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -168,6 +168,36 @@ export async function POST(req: Request) {
         .update({ access_email_sent_at: new Date().toISOString() })
         .eq("id", result.registration_id)
         .is("access_email_sent_at", null);
+    }
+  }
+
+  // Notify the seller (braider) on the first paid sign-up — email + web
+  // push + in-app bell, via the same worker every other stylist alert
+  // uses. queue_stylist_email_alert resolves the owner's email
+  // server-side, so it never depends on the app's own email env.
+  if (!result.already_paid) {
+    const stylistUserId =
+      typeof session?.metadata?.stylist_user_id === "string" ? session.metadata.stylist_user_id : null;
+    if (stylistUserId) {
+      const alert = buildClassSaleAlert({
+        classTitle: result.class_title,
+        buyerLabel: result.student_name || result.student_email || "Someone",
+        seats: Number(result.seats || 1),
+        amount: amountTotal,
+        currency: String(session?.currency || "usd"),
+      });
+      try {
+        await admin.rpc("queue_stylist_email_alert", {
+          user_id_in: stylistUserId,
+          notification_type_in: "academy_class_signup",
+          subject_in: alert.subject,
+          body_in: alert.body,
+          payload_in: {},
+          dedupe_key_in: `academy_class_signup:${result.registration_id}`,
+        });
+      } catch (e) {
+        console.warn("[class-checkout/webhook] seller alert enqueue failed:", e);
+      }
     }
   }
 

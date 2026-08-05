@@ -87,3 +87,45 @@ export const buildClassAccessEmail = (args: {
     }`,
   };
 };
+
+// ── Seller (braider) sale alerts ────────────────────────────────────
+// Plain subject + body for queue_stylist_email_alert → the notification
+// worker's renderGeneric wraps the body and sends it, and the
+// stylist-addressed row also fires a web push + in-app bell. Kept as
+// plain text (no HTML) because renderGeneric escapes the body.
+
+const money = (amount: number, currency: string): string => {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: (currency || "usd").toUpperCase(),
+    }).format(amount);
+  } catch {
+    return `$${(Number(amount) || 0).toFixed(2)}`;
+  }
+};
+
+export type SellerAlert = { subject: string; body: string };
+
+export const buildVideoSaleAlert = (args: {
+  videoTitle: string;
+  buyerLabel: string;
+  amount: number;
+  currency: string;
+}): SellerAlert => ({
+  subject: `New sale: ${args.videoTitle}`,
+  body: `${args.buyerLabel} just purchased "${args.videoTitle}" for ${money(args.amount, args.currency)}.\n\nOpen Braid Boss Pro → Video Lessons → Sales to see the buyer.`,
+});
+
+export const buildClassSaleAlert = (args: {
+  classTitle: string;
+  buyerLabel: string;
+  seats: number;
+  amount: number;
+  currency: string;
+}): SellerAlert => ({
+  subject: `New class sign-up: ${args.classTitle}`,
+  body: `${args.buyerLabel} signed up for "${args.classTitle}"${
+    args.seats > 1 ? ` (${args.seats} seats)` : ""
+  } — ${money(args.amount, args.currency)}.\n\nOpen Braid Boss Pro → Classes → Sign-ups to see the roster.`,
+});

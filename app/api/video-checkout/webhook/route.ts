@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createHmac, timingSafeEqual } from "crypto";
 import { sendEmail } from "../../../lib/email";
-import { buildVideoAccessEmail } from "../../../lib/academy-emails";
+import { buildVideoAccessEmail, buildVideoSaleAlert } from "../../../lib/academy-emails";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -165,6 +165,35 @@ export async function POST(req: Request) {
         .update({ access_email_sent_at: new Date().toISOString() })
         .eq("id", result.purchase_id)
         .is("access_email_sent_at", null);
+    }
+  }
+
+  // Notify the seller (braider) on the first paid transition — email +
+  // web push + in-app bell, via the same worker every other stylist alert
+  // uses. queue_stylist_email_alert resolves the owner's email server-side
+  // and never depends on the app's own email env, so this fires reliably.
+  if (!result.already_paid) {
+    const stylistUserId =
+      typeof session?.metadata?.stylist_user_id === "string" ? session.metadata.stylist_user_id : null;
+    if (stylistUserId) {
+      const alert = buildVideoSaleAlert({
+        videoTitle: result.video_title,
+        buyerLabel: result.buyer_name || result.buyer_email || "Someone",
+        amount: amountTotal,
+        currency: String(session?.currency || "usd"),
+      });
+      try {
+        await admin.rpc("queue_stylist_email_alert", {
+          user_id_in: stylistUserId,
+          notification_type_in: "academy_video_sale",
+          subject_in: alert.subject,
+          body_in: alert.body,
+          payload_in: {},
+          dedupe_key_in: `academy_video_sale:${result.purchase_id}`,
+        });
+      } catch (e) {
+        console.warn("[video-checkout/webhook] seller alert enqueue failed:", e);
+      }
     }
   }
 
