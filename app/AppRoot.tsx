@@ -22895,6 +22895,30 @@ const useCloudSync = (userId: string | null, store: any) => {
   return { state, lastOk, pendingCount, cloudReady };
 };
 
+// Supabase surfaces a rate-limit message like "For security purposes, you
+// can only request this after 51 seconds." Pull the number back out so we
+// can turn it into a friendly countdown instead of leaking raw copy.
+const parseRetryAfterSeconds = (raw: string): number | null => {
+  const m = /after (\d+)\s*second/i.exec(raw || "");
+  return m ? Math.max(1, parseInt(m[1], 10)) : null;
+};
+
+// Translate raw GoTrue/Supabase auth errors into warm, human copy. One
+// source of truth for both the full-page AuthGate and the in-app
+// AuthSheet so the language never drifts between them.
+const friendlyAuthError = (raw: string): string => {
+  const s = (raw || "").toLowerCase();
+  if (parseRetryAfterSeconds(raw)) return "We just sent that email — check your inbox. You can resend in a moment if it doesn't arrive.";
+  if (s.includes("invalid") && s.includes("credential")) return "That email and password don't match. Try again, or reset your password.";
+  if (s.includes("email not confirmed")) return "Almost there — confirm your email first. Check your inbox for the link we sent.";
+  if (s.includes("already registered") || s.includes("already been registered")) return "You already have an account with this email. Try signing in instead.";
+  if (s.includes("password should be") || (s.includes("password") && s.includes("6 char"))) return "Use a password with at least 6 characters.";
+  if (s.includes("unable to validate email") || s.includes("invalid email")) return "That doesn't look like a valid email address.";
+  if (s.includes("network") || s.includes("failed to fetch") || s.includes("load failed")) return "Connection problem — check your internet and try again.";
+  if (s.includes("rate limit") || s.includes("too many")) return "That's a lot of tries — give it a minute, then try again.";
+  return raw || "Something went wrong. Please try again in a moment.";
+};
+
 const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
   onContinueGuest: () => void;
   onBack?: () => void;
@@ -22904,44 +22928,164 @@ const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // When set, we swap the form for the "check your email" confirmation
+  // screen. `kind` picks the copy (new-account confirmation vs. reset).
+  const [sent, setSent] = useState<{ kind: "signup" | "reset"; email: string } | null>(null);
+  // Seconds until the next email request is allowed. Supabase enforces a
+  // ~60s window; mirroring it here means the button is disabled with a
+  // live countdown instead of the braider hitting a raw rate-limit error.
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(c => Math.max(0, c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  const trimmedEmail = email.trim();
+
+  // Map any thrown auth error to friendly copy, and start a countdown if
+  // it was a rate limit so the retry button self-heals.
+  const applyError = (e: any) => {
+    const raw = e?.message || "";
+    const secs = parseRetryAfterSeconds(raw);
+    if (secs) setCooldown(secs);
+    setErr(friendlyAuthError(raw));
+  };
+
+  const switchTab = (next: "signin" | "signup" | "reset") => {
+    setTab(next); setErr(null); setSent(null);
+  };
 
   const submit = async () => {
-    if (busy) return;
-    setBusy(true); setMsg(null); setErr(null);
+    if (busy || cooldown > 0) return;
+    setBusy(true); setErr(null);
     try {
       const supabase = getSupabase();
       if (tab === "signin") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase.auth.signInWithPassword({ email: trimmedEmail, password });
         if (error) throw error;
+        // Success: the useAuth() listener flips mode → authed and this
+        // gate unmounts on its own. Nothing else to do here.
       } else if (tab === "signup") {
-        const { error } = await supabase.auth.signUp({
-          email,
+        const { data, error } = await supabase.auth.signUp({
+          email: trimmedEmail,
           password,
           options: { emailRedirectTo: getAuthRedirectUrl() },
         });
         if (error) throw error;
-        setMsg("Check your inbox to confirm the account, then sign in.");
+        // Supabase's anti-enumeration behaviour: re-signing-up an email
+        // that already has a (confirmed) account returns a user with an
+        // empty identities array and sends NO email. Don't pretend we
+        // sent one — guide them to sign in.
+        const identities = data?.user?.identities;
+        if (Array.isArray(identities) && identities.length === 0) {
+          setErr("You already have an account with this email. Sign in below, or reset your password.");
+          setTab("signin");
+          return;
+        }
+        // If email confirmation is turned off, signUp returns a live
+        // session and the braider is already in — the auth listener takes
+        // over and this gate unmounts. Nothing to show.
+        if (data?.session) return;
+        // Otherwise a confirmation email is on its way. Show the
+        // white-glove "check your email" screen and start the resend
+        // cooldown Supabase enforces.
+        setSent({ kind: "signup", email: trimmedEmail });
+        setCooldown(60);
       } else {
-        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
           redirectTo: getAuthRedirectUrl(),
         });
         if (error) throw error;
-        setMsg("Reset email sent. Check your inbox.");
+        setSent({ kind: "reset", email: trimmedEmail });
+        setCooldown(60);
       }
     } catch (e: any) {
-      setErr(e?.message || "Something went wrong.");
+      applyError(e);
     } finally {
       setBusy(false);
     }
   };
 
+  const resend = async () => {
+    if (busy || cooldown > 0 || !sent) return;
+    setBusy(true); setErr(null);
+    try {
+      const supabase = getSupabase();
+      if (sent.kind === "signup") {
+        const { error } = await supabase.auth.resend({
+          type: "signup",
+          email: sent.email,
+          options: { emailRedirectTo: getAuthRedirectUrl() },
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.resetPasswordForEmail(sent.email, {
+          redirectTo: getAuthRedirectUrl(),
+        });
+        if (error) throw error;
+      }
+      setCooldown(60);
+    } catch (e: any) {
+      applyError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const primaryLabel = busy
+    ? "Working…"
+    : cooldown > 0
+      ? `Try again in ${cooldown}s`
+      : tab === "signin" ? "Sign in" : tab === "signup" ? "Start free trial" : "Send reset link";
+
   return (
     <AuthScreen mode={tab} onBack={onBack}>
       <GlobalStyle />
-      {/* Form card — the branded hero + trial pill around it are owned by
-          AuthScreen; the auth logic + the .bbpa-* styled markup stay here. */}
+
+      {sent ? (
+        /* ---- "Check your email" confirmation screen ---- */
+        <div className="bbpa-card" style={{ alignItems: "center", textAlign: "center", gap: 12 }}>
+          <div aria-hidden style={{ width: 64, height: 64, borderRadius: 999, display: "grid", placeItems: "center", background: GRADIENTS.primary, color: "#FFFFFF", boxShadow: SHADOWS.primaryGlow }}>
+            <Mail size={28} />
+          </div>
+          <h2 style={{ fontFamily: FONT_DISPLAY, fontSize: 26, fontWeight: 700, color: C.espresso, margin: 0, lineHeight: 1.1 }}>
+            Check your email
+          </h2>
+          <p style={{ fontSize: 14, lineHeight: 1.55, color: C.coffee, margin: 0 }}>
+            We sent a {sent.kind === "signup" ? "confirmation" : "password reset"} link to<br />
+            <strong style={{ color: C.espresso, wordBreak: "break-word" }}>{sent.email}</strong>.
+            {" "}
+            {sent.kind === "signup"
+              ? "Tap it to activate your 14-day free trial and you're in."
+              : "Tap it to set a new password."}
+          </p>
+          <p style={{ fontSize: 12.5, lineHeight: 1.5, color: C.muted, margin: 0 }}>
+            Can&apos;t find it? Check your spam or promotions folder — it can take a minute to land.
+          </p>
+          <button
+            type="button"
+            className="bbpa-btn-primary"
+            disabled={busy || cooldown > 0}
+            onClick={resend}
+          >
+            {busy ? "Sending…" : cooldown > 0 ? `Resend email in ${cooldown}s` : "Resend email"}
+          </button>
+          {err && <p className="bbpa-msg err">{err}</p>}
+          <div className="bbpa-actions" style={{ justifyContent: "center" }}>
+            <button type="button" className="bbpa-textbtn link" onClick={() => switchTab("signin")}>
+              {sent.kind === "signup" ? "Already confirmed? Sign in" : "Back to sign in"}
+            </button>
+            <button type="button" className="bbpa-textbtn muted" onClick={() => { setSent(null); setErr(null); }}>
+              Use a different email
+            </button>
+          </div>
+        </div>
+      ) : (
+      /* Form card — the branded hero + trial pill around it are owned by
+          AuthScreen; the auth logic + the .bbpa-* styled markup stay here. */
       <form
         className="bbpa-card"
         onSubmit={(e) => { e.preventDefault(); submit(); }}
@@ -22973,17 +23117,24 @@ const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
               onChange={e => setPassword(e.target.value)}
               placeholder="••••••••"
             />
+            {tab === "signup" && (
+              <span style={{ fontSize: 11.5, color: "#9F95A8", marginTop: 2 }}>At least 6 characters.</span>
+            )}
           </div>
         )}
         {err && <p className="bbpa-msg err">{err}</p>}
-        {msg && <p className="bbpa-msg ok">{msg}</p>}
         <button
           type="submit"
           className="bbpa-btn-primary"
-          disabled={busy || !email || (tab !== "reset" && !password)}
+          disabled={busy || !trimmedEmail || (tab !== "reset" && !password) || cooldown > 0}
         >
-          {busy ? "Working…" : tab === "signin" ? "Sign in" : tab === "signup" ? "Create account" : "Send reset email"}
+          {primaryLabel}
         </button>
+        {tab === "signup" && (
+          <p style={{ fontSize: 11.5, color: "#9F95A8", textAlign: "center", margin: "-2px 0 0", lineHeight: 1.45 }}>
+            We&apos;ll email you a link to confirm your account. Free for 14 days, then $14.99/mo · cancel anytime.
+          </p>
+        )}
         {/* key={tab} forces this row to fully remount when the tab
             changes, so a toggle button from the previous tab can never
             linger and overlap (the conditional swaps a Fragment for a
@@ -22992,16 +23143,17 @@ const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
         <div className="bbpa-actions" key={tab}>
           {tab === "signin" ? (
             <>
-              <button type="button" className="bbpa-textbtn muted" onClick={() => { setTab("reset"); setErr(null); setMsg(null); }}>Forgot password?</button>
-              <button type="button" className="bbpa-textbtn link" onClick={() => { setTab("signup"); setErr(null); setMsg(null); }}>Create account</button>
+              <button type="button" className="bbpa-textbtn muted" onClick={() => switchTab("reset")}>Forgot password?</button>
+              <button type="button" className="bbpa-textbtn link" onClick={() => switchTab("signup")}>Create account</button>
             </>
           ) : tab === "signup" ? (
-            <button type="button" className="bbpa-textbtn link" onClick={() => { setTab("signin"); setErr(null); setMsg(null); }}>Already have an account? Sign in</button>
+            <button type="button" className="bbpa-textbtn link" onClick={() => switchTab("signin")}>Already have an account? Sign in</button>
           ) : (
-            <button type="button" className="bbpa-textbtn link" onClick={() => { setTab("signin"); setErr(null); setMsg(null); }}>Back to sign in</button>
+            <button type="button" className="bbpa-textbtn link" onClick={() => switchTab("signin")}>Back to sign in</button>
           )}
         </div>
       </form>
+      )}
       <button type="button" className="bbpa-guest" onClick={onContinueGuest}>
         Continue as guest · data stays on this device
       </button>
@@ -23245,15 +23397,9 @@ const AuthSheet = ({ open, initialMode, onClose, onAuthed }: {
     setPassword("");
   }, [open, initialMode]);
 
-  const friendlyError = (raw: string): string => {
-    const s = (raw || "").toLowerCase();
-    if (s.includes("invalid") && s.includes("credentials")) return "That email and password don't match. Try again or reset your password.";
-    if (s.includes("user already registered")) return "An account with this email already exists. Sign in instead?";
-    if (s.includes("password should be")) return "Password is too short — use at least 6 characters.";
-    if (s.includes("network") || s.includes("failed to fetch")) return "Connection failed. Check your network and try again.";
-    if (s.includes("rate limit")) return "Too many attempts. Wait a minute and try again.";
-    return raw || "Something went wrong. Try again in a moment.";
-  };
+  // Delegate to the shared, single-source-of-truth mapper so the in-app
+  // sheet and the full-page AuthGate speak the same friendly language.
+  const friendlyError = friendlyAuthError;
 
   const submit = async () => {
     if (busy) return;
