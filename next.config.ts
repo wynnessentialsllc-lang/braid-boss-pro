@@ -17,6 +17,14 @@ import type { NextConfig } from "next";
 //     plugin or <base>/form hijack.
 //   • connect-src pins Supabase (REST + realtime wss) and Stripe; an
 //     injected script can't exfiltrate to an arbitrary origin.
+//   • frame-src allows Stripe Checkout plus the Academy video embed
+//     hosts (YouTube / Vimeo / Loom) — the /watch page and the video
+//     buy-page preview render lessons in an <iframe>, so these hosts
+//     must be allow-listed or the player is silently blank.
+//   • media-src allows uploaded lessons to stream from the private
+//     Supabase bucket (signed URLs on *.supabase.co) in a <video>;
+//     without it the element falls back to default-src 'self' and the
+//     file never plays.
 //   • 'unsafe-inline' is required because the UI uses inline style
 //     attributes throughout and Next injects inline bootstrap scripts;
 //     tightening to nonces/hashes is a follow-up, not a launch blocker.
@@ -37,7 +45,8 @@ const CONTENT_SECURITY_POLICY = [
   "img-src 'self' data: blob: https:",
   "font-src 'self' data: https://fonts.gstatic.com",
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://*.stripe.com",
-  "frame-src https://*.stripe.com",
+  "media-src 'self' blob: https://*.supabase.co",
+  "frame-src https://*.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com https://www.loom.com",
   "form-action 'self' https://*.stripe.com",
   "manifest-src 'self'",
   "worker-src 'self' blob:",
