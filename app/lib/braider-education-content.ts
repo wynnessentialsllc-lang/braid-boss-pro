@@ -1260,6 +1260,32 @@ export const EDUCATION_CATEGORIES: EducationCategory[] = [
           "Set a price for one class and one video, then check back in a month — if they sell out or sell fast, that's your signal to raise it.",
         relatedTool: "Boss Growth Guide",
       },
+      {
+        id: "run-virtual-class-zoom",
+        title: "Running a virtual class on Zoom",
+        readMinutes: 4,
+        body: [
+          "A virtual class runs on your own video tool — Zoom, Google Meet, whatever you already use. Braid Boss Pro handles the sign-up, the payment, and delivering the private link; you just create the meeting and paste its link in.",
+          "In Zoom, choose Schedule a Meeting, give it a topic, and set the date and time to match your class. Save it, then copy the full Invite Link — the one with the '?pwd=' on the end. That version lets students join in one tap without typing a passcode. (Heads-up: a free Zoom plan caps meetings at 40 minutes, so keep a test class short, or plan to restart the room.)",
+          "In Braid Boss Pro, create a New class, set Format to Virtual, and paste that link into the Meeting link field. Add your price, date, and time, then Publish. The link stays hidden until a student pays — then it's revealed on their confirmation page and emailed to them. If you ever change the meeting, just edit the class and paste the new link.",
+        ],
+        tryThisWeek:
+          "Schedule a short Zoom, paste its invite link into a virtual class at a test price, and buy your own seat to see exactly what a student receives after paying.",
+        relatedTool: "Settings → Classes",
+      },
+      {
+        id: "buyer-access-and-resend",
+        title: "What buyers get — and resending access",
+        readMinutes: 3,
+        body: [
+          "The moment someone pays, Braid Boss Pro emails them their access — a 'Watch now' link for a video, or the class details (the exact location, or the Zoom link) for a class — and shows the same thing on screen. You get a notification too, so you always know a sale came in.",
+          "Buyers don't have a login, so that emailed link is their way back in. If someone says they can't find it, open the sign-up or sale in your dashboard and tap Resend — it sends their access to the same email again. That's your one-tap fix for a locked-out customer.",
+          "A video sold as a Rent stops working after the number of days you set; a permanent Buy keeps working so students can rewatch. Refunding a sale from the same screen sends the money back, revokes access, and reopens a class seat automatically.",
+        ],
+        tryThisWeek:
+          "After a test purchase, tap Resend on the sale and confirm the email arrives — so you already know how to help a real customer who's misplaced their link.",
+        relatedTool: "Settings → Classes / Video Lessons",
+      },
     ],
   },
 ];
