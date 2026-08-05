@@ -156,7 +156,7 @@ export async function POST(req: Request) {
           ).toLocaleString()}.</p>`
         : `<p style="margin:0 0 12px;font-size:13px;color:#6F6477;">You have permanent access — save this link.</p>`;
 
-    await sendEmail({
+    const sent = await sendEmail({
       to: result.buyer_email,
       subject: `Your video access: ${result.video_title}`,
       html: `
@@ -172,6 +172,15 @@ export async function POST(req: Request) {
       `,
       text: `Thanks for your purchase! Watch ${result.video_title} here: ${watchUrl}`,
     });
+    // Stamp only on an accepted send, so the reconcile sweep retries a
+    // skipped/failed delivery instead of the buyer being locked out.
+    if (sent.ok) {
+      await admin
+        .from("video_purchases")
+        .update({ access_email_sent_at: new Date().toISOString() })
+        .eq("id", result.purchase_id)
+        .is("access_email_sent_at", null);
+    }
   }
 
   return NextResponse.json({ received: true, purchase_id: result.purchase_id }, { status: 200 });

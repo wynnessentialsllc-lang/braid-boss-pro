@@ -175,7 +175,7 @@ export async function POST(req: Request) {
     const seatLine =
       Number(result.seats) > 1 ? `<p style="margin:0 0 6px;"><strong>Seats:</strong> ${result.seats}</p>` : "";
 
-    await sendEmail({
+    const sent = await sendEmail({
       to: result.student_email,
       subject: `You're signed up: ${result.class_title}`,
       html: `
@@ -190,6 +190,15 @@ export async function POST(req: Request) {
         isVirtual ? `Join: ${result.meeting_url || "link to follow"}` : `Location: ${result.location_text || "details to follow"}`
       }`,
     });
+    // Stamp only on an accepted send, so the reconcile sweep retries a
+    // skipped/failed delivery.
+    if (sent.ok) {
+      await admin
+        .from("class_registrations")
+        .update({ access_email_sent_at: new Date().toISOString() })
+        .eq("id", result.registration_id)
+        .is("access_email_sent_at", null);
+    }
   }
 
   return NextResponse.json({ received: true, registration_id: result.registration_id }, { status: 200 });
