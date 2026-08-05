@@ -18863,7 +18863,7 @@ const WalkthroughSheet = ({ walkthrough, onClose }: { walkthrough: Walkthrough; 
 const SupportCenterScreen = ({
   store, onBack,
   openAccount, openServices, openAvailability, openPolicies,
-  goToTab,
+  goToTab, replayTour,
 }: {
   store: any;
   onBack: () => void;
@@ -18872,6 +18872,7 @@ const SupportCenterScreen = ({
   openAvailability?: () => void;
   openPolicies?: () => void;
   goToTab?: (tab: string) => void;
+  replayTour?: () => void;
 }) => {
   const userId: string | null = store.userId || null;
   const membership = useFoundingMembership(userId);
@@ -19067,6 +19068,15 @@ const SupportCenterScreen = ({
                 );
               })}
             </div>
+            {replayTour && (
+              <button type="button"
+                onClick={replayTour}
+                className="mt-3 w-full flex items-center justify-center gap-2 p-2.5 rounded-xl active:scale-[0.99] transition"
+                style={{ background: C.ivory, border: `1px solid ${C.hairline}`, color: C.brandPrimary }}>
+                <Sparkles size={15} />
+                <span className="text-[13px] font-semibold">Replay the welcome tour</span>
+              </button>
+            )}
           </Card>
         </SupportSection>
 
@@ -40610,6 +40620,12 @@ const CampaignComposerSheet = ({
 // awareness splash? Mirrors the intro-seen pattern.
 const TAP_TO_PAY_AWARE_KEY = "bbp-ttp-aware-v1";
 
+// localStorage flag — has the braider watched the one-time animated
+// welcome tour that plays the first time they land in the app? Same
+// "show once, then never again" pattern as TAP_TO_PAY_AWARE_KEY. Bump
+// the version suffix to re-show the tour to everyone after a redesign.
+const WELCOME_TOUR_KEY = "bbp-welcome-tour-v1";
+
 // A single readiness row in the Tap to Pay status card. Module-level so
 // it isn't recreated on every TapToPayScreen render.
 const TtpStatusRow = ({ ok, pending, title, sub }: { ok: boolean; pending?: boolean; title: string; sub?: string }) => (
@@ -40786,6 +40802,455 @@ const TapToPayAwareness = ({ onSetup, onDismiss }: { onSetup: () => void; onDism
     </div>
   </div>
 );
+
+// ============================================================
+// Welcome tour — the animated, one-time onboarding a braider sees the
+// first time they land in the app after signing up.
+//
+// "Welcome to Braid Boss Pro, let me show you around" → then it walks,
+// slide by slide, through every bottom-nav section (Home, Quote,
+// Schedule, Clients, Checkout, Money), highlighting each one on a live
+// mini nav preview with a short "what to do to get started" note, and
+// finishes by pointing at the built-in step-by-step guides in the
+// Support Center.
+//
+// Behaviour: gently auto-advances (like the marketing /tour), but any
+// manual tap stops the autoplay so it never fights the reader. Fully
+// keyboard-driven (←/→ to step, Esc to skip) and honours
+// prefers-reduced-motion — no autoplay, no entrance motion. Rendered
+// through a portal at the very top of the z-index ladder so it covers
+// the tab bar and any open sheet. Seen-state persists to
+// WELCOME_TOUR_KEY so it only ever plays once per device.
+// ============================================================
+
+// The bottom-nav sections, mirrored from <TabBar/> (see the `tabs`
+// array there) so the mini preview highlights the exact same icons and
+// labels the braider will tap in the real app.
+const WELCOME_NAV: { id: string; label: string; icon: React.ComponentType<{ size?: number; strokeWidth?: number }> }[] = [
+  { id: "dashboard",  label: "Home",     icon: Home },
+  { id: "calculator", label: "Quote",    icon: CalcIcon },
+  { id: "schedule",   label: "Schedule", icon: Calendar },
+  { id: "clients",    label: "Clients",  icon: Users },
+  { id: "checkout",   label: "Checkout", icon: ShoppingBag },
+  { id: "money",      label: "Money",    icon: TrendingUp },
+];
+
+type WelcomeSlide = {
+  key: string;
+  // Which bottom-nav section this slide is spotlighting (undefined for
+  // the intro + the closing "guides" card).
+  navId?: string;
+  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
+  eyebrow: string;
+  title: string;
+  body: string;
+  tips?: string[];
+};
+
+// The mini bottom-nav rail shown inside a slide, with `activeId` lit up
+// in the brand gradient exactly like the live tab bar. This is the
+// "highlight each section" cue — the braider sees precisely which tab
+// the current card is talking about.
+const WelcomeNavPreview = ({ activeId }: { activeId?: string }) => (
+  <div
+    aria-hidden
+    style={{
+      display: "flex",
+      alignItems: "flex-end",
+      justifyContent: "space-between",
+      gap: 4,
+      padding: "10px 8px",
+      borderRadius: 16,
+      background: C.brandSurface,
+      border: `1px solid ${C.brandBorder}`,
+      boxShadow: "inset 0 1px 2px rgba(21,17,26,0.03)",
+    }}
+  >
+    {WELCOME_NAV.map((t) => {
+      const on = t.id === activeId;
+      const Icon = t.icon;
+      return (
+        <div key={t.id} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0 }}>
+          <div
+            className={on ? "bbp-wt-navpop" : undefined}
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 11,
+              display: "grid",
+              placeItems: "center",
+              background: on ? GRADIENTS.primary : "transparent",
+              color: on ? "#FFFFFF" : C.brandMuted,
+              boxShadow: on ? SHADOWS.primaryGlow : "none",
+              transition: "background 240ms ease, color 240ms ease",
+            }}
+          >
+            <Icon size={17} strokeWidth={on ? 2.4 : 1.85} />
+          </div>
+          <span
+            style={{
+              fontSize: 9.5,
+              fontWeight: on ? 800 : 600,
+              letterSpacing: "0.02em",
+              color: on ? C.brandPrimary : C.brandMuted,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {t.label}
+          </span>
+        </div>
+      );
+    })}
+  </div>
+);
+
+const WELCOME_AUTO_MS = 6500;
+
+const WelcomeOnboarding = ({
+  ownerName,
+  goToTab,
+  openGuides,
+  onFinish,
+}: {
+  ownerName?: string;
+  /** Land the braider on a given bottom-nav tab (used by the finish CTA). */
+  goToTab: (tab: string) => void;
+  /** Open Settings → Support Center, where the step-by-step guides live. */
+  openGuides: () => void;
+  /** Mark the tour seen and close it. */
+  onFinish: () => void;
+}) => {
+  const firstName = (ownerName || "").trim().split(/\s+/)[0] || "";
+  const greeting = firstName ? `Welcome, ${firstName}` : "Welcome to Braid Boss Pro";
+
+  const slides = useMemo<WelcomeSlide[]>(() => [
+    {
+      key: "intro",
+      icon: Sparkles,
+      eyebrow: "Let me show you around",
+      title: greeting,
+      body: "This is your whole braiding business in one app — booking, clients, checkout, and the money side. Here's a 60-second tour of where everything lives and how to get started.",
+    },
+    {
+      key: "dashboard",
+      navId: "dashboard",
+      icon: Home,
+      eyebrow: "Home",
+      title: "Your command center",
+      body: "Every day opens here — today's appointments and your earnings at a glance, with quick actions right on top.",
+      tips: ["See who's coming in and what you've made", "Tap the gear ⚙ up top for settings anytime"],
+    },
+    {
+      key: "calculator",
+      navId: "calculator",
+      icon: CalcIcon,
+      eyebrow: "Quote",
+      title: "Price any style in seconds",
+      body: "Build an instant quote — pick the style, hair, and add-ons — then save it or turn it straight into a booking.",
+      tips: ["Great for DMs asking “how much?”", "Turn a quote into an appointment in one tap"],
+    },
+    {
+      key: "schedule",
+      navId: "schedule",
+      icon: Calendar,
+      eyebrow: "Schedule",
+      title: "Your calendar, your way",
+      body: "Book appointments, block off time, and let automatic reminders keep clients on schedule.",
+      tips: ["Tap + to add your first appointment", "Reminders text clients so no one no-shows"],
+    },
+    {
+      key: "clients",
+      navId: "clients",
+      icon: Users,
+      eyebrow: "Clients",
+      title: "Your little black book",
+      body: "Every client's visit history, style photos, and lifetime spend — all one tap away.",
+      tips: ["Add your regulars to start their profiles", "See favorite styles and what they've spent"],
+    },
+    {
+      key: "checkout",
+      navId: "checkout",
+      icon: ShoppingBag,
+      eyebrow: "Checkout",
+      title: "Get paid at the chair",
+      body: "Ring up a service or a retail product, add a tip, and take payment — cash, Zelle, or card.",
+      tips: ["Send a branded receipt on the spot", "Sales flow straight into your Money tab"],
+    },
+    {
+      key: "money",
+      navId: "money",
+      icon: TrendingUp,
+      eyebrow: "Money",
+      title: "Know your numbers",
+      body: "Track income, deposits, and tips as they come in — and log expenses so you always know your real take-home.",
+      tips: ["Watch this week's earnings add up", "Tax time is easy when it's all here"],
+    },
+    {
+      key: "guides",
+      icon: LifeBuoy,
+      eyebrow: "Whenever you're stuck",
+      title: "Step-by-step guides, built in",
+      body: "Tap the gear ⚙ → Support Center any time for a getting-started checklist, walkthroughs, and answers to common questions.",
+      tips: ["A checklist tracks your setup as you go", "Search “How do I…” for instant answers"],
+    },
+  ], [greeting]);
+
+  const last = slides.length - 1;
+  const [index, setIndex] = useState(0);
+
+  const reducedMotion = useMemo(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+    catch { return false; }
+  }, []);
+  // Autoplay gently cycles the tour; the first manual interaction turns
+  // it off for good so it never yanks a slide out from under a reader.
+  const [autoplay, setAutoplay] = useState(!reducedMotion);
+
+  const cardRef = useRef<HTMLDivElement | null>(null);
+
+  const goTo = useCallback((next: number) => {
+    setAutoplay(false);
+    setIndex(((next % slides.length) + slides.length) % slides.length);
+  }, [slides.length]);
+  const next = useCallback(() => goTo(index + 1), [goTo, index]);
+  const prev = useCallback(() => goTo(index - 1), [goTo, index]);
+
+  const finish = useCallback(() => { goToTab("dashboard"); onFinish(); }, [goToTab, onFinish]);
+
+  // Auto-advance timer. Stops on the final slide (nothing to cycle to)
+  // and whenever autoplay is switched off.
+  useEffect(() => {
+    if (!autoplay || index >= last) return;
+    const t = setTimeout(() => setIndex((i) => Math.min(i + 1, last)), WELCOME_AUTO_MS);
+    return () => clearTimeout(t);
+  }, [autoplay, index, last]);
+
+  // Keyboard: arrows step, Escape skips the whole tour.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowRight") { e.preventDefault(); next(); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); prev(); }
+      else if (e.key === "Escape") { e.preventDefault(); onFinish(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [next, prev, onFinish]);
+
+  // Pull focus onto the dialog on mount so screen readers announce it
+  // and the keyboard controls work immediately.
+  useEffect(() => { cardRef.current?.focus(); }, []);
+
+  const slide = slides[index];
+  const Icon = slide.icon;
+  const onLast = index === last;
+
+  const overlay = (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Welcome tour"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 120,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 18,
+        background: "rgba(21,17,26,0.62)",
+        WebkitBackdropFilter: "blur(8px)",
+        backdropFilter: "blur(8px)",
+      }}
+    >
+      <div
+        ref={cardRef}
+        tabIndex={-1}
+        className={reducedMotion ? undefined : "bbp-wt-pop"}
+        // Pointer activity over the card pauses autoplay so the braider
+        // can read at their own pace without a slide jumping.
+        onPointerDown={() => setAutoplay(false)}
+        style={{
+          width: "100%",
+          maxWidth: 430,
+          maxHeight: "92dvh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          background: C.cream,
+          borderRadius: 26,
+          boxShadow: "0 30px 80px -24px rgba(21,17,26,0.6)",
+          outline: "none",
+        }}
+      >
+        {/* Autoplay progress bar — telegraphs the gentle auto-advance. */}
+        <div style={{ height: 3, background: C.brandBorder, position: "relative", overflow: "hidden", flexShrink: 0 }}>
+          {autoplay && !onLast && (
+            <div
+              key={index}
+              className="bbp-wt-progress"
+              style={{ position: "absolute", inset: 0, transformOrigin: "left", background: GRADIENTS.primary }}
+            />
+          )}
+        </div>
+
+        {/* Spotlight header — brand gradient with a floating icon badge. */}
+        <div
+          style={{
+            position: "relative",
+            padding: "26px 22px 22px",
+            background: GRADIENTS.hero,
+            color: "#FFFFFF",
+            overflow: "hidden",
+            flexShrink: 0,
+          }}
+        >
+          {/* Decorative drifting blobs. */}
+          <span aria-hidden className={reducedMotion ? undefined : "bbp-wt-float"} style={{ position: "absolute", top: -40, right: -30, width: 150, height: 150, borderRadius: 999, background: "rgba(255,255,255,0.16)" }} />
+          <span aria-hidden className={reducedMotion ? undefined : "bbp-wt-float2"} style={{ position: "absolute", bottom: -50, left: -30, width: 130, height: 130, borderRadius: 999, background: "rgba(255,255,255,0.10)" }} />
+
+          <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", opacity: 0.9 }}>
+              {index + 1} / {slides.length}
+            </span>
+            <button
+              type="button"
+              onClick={onFinish}
+              style={{ background: "rgba(255,255,255,0.18)", color: "#FFFFFF", border: 0, borderRadius: 999, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+            >
+              Skip
+            </button>
+          </div>
+
+          <div
+            aria-hidden
+            key={`icon-${index}`}
+            className={reducedMotion ? undefined : "bbp-wt-badge"}
+            style={{
+              position: "relative",
+              width: 66,
+              height: 66,
+              margin: "0 auto",
+              borderRadius: 20,
+              display: "grid",
+              placeItems: "center",
+              background: "rgba(255,255,255,0.22)",
+              border: "1px solid rgba(255,255,255,0.35)",
+              boxShadow: "0 10px 30px -10px rgba(0,0,0,0.35)",
+            }}
+          >
+            <Icon size={30} strokeWidth={2.1} />
+          </div>
+        </div>
+
+        {/* Body — copy, the highlighted nav preview, and getting-started tips. */}
+        <div className="bbp-scroll" style={{ padding: "20px 22px 8px", overflowY: "auto", flex: "1 1 auto", minHeight: 0 }}>
+          <div key={`copy-${index}`} className={reducedMotion ? undefined : "bbp-wt-slide"}>
+            <p style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.16em", textTransform: "uppercase", color: C.brandPrimary, margin: "0 0 6px" }}>
+              {slide.eyebrow}
+            </p>
+            <h2 style={{ fontFamily: FONT_DISPLAY, fontSize: 27, fontWeight: 700, color: C.espresso, margin: "0 0 8px", lineHeight: 1.12 }}>
+              {slide.title}
+            </h2>
+            <p style={{ fontSize: 14, lineHeight: 1.6, color: C.coffee, margin: 0 }}>
+              {slide.body}
+            </p>
+
+            {slide.navId && (
+              <div style={{ marginTop: 16 }}>
+                <WelcomeNavPreview activeId={slide.navId} />
+              </div>
+            )}
+
+            {slide.tips && slide.tips.length > 0 && (
+              <div style={{ marginTop: 16, display: "grid", gap: 8 }}>
+                {slide.tips.map((tip) => (
+                  <div key={tip} style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
+                    <span aria-hidden style={{ flexShrink: 0, width: 20, height: 20, borderRadius: 999, display: "grid", placeItems: "center", background: GRADIENTS.primary, color: "#FFFFFF", marginTop: 1 }}>
+                      <Check size={12} strokeWidth={3} />
+                    </span>
+                    <span style={{ fontSize: 13, lineHeight: 1.5, color: C.espresso }}>{tip}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer — progress dots + navigation controls. */}
+        <div style={{ padding: "10px 22px calc(18px + env(safe-area-inset-bottom, 0px))", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 14 }}>
+            {slides.map((s, i) => (
+              <button
+                key={s.key}
+                type="button"
+                aria-label={`Go to step ${i + 1}: ${s.title}`}
+                aria-current={i === index ? "true" : undefined}
+                onClick={() => goTo(i)}
+                style={{
+                  width: i === index ? 22 : 8,
+                  height: 8,
+                  borderRadius: 999,
+                  border: 0,
+                  padding: 0,
+                  cursor: "pointer",
+                  background: i === index ? GRADIENTS.primary : C.brandBorder,
+                  transition: "width 220ms ease",
+                }}
+              />
+            ))}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {index > 0 && (
+              <div style={{ flexShrink: 0 }}>
+                <Button variant="ghost" onClick={prev}>Back</Button>
+              </div>
+            )}
+            <div style={{ flex: 1 }}>
+              {onLast ? (
+                <Button variant="primary" fullWidth onClick={finish} icon={<Sparkles size={17} />}>Start braiding</Button>
+              ) : (
+                <Button variant="primary" fullWidth onClick={next} icon={<ChevronRight size={18} />}>Next</Button>
+              )}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => { openGuides(); onFinish(); }}
+            style={{ display: "block", width: "100%", marginTop: 10, background: "transparent", border: 0, color: C.brandPrimary, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 4 }}
+          >
+            Open the step-by-step guides
+          </button>
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes bbpWtPop { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .bbp-wt-pop { animation: bbpWtPop 0.42s cubic-bezier(.2,.8,.2,1) both; }
+        @keyframes bbpWtSlide { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .bbp-wt-slide { animation: bbpWtSlide 0.4s cubic-bezier(.2,.8,.2,1) both; }
+        @keyframes bbpWtBadge { 0% { opacity: 0; transform: scale(0.6) rotate(-8deg); } 60% { transform: scale(1.08) rotate(3deg); } 100% { opacity: 1; transform: scale(1) rotate(0deg); } }
+        .bbp-wt-badge { animation: bbpWtBadge 0.5s cubic-bezier(.2,.9,.25,1.2) both; }
+        @keyframes bbpWtNavPop { 0% { transform: scale(0.8); } 55% { transform: scale(1.12); } 100% { transform: scale(1); } }
+        .bbp-wt-navpop { animation: bbpWtNavPop 0.44s cubic-bezier(.2,.9,.25,1.2) both; }
+        @keyframes bbpWtProgress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+        .bbp-wt-progress { animation: bbpWtProgress ${WELCOME_AUTO_MS}ms linear both; }
+        @keyframes bbpWtFloat { 0%, 100% { transform: translate(0,0); } 50% { transform: translate(-14px, 12px); } }
+        @keyframes bbpWtFloat2 { 0%, 100% { transform: translate(0,0); } 50% { transform: translate(12px, -10px); } }
+        .bbp-wt-float { animation: bbpWtFloat 9s ease-in-out infinite; }
+        .bbp-wt-float2 { animation: bbpWtFloat2 11s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .bbp-wt-pop, .bbp-wt-slide, .bbp-wt-badge, .bbp-wt-navpop, .bbp-wt-progress, .bbp-wt-float, .bbp-wt-float2 { animation: none !important; }
+        }
+      `}</style>
+    </div>
+  );
+
+  if (typeof document === "undefined") return overlay;
+  return createPortal(overlay, document.body);
+};
 
 // ============================================================
 // Boss Checkout — in-person point of sale.
@@ -42208,6 +42673,29 @@ export default function App() {
     setTtpAwareOpen(false);
   };
 
+  // One-time animated welcome tour for new braiders. Plays the first
+  // time someone lands in the app (authed or trialing as a guest) and
+  // never again once dismissed (flag persisted, same pattern as the Tap
+  // to Pay splash). We wait for the store to finish loading so it opens
+  // over the real app, not the loading splash.
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (auth.mode === "loading" || store.loading) return;
+    try { if (window.localStorage.getItem(WELCOME_TOUR_KEY) === "1") return; } catch { return; }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- opening a one-time splash after auth + store resolve
+    setWelcomeOpen(true);
+  }, [auth.mode, store.loading]);
+  const markWelcomeSeen = useCallback(() => {
+    try { window.localStorage.setItem(WELCOME_TOUR_KEY, "1"); } catch { /* private mode */ }
+    setWelcomeOpen(false);
+  }, []);
+  // Let the Support Center replay the tour on demand.
+  const replayWelcomeTour = useCallback(() => {
+    setSecondary(null);
+    setWelcomeOpen(true);
+  }, []);
+
   // Persist the current screen so a page refresh / pull-to-refresh stays
   // put instead of dumping back to Home. `active` is the bottom-nav tab
   // and `secondary` is the overlay sub-screen (settings, intake form,
@@ -42640,6 +43128,15 @@ export default function App() {
         />
       )}
 
+      {welcomeOpen && (
+        <WelcomeOnboarding
+          ownerName={store.business?.ownerName || ""}
+          goToTab={(tab) => { setSecondary(null); setActive(tab); }}
+          openGuides={() => { setSecondary("support"); }}
+          onFinish={markWelcomeSeen}
+        />
+      )}
+
       {secondary === null && (
         <>
           {active === "dashboard" && (
@@ -42776,6 +43273,7 @@ export default function App() {
           openAvailability={() => setSecondary("availability")}
           openPolicies={() => setSecondary("bookingPolicies")}
           goToTab={(tab) => { setSecondary(null); setActive(tab); }}
+          replayTour={replayWelcomeTour}
         />
       )}
       {secondary === "availability" && <AvailabilityScreen store={store} onBack={() => setSecondary("settings")} />}
