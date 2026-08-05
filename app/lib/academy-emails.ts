@@ -1,11 +1,45 @@
-// Shared Academy access-email templates.
+// Shared Academy email templates.
 //
-// One source of truth for the "you now have access" emails sent after a
-// paid video purchase or class sign-up. Used by the checkout webhooks
-// (fast path), the reconcile sweep (retry), and the owner-facing "Resend
-// confirmation" action — so the copy can never drift between them.
+// One source of truth for the buyer "you now have access" emails (sent by
+// the checkout webhooks, the reconcile sweep, and the owner "Resend"
+// action) and the seller sale alerts. Keeping the copy + styling here
+// means it can never drift between those call sites.
 
 export type BuiltEmail = { subject: string; html: string; text: string };
+
+// ── Branded shell ───────────────────────────────────────────────────
+// Matches the app's transactional look: warm cream backdrop, a wordmark,
+// a white card, and a footer — so these read like a real Braid Boss Pro
+// email instead of raw HTML.
+const BRAND = {
+  bg: "#FAF6EE",
+  card: "#FFFFFF",
+  border: "#E9DFC8",
+  ink: "#2A1D12",
+  coffee: "#6F5B47",
+  muted: "#9A8B72",
+  accent: "#7C3AED",
+};
+
+const wrapAcademyEmail = (title: string, inner: string): string => `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title}</title>
+  </head>
+  <body style="margin:0;padding:0;background:${BRAND.bg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${BRAND.ink};-webkit-font-smoothing:antialiased;">
+    <div style="max-width:520px;margin:0 auto;padding:28px 20px;">
+      <p style="text-align:center;font-size:12px;font-weight:700;letter-spacing:0.24em;color:${BRAND.accent};margin:0 0 18px;">BRAID BOSS PRO</p>
+      <div style="background:${BRAND.card};border:1px solid ${BRAND.border};border-radius:18px;padding:32px 28px;box-shadow:0 2px 12px rgba(42,29,18,0.06);">
+        ${inner}
+      </div>
+      <p style="text-align:center;font-size:11px;line-height:1.5;color:${BRAND.muted};margin:20px 0 0;">
+        Sent by Braid Boss Pro · You received this because you made a purchase.
+      </p>
+    </div>
+  </body>
+</html>`;
 
 // Human "when" for a class start, in the braider's timezone when set.
 export const fmtClassWhen = (startsAt: string | null, tz: string | null): string => {
@@ -21,6 +55,9 @@ export const fmtClassWhen = (startsAt: string | null, tz: string | null): string
   }
 };
 
+const button = (href: string, label: string): string =>
+  `<a href="${href}" style="display:inline-block;background:${BRAND.accent};color:#ffffff;text-decoration:none;padding:14px 30px;border-radius:12px;font-weight:700;font-size:15px;letter-spacing:0.01em;">${label}</a>`;
+
 export const buildVideoAccessEmail = (args: {
   videoTitle: string;
   accessToken: string;
@@ -31,23 +68,23 @@ export const buildVideoAccessEmail = (args: {
   const watchUrl = `${args.baseUrl.replace(/\/$/, "")}/watch/${encodeURIComponent(args.accessToken)}`;
   const expiryLine =
     args.accessModel === "rent" && args.accessExpiresAt
-      ? `<p style="margin:0 0 12px;font-size:13px;color:#6F6477;">Your access is available until ${new Date(
+      ? `<p style="font-size:13px;line-height:1.5;color:${BRAND.coffee};margin:0;">Your access is available until <strong>${new Date(
           args.accessExpiresAt,
-        ).toLocaleString()}.</p>`
-      : `<p style="margin:0 0 12px;font-size:13px;color:#6F6477;">You have permanent access — save this link.</p>`;
+        ).toLocaleString()}</strong>.</p>`
+      : `<p style="font-size:13px;line-height:1.5;color:${BRAND.coffee};margin:0;">You have permanent access — save this email.</p>`;
+  const inner = `
+    <h1 style="font-size:22px;line-height:1.3;font-weight:700;margin:0 0 12px;color:${BRAND.ink};">Thanks for your purchase! 🎬</h1>
+    <p style="font-size:15px;line-height:1.6;margin:0 0 22px;color:${BRAND.coffee};">You now have access to <strong style="color:${BRAND.ink};">${args.videoTitle}</strong>.</p>
+    <p style="margin:0 0 22px;">${button(watchUrl, "Watch now →")}</p>
+    ${expiryLine}
+    <hr style="border:none;border-top:1px solid ${BRAND.border};margin:22px 0 16px;" />
+    <p style="font-size:12px;line-height:1.5;color:${BRAND.muted};margin:0;word-break:break-all;">
+      Button not working? Paste this link:<br />
+      <a href="${watchUrl}" style="color:${BRAND.accent};">${watchUrl}</a>
+    </p>`;
   return {
     subject: `Your video access: ${args.videoTitle}`,
-    html: `
-        <h1 style="font-size:20px;margin:0 0 12px;">Thanks for your purchase! 🎬</h1>
-        <p style="margin:0 0 12px;">You now have access to <strong>${args.videoTitle}</strong>.</p>
-        <p style="margin:0 0 16px;">
-          <a href="${watchUrl}" style="display:inline-block;background:#7C3AED;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:600;">
-            Watch now
-          </a>
-        </p>
-        ${expiryLine}
-        <p style="margin:0;font-size:12px;color:#9A8B72;word-break:break-all;">Or paste this link: ${watchUrl}</p>
-      `,
+    html: wrapAcademyEmail(`Your video access: ${args.videoTitle}`, inner),
     text: `Thanks for your purchase! Watch ${args.videoTitle} here: ${watchUrl}`,
   };
 };
@@ -63,25 +100,32 @@ export const buildClassAccessEmail = (args: {
 }): BuiltEmail => {
   const when = fmtClassWhen(args.startsAt, args.timezone);
   const isVirtual = args.format === "virtual";
-  const accessLine = isVirtual
+  const row = (label: string, value: string): string =>
+    `<tr>
+      <td style="padding:4px 0;font-size:13px;color:${BRAND.muted};width:92px;vertical-align:top;">${label}</td>
+      <td style="padding:4px 0;font-size:14px;color:${BRAND.ink};">${value}</td>
+    </tr>`;
+  const accessValue = isVirtual
     ? args.meetingUrl
-      ? `<p style="margin:0 0 6px;"><strong>Join link:</strong> <a href="${args.meetingUrl}">${args.meetingUrl}</a></p>`
-      : `<p style="margin:0 0 6px;">Your join link will be sent before the class.</p>`
+      ? `<a href="${args.meetingUrl}" style="color:${BRAND.accent};word-break:break-all;">${args.meetingUrl}</a>`
+      : "Your join link will be sent before the class."
     : args.locationText
-      ? `<p style="margin:0 0 6px;"><strong>Location:</strong> ${args.locationText}</p>`
-      : `<p style="margin:0 0 6px;">Location details will follow from your braider.</p>`;
-  const seatLine =
-    Number(args.seats) > 1 ? `<p style="margin:0 0 6px;"><strong>Seats:</strong> ${args.seats}</p>` : "";
+      ? args.locationText
+      : "Location details will follow from your braider.";
+  const detailRows =
+    row("When", when) +
+    (args.seats > 1 ? row("Seats", String(args.seats)) : "") +
+    row(isVirtual ? "Join link" : "Location", accessValue);
+  const inner = `
+    <h1 style="font-size:22px;line-height:1.3;font-weight:700;margin:0 0 12px;color:${BRAND.ink};">You're in! 🎉</h1>
+    <p style="font-size:15px;line-height:1.6;margin:0 0 20px;color:${BRAND.coffee};">Your spot in <strong style="color:${BRAND.ink};">${args.classTitle}</strong> is confirmed.</p>
+    <div style="background:${BRAND.bg};border:1px solid ${BRAND.border};border-radius:12px;padding:14px 18px;margin:0 0 20px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;">${detailRows}</table>
+    </div>
+    <p style="font-size:14px;line-height:1.6;color:${BRAND.coffee};margin:0;">See you there! 💜</p>`;
   return {
     subject: `You're signed up: ${args.classTitle}`,
-    html: `
-        <h1 style="font-size:20px;margin:0 0 12px;">You're in! 🎉</h1>
-        <p style="margin:0 0 12px;">Your spot in <strong>${args.classTitle}</strong> is confirmed.</p>
-        <p style="margin:0 0 6px;"><strong>When:</strong> ${when}</p>
-        ${seatLine}
-        ${accessLine}
-        <p style="margin:16px 0 0;font-size:13px;color:#6F6477;">See you there!</p>
-      `,
+    html: wrapAcademyEmail(`You're signed up: ${args.classTitle}`, inner),
     text: `You're signed up for ${args.classTitle}. When: ${when}. ${
       isVirtual ? `Join: ${args.meetingUrl || "link to follow"}` : `Location: ${args.locationText || "details to follow"}`
     }`,
@@ -90,9 +134,9 @@ export const buildClassAccessEmail = (args: {
 
 // ── Seller (braider) sale alerts ────────────────────────────────────
 // Plain subject + body for queue_stylist_email_alert → the notification
-// worker's renderGeneric wraps the body and sends it, and the
-// stylist-addressed row also fires a web push + in-app bell. Kept as
-// plain text (no HTML) because renderGeneric escapes the body.
+// worker's renderGeneric wraps the body in its own branded shell and
+// sends it, and the stylist-addressed row also fires a web push +
+// in-app bell. Kept as plain text because renderGeneric escapes the body.
 
 const money = (amount: number, currency: string): string => {
   try {
