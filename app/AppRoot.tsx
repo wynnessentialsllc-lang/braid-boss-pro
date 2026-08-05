@@ -1855,6 +1855,40 @@ async function deleteEntity(
   setter(prev => prev.filter(x => x.id !== id));
 }
 
+// ---- Account isolation ----------------------------------------------
+// The local cache (below) is ONE global namespace per device/browser —
+// keys like "clients:<id>" are NOT scoped to a user. That's fine while a
+// single braider uses the app, but if a different account then signs in
+// on the same device it would inherit the previous braider's clients,
+// inventory, revenue, etc. — and (for premium accounts) the login
+// migration would even re-upload that data into the new account.
+//
+// To prevent any cross-braider bleed we record which account currently
+// owns the local cache (ACCOUNT_SCOPE_KEY). When a different account
+// takes over — or on sign-out — we wipe every per-account key so each
+// braider always starts from their own (cloud-backed, or empty) data.
+const ACCOUNT_SCOPE_KEY = "bbp-account-scope-v1";
+
+// Every localStorage prefix / singleton key that holds per-account data.
+const ACCOUNT_DATA_PREFIXES = [
+  "reminders:", "clients:", "appointments:", "quotes:", "transactions:",
+  "photos:", "recurringSeries:", "timerSessions:", "commLog:", "receipts:",
+  "businessExpenses:", "inventoryItems:", "inventoryMovements:",
+  "policies:", "stylePresets:", "reminderTemplates:",
+];
+const ACCOUNT_DATA_SINGLETONS = ["settings:business", "reminderSettings", "activeTimer"];
+
+// Purge all per-account data from this device's localStorage. Pure
+// storage side-effect — callers own resetting any in-memory React state.
+const wipeLocalAccountStorage = async () => {
+  for (const prefix of ACCOUNT_DATA_PREFIXES) {
+    const keys = await safeStorage.list(prefix);
+    for (const k of keys) await safeStorage.delete(k);
+  }
+  for (const k of ACCOUNT_DATA_SINGLETONS) await safeStorage.delete(k);
+  await safeStorage.delete(ACCOUNT_SCOPE_KEY);
+};
+
 const useStorage = () => {
   const [business, setBusiness] = useState<EntityRecord>(DEFAULT_BUSINESS);
   const [reminderSettings, setReminderSettings] = useState<EntityRecord>(DEFAULT_REMINDER_SETTINGS);
@@ -1939,6 +1973,41 @@ const useStorage = () => {
 
   const saveBusiness = useCallback(async (next) => { setBusiness(next); await safeStorage.set("settings:business", next); }, []);
   const saveReminderSettings = useCallback(async (next) => { setReminderSettings(next); await safeStorage.set("reminderSettings", next); }, []);
+
+  // Wipe every per-account cache on this device and reset in-memory
+  // state back to a fresh-install baseline. Called when a different
+  // braider takes over the device (account-isolation guard) and on
+  // sign-out, so no braider ever sees another's data. App defaults
+  // (starter templates / policies / presets) are re-seeded exactly like
+  // a first launch; for cloud-backed accounts the login pull then
+  // repopulates their real data.
+  const resetLocalData = useCallback(async () => {
+    await wipeLocalAccountStorage();
+    await safeStorage.set("settings:business", DEFAULT_BUSINESS);
+    await safeStorage.set("reminderSettings", DEFAULT_REMINDER_SETTINGS);
+    for (const t of DEFAULT_REMINDER_TEMPLATES) await safeStorage.set(`reminderTemplates:${t.id}`, t);
+    for (const p of DEFAULT_POLICIES) await safeStorage.set(`policies:${p.id}`, p);
+    for (const p of DEFAULT_PRESETS) await safeStorage.set(`stylePresets:${p.id}`, p);
+    setBusiness(DEFAULT_BUSINESS);
+    setReminderSettings(DEFAULT_REMINDER_SETTINGS);
+    setReminderTemplates(DEFAULT_REMINDER_TEMPLATES);
+    setReminders([]);
+    setClients([]);
+    setAppointments([]);
+    setQuotes([]);
+    setTransactions([]);
+    setPhotos([]);
+    setRecurringSeries([]);
+    setTimerSessions([]);
+    setCommLog([]);
+    setReceipts([]);
+    setBusinessExpenses([]);
+    setInventoryItems([]);
+    setInventoryMovements([]);
+    setPolicies(DEFAULT_POLICIES);
+    setStylePresets(DEFAULT_PRESETS);
+    setActiveTimer(null);
+  }, []);
 
   const upsertClient = useCallback((record: any) => upsertEntity("clients", setClients, record), []);
   const deleteClient = useCallback((id: string) => deleteEntity("clients", setClients, id), []);
@@ -2220,7 +2289,7 @@ const useStorage = () => {
     upsertInventoryItem, deleteInventoryItem,
     inventoryMovements,
     recordInventoryMovement, setInventoryItemQuantity, setInventoryVariationQuantity,
-    replaceCloudState,
+    replaceCloudState, resetLocalData,
   };
 };
 
@@ -22449,6 +22518,10 @@ const useAuth = () => {
     const supabase = getSupabase();
     await supabase.auth.signOut();
     if (typeof window !== "undefined") window.localStorage.removeItem(GUEST_FLAG_KEY);
+    // Purge this braider's data from the device so the next person to
+    // sign in (or continue as guest) never inherits it. In-memory React
+    // state is reset by the caller via store.resetLocalData().
+    try { await wipeLocalAccountStorage(); } catch { /* storage blocked */ }
     setMode("loading");
   }, []);
 
@@ -22486,6 +22559,43 @@ const useCloudSync = (userId: string | null, store: any) => {
     setLastOk(s);
     if (typeof window !== "undefined") window.localStorage.setItem(SYNC_LAST_OK_KEY, s);
   };
+
+  // ---- Account isolation guard ----------------------------------------
+  // The local cache is one global namespace on this device. Before we do
+  // anything else for a signed-in braider, compare who owns the cache to
+  // who's signed in now. If they differ, the cache belongs to a DIFFERENT
+  // account — wipe it so this braider never sees (or, via the migration
+  // push below, re-uploads) the previous braider's data. This is what
+  // guarantees each account starts from only its own data.
+  //
+  // `scopeReady` gates the initial pull so the migration can't run against
+  // another account's stale local records; `scopeSameAccount` tells the
+  // pull whether the local-only migration is safe (same braider returning
+  // with offline edits) or must be skipped (a different braider).
+  const scopeCheckedFor = useRef<string | null>(null);
+  const [scopeReady, setScopeReady] = useState(false);
+  const [scopeSameAccount, setScopeSameAccount] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting the guard's own gate state on auth change
+    if (!userId) { scopeCheckedFor.current = null; setScopeReady(false); setScopeSameAccount(false); return; }
+    if (scopeCheckedFor.current === userId) return;
+    scopeCheckedFor.current = userId;
+    setScopeReady(false);
+    (async () => {
+      let same = false;
+      try {
+        const prev = await safeStorage.get(ACCOUNT_SCOPE_KEY);
+        same = prev === userId;
+        if (!same) await store.resetLocalData?.();
+        await safeStorage.set(ACCOUNT_SCOPE_KEY, userId);
+      } catch { /* storage blocked — treat as a fresh, non-migrating account */ }
+      setScopeSameAccount(same);
+      setScopeReady(true);
+    })();
+    // Intentionally keyed on userId only: the guard must run once per
+    // account switch, not on every store mutation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   // Central Stripe reconciliation. Pulls the connected account's live
   // charges and marks any appointment whose balance a Stripe payment has
@@ -22539,6 +22649,9 @@ const useCloudSync = (userId: string | null, store: any) => {
   // behind lifetime access, so guest/free accounts work fully offline.
   useEffect(() => {
     if (!userId || !store?.premium) { initialPullDone.current = false; return; }
+    // Wait for the account-isolation guard so we never migrate a
+    // different braider's local cache into this account.
+    if (!scopeReady) return;
     if (initialPullDone.current) return;
     initialPullDone.current = true;
     (async () => {
@@ -22560,31 +22673,40 @@ const useCloudSync = (userId: string | null, store: any) => {
         // One-time migration: push any local-only records (id absent in
         // the cloud snapshot) so existing localStorage data lands in the
         // user's account. Cloud is canonical for everything else.
-        const newOnly = (local: any[], cloud: any[]) => {
-          const ids = new Set(cloud.map((x: any) => x.id));
-          return (Array.isArray(local) ? local : []).filter((x: any) => x?.id && !ids.has(x.id));
-        };
-        const pushQueue: Promise<any>[] = [];
-        for (const r of newOnly(store.clients, clientsCloud)) pushQueue.push(syncClients.upsert(userId, r).catch(() => null));
-        for (const r of newOnly(store.appointments, apptsCloud)) pushQueue.push(syncAppointments.upsert(userId, r).catch(() => null));
-        for (const r of newOnly(store.quotes, quotesCloud)) pushQueue.push(syncQuotes.upsert(userId, r).catch(() => null));
-        for (const r of newOnly(store.receipts || [], receiptsCloud)) pushQueue.push(syncReceipts.upsert(userId, r).catch(() => null));
-        for (const r of newOnly(store.commLog, commsCloud)) pushQueue.push(syncCommunications.upsert(userId, r).catch(() => null));
-        // Photos: only push metadata for items that already have a
-        // storagePath (already uploaded). Items still carrying a
-        // dataUrl will be migrated lazily by handleSavePhoto next time
-        // the user opens the gallery, since a real bucket upload has
-        // to happen first.
-        for (const r of newOnly(store.photos, photosCloud).filter((p: any) => p?.storagePath))
-          pushQueue.push(syncPhotos.upsert(userId, r).catch(() => null));
-        for (const r of newOnly(store.businessExpenses || store.expenses || [], expensesCloud))
-          pushQueue.push(syncBusinessExpenses.upsert(userId, r).catch(() => null));
-        for (const r of newOnly(store.inventoryItems || [], inventoryItemsCloud))
-          pushQueue.push(syncInventoryItems.upsert(userId, r).catch(() => null));
-        // Inventory movements are written server-side by the RPC, so
-        // there's no "local-only" migration push for them; the pull
-        // below brings them in.
-        await Promise.all(pushQueue);
+        //
+        // GATED on scopeSameAccount: we only migrate local records when
+        // the cache already belonged to THIS braider (a returning user
+        // whose offline edits should sync up). When a different account
+        // signs in on this device, the guard above has already wiped the
+        // cache, and we must NOT push — otherwise the previous braider's
+        // clients/inventory/etc. would be copied into this account.
+        if (scopeSameAccount) {
+          const newOnly = (local: any[], cloud: any[]) => {
+            const ids = new Set(cloud.map((x: any) => x.id));
+            return (Array.isArray(local) ? local : []).filter((x: any) => x?.id && !ids.has(x.id));
+          };
+          const pushQueue: Promise<any>[] = [];
+          for (const r of newOnly(store.clients, clientsCloud)) pushQueue.push(syncClients.upsert(userId, r).catch(() => null));
+          for (const r of newOnly(store.appointments, apptsCloud)) pushQueue.push(syncAppointments.upsert(userId, r).catch(() => null));
+          for (const r of newOnly(store.quotes, quotesCloud)) pushQueue.push(syncQuotes.upsert(userId, r).catch(() => null));
+          for (const r of newOnly(store.receipts || [], receiptsCloud)) pushQueue.push(syncReceipts.upsert(userId, r).catch(() => null));
+          for (const r of newOnly(store.commLog, commsCloud)) pushQueue.push(syncCommunications.upsert(userId, r).catch(() => null));
+          // Photos: only push metadata for items that already have a
+          // storagePath (already uploaded). Items still carrying a
+          // dataUrl will be migrated lazily by handleSavePhoto next time
+          // the user opens the gallery, since a real bucket upload has
+          // to happen first.
+          for (const r of newOnly(store.photos, photosCloud).filter((p: any) => p?.storagePath))
+            pushQueue.push(syncPhotos.upsert(userId, r).catch(() => null));
+          for (const r of newOnly(store.businessExpenses || store.expenses || [], expensesCloud))
+            pushQueue.push(syncBusinessExpenses.upsert(userId, r).catch(() => null));
+          for (const r of newOnly(store.inventoryItems || [], inventoryItemsCloud))
+            pushQueue.push(syncInventoryItems.upsert(userId, r).catch(() => null));
+          // Inventory movements are written server-side by the RPC, so
+          // there's no "local-only" migration push for them; the pull
+          // below brings them in.
+          await Promise.all(pushQueue);
+        }
 
         // Re-pull so the local state mirrors what's now in the cloud.
         const [clients2, appts2, quotes2, receipts2, comms2, photos2, expenses2, inventoryItems2, inventoryMovements2] = await Promise.all([
@@ -22640,7 +22762,7 @@ const useCloudSync = (userId: string | null, store: any) => {
         setState("error");
       }
     })();
-  }, [userId, store]);
+  }, [userId, store, scopeReady, scopeSameAccount]);
 
   // Diff-push on every store change (after the initial pull). Pushes
   // only records whose JSON differs from the last successful sync;
@@ -40986,6 +41108,9 @@ type WelcomeSlide = {
   // Which bottom-nav section this slide is spotlighting (undefined for
   // the intro + the closing "guides" card).
   navId?: string;
+  // "trial" marks the final activation card, which renders the plan
+  // pricing block and a "Start your free trial" CTA instead of tips.
+  kind?: "trial";
   icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
   eyebrow: string;
   title: string;
@@ -41054,15 +41179,23 @@ const WELCOME_AUTO_MS = 6500;
 
 const WelcomeOnboarding = ({
   ownerName,
+  showTrial = false,
   goToTab,
   openGuides,
+  onStartTrial,
   onFinish,
 }: {
   ownerName?: string;
+  /** Whether to end the tour on the "start your free trial" activation
+   *  card. False for accounts already subscribed / grandfathered. */
+  showTrial?: boolean;
   /** Land the braider on a given bottom-nav tab (used by the finish CTA). */
   goToTab: (tab: string) => void;
   /** Open Settings → Support Center, where the step-by-step guides live. */
   openGuides: () => void;
+  /** Close the tour and take the braider to the subscription screen so
+   *  they can activate their 14-day free trial. */
+  onStartTrial?: () => void;
   /** Mark the tour seen and close it. */
   onFinish: () => void;
 }) => {
@@ -41139,7 +41272,17 @@ const WelcomeOnboarding = ({
       body: "Tap the gear ⚙ → Support Center any time for a getting-started checklist, walkthroughs, and answers to common questions.",
       tips: ["A checklist tracks your setup as you go", "Search “How do I…” for instant answers"],
     },
-  ], [greeting]);
+    // Final activation card — only for accounts that haven't started a
+    // plan yet. Turns "Start braiding" into a clear trial kickoff.
+    ...(showTrial ? [{
+      key: "trial",
+      kind: "trial" as const,
+      icon: Sparkles,
+      eyebrow: "You're all set",
+      title: `Start your ${SUBSCRIPTION_TRIAL_DAYS}-day free trial`,
+      body: "Unlock every feature free for 14 days — unlimited clients, reminders, marketing, your storefront, and more. No contracts, cancel anytime.",
+    }] : []),
+  ], [greeting, showTrial]);
 
   const last = slides.length - 1;
   const [index, setIndex] = useState(0);
@@ -41320,6 +41463,24 @@ const WelcomeOnboarding = ({
                 ))}
               </div>
             )}
+
+            {slide.kind === "trial" && (
+              <div style={{ marginTop: 16, display: "grid", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ flex: 1, borderRadius: 14, padding: "12px 10px", textAlign: "center", background: GRADIENTS.primary, color: "#FFFFFF", boxShadow: SHADOWS.primaryGlow }}>
+                    <p style={{ fontSize: 14, fontWeight: 800, margin: 0 }}>Monthly</p>
+                    <p style={{ fontSize: 11, fontWeight: 600, margin: "2px 0 0", opacity: 0.92 }}>{SUBSCRIPTION_PRICE_LABEL}</p>
+                  </div>
+                  <div style={{ flex: 1, borderRadius: 14, padding: "12px 10px", textAlign: "center", background: C.brandSurface, color: C.espresso, border: `1px solid ${C.brandBorder}` }}>
+                    <p style={{ fontSize: 14, fontWeight: 800, margin: 0 }}>Annual</p>
+                    <p style={{ fontSize: 11, fontWeight: 600, margin: "2px 0 0", color: C.muted }}>{ANNUAL_PRICE_LABEL} · {ANNUAL_SAVINGS_LABEL}</p>
+                  </div>
+                </div>
+                <p style={{ fontSize: 12, lineHeight: 1.5, color: C.muted, textAlign: "center", margin: "2px 0 0" }}>
+                  Free for {SUBSCRIPTION_TRIAL_DAYS} days, then {SUBSCRIPTION_PRICE_LABEL}. You won&apos;t be charged until your trial ends, and you can cancel anytime before then — right from Settings.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -41354,7 +41515,11 @@ const WelcomeOnboarding = ({
               </div>
             )}
             <div style={{ flex: 1 }}>
-              {onLast ? (
+              {slide.kind === "trial" ? (
+                <Button variant="primary" fullWidth onClick={() => { (onStartTrial || finish)(); }} icon={<Sparkles size={17} />}>
+                  Start your {SUBSCRIPTION_TRIAL_DAYS}-day free trial
+                </Button>
+              ) : onLast ? (
                 <Button variant="primary" fullWidth onClick={finish} icon={<Sparkles size={17} />}>Start braiding</Button>
               ) : (
                 <Button variant="primary" fullWidth onClick={next} icon={<ChevronRight size={18} />}>Next</Button>
@@ -41362,13 +41527,23 @@ const WelcomeOnboarding = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => { openGuides(); onFinish(); }}
-            style={{ display: "block", width: "100%", marginTop: 10, background: "transparent", border: 0, color: C.brandPrimary, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 4 }}
-          >
-            Open the step-by-step guides
-          </button>
+          {slide.kind === "trial" ? (
+            <button
+              type="button"
+              onClick={finish}
+              style={{ display: "block", width: "100%", marginTop: 10, background: "transparent", border: 0, color: C.muted, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 4 }}
+            >
+              I&apos;ll explore first
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { openGuides(); onFinish(); }}
+              style={{ display: "block", width: "100%", marginTop: 10, background: "transparent", border: 0, color: C.brandPrimary, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 4 }}
+            >
+              Open the step-by-step guides
+            </button>
+          )}
         </div>
       </div>
 
@@ -43277,8 +43452,10 @@ export default function App() {
       {welcomeOpen && (
         <WelcomeOnboarding
           ownerName={store.business?.ownerName || ""}
+          showTrial={!store.premium}
           goToTab={(tab) => { setSecondary(null); setActive(tab); }}
           openGuides={() => { setSecondary("support"); }}
+          onStartTrial={() => { markWelcomeSeen(); setSecondary("account"); }}
           onFinish={markWelcomeSeen}
         />
       )}
@@ -43524,7 +43701,7 @@ export default function App() {
           sync={sync}
           userId={auth.userId}
           onBack={() => setSecondary("settings")}
-          onSignOut={async () => { await auth.signOut(); setSecondary(null); }}
+          onSignOut={async () => { await auth.signOut(); await store.resetLocalData?.(); setSecondary(null); }}
           onExport={() => {
             if (!store.premium) { store.requestUpgrade?.("export"); return; }
             const data = JSON.stringify({
