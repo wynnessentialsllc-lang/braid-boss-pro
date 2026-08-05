@@ -62,6 +62,18 @@ export async function POST(req: Request) {
     );
   }
 
+  // Record the first watch, so the 24h review-request sweep has a clock to
+  // count from. Best-effort — never block or fail playback over it.
+  try {
+    await admin
+      .from("video_purchases")
+      .update({ first_watched_at: new Date().toISOString() })
+      .eq("access_token", token)
+      .is("first_watched_at", null);
+  } catch {
+    /* ignore */
+  }
+
   const common = {
     title: row.title || "",
     description: row.description ?? null,

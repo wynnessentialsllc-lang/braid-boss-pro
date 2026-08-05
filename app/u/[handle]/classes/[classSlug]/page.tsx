@@ -24,13 +24,16 @@ import {
 import { useStylistProfile } from "../../_components/useStylistProfile";
 import {
   fetchPublicClass,
+  fetchClassReviews,
   fetchClassRegistration,
   startClassCheckout,
   joinClassWaitlist,
   formatClassWhen,
   type PublicClassDetail,
   type ClassRegistration,
+  type AcademyReview,
 } from "../../../../lib/academy";
+import { AcademyReviews } from "../../_components/AcademyReviews";
 
 export default function ClassDetailPage() {
   const params = useParams();
@@ -53,15 +56,17 @@ export default function ClassDetailPage() {
   const profileState = useStylistProfile(handle);
 
   const [klass, setKlass] = useState<PublicClassDetail | null>(null);
+  const [reviews, setReviews] = useState<AcademyReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (profileState.status !== "ready") return;
     let cancelledEffect = false;
+    const slug = profileState.profile.slug;
     (async () => {
       setLoading(true);
-      const r = await fetchPublicClass(profileState.profile.slug, classSlug);
+      const r = await fetchPublicClass(slug, classSlug);
       if (cancelledEffect) return;
       if (!r.ok) {
         setError(r.error);
@@ -69,6 +74,8 @@ export default function ClassDetailPage() {
       } else {
         setError(null);
         setKlass(r.klass);
+        const rv = await fetchClassReviews(slug, classSlug);
+        if (!cancelledEffect) setReviews(rv);
       }
       setLoading(false);
     })();
@@ -109,7 +116,10 @@ export default function ClassDetailPage() {
       ) : error || !klass ? (
         <CenterNote text={error || "That class isn't available."} inline />
       ) : (
-        <ClassBooking klass={klass} handle={handle} cancelled={cancelled} />
+        <>
+          <ClassBooking klass={klass} handle={handle} cancelled={cancelled} />
+          <AcademyReviews reviews={reviews} noun="Class" />
+        </>
       )}
     </StorefrontShell>
   );

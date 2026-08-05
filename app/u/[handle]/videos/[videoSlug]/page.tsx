@@ -20,10 +20,13 @@ import {
 import { useStylistProfile } from "../../_components/useStylistProfile";
 import {
   fetchPublicVideo,
+  fetchVideoReviews,
   startVideoCheckout,
   videoAccessLabel,
   type PublicVideoDetail,
+  type AcademyReview,
 } from "../../../../lib/academy";
+import { AcademyReviews } from "../../_components/AcademyReviews";
 
 export default function VideoDetailPage() {
   const params = useParams();
@@ -44,15 +47,17 @@ export default function VideoDetailPage() {
   const profileState = useStylistProfile(handle);
 
   const [video, setVideo] = useState<PublicVideoDetail | null>(null);
+  const [reviews, setReviews] = useState<AcademyReview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (profileState.status !== "ready") return;
     let stop = false;
+    const slug = profileState.profile.slug;
     (async () => {
       setLoading(true);
-      const r = await fetchPublicVideo(profileState.profile.slug, videoSlug);
+      const r = await fetchPublicVideo(slug, videoSlug);
       if (stop) return;
       if (!r.ok) {
         setError(r.error);
@@ -60,6 +65,8 @@ export default function VideoDetailPage() {
       } else {
         setError(null);
         setVideo(r.video);
+        const rv = await fetchVideoReviews(slug, videoSlug);
+        if (!stop) setReviews(rv);
       }
       setLoading(false);
     })();
@@ -94,7 +101,10 @@ export default function VideoDetailPage() {
       ) : error || !video ? (
         <CenterNote text={error || "That video isn't available."} inline />
       ) : (
-        <VideoBuy video={video} handle={handle} cancelled={cancelled} />
+        <>
+          <VideoBuy video={video} handle={handle} cancelled={cancelled} />
+          <AcademyReviews reviews={reviews} noun="Video" />
+        </>
       )}
     </StorefrontShell>
   );

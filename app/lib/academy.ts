@@ -835,3 +835,124 @@ export const resendAccessEmail = async (
     return { ok: false, error: "Network error — try again in a moment." };
   }
 };
+
+// ============================================================
+// Academy reviews (per-video / per-class)
+// ============================================================
+
+export type AcademyReview = {
+  stars: number;
+  notes: string | null;
+  display_name: string | null;
+  submitted_at: string;
+};
+
+const mapAcademyReviews = (data: unknown): AcademyReview[] =>
+  ((data || []) as any[]).map((r) => ({
+    stars: Number(r.stars || 0),
+    notes: r.notes ?? null,
+    display_name: r.display_name ?? null,
+    submitted_at: String(r.submitted_at || ""),
+  }));
+
+export const fetchVideoReviews = async (slug: string, videoSlug: string): Promise<AcademyReview[]> => {
+  if (!slug || !videoSlug) return [];
+  try {
+    const { data, error } = await getSupabase().rpc("public_video_reviews", {
+      slug_in: slug,
+      video_slug_in: videoSlug,
+    });
+    if (error) return [];
+    return mapAcademyReviews(data);
+  } catch {
+    return [];
+  }
+};
+
+export const fetchClassReviews = async (slug: string, classSlug: string): Promise<AcademyReview[]> => {
+  if (!slug || !classSlug) return [];
+  try {
+    const { data, error } = await getSupabase().rpc("public_class_reviews", {
+      slug_in: slug,
+      class_slug_in: classSlug,
+    });
+    if (error) return [];
+    return mapAcademyReviews(data);
+  } catch {
+    return [];
+  }
+};
+
+export type AcademyReviewContext =
+  | { ok: true; kind: "video" | "class"; itemTitle: string; studioName: string; alreadyReviewed: boolean }
+  | { ok: false; error: string };
+
+export const fetchAcademyReviewContext = async (token: string): Promise<AcademyReviewContext> => {
+  if (!token) return { ok: false, error: "Missing review link." };
+  try {
+    const { data, error } = await getSupabase().rpc("academy_review_context", { token_in: token });
+    if (error) return { ok: false, error: error.message };
+    const r = Array.isArray(data) ? data[0] : data;
+    if (!r) return { ok: false, error: "This review link isn't valid." };
+    return {
+      ok: true,
+      kind: r.kind === "class" ? "class" : "video",
+      itemTitle: String(r.item_title || ""),
+      studioName: String(r.studio_name || "your braider"),
+      alreadyReviewed: !!r.already_reviewed,
+    };
+  } catch {
+    return { ok: false, error: "Couldn't load this review link." };
+  }
+};
+
+export const submitAcademyReview = async (input: {
+  token: string;
+  stars: number;
+  notes: string;
+  displayName: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> => {
+  try {
+    const { data, error } = await getSupabase().rpc("submit_academy_review_by_token", {
+      token_in: input.token,
+      stars_in: input.stars,
+      notes_in: input.notes || null,
+      display_name_in: input.displayName || null,
+    });
+    if (error) return { ok: false, error: error.message };
+    const r = (data || {}) as { ok?: boolean; error?: string };
+    if (!r.ok) return { ok: false, error: r.error || "Couldn't submit your review." };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Network error — try again in a moment." };
+  }
+};
+
+// Owner: read / set whether Academy reviews show on the public video &
+// class pages. Backed by profiles.academy_reviews_public (default true).
+export const fetchAcademyReviewsPublic = async (userId: string): Promise<boolean> => {
+  if (!userId) return true;
+  try {
+    const { data } = await getSupabase()
+      .from("profiles")
+      .select("academy_reviews_public")
+      .eq("id", userId)
+      .maybeSingle();
+    return (data as any)?.academy_reviews_public ?? true;
+  } catch {
+    return true;
+  }
+};
+
+export const setAcademyReviewsPublic = async (userId: string, value: boolean): Promise<boolean> => {
+  if (!userId) return false;
+  try {
+    const { error } = await getSupabase()
+      .from("profiles")
+      .update({ academy_reviews_public: value })
+      .eq("id", userId);
+    return !error;
+  } catch {
+    return false;
+  }
+};
