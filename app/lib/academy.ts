@@ -807,3 +807,31 @@ export const refundSale = async (
     return { ok: false, error: "Network error — try again in a moment." };
   }
 };
+
+// Owner: resend a paid buyer their access email (video watch link / class
+// details). The API route re-checks ownership from the Bearer token.
+export const resendAccessEmail = async (
+  kind: "class" | "video",
+  id: string,
+): Promise<{ ok: true; to: string | null } | { ok: false; error: string }> => {
+  const supabase = getSupabase();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) return { ok: false, error: "You need to be signed in to resend." };
+  try {
+    const res = await fetch("/api/academy/resend", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ kind, id }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body?.ok) {
+      return { ok: false, error: body?.error || "Couldn't resend the email." };
+    }
+    return { ok: true, to: body.to ?? null };
+  } catch {
+    return { ok: false, error: "Network error — try again in a moment." };
+  }
+};

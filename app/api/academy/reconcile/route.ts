@@ -29,6 +29,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { timingSafeEqual } from "crypto";
 import { sendEmail } from "../../../lib/email";
+import { buildVideoAccessEmail, buildClassAccessEmail } from "../../../lib/academy-emails";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,19 +57,6 @@ const constantTimeEqual = (a: string, b: string): boolean => {
 
 const baseUrl = (): string =>
   (process.env.NEXT_PUBLIC_SITE_URL || process.env.APP_PUBLIC_URL || "https://braidbosspro.app").replace(/\/$/, "");
-
-const fmtWhen = (startsAt: string | null, tz: string | null): string => {
-  if (!startsAt) return "Time TBA — the braider will be in touch.";
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      dateStyle: "full",
-      timeStyle: "short",
-      timeZone: tz || undefined,
-    }).format(new Date(startsAt));
-  } catch {
-    return new Date(startsAt).toLocaleString();
-  }
-};
 
 // Retrieve a Checkout Session AS the connected account (direct charge).
 // Returns null on any error so a single bad row never aborts the batch.
@@ -177,32 +165,16 @@ export async function POST(req: Request) {
 
     if (!result.buyer_email || !result.access_token) continue;
 
-    const watchUrl = `${baseUrl()}/watch/${encodeURIComponent(result.access_token)}`;
-    const expiryLine =
-      result.access_model === "rent" && result.access_expires_at
-        ? `<p style="margin:0 0 12px;font-size:13px;color:#6F6477;">Your access is available until ${new Date(
-            result.access_expires_at,
-          ).toLocaleString()}.</p>`
-        : `<p style="margin:0 0 12px;font-size:13px;color:#6F6477;">You have permanent access — save this link.</p>`;
-
+    const mail = buildVideoAccessEmail({
+      videoTitle: result.video_title,
+      accessToken: result.access_token,
+      accessModel: result.access_model,
+      accessExpiresAt: result.access_expires_at ?? null,
+      baseUrl: baseUrl(),
+    });
     let sent;
     try {
-      sent = await sendEmail({
-        to: result.buyer_email,
-        subject: `Your video access: ${result.video_title}`,
-        html: `
-          <h1 style="font-size:20px;margin:0 0 12px;">Thanks for your purchase! 🎬</h1>
-          <p style="margin:0 0 12px;">You now have access to <strong>${result.video_title}</strong>.</p>
-          <p style="margin:0 0 16px;">
-            <a href="${watchUrl}" style="display:inline-block;background:#7C3AED;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:600;">
-              Watch now
-            </a>
-          </p>
-          ${expiryLine}
-          <p style="margin:0;font-size:12px;color:#9A8B72;word-break:break-all;">Or paste this link: ${watchUrl}</p>
-        `,
-        text: `Thanks for your purchase! Watch ${result.video_title} here: ${watchUrl}`,
-      });
+      sent = await sendEmail({ to: result.buyer_email, ...mail });
     } catch {
       continue; // leave unsent → retry next tick
     }
@@ -260,35 +232,18 @@ export async function POST(req: Request) {
 
     if (!result.student_email) continue;
 
-    const when = fmtWhen(result.starts_at, result.timezone);
-    const isVirtual = result.format === "virtual";
-    const accessLine = isVirtual
-      ? result.meeting_url
-        ? `<p style="margin:0 0 6px;"><strong>Join link:</strong> <a href="${result.meeting_url}">${result.meeting_url}</a></p>`
-        : `<p style="margin:0 0 6px;">Your join link will be sent before the class.</p>`
-      : result.location_text
-        ? `<p style="margin:0 0 6px;"><strong>Location:</strong> ${result.location_text}</p>`
-        : `<p style="margin:0 0 6px;">Location details will follow from your braider.</p>`;
-    const seatLine =
-      Number(result.seats) > 1 ? `<p style="margin:0 0 6px;"><strong>Seats:</strong> ${result.seats}</p>` : "";
-
+    const mail = buildClassAccessEmail({
+      classTitle: result.class_title,
+      startsAt: result.starts_at ?? null,
+      timezone: result.timezone ?? null,
+      format: result.format,
+      meetingUrl: result.meeting_url ?? null,
+      locationText: result.location_text ?? null,
+      seats: Number(result.seats || 1),
+    });
     let sent;
     try {
-      sent = await sendEmail({
-        to: result.student_email,
-        subject: `You're signed up: ${result.class_title}`,
-        html: `
-          <h1 style="font-size:20px;margin:0 0 12px;">You're in! 🎉</h1>
-          <p style="margin:0 0 12px;">Your spot in <strong>${result.class_title}</strong> is confirmed.</p>
-          <p style="margin:0 0 6px;"><strong>When:</strong> ${when}</p>
-          ${seatLine}
-          ${accessLine}
-          <p style="margin:16px 0 0;font-size:13px;color:#6F6477;">See you there!</p>
-        `,
-        text: `You're signed up for ${result.class_title}. When: ${when}. ${
-          isVirtual ? `Join: ${result.meeting_url || "link to follow"}` : `Location: ${result.location_text || "details to follow"}`
-        }`,
-      });
+      sent = await sendEmail({ to: result.student_email, ...mail });
     } catch {
       continue;
     }
