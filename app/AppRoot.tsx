@@ -263,6 +263,8 @@ import {
   fetchVideoSales,
   refundSale,
   resendAccessEmail,
+  fetchAcademyReviewsPublic,
+  setAcademyReviewsPublic,
   isoToLocalInput,
   localInputToIso,
   videoAccessLabel,
@@ -35362,6 +35364,36 @@ const ORDER_LABEL: Record<string, string> = {
   failed: "Failed",
 };
 
+// Account-level toggle: show buyer reviews on the public video & class
+// pages. Backed by profiles.academy_reviews_public. Shown on both Academy
+// management screens (same underlying setting).
+const AcademyReviewsToggle = ({ userId }: { userId: string | null }) => {
+  const [on, setOn] = useState(true);
+  useEffect(() => {
+    if (!userId) return;
+    let off = false;
+    fetchAcademyReviewsPublic(userId).then((v) => { if (!off) setOn(v); });
+    return () => { off = true; };
+  }, [userId]);
+  if (!userId) return null;
+  return (
+    <Card className="p-4 flex items-center justify-between">
+      <div className="flex-1 min-w-0 pr-3">
+        <p className="text-sm font-semibold" style={{ color: C.espresso }}>Show reviews publicly</p>
+        <p className="text-[11px]" style={{ color: C.muted }}>Display buyer reviews on your video & class pages.</p>
+      </div>
+      <Toggle
+        checked={on}
+        onChange={async (v) => {
+          setOn(v);
+          const ok = await setAcademyReviewsPublic(userId, v);
+          if (!ok) setOn(!v);
+        }}
+      />
+    </Card>
+  );
+};
+
 // ── Academy: Classes management (Phase 2) ───────────────────────────
 // Braider-facing CRUD for ticketed workshops. Create/edit an offering,
 // publish it to the /@handle/classes storefront, and view the paid
@@ -35566,6 +35598,7 @@ const ClassesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
         }
       />
       <div className="px-5 pt-2 space-y-3">
+        {items.length > 0 && <AcademyReviewsToggle userId={userId} />}
         {api.loading ? (
           <p className="text-[13px] py-6 text-center" style={{ color: C.muted }}>Loading…</p>
         ) : items.length === 0 ? (
@@ -35936,6 +35969,7 @@ const VideosScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
         }
       />
       <div className="px-5 pt-2 space-y-3">
+        {items.length > 0 && <AcademyReviewsToggle userId={userId} />}
         {api.loading ? (
           <p className="text-[13px] py-6 text-center" style={{ color: C.muted }}>Loading…</p>
         ) : items.length === 0 ? (
