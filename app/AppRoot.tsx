@@ -711,11 +711,14 @@ const GlobalStyle = () => (
     .bbp-appframe { max-width: 480px; margin-left: auto; margin-right: auto; }
     .bbp-desktop-nav { display: none; }
     @media (min-width: 1024px) {
-      .bbp-appframe--desktop {
-        max-width: 1120px;
-        margin-left: 288px;   /* clear the 240px fixed sidebar + gutter */
-        margin-right: 32px;
-      }
+      /* Reserve the fixed sidebar's width, then center the content
+         column in the remaining space at a comfortable reading width —
+         so forms and stacked screens don't stretch across the whole
+         monitor. Data-dense screens can opt into more width via
+         .bbp-wide (applied per-screen). */
+      .bbp-frame-outer--desktop { padding-left: 240px; }
+      .bbp-appframe--desktop { max-width: 860px; }   /* margin: auto inherited from .bbp-appframe */
+      .bbp-appframe--desktop.bbp-has-wide { max-width: 1200px; }
       .bbp-desktop-nav { display: flex; }
       .bbp-tabbar { display: none; }
     }
@@ -44005,6 +44008,7 @@ export default function App() {
 
 const Frame = ({ children, withTabBar = false, desktop = false }: { children: React.ReactNode; withTabBar?: boolean; desktop?: boolean }) => (
   <div
+    className={`bbp-frame-outer${desktop ? " bbp-frame-outer--desktop" : ""}`}
     style={{
       minHeight: "100dvh",
       fontFamily: FONT_BODY,
