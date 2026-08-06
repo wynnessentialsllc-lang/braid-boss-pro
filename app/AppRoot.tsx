@@ -703,6 +703,26 @@ const GlobalStyle = () => (
     input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     input[type=number] { -moz-appearance: textfield; }
 
+    /* ---- Desktop shell -------------------------------------------------
+       EVERYTHING here is gated to >=1024px so the phone-width mobile app
+       is 100% unchanged below that width. On desktop the bottom tab bar
+       is swapped for a left sidebar (.bbp-desktop-nav) and the content
+       column widens to fill the screen instead of floating in gray. */
+    .bbp-appframe { max-width: 480px; margin-left: auto; margin-right: auto; }
+    .bbp-desktop-nav { display: none; }
+    @media (min-width: 1024px) {
+      /* Reserve the fixed sidebar's width, then center the content
+         column in the remaining space at a comfortable reading width —
+         so forms and stacked screens don't stretch across the whole
+         monitor. Data-dense screens can opt into more width via
+         .bbp-wide (applied per-screen). */
+      .bbp-frame-outer--desktop { padding-left: 240px; }
+      .bbp-appframe--desktop { max-width: 860px; }   /* margin: auto inherited from .bbp-appframe */
+      .bbp-appframe--desktop.bbp-has-wide { max-width: 1200px; }
+      .bbp-desktop-nav { display: flex; }
+      .bbp-tabbar { display: none; }
+    }
+
     /* 2026 glass surfaces — frosted, translucent panels that blur the
        content scrolling behind them. Used by the app shell (header +
        tab bar) and available to any screen that wants a "floating"
@@ -3032,6 +3052,84 @@ const TabBar = ({ active, setActive }: {
             </button>
           );
         })}
+      </div>
+    </nav>
+  );
+};
+
+// Desktop-only left rail. Hidden below 1024px via `.bbp-desktop-nav`
+// (see GlobalStyle), so the mobile app never renders it — on phones the
+// bottom <TabBar/> stays exactly as-is. On desktop this replaces the
+// bottom bar with a persistent sidebar and the content area widens to
+// fill the screen. Mirrors TabBar's items + adds a Settings entry.
+const SidebarRow = ({ label, Icon, activeRow, onClick }: {
+  label: string;
+  Icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
+  activeRow: boolean;
+  onClick: () => void;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-current={activeRow ? "page" : undefined}
+    className="flex items-center gap-3 rounded-xl transition active:scale-[0.99]"
+    style={{
+      width: "100%",
+      padding: "11px 14px",
+      background: activeRow ? GRADIENTS.primary : "transparent",
+      color: activeRow ? "#FFFFFF" : C.brandText,
+      boxShadow: activeRow ? SHADOWS.primaryGlow : "none",
+      fontWeight: activeRow ? 700 : 600,
+    }}
+  >
+    <Icon size={20} strokeWidth={activeRow ? 2.4 : 1.9} />
+    <span className="text-[14px]" style={{ letterSpacing: "0.01em" }}>{label}</span>
+  </button>
+);
+
+const DesktopSidebar = ({
+  active, onNavigate, onOpenSettings,
+}: {
+  active: string;
+  onNavigate: (tab: string) => void;
+  onOpenSettings: () => void;
+}) => {
+  const items = [
+    { id: "dashboard", label: "Home", icon: Home },
+    { id: "calculator", label: "Quote", icon: CalcIcon },
+    { id: "schedule", label: "Schedule", icon: Calendar },
+    { id: "clients", label: "Clients", icon: Users },
+    { id: "checkout", label: "Checkout", icon: ShoppingBag },
+    { id: "money", label: "Money", icon: TrendingUp },
+  ];
+  return (
+    <nav
+      className="bbp-desktop-nav bbp-glass-strong"
+      aria-label="Primary"
+      style={{
+        position: "fixed",
+        left: 0, top: 0, bottom: 0,
+        width: 240,
+        zIndex: 45,
+        flexDirection: "column",
+        padding: "22px 16px",
+        borderRight: "1px solid rgba(21,17,26,0.06)",
+        boxShadow: "12px 0 30px -22px rgba(21,17,26,0.22)",
+      }}
+    >
+      <div className="flex items-center gap-2" style={{ padding: "0 8px 20px" }}>
+        <span aria-hidden style={{ width: 34, height: 34, borderRadius: 10, display: "grid", placeItems: "center", background: GRADIENTS.primary, color: "#FFFFFF", boxShadow: SHADOWS.primaryGlow }}>
+          <Sparkles size={18} />
+        </span>
+        <span style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 700, color: C.espresso, lineHeight: 1 }}>Braid Boss Pro</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+        {items.map(t => (
+          <SidebarRow key={t.id} label={t.label} Icon={t.icon} activeRow={active === t.id} onClick={() => onNavigate(t.id)} />
+        ))}
+      </div>
+      <div style={{ borderTop: `1px solid ${C.brandBorder}`, paddingTop: 8 }}>
+        <SidebarRow label="Settings" Icon={SettingsIcon} activeRow={false} onClick={onOpenSettings} />
       </div>
     </nav>
   );
@@ -33618,6 +33716,11 @@ const UpgradeSheet = ({
   const [subError, setSubError] = useState<string | null>(null);
   const [subPlan, setSubPlan] = useState<SubscriptionPlan>("monthly");
   const isNative = useIsNativePlatform();
+  // Signed-in accounts aren't "guests" — they're on the free plan. Only
+  // true guest sessions see the "guest workspace" wording.
+  const headline = mode === "authed"
+    ? "You've reached the limits of the free plan."
+    : UPGRADE_HEADLINE;
 
   return (
     <Sheet open={open} onClose={onClose} title="Braid Boss Pro">
@@ -33642,7 +33745,7 @@ const UpgradeSheet = ({
             lineHeight: 1.15, color: C.espresso,
           }}
         >
-          ✨ {UPGRADE_HEADLINE}
+          ✨ {headline}
         </p>
         {limit !== null && (
           <p className="mt-2" style={{ color: C.muted, fontSize: 13 }}>
@@ -43473,8 +43576,17 @@ export default function App() {
   }
 
   return (
-    <Frame withTabBar={secondary === null}>
+    <Frame withTabBar={secondary === null} desktop>
       <GlobalStyle />
+
+      {/* Desktop-only left sidebar (hidden < 1024px). Navigating from it
+          clears any secondary screen and switches the primary tab, so it
+          works as a persistent desktop nav. */}
+      <DesktopSidebar
+        active={secondary === null ? active : ""}
+        onNavigate={(tab) => { setSecondary(null); setActive(tab); }}
+        onOpenSettings={() => setSecondary("settings")}
+      />
 
       {TAP_TO_PAY_ENABLED && ttpAwareOpen && (
         <TapToPayAwareness
@@ -43894,8 +44006,9 @@ export default function App() {
   );
 }
 
-const Frame = ({ children, withTabBar = false }: { children: React.ReactNode; withTabBar?: boolean }) => (
+const Frame = ({ children, withTabBar = false, desktop = false }: { children: React.ReactNode; withTabBar?: boolean; desktop?: boolean }) => (
   <div
+    className={`bbp-frame-outer${desktop ? " bbp-frame-outer--desktop" : ""}`}
     style={{
       minHeight: "100dvh",
       fontFamily: FONT_BODY,
@@ -43916,9 +44029,8 @@ const Frame = ({ children, withTabBar = false }: { children: React.ReactNode; wi
   >
     <GlobalStyle />
     <div
-      className="mx-auto relative"
+      className={`relative bbp-appframe${desktop ? " bbp-appframe--desktop" : ""}`}
       style={{
-        maxWidth: 480,
         minHeight: "100dvh",
         // Faintly tinted content column (not pure white) with its own
         // gentle top-down wash, so the white cards inside visibly float
