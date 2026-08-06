@@ -4,6 +4,7 @@ import PullToRefresh from "./components/PullToRefresh";
 import PrivacyNotice from "./components/PrivacyNotice";
 import { CartProvider } from "./lib/cart";
 import { CartDrawer, CartFloatingBadge } from "./components/CartDrawer";
+import { Analytics } from "@vercel/analytics/next";
 
 // Viewport for both the PWA and the Capacitor iOS shell.
 // - viewportFit: "cover" lets `env(safe-area-inset-*)` produce real
@@ -218,6 +219,7 @@ export default function RootLayout({
           <CartDrawer />
         </CartProvider>
         <PrivacyNotice />
+        <Analytics />
       </body>
     </html>
   );

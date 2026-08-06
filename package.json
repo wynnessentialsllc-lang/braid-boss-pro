@@ -20,6 +20,7 @@
     "@capacitor/push-notifications": "^8.0.4",
     "@capacitor/share": "^8.0.1",
     "@supabase/supabase-js": "^2.105.3",
+    "@vercel/analytics": "^2.0.1",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.14.0",
     "next": "^16.2.6",
