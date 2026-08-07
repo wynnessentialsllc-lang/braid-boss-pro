@@ -932,6 +932,7 @@ const renderAppointmentReminder = (p: Record<string, any>) => {
     <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">See you soon, <span style="color:${C.purple};">${escape(clientName)}</span>.</h1>
     <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">Your appointment with <strong style="color:${C.purpleDeep};">${escape(studioName)}</strong>${serviceName ? ` for <strong style="color:${C.coralDeep};">${escape(serviceName)}</strong>` : ""}${when ? ` is on <strong style="color:${C.espresso};">${escape(when)}</strong>` : " is coming up soon"}.</p>
     ${recipientLine(p)}
+    ${locationBlock(p)}
     ${customizationBlock(p)}
     ${hairBringBlock(p)}
     ${p.prepInstructions ? `<p style="font-size:13px;line-height:20px;color:${C.coffee};margin:0 0 14px;"><strong>Prep:</strong> ${escape(p.prepInstructions)}</p>` : ""}
