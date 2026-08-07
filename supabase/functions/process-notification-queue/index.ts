@@ -334,6 +334,20 @@ const hairBringBlock = (p: Record<string, any>): string => {
   </div>`;
 };
 
+// Studio location callout — shown when the appointment is at a fixed
+// address (studio-based service) and the stylist has set a location.
+// Renders nothing for mobile services or when no address is on file.
+const locationBlock = (p: Record<string, any>): string => {
+  const addr = String(p.studioAddress ?? "").trim();
+  if (!addr) return "";
+  const maps = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`;
+  return `<div style="margin:0 0 14px;padding:12px 14px;border-radius:12px;background:${C.tint};border:1px solid ${C.hairline};">
+    <p style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 4px;font-weight:700;">Where</p>
+    <p style="font-size:14px;line-height:21px;color:${C.espresso};margin:0 0 6px;white-space:pre-wrap;">${escape(addr)}</p>
+    <a href="${maps}" style="font-size:13px;color:${C.goldDeep};text-decoration:none;font-weight:600;">Get directions →</a>
+  </div>`;
+};
+
 const portalButton = (p: Record<string, any>): string => {
   const url = String(p.portalUrl || "").trim();
   if (!url) return "";
@@ -839,6 +853,7 @@ const renderAppointmentConfirmed = (p: Record<string, any>) => {
       ${escape(studioName)} approved and scheduled your appointment${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}${when ? ` on <strong>${escape(when)}</strong>` : ""}.
     </p>
     ${recipientLine(p)}
+    ${locationBlock(p)}
     ${balanceLine}
     ${customizationBlock(p)}
     ${hairBringBlock(p)}
