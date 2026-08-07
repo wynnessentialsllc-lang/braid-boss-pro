@@ -110,25 +110,31 @@ export const STORE_PRODUCTS: StoreProduct[] = [
     digitalFilePath: "Braid_Boss_Pro_Business_Planner_DIGITAL.pdf",
     digitalFileName: "The Braid Boss Pro Business Planner.pdf",
 
-    // TODO: replace with real mockups in /public/store (see the shot list
-    // the owner provided: iPad + Pencil hero, dashboard w/ "tap to jump",
-    // filled-in month & money pages, 109-page thumbnail grid).
-    image: undefined,
-    gallery: [],
+    // Real product mockups in /public/store. Hero = cover-on-iPad with the
+    // 111 pages / 2,200+ links / 12 months stat bar.
+    image: "/store/planner-hero.jpg",
+    gallery: [
+      "/store/planner-tap-to-jump.jpg",
+      "/store/planner-write-on-it.jpg",
+      "/store/planner-pages-overview.jpg",
+      "/store/planner-worksheets.jpg",
+      "/store/planner-dashboard-bonus.jpg",
+    ],
 
     shortDescription:
       "A fully hyperlinked digital planner built for professional braiders — bookings, income, clients, taxes and growth in one tappable file for GoodNotes and iPad.",
     longDescription: [
       "You are not disorganized. You have just been running a real business out of your DMs, your notes app and your head.",
       "This is the planner I wish I'd had. Not a pretty calendar with a hair graphic slapped on it — an actual business system, built by a braider, for the way braiding actually works. Nine-hour installs. Deposits that walk. Cash tips nobody logs. A February so slow it makes you question everything.",
-      "It is fully hyperlinked, so it works like an app. Tap a tab, land on the page. No scrolling, no hunting, no page-flipping through 109 pages to find October.",
+      "It is fully hyperlinked, so it works like an app. Tap a tab, land on the page. No scrolling, no hunting, no page-flipping through 111 pages to find October.",
       "You write in your own dates, so you can start today, start in June, and use it again next year. It never expires.",
     ],
     highlights: [
-      "109 pages, fully hyperlinked — tap a tab, land on the page",
-      "Over 2,000 working links — it works like an app",
+      "111 pages, fully hyperlinked — tap a tab, land on the page",
+      "Over 2,200 working links — it works like an app",
       "Write-in dates — start any month, reuse every year, never expires",
       "Built for GoodNotes, Notability & Noteshelf on iPad (Xodo/Noteshelf on Android)",
+      "FREE bonus: the live Braid Boss Dashboard (Google Sheets & Excel)",
       "Instant download — buy once, use forever, no subscription",
     ],
     whatsInside: [
@@ -148,7 +154,8 @@ export const STORE_PRODUCTS: StoreProduct[] = [
       "8 note pages — lined and dot grid",
     ],
     whatYouGet: [
-      "The planner — 110 pages, hyperlinked, write-in dates, instant download",
+      "The planner — 111 pages, hyperlinked, write-in dates, instant download",
+      "FREE bonus — the Braid Boss Dashboard, a live spreadsheet that does the maths for you (Google Sheets & Excel)",
       "A Start Here guide — how to import it and how the tabs work",
       "This is a digital product. Nothing is shipped — you download it immediately after purchase.",
     ],
@@ -181,7 +188,7 @@ export const STORE_PRODUCTS: StoreProduct[] = [
       },
       {
         q: "Do the tabs really work?",
-        a: "Yes. Over two thousand working links. If a tab does nothing, you're viewing the file in a PDF reader like Files or Books instead of a note-taking app — that's the number one setup issue, and the Start Here guide walks you through it.",
+        a: "Yes. Over 2,200 working links. If a tab does nothing, you're viewing the file in a PDF reader like Files or Books instead of a note-taking app — that's the number one setup issue, and the Start Here guide walks you through it.",
       },
       {
         q: "Can I use this if I'm not a braider?",
@@ -214,10 +221,10 @@ export const STORE_PRODUCTS: StoreProduct[] = [
     ],
 
     featured: true,
-    // File ✓ and price ✓. Waiting only on product images before going live;
-    // flip to true once `image`/`gallery` are set. Kept false so the launch
-    // page showcases the planner with a branded placeholder in the meantime.
-    active: false,
+    // LIVE: file ✓, price ✓ ($19 intro / $39.99 anchor), images ✓.
+    // The planner is purchasable — checkout charges the platform Stripe
+    // account and delivers the PDF by email + secure signed URL.
+    active: true,
   },
 ];
 
