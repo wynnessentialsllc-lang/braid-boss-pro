@@ -43340,22 +43340,41 @@ export default function App() {
   const goToMoney = (p: string) => { setMoneyPeriod(p); setActive("money"); };
   const [secondary, setSecondary] = useState<string | null>(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
 
-  // Every screen and feature opens scrolled to the top. The app scrolls
-  // at the document level (see Frame: min-height:100dvh, no overflow
-  // container), so navigating between tabs/features otherwise inherits
-  // the previous screen's scroll position and lands mid-page. Reset the
-  // document scroll whenever the primary tab or a secondary feature
-  // screen changes. Window-level scroll only — never a nested scrollTop,
-  // which leaks to the page on iOS WKWebView. rAF + a short timeout
-  // re-assert it after layout settles.
+  // Per-screen scroll memory. The app scrolls at the document level (see
+  // Frame: min-height:100dvh, no overflow container). A screen you open
+  // for the first time lands at the top, but returning to one you've
+  // already been on — e.g. tapping Back out of a Settings sub-page —
+  // drops you right back where you left off instead of the top. Keyed by
+  // the active tab + secondary overlay so each screen keeps its own spot.
+  const scrollMemory = useRef<Record<string, number>>({});
+  const navScrollKey = `${active}|${secondary ?? ""}`;
+  const navScrollKeyRef = useRef(navScrollKey);
+  // Continuously remember the current screen's scroll position (rAF-
+  // throttled). Because it writes under navScrollKeyRef — flipped in the
+  // layout effect below BEFORE paint — a post-navigation scroll can never
+  // clobber the screen we just left.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const toTop = () => window.scrollTo(0, 0);
-    toTop();
-    const raf = requestAnimationFrame(toTop);
-    const t = setTimeout(toTop, 60);
+    let raf = 0;
+    const record = () => { raf = 0; scrollMemory.current[navScrollKeyRef.current] = window.scrollY; };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(record); };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => { window.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); };
+  }, []);
+  // On a tab/overlay change, flip the key and restore the destination's
+  // remembered position (top for a screen we haven't seen). Layout effect
+  // + rAF + a short timeout re-assert it after content lays out. Window-
+  // level only — never a nested scrollTop, which leaks on iOS WKWebView.
+  React.useLayoutEffect(() => {
+    if (typeof window === "undefined") return;
+    navScrollKeyRef.current = navScrollKey;
+    const target = scrollMemory.current[navScrollKey] ?? 0;
+    const go = () => window.scrollTo(0, target);
+    go();
+    const raf = requestAnimationFrame(go);
+    const t = setTimeout(go, 60);
     return () => { cancelAnimationFrame(raf); clearTimeout(t); };
-  }, [active, secondary]);
+  }, [navScrollKey]);
 
   // One-time Tap to Pay awareness splash. Shows once on a supported iPhone
   // that hasn't enabled Tap to Pay yet, then never again (flag persisted).
@@ -43411,11 +43430,11 @@ export default function App() {
   // below so a returning user lands on Home instead of deep in a sub-screen.
   const NAV_LAST_SEEN_KEY = "nav:lastSeen";
   // How long the user has to be away before we treat the next return as a
-  // fresh visit and drop them back on the Home dashboard. 30 min: short
-  // enough that a return after a real break starts fresh, long enough that
-  // a quick context switch (answer a text, glance at the calendar) keeps
-  // them right where they were.
-  const NAV_IDLE_RESET_MS = 30 * 60 * 1000;
+  // fresh visit and drop them back on the Home dashboard. 60s: reopening
+  // the app after even a short break lands on Home, while a quick glance
+  // at another app — or a pull-to-refresh, which stamps "last seen" right
+  // before it reloads (see pagehide below) — keeps you where you were.
+  const NAV_IDLE_RESET_MS = 60 * 1000;
   const navRestored = useRef(false);
   useEffect(() => {
     let cancelled = false;
@@ -43468,15 +43487,20 @@ export default function App() {
       });
     };
     document.addEventListener("visibilitychange", onVisibility);
+    // A reload (pull-to-refresh) fires pagehide but not always
+    // visibilitychange, so stamp here too — it keeps "last seen" fresh
+    // right before the reload so the remount restores the screen instead
+    // of treating a refresh as a reopen and bouncing to Home.
+    window.addEventListener("pagehide", stamp);
     // Heartbeat so "last seen" tracks active presence even when the user
-    // lingers on one screen without navigating. First fire is at +60s, by
-    // which point the one-time restore above has already run, so it can't
-    // race the idle check on mount.
+    // lingers on one screen without navigating. Kept well under the 60s
+    // idle window so a genuine refresh never looks stale enough to reset.
     const heartbeat = setInterval(() => {
       if (document.visibilityState === "visible") stamp();
-    }, 60 * 1000);
+    }, 15 * 1000);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", stamp);
       clearInterval(heartbeat);
     };
   }, []);
