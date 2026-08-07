@@ -601,7 +601,6 @@ const renderAppointmentApproved = (p: Record<string, any>) => {
       ${escape(studioName)} approved your${serviceName ? ` ${escape(serviceName)}` : ""} request${when ? ` for ${escape(when)}` : ""}.
     </p>
     ${recipientLine(p)}
-    ${locationBlock(p)}
     ${customizationBlock(p)}
     ${intakeBlock(p)}
     ${dep}
