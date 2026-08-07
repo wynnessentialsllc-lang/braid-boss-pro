@@ -191,6 +191,24 @@ export default function OrderTrackingPage() {
   const lineItems = Array.isArray(order.line_items) ? order.line_items : [];
   const totalUnits = lineItems.reduce((s: number, i: any) => s + (Number(i?.quantity) || 1), 0);
 
+  // Digital downloads — distinct digital line items on a PAID order. Each
+  // links to the secure download endpoint, which re-verifies the order is
+  // paid and mints a short-lived signed URL. One link per product even if
+  // the buyer ordered a quantity > 1 (a file is a file).
+  const digitalItems =
+    order.status === "paid"
+      ? Array.from(
+          new Map(
+            lineItems
+              .filter((i: any) => i?.is_digital && i?.product_id)
+              .map((i: any): [string, { product_id: string; title: string }] => [
+                String(i.product_id),
+                { product_id: String(i.product_id), title: i?.title || "Download" },
+              ]),
+          ).values(),
+        )
+      : [];
+
   return (
     <div style={{ minHeight: "100vh", background: C.cream, fontFamily: FONT_BODY, color: C.ink }}>
       <style>{`
@@ -282,6 +300,70 @@ export default function OrderTrackingPage() {
             {meta.label}
           </div>
         </div>
+
+        {digitalItems.length > 0 && (
+          <section style={{ marginTop: 20 }}>
+            <h2 style={{ fontSize: 11, fontWeight: 800, color: C.muted, letterSpacing: "0.14em", textTransform: "uppercase", margin: 0 }}>
+              Your downloads
+            </h2>
+            <ul style={{ listStyle: "none", padding: 0, margin: "12px 0 0", display: "flex", flexDirection: "column", gap: 10 }}>
+              {digitalItems.map((d) => (
+                <li
+                  key={d.product_id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: 12,
+                    background: C.paper,
+                    border: `1px solid ${C.brandBorder}`,
+                    borderRadius: 16,
+                  }}
+                >
+                  <div
+                    aria-hidden
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 12,
+                      flexShrink: 0,
+                      display: "grid",
+                      placeItems: "center",
+                      background: `${C.brandPrimary}14`,
+                      color: C.brandPrimary,
+                      fontSize: 20,
+                    }}
+                  >
+                    📄
+                  </div>
+                  <p style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: C.ink, margin: 0, lineHeight: 1.2 }}>
+                    {d.title}
+                  </p>
+                  <a
+                    href={`/api/product-download?token=${encodeURIComponent(order.customer_token)}&product=${encodeURIComponent(d.product_id)}`}
+                    style={{
+                      flexShrink: 0,
+                      padding: "8px 16px",
+                      background: GRADIENTS.primary,
+                      color: "#FFFFFF",
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 800,
+                      letterSpacing: "0.12em",
+                      textTransform: "uppercase",
+                      textDecoration: "none",
+                    }}
+                  >
+                    Download
+                  </a>
+                </li>
+              ))}
+            </ul>
+            <p style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
+              Keep this page — your download links live here whenever you need them.
+            </p>
+          </section>
+        )}
 
         <section style={{ marginTop: 20 }}>
           <h2 style={{ fontSize: 11, fontWeight: 800, color: C.muted, letterSpacing: "0.14em", textTransform: "uppercase", margin: 0 }}>

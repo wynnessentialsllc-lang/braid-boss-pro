@@ -435,6 +435,15 @@ export type Product = {
   // the parcel value (and is multiplied by quantity when summed).
   requires_signature: boolean;
   insurance_amount: number | null;
+  // Digital products — when is_digital is true and digital_file_path is
+  // set, a paid order delivers a secure download instead of (or in
+  // addition to) a shipped item. The file lives in the private
+  // `product-files` bucket; buyers reach it only via a server-minted
+  // signed URL from /api/product-download. Orthogonal to
+  // requires_shipping, so a product can be physical, digital, or both.
+  is_digital: boolean;
+  digital_file_path: string | null;
+  digital_file_name: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -453,6 +462,9 @@ export type ProductInput = Pick<
   | "weight_oz"
   | "requires_signature"
   | "insurance_amount"
+  | "is_digital"
+  | "digital_file_path"
+  | "digital_file_name"
 >;
 
 // URL-friendly slug from a free-form title. Mirrors the DB
@@ -559,6 +571,9 @@ export const useProducts = (userId: string | null): {
       weight_oz:              has("weight_oz")              ? draft.weight_oz!              : (existing as any).weight_oz ?? null,
       requires_signature:     has("requires_signature")     ? draft.requires_signature!     : (existing as any).requires_signature ?? false,
       insurance_amount:       has("insurance_amount")       ? draft.insurance_amount!       : (existing as any).insurance_amount ?? null,
+      is_digital:             has("is_digital")             ? draft.is_digital!             : (existing as any).is_digital ?? false,
+      digital_file_path:      has("digital_file_path")      ? draft.digital_file_path!      : (existing as any).digital_file_path ?? null,
+      digital_file_name:      has("digital_file_name")      ? draft.digital_file_name!      : (existing as any).digital_file_name ?? null,
     };
   };
 
@@ -662,6 +677,19 @@ export const useProducts = (userId: string | null): {
         const n = Number(raw);
         return Number.isFinite(n) && n > 0 ? n : null;
       })(),
+      // Digital delivery. A product is only treated as digital when the
+      // flag is on AND a file is attached — a stray flag with no upload
+      // would sell a download that can't be delivered, so we require both.
+      is_digital: (() => {
+        const path = (draft as any).digital_file_path;
+        return !!draft.is_digital && !!(path && String(path).trim());
+      })(),
+      digital_file_path: (draft as any).digital_file_path && String((draft as any).digital_file_path).trim()
+        ? String((draft as any).digital_file_path).trim()
+        : null,
+      digital_file_name: (draft as any).digital_file_name && String((draft as any).digital_file_name).trim()
+        ? String((draft as any).digital_file_name).trim().slice(0, 180)
+        : null,
     };
     const supabase = getSupabase();
     const { data, error: err } = draft.id
@@ -735,6 +763,10 @@ export type PublicProduct = {
   variants: ProductVariant[];
   is_gift_card: boolean;
   gift_card_allow_custom: boolean;
+  // True when this listing delivers a downloadable file after purchase.
+  // The file path/name stay server-side; the storefront only needs the
+  // flag to badge the item and set expectations ("instant download").
+  is_digital: boolean;
 };
 
 const normalizePublicProduct = (p: any): PublicProduct => ({
@@ -760,6 +792,7 @@ const normalizePublicProduct = (p: any): PublicProduct => ({
     : [],
   is_gift_card: !!p.is_gift_card,
   gift_card_allow_custom: !!p.gift_card_allow_custom,
+  is_digital: !!p.is_digital,
 });
 
 export const fetchPublicProducts = async (
