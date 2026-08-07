@@ -334,10 +334,46 @@ const hairBringBlock = (p: Record<string, any>): string => {
   </div>`;
 };
 
+// Studio location callout — shown when the appointment is at a fixed
+// address (studio-based service) and the stylist has set a location.
+// Renders nothing for mobile services or when no address is on file.
+const locationBlock = (p: Record<string, any>): string => {
+  const addr = String(p.studioAddress ?? "").trim();
+  if (!addr) return "";
+  const maps = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`;
+  return `<div style="margin:0 0 14px;padding:12px 14px;border-radius:12px;background:${C.tint};border:1px solid ${C.hairline};">
+    <p style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 4px;font-weight:700;">Where</p>
+    <p style="font-size:14px;line-height:21px;color:${C.espresso};margin:0 0 6px;white-space:pre-wrap;">${escape(addr)}</p>
+    <a href="${maps}" style="font-size:13px;color:${C.goldDeep};text-decoration:none;font-weight:600;">Get directions →</a>
+  </div>`;
+};
+
 const portalButton = (p: Record<string, any>): string => {
   const url = String(p.portalUrl || "").trim();
   if (!url) return "";
   return `<p style="margin:20px 0 4px;text-align:center;"><a href="${escape(url)}" style="display:inline-block;background:transparent;color:${C.espresso};text-decoration:none;padding:12px 24px;border-radius:999px;font-weight:600;font-size:13px;letter-spacing:0.04em;border:1.5px solid ${C.espresso};">View appointment details</a></p>`;
+};
+
+// Contract heads-up — shown on the confirmation email when an agreement
+// exists for the booking (payload.contractExpected). Primes the client
+// to watch for a contract to sign, and gives them a one-tap way to reach
+// the stylist (the portal message thread) if it never arrives.
+const contractHeadsUpBlock = (p: Record<string, any>): string => {
+  if (!p.contractExpected) return "";
+  const studioName = p.studioName || "your stylist";
+  const portalUrl = String(p.portalUrl || "").trim();
+  const button = portalUrl
+    ? `<p style="margin:14px 0 2px;text-align:center;"><a href="${escape(portalUrl)}" style="display:inline-block;background:transparent;color:${C.espresso};text-decoration:none;padding:11px 22px;border-radius:999px;font-weight:600;font-size:13px;letter-spacing:0.04em;border:1.5px solid ${C.espresso};">Message ${escape(studioName)}</a></p>`
+    : "";
+  return `<hr style="border:none;border-top:1px solid ${C.hairline};margin:22px 0;" />
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 8px;font-weight:700;">Your appointment agreement</p>
+    <p style="font-size:14px;line-height:22px;margin:0 0 10px;color:${C.coffee};">
+      Look out for a contract to review and sign — it has the full details for your appointment, and signing it locks everything in.
+    </p>
+    <p style="font-size:14px;line-height:22px;margin:0 0 4px;color:${C.coffee};">
+      Haven't received it within 24–48 hours? Message ${escape(studioName)} and they'll get it right to you.
+    </p>
+    ${button}`;
 };
 
 // A one-line "Appointment for: <name>" banner, shown in client-facing
@@ -839,10 +875,12 @@ const renderAppointmentConfirmed = (p: Record<string, any>) => {
       ${escape(studioName)} approved and scheduled your appointment${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}${when ? ` on <strong>${escape(when)}</strong>` : ""}.
     </p>
     ${recipientLine(p)}
+    ${locationBlock(p)}
     ${balanceLine}
     ${customizationBlock(p)}
     ${hairBringBlock(p)}
     ${contractBlock(p)}
+    ${contractHeadsUpBlock(p)}
     <p style="font-size:14px;line-height:22px;margin:0 0 14px;color:${C.coffee};">
       We'll send a reminder closer to the day. If anything changes, reply to this email and ${escape(studioName)} will get it.
     </p>
@@ -894,6 +932,7 @@ const renderAppointmentReminder = (p: Record<string, any>) => {
     <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">See you soon, <span style="color:${C.purple};">${escape(clientName)}</span>.</h1>
     <p style="font-size:15px;line-height:24px;margin:0 0 14px;color:${C.coffee};">Your appointment with <strong style="color:${C.purpleDeep};">${escape(studioName)}</strong>${serviceName ? ` for <strong style="color:${C.coralDeep};">${escape(serviceName)}</strong>` : ""}${when ? ` is on <strong style="color:${C.espresso};">${escape(when)}</strong>` : " is coming up soon"}.</p>
     ${recipientLine(p)}
+    ${locationBlock(p)}
     ${customizationBlock(p)}
     ${hairBringBlock(p)}
     ${p.prepInstructions ? `<p style="font-size:13px;line-height:20px;color:${C.coffee};margin:0 0 14px;"><strong>Prep:</strong> ${escape(p.prepInstructions)}</p>` : ""}
@@ -2278,7 +2317,7 @@ const enrichCustomization = async (
 ): Promise<void> => {
   if (!CUSTOMIZATION_TYPES.has(row.notification_type)) return;
   const cols =
-    "selected_hair_color, selected_curl_pattern, client_style_notes, inspiration_photo_urls, customization_summary, selected_addons, selected_variation_name, portal_token, cancel_token, intake_answers, booked_for_name";
+    "id, service_id, selected_hair_color, selected_curl_pattern, client_style_notes, inspiration_photo_urls, customization_summary, selected_addons, selected_variation_name, portal_token, cancel_token, intake_answers, booked_for_name";
   let br: any = null;
   try {
     if (row.booking_request_id) {
@@ -2337,6 +2376,46 @@ const enrichCustomization = async (
   const base = String(p.appBase || "").replace(/\/$/, "") || "https://braidbosspro.app";
   if (br.portal_token) fill("portalUrl", `${base}/client/appointment/${br.portal_token}`);
   if (br.cancel_token) fill("cancelUrl", `${base}/booking-action/${br.cancel_token}/cancel`);
+
+  // Studio address for fixed-location services, so the approval /
+  // confirmation / reminder emails can show a "Where" block. Mobile
+  // services happen at the client's place, so they're skipped. The
+  // confirmation enqueue RPC already sets this — fill() leaves it as-is.
+  try {
+    let mobile = false;
+    if (br.service_id) {
+      const { data: svc } = await admin
+        .from("services").select("mobile_service")
+        .eq("id", br.service_id).maybeSingle();
+      mobile = !!(svc as any)?.mobile_service;
+    }
+    if (!mobile) {
+      const { data: addr } = await admin.rpc("studio_location_text", { user_id_in: row.user_id });
+      const a = typeof addr === "string" ? addr.trim() : "";
+      if (a) fill("studioAddress", a);
+    }
+  } catch { /* address is best-effort — never block the send */ }
+
+  // Whether an agreement exists for this booking. Drives the "look for
+  // your contract to sign, and message us if it doesn't arrive" note on
+  // the confirmation email — shown only when a contract is actually in
+  // play, so contract-less stylists' clients never see it.
+  try {
+    const brId = row.booking_request_id || br.id || null;
+    let hasContract = false;
+    if (brId) {
+      const { count } = await admin
+        .from("booking_contracts").select("id", { count: "exact", head: true })
+        .eq("booking_request_id", brId);
+      hasContract = (count || 0) > 0;
+    } else if (row.appointment_id) {
+      const { count } = await admin
+        .from("booking_contracts").select("id", { count: "exact", head: true })
+        .eq("appointment_id", row.appointment_id);
+      hasContract = (count || 0) > 0;
+    }
+    if (hasContract) p.contractExpected = true;
+  } catch { /* best-effort — the note simply won't show */ }
 
   // Intake / consultation answers — array of { q, a }. Surfaces in the
   // approval ("appointment_approved") email via intakeBlock.

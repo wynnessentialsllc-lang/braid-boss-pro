@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { getSupabase } from "../../../lib/supabase";
-import { listPortalMessages, postPortalMessage, type PortalMessage } from "../../../lib/messages";
+import { listPortalMessages, postPortalMessage, uploadPortalMessagePhoto, type PortalMessage } from "../../../lib/messages";
 
 const C = {
   espresso: "#15111A", coffee: "#3D3447", paper: "#FFFFFF",
@@ -147,7 +147,11 @@ const MessageThread = ({ token, studioName }: { token: string; studioName: strin
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   const load = async () => {
     const res = await listPortalMessages(token);
@@ -174,19 +178,35 @@ const MessageThread = ({ token, studioName }: { token: string; studioName: strin
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [messages.length]);
 
+  const pickPhoto = async (file: File | null) => {
+    if (!file) return;
+    setPhotoError(null);
+    setUploading(true);
+    const res = await uploadPortalMessagePhoto(token, file);
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = "";
+    if (res.ok && res.url) {
+      setPendingImage(res.url);
+    } else {
+      setPhotoError(res.error || "Couldn't upload that photo.");
+    }
+  };
+
   const send = async () => {
     const body = draft.trim();
-    if (!body || sending) return;
+    const image = pendingImage;
+    if ((!body && !image) || sending || uploading) return;
     setSending(true);
-    const ok = await postPortalMessage(token, body);
+    const ok = await postPortalMessage(token, body, image);
     setSending(false);
     if (ok) {
       setDraft("");
+      setPendingImage(null);
       // Optimistic append so the bubble shows immediately; reconciled
       // by the next poll.
       setMessages((prev) => [
         ...prev,
-        { id: `local-${Date.now()}`, sender: "client", body, created_at: new Date().toISOString() },
+        { id: `local-${Date.now()}`, sender: "client", body, image_url: image, created_at: new Date().toISOString() },
       ]);
     }
   };
@@ -217,9 +237,23 @@ const MessageThread = ({ token, studioName }: { token: string; studioName: strin
                 <div style={{
                   background: mine ? C.brandPrimary : C.cream,
                   color: mine ? "#FFFFFF" : C.espresso,
-                  borderRadius: 14, padding: "9px 13px", fontSize: 13.5, lineHeight: 1.45,
+                  borderRadius: 14, padding: m.image_url && !m.body ? 4 : "9px 13px",
+                  fontSize: 13.5, lineHeight: 1.45,
                   border: mine ? "none" : `1px solid ${C.hairline}`, whiteSpace: "pre-wrap", wordBreak: "break-word",
                 }}>
+                  {m.image_url && (
+                    <a href={m.image_url} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={m.image_url}
+                        alt="Attached photo"
+                        style={{
+                          display: "block", maxWidth: "100%", width: 200, maxHeight: 240,
+                          objectFit: "cover", borderRadius: 10, marginBottom: m.body ? 6 : 0,
+                        }}
+                      />
+                    </a>
+                  )}
                   {m.body}
                 </div>
                 <p style={{
@@ -232,7 +266,51 @@ const MessageThread = ({ token, studioName }: { token: string; studioName: strin
           );
         })}
       </div>
+      {/* Pending attachment preview */}
+      {pendingImage && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={pendingImage}
+            alt="Attachment preview"
+            style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, border: `1px solid ${C.hairline}` }}
+          />
+          <span style={{ fontSize: 12, color: C.muted }}>Photo ready to send</span>
+          <button
+            onClick={() => setPendingImage(null)}
+            style={{ marginLeft: "auto", background: "transparent", border: "none", color: C.danger, fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+          >
+            Remove
+          </button>
+        </div>
+      )}
+      {photoError && (
+        <p style={{ margin: "0 0 8px", fontSize: 12, color: C.danger }}>{photoError}</p>
+      )}
+
       <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={(e) => void pickPhoto(e.target.files?.[0] || null)}
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading || sending}
+          aria-label="Attach a photo"
+          title="Attach a photo"
+          style={{
+            flexShrink: 0, width: 42, height: 42, borderRadius: 12, border: `1px solid ${C.hairline}`,
+            background: C.paper, color: C.brandDeep, fontSize: 18, lineHeight: 1,
+            cursor: uploading || sending ? "default" : "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          {uploading ? "…" : "📷"}
+        </button>
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -249,17 +327,21 @@ const MessageThread = ({ token, studioName }: { token: string; studioName: strin
         />
         <button
           onClick={() => void send()}
-          disabled={sending || !draft.trim()}
+          disabled={sending || uploading || (!draft.trim() && !pendingImage)}
           style={{
             padding: "11px 16px", borderRadius: 12, border: "none",
-            background: draft.trim() ? C.espresso : C.hairline,
-            color: "#FFFFFF", fontSize: 13, fontWeight: 700, cursor: draft.trim() ? "pointer" : "default",
+            background: (draft.trim() || pendingImage) ? C.espresso : C.hairline,
+            color: "#FFFFFF", fontSize: 13, fontWeight: 700,
+            cursor: (draft.trim() || pendingImage) ? "pointer" : "default",
             whiteSpace: "nowrap",
           }}
         >
           {sending ? "…" : "Send"}
         </button>
       </div>
+      <p style={{ margin: "8px 0 0", fontSize: 11, color: C.muted, textAlign: "center" }}>
+        Tap 📷 to send a screenshot or photo.
+      </p>
     </Card>
   );
 };

@@ -10897,6 +10897,179 @@ const ApptActionRow = ({
   </button>
 );
 
+// Contract actions for an existing appointment — generate the service's
+// assigned agreement(s) for THIS appointment and email the client a
+// signing link, right from the Edit Appointment sheet. Appointment-keyed
+// (generate_appointment_contracts), so it works whether the appointment
+// came from an online booking or was created by hand, and it reads the
+// service's CURRENT contract assignment — so an agreement attached to the
+// service AFTER the client booked still sends. Shows live sent/signed
+// status with a copy-link fallback.
+const AppointmentContractActions = ({
+  userId, appointmentId, clientName, clientEmail, serviceName,
+}: {
+  userId: string | null;
+  appointmentId: string | null;
+  clientName?: string | null;
+  clientEmail?: string | null;
+  serviceName?: string | null;
+}) => {
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const email = String(clientEmail || "").trim();
+
+  const refresh = useCallback(async () => {
+    if (!userId || !appointmentId) { setRows([]); return; }
+    try {
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from("booking_contracts")
+        .select("id, title, public_token, status, signed_at, client_email")
+        .eq("user_id", userId)
+        .eq("appointment_id", appointmentId)
+        .order("created_at", { ascending: true });
+      setRows((data as any[]) || []);
+    } catch { /* best-effort — the button still works */ }
+  }, [userId, appointmentId]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  const sendNow = async () => {
+    if (!userId || !appointmentId || busy || !email) return;
+    setBusy(true);
+    setToast(null);
+    try {
+      const supabase = getSupabase();
+      // Generate any missing agreement(s) for this appointment from the
+      // service's current assignment (idempotent — one row per template).
+      await supabase.rpc("generate_appointment_contracts", { appointment_id_in: appointmentId });
+      // Email a signing link for each unsigned agreement.
+      const { data: bcs } = await supabase
+        .from("booking_contracts")
+        .select("id, title, public_token, status, client_email")
+        .eq("user_id", userId)
+        .eq("appointment_id", appointmentId)
+        .is("signed_at", null)
+        .in("status", ["sent", "pending", "pending_signature", "viewed"]);
+      const list = (bcs as any[]) || [];
+      let studioName = "your stylist";
+      try {
+        const { data: studio } = await supabase.rpc("public_get_studio_name", { user_id_in: userId });
+        if (typeof studio === "string" && studio.trim()) studioName = studio.trim();
+      } catch { /* studio name best-effort */ }
+      const origin = typeof window !== "undefined" ? window.location.origin : "https://braidbosspro.app";
+      let sent = 0;
+      for (const bc of list) {
+        if (!bc?.public_token) continue;
+        const to = String(bc.client_email || email).trim();
+        if (!to) continue;
+        try {
+          await supabase.rpc("queue_notification", {
+            user_id_in: userId,
+            channel_in: "email",
+            notification_type_in: "contract_signing",
+            body_in: "Please review and sign your appointment agreement.",
+            recipient_email_in: to,
+            recipient_name_in: clientName || null,
+            payload_in: {
+              clientName: clientName || "there",
+              studioName,
+              contractTitle: bc.title || "Appointment agreement",
+              serviceName: serviceName || null,
+              contractUrl: `${origin}/sign/contract/${bc.public_token}`,
+            },
+            // Unique per click so an explicit (re)send from this button
+            // always goes out — the dedupe guard is for automatic sends.
+            dedupe_key_in: `contract_signing:${bc.id}:manual:${Date.now()}`,
+            appointment_id_in: appointmentId,
+          });
+          sent++;
+        } catch { /* per-contract best-effort */ }
+      }
+      await refresh();
+      setToast(
+        sent > 0
+          ? `Sent to ${clientName || "your client"}.`
+          : "Nothing to send — the agreement is already signed.",
+      );
+    } catch {
+      setToast("Couldn't send — please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async (token: string) => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(contractSigningUrl(token));
+        setCopiedId(token);
+        setTimeout(() => setCopiedId(null), 1600);
+      }
+    } catch { /* unsupported / cancelled — silent */ }
+  };
+
+  const allSigned = rows.length > 0 && rows.every((r) => r.status === "signed" || r.signed_at);
+
+  return (
+    <div className="mt-2.5">
+      {rows.length > 0 && (
+        <div className="space-y-1.5 mb-2">
+          {rows.map((c) => {
+            const signed = c.status === "signed" || !!c.signed_at;
+            return (
+              <div key={c.id} className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Pill tone={signed ? "success" : "gold"}>
+                    {CONTRACT_STATUS_LABEL[c.status] || (signed ? "Signed" : "Sent")}
+                  </Pill>
+                  <span className="text-[12px] truncate" style={{ color: C.coffee }}>{c.title}</span>
+                </div>
+                {!signed && c.public_token && (
+                  <button
+                    type="button"
+                    onClick={() => void copy(c.public_token)}
+                    className="text-[11px] underline shrink-0"
+                    style={{ color: C.muted }}
+                  >
+                    {copiedId === c.public_token ? "Copied" : "Copy link"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {!allSigned && (
+        <Button
+          variant="outline"
+          size="sm"
+          fullWidth
+          icon={<Send size={15} />}
+          disabled={busy || !email || !appointmentId}
+          onClick={() => void sendNow()}
+        >
+          {busy ? "Sending…" : rows.length > 0 ? "Resend contract" : "Generate & send contract"}
+        </Button>
+      )}
+      {allSigned && (
+        <p className="text-[11px]" style={{ color: C.success }}>Signed — you&apos;re all set.</p>
+      )}
+      {!email && (
+        <p className="text-[11px] mt-1.5" style={{ color: C.muted }}>
+          Add a client email above to send the contract.
+        </p>
+      )}
+      {toast && (
+        <p className="text-[11px] mt-1.5 font-semibold" style={{ color: C.success }}>{toast}</p>
+      )}
+    </div>
+  );
+};
+
 const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCommunication, openReceipt }: { open: any; appt: any; store: any; onClose: any; openTimerForAppt: any; openCommunication?: (ctx: CommContext) => void; openReceipt?: (rcp: ReceiptRecord) => void }) => {
   const {
     upsertAppointment, deleteAppointment, clients, upsertClient, business,
@@ -12237,6 +12410,13 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     }
     return Array.from(new Set(names));
   }, [apptService, apptContracts.contractTemplates]);
+  // Only offer the "send contract" action once the appointment is
+  // actually saved — generate_appointment_contracts reads the DB row, so
+  // it's a no-op for an unsaved draft (a fresh manual create auto-sends
+  // on save anyway).
+  const apptPersisted = !!form.id
+    && Array.isArray(store?.appointments)
+    && store.appointments.some((x: any) => x?.id === form.id);
   const currentAddons: any[] = Array.isArray(form.addons) ? form.addons : [];
   // Match a stored add-on to a menu extra by a STABLE key, not just id.
   // A service's extra ids are regenerated whenever its extras are
@@ -13531,12 +13711,22 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           {apptContractNames.length > 0 && (
             <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
               <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: C.muted, letterSpacing: "0.12em" }}>
-                Contract{apptContractNames.length === 1 ? "" : "s"} sent with this booking
+                Appointment contract{apptContractNames.length === 1 ? "" : "s"}
               </p>
               {apptContractNames.map((n) => (
                 <p key={n} className="text-[13px] mt-1 font-semibold" style={{ color: C.espresso }}>{n}</p>
               ))}
-              <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>Assigned in Settings → Services / Contracts.</p>
+              {apptPersisted ? (
+                <AppointmentContractActions
+                  userId={store.userId || null}
+                  appointmentId={form.id || null}
+                  clientName={form.clientName || null}
+                  clientEmail={form.clientEmail || null}
+                  serviceName={form.style || null}
+                />
+              ) : (
+                <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>Save the appointment to send the contract. Assigned in Settings → Services / Contracts.</p>
+              )}
             </div>
           )}
         </Card>
@@ -34527,10 +34717,24 @@ const InboxScreen = ({
                     <div style={{
                       background: mine ? C.gold : C.ivory,
                       color: mine ? "#FFFFFF" : C.espresso,
-                      borderRadius: 14, padding: "9px 13px", fontSize: 14, lineHeight: 1.45,
+                      borderRadius: 14, padding: m.image_url && !m.body ? 4 : "9px 13px",
+                      fontSize: 14, lineHeight: 1.45,
                       border: mine ? "none" : `1px solid ${C.hairline}`,
                       whiteSpace: "pre-wrap", wordBreak: "break-word",
                     }}>
+                      {m.image_url && (
+                        <a href={m.image_url} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={m.image_url}
+                            alt="Attached photo"
+                            style={{
+                              display: "block", maxWidth: "100%", width: 220, maxHeight: 260,
+                              objectFit: "cover", borderRadius: 10, marginBottom: m.body ? 6 : 0,
+                            }}
+                          />
+                        </a>
+                      )}
                       {m.body}
                     </div>
                     <p style={{ margin: "3px 4px 0", fontSize: 10.5, color: C.muted, textAlign: mine ? "right" : "left" }}>
