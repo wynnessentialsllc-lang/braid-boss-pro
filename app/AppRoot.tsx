@@ -27288,9 +27288,9 @@ const ReportsScreen = ({ store, onBack, focus, onFocusConsumed }: { store: any; 
             <SectionTitle>Data cleanup</SectionTitle>
             <Card className="p-4">
               <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
-                {cancelled.length} cancelled appointment{cancelled.length === 1 ? " is" : "s are"} still
-                saved. They&apos;re already excluded from the numbers above, but you can permanently
-                remove them to keep your history tidy.
+                {cancelled.length === 1
+                  ? "1 cancelled appointment is still saved. It’s already excluded from the numbers above, but you can permanently remove it to keep your history tidy."
+                  : `${cancelled.length} cancelled appointments are still saved. They’re already excluded from the numbers above, but you can permanently remove them to keep your history tidy.`}
               </p>
               <div className="mt-3">
                 <Button
