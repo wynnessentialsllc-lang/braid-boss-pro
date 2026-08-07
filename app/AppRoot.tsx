@@ -18987,7 +18987,7 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
                         <p key={i} className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.55 }}>{para}</p>
                       ))}
                       <div className="p-3 rounded-xl" style={{ background: C.ivory }}>
-                        <p className="text-[11px] font-bold mb-1" style={{ color: C.goldDeep, letterSpacing: "0.1em", textTransform: "uppercase" }}>Try this this week</p>
+                        <p className="text-[11px] font-bold mb-1" style={{ color: C.goldDeep, letterSpacing: "0.1em", textTransform: "uppercase" }}>Try this week</p>
                         <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>{lesson.tryThisWeek}</p>
                       </div>
                       {lesson.relatedTool && (
