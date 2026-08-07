@@ -44,11 +44,23 @@ export async function generateMetadata({
       url: `/store/${product.slug}`,
       siteName: "Braid Boss Pro",
       type: "website",
-      ...(product.image && /^https?:\/\//i.test(product.image)
-        ? { images: [{ url: product.image }] }
+      // A relative path resolves to an absolute URL via metadataBase
+      // (app/layout.tsx). The hero is a 2000×2000 designed graphic, so it
+      // makes a strong share card on its own.
+      ...(product.image
+        ? {
+            images: [
+              { url: product.image, width: 2000, height: 2000, alt: product.imageAlt || product.name },
+            ],
+          }
         : {}),
     },
-    twitter: { card: "summary_large_image", title, description },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      ...(product.image ? { images: [product.image] } : {}),
+    },
   };
 }
 
@@ -75,6 +87,13 @@ export default async function StoreProductPage({
       ]
     : [];
 
+  // Absolute image URLs for structured data (schema.org wants absolute).
+  const toAbs = (u: string) => (/^https?:\/\//i.test(u) ? u : `${SITE}${u}`);
+  const productImages = [
+    ...(product.image ? [product.image] : []),
+    ...(product.gallery ?? []).map((g) => g.src),
+  ].map(toAbs);
+
   // Product JSON-LD for rich results. Only advertise an Offer when the
   // product is actually purchasable and priced.
   const jsonLd: Record<string, unknown> = {
@@ -84,7 +103,8 @@ export default async function StoreProductPage({
     description: product.shortDescription,
     category: product.category,
     brand: { "@type": "Brand", name: "Braid Boss Pro" },
-    ...(product.image && /^https?:\/\//i.test(product.image) ? { image: product.image } : {}),
+    sku: product.slug,
+    ...(productImages.length ? { image: productImages } : {}),
     ...(buyable
       ? {
           offers: {
@@ -93,9 +113,27 @@ export default async function StoreProductPage({
             priceCurrency: product.currency.toUpperCase(),
             price: (product.priceCents / 100).toFixed(2),
             availability: "https://schema.org/InStock",
+            itemCondition: "https://schema.org/NewCondition",
+            seller: { "@type": "Organization", name: "Braid Boss Pro" },
           },
         }
       : {}),
+  };
+
+  // Breadcrumbs — Home › Store › Product. Helps breadcrumb rich results.
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: `${SITE}/` },
+      { "@type": "ListItem", position: 2, name: "Store", item: `${SITE}/store` },
+      {
+        "@type": "ListItem",
+        position: 3,
+        name: product.name,
+        item: `${SITE}/store/${product.slug}`,
+      },
+    ],
   };
 
   const faqJsonLd =
@@ -116,6 +154,10 @@ export default async function StoreProductPage({
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
       {faqJsonLd && (
         <script

@@ -16,6 +16,11 @@ import {
 } from "../lib/store-catalog";
 import { StoreVisual } from "./_components/StoreVisual";
 
+const SITE = (process.env.NEXT_PUBLIC_SITE_URL || "https://braidbosspro.app").replace(/\/$/, "");
+// Featured product hero doubles as the store's social-share image.
+// Relative path — resolved to an absolute URL via metadataBase (layout).
+const FEATURED_HERO = listStoreProducts().find((p) => p.featured)?.image;
+
 export const metadata: Metadata = {
   title: "Braid Boss Pro Store — Braider Essentials & Digital Planners",
   description:
@@ -37,12 +42,14 @@ export const metadata: Metadata = {
     url: "/store",
     siteName: "Braid Boss Pro",
     type: "website",
+    ...(FEATURED_HERO ? { images: [{ url: FEATURED_HERO, width: 2000, height: 2000 }] } : {}),
   },
   twitter: {
     card: "summary_large_image",
     title: "Braid Boss Pro Store",
     description:
-      "Braider essentials made for the chair — starting with the Braid Boss Planner, a GoodNotes-ready digital planner.",
+      "Braider essentials made for the chair — starting with the Braid Boss Pro Business Planner, a GoodNotes-ready digital planner.",
+    ...(FEATURED_HERO ? { images: [FEATURED_HERO] } : {}),
   },
 };
 
@@ -56,8 +63,38 @@ export default function StorePage() {
   const products = listStoreProducts();
   const featured = products.find((p) => p.featured) || products[0];
 
+  // Breadcrumbs (Home › Store) + an ItemList of the catalog, so search
+  // engines understand the store as a collection and can surface products.
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: `${SITE}/` },
+      { "@type": "ListItem", position: 2, name: "Store", item: `${SITE}/store` },
+    ],
+  };
+  const itemListJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    name: "Braider Essentials",
+    itemListElement: products.map((p, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      url: `${SITE}/store/${p.slug}`,
+      name: p.name,
+    })),
+  };
+
   return (
     <MarketingShell>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(itemListJsonLd) }}
+      />
       <MarketingHero
         eyebrow="Braid Boss Pro Store"
         title={
