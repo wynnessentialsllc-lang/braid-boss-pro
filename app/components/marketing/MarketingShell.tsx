@@ -94,6 +94,7 @@ const MARKETING_NAV_LINKS: Array<{ href: string; label: string }> = [
   { href: "/discover", label: "Find a Braider" },
   { href: "/#booking-scheduling", label: "Features" },
   { href: "/how-it-works", label: "How it works" },
+  { href: "/store", label: "Store" },
   { href: "/pricing", label: "Pricing" },
   { href: "/faq", label: "FAQ" },
 ];
@@ -340,6 +341,9 @@ const MarketingFooter = () => (
         </Link>
         <Link href="/how-it-works" style={footerLink}>
           How it works
+        </Link>
+        <Link href="/store" style={footerLink}>
+          Store
         </Link>
         <Link href="/about" style={footerLink}>
           About
