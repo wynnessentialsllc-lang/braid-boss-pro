@@ -12,6 +12,7 @@ import {
 } from "../../lib/store-catalog";
 import { StoreVisual } from "../_components/StoreVisual";
 import BuyPanel from "./BuyPanel";
+import ProductGallery, { type GalleryImage } from "./ProductGallery";
 
 const SITE = (process.env.NEXT_PUBLIC_SITE_URL || "https://braidbosspro.app").replace(/\/$/, "");
 
@@ -62,6 +63,17 @@ export default async function StoreProductPage({
 
   const buyable = isPurchasable(product);
   const others = listStoreProducts().filter((p) => p.slug !== product.slug);
+
+  // Gallery = hero first, then the extra catalog images. Drives the
+  // interactive <ProductGallery/>; empty when the product has no hero
+  // (unconfigured / coming-soon), in which case the branded placeholder
+  // renders instead.
+  const galleryImages: GalleryImage[] = product.image
+    ? [
+        { src: product.image, alt: product.imageAlt || product.name },
+        ...(product.gallery ?? []),
+      ]
+    : [];
 
   // Product JSON-LD for rich results. Only advertise an Offer when the
   // product is actually purchasable and priced.
@@ -126,32 +138,10 @@ export default async function StoreProductPage({
       <section style={{ padding: "20px 20px 8px" }}>
         <div className="max-w-[1100px] mx-auto store-product-grid">
           <div className="bbp-reveal">
-            <StoreVisual product={product} minHeight={380} />
-            {product.gallery && product.gallery.length > 0 && (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))",
-                  gap: 10,
-                  marginTop: 12,
-                }}
-              >
-                {product.gallery.map((src, i) => (
-                  // eslint-disable-next-line @next/next/no-img-element -- catalog gallery images, dependency-free
-                  <img
-                    key={i}
-                    src={src}
-                    alt={`${product.name} preview ${i + 1}`}
-                    style={{
-                      width: "100%",
-                      height: 90,
-                      objectFit: "cover",
-                      borderRadius: 12,
-                      border: `1px solid ${C.brandBorder}`,
-                    }}
-                  />
-                ))}
-              </div>
+            {galleryImages.length > 0 ? (
+              <ProductGallery images={galleryImages} />
+            ) : (
+              <StoreVisual product={product} minHeight={380} />
             )}
           </div>
 
