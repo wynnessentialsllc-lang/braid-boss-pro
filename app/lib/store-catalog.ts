@@ -23,6 +23,7 @@
 // ─────────────────────────────────────────────────────────────────────
 
 export type StoreFaq = { q: string; a: string };
+export type StoreImage = { src: string; alt: string };
 
 export type StoreProduct = {
   /** URL slug: /store/<slug>. Stable — it's referenced by orders. */
@@ -52,10 +53,14 @@ export type StoreProduct = {
   digitalFileName?: string;
 
   /** Hero/card image — a path under /public (e.g. "/store/planner.png")
-   *  or an absolute URL. When absent, a branded placeholder renders. */
+   *  or an absolute URL. Used by the landing card, OG image, Product
+   *  JSON-LD, and as the first image in the product-page gallery. When
+   *  absent, a branded placeholder renders. */
   image?: string;
-  /** Extra images for the product-page gallery. */
-  gallery?: string[];
+  /** Alt text for the hero image. */
+  imageAlt?: string;
+  /** Additional images (beyond the hero) for the product-page gallery. */
+  gallery?: StoreImage[];
 
   shortDescription: string;
   /** Long description, one string per paragraph. */
@@ -110,15 +115,16 @@ export const STORE_PRODUCTS: StoreProduct[] = [
     digitalFilePath: "Braid_Boss_Pro_Business_Planner_DIGITAL.pdf",
     digitalFileName: "The Braid Boss Pro Business Planner.pdf",
 
-    // Real product mockups in /public/store. Hero = cover-on-iPad with the
-    // 111 pages / 2,200+ links / 12 months stat bar.
-    image: "/store/planner-hero.jpg",
+    // Real product mockups in /public/store/planner (2000×2000). Hero =
+    // cover-on-iPad with the 111 pages / 2,200+ links / 12 months stat bar.
+    image: "/store/planner/1_hero.jpg",
+    imageAlt: "Braid Boss Pro Business Planner cover on an iPad",
     gallery: [
-      "/store/planner-tap-to-jump.jpg",
-      "/store/planner-write-on-it.jpg",
-      "/store/planner-pages-overview.jpg",
-      "/store/planner-worksheets.jpg",
-      "/store/planner-dashboard-bonus.jpg",
+      { src: "/store/planner/2_hyperlinked.jpg", alt: "Tabbed navigation — tap a tab, land on the page" },
+      { src: "/store/planner/3_write_on_it.jpg", alt: "Write directly on it with an Apple Pencil" },
+      { src: "/store/planner/4_whats_inside.jpg", alt: "111 pages — what is inside the planner" },
+      { src: "/store/planner/5_six_worksheets.jpg", alt: "Six worksheets built for 2026" },
+      { src: "/store/planner/6_free_dashboard.jpg", alt: "Free Braid Boss Dashboard included" },
     ],
 
     shortDescription:
