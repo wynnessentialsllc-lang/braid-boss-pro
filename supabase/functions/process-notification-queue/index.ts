@@ -819,7 +819,7 @@ const renderGiftCardIssued = (p: Record<string, any>) => {
     <h1 style="font-size:22px;line-height:1.25;margin:0 0 14px;color:${C.espresso};">Thank you, ${escape(purchaserName)}.</h1>
     <p style="font-size:15px;line-height:24px;margin:0 0 16px;color:${C.coffee};">
       Here ${multi ? "are your gift cards" : "is your gift card"} for ${escape(studioName)}${multi ? ` — ${money(total)} total` : ""}.
-      Keep ${multi ? "these codes" : "this code"} safe and share with whoever ${multi ? "they're" : "it's"} for.
+      Keep ${multi ? "these codes" : "this code"} safe and share ${multi ? "them" : "it"} with whoever ${multi ? "they're" : "it's"} for.
     </p>
     ${cardBlocks}
     <p style="font-size:13px;line-height:21px;margin:14px 0 0;color:${C.muted};">
@@ -936,7 +936,7 @@ const renderAppointmentReminder = (p: Record<string, any>) => {
     ${customizationBlock(p)}
     ${hairBringBlock(p)}
     ${p.prepInstructions ? `<p style="font-size:13px;line-height:20px;color:${C.coffee};margin:0 0 14px;"><strong>Prep:</strong> ${escape(p.prepInstructions)}</p>` : ""}
-    <p style="font-size:14px;line-height:22px;margin:0 0 18px;color:${C.coffee};">If everything still looks good, no action needed — we just wanted to give you a heads up.</p>
+    <p style="font-size:14px;line-height:22px;margin:0 0 18px;color:${C.coffee};">If everything still looks good, no action needed — we just wanted to give you a heads-up.</p>
     ${portalButton(p)}
     <hr style="border:none;border-top:1px solid ${C.hairline};margin:22px 0;" />
     <p style="font-size:13px;font-weight:700;letter-spacing:0.04em;color:${C.coffee};margin:0 0 14px;text-transform:uppercase;">Need to make a change?</p>
@@ -1137,7 +1137,7 @@ const renderBookingRefundManualStylist = (p: Record<string, any>) => {
   const reason = String(p.reason || "refund_failed").trim();
   const subject = "Action needed: manual deposit refund — Braid Boss Pro";
   const html = wrapHtml(subject, `
-    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.danger};margin:0 0 10px;font-weight:700;">Manual refund needed</p>
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.coralDeep};margin:0 0 10px;font-weight:700;">Manual refund needed</p>
     <h1 style="font-size:20px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">A deposit refund didn't go through automatically.</h1>
     <p style="font-size:14px;line-height:22px;margin:0 0 10px;color:${C.coffee};">
       You denied ${escape(clientName)}'s booking${serviceName ? ` for <strong>${escape(serviceName)}</strong>` : ""}, but the automatic Stripe refund failed${depositAmount ? ` for the <strong>$${depositAmount.toFixed(2)}</strong> deposit` : ""}.

@@ -852,6 +852,22 @@ const fmtMoney = (n: number, currency: string = "USD"): string => {
   try { return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(num); } catch { return `$${num.toFixed(2)}`; }
 };
 
+// Compact money for tight spots like chart axis ticks — "$3.2k", "$840".
+const fmtMoneyCompact = (n: number, currency: string = "USD"): string => {
+  const num = Number(n) || 0;
+  let sym = "$";
+  try {
+    sym = new Intl.NumberFormat("en-US", { style: "currency", currency })
+      .formatToParts(0).find((p) => p.type === "currency")?.value || "$";
+  } catch { /* fall back to $ */ }
+  const abs = Math.abs(num);
+  if (abs >= 1000) {
+    const k = num / 1000;
+    return `${sym}${k >= 10 ? Math.round(k) : Number(k.toFixed(1))}k`;
+  }
+  return `${sym}${Math.round(num)}`;
+};
+
 // --- Style-customization snapshot -----------------------------------
 // Single source of truth for rendering the client's booked style
 // configuration in the approval card AND the Edit Appointment sheet,
@@ -18971,7 +18987,7 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
                         <p key={i} className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.55 }}>{para}</p>
                       ))}
                       <div className="p-3 rounded-xl" style={{ background: C.ivory }}>
-                        <p className="text-[11px] font-bold mb-1" style={{ color: C.goldDeep, letterSpacing: "0.1em", textTransform: "uppercase" }}>Try this this week</p>
+                        <p className="text-[11px] font-bold mb-1" style={{ color: C.goldDeep, letterSpacing: "0.1em", textTransform: "uppercase" }}>Try this week</p>
                         <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>{lesson.tryThisWeek}</p>
                       </div>
                       {lesson.relatedTool && (
@@ -26978,6 +26994,10 @@ const ReportsScreen = ({ store, onBack, focus, onFocusConsumed }: { store: any; 
     { label: "Discounts & comps", value: s.discounts > 0 ? `(${fmtMoney(s.discounts, currency)})` : fmtMoney(0, currency), negative: s.discounts > 0, kind: "discounts", count: report.details.discounts.length },
   ];
   const chartMax = Math.max(1, ...report.series.map(p => Math.max(p.current, p.previous)));
+  // Show a period label under every bar, but thin them out when a range
+  // has more buckets than comfortably fit (e.g. 1Y = 13 months) so labels
+  // never overlap. First and last always show for orientation.
+  const labelEvery = Math.max(1, Math.ceil(report.series.length / 14));
   const topItems = [...report.topItems].sort((a, b) => (itemMode === "gross" ? b.gross - a.gross : b.count - a.count));
   const topCategories = [...report.topCategories].sort((a, b) => (catMode === "gross" ? b.gross - a.gross : b.count - a.count));
 
@@ -27074,18 +27094,38 @@ const ReportsScreen = ({ store, onBack, focus, onFocusConsumed }: { store: any; 
             <p className="text-[11px]" style={{ color: C.muted }}>vs previous {fmtMoney(report.previousGross, currency)}</p>
           </div>
           <Card className="p-4">
-            <div className="flex items-end gap-1" style={{ height: 120 }}>
-              {report.series.map((p, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-0">
-                  <div className="flex items-end justify-center w-full" style={{ height: 100, gap: 2 }}>
-                    <div style={{ width: "42%", maxWidth: 12, height: Math.max(2, Math.round((p.current / chartMax) * 100)), background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`, borderRadius: "3px 3px 0 0" }} />
-                    <div style={{ width: "42%", maxWidth: 12, height: Math.max(2, Math.round((p.previous / chartMax) * 100)), background: C.mutedSoft, opacity: 0.55, borderRadius: "3px 3px 0 0" }} />
-                  </div>
-                  {report.series.length <= 12 && (
-                    <span className="text-[8px] font-semibold" style={{ color: C.muted, whiteSpace: "nowrap" }}>{p.label}</span>
-                  )}
+            {/* Plot: a small $ scale on the left (peak → $0), bars in the
+                middle, and a period label under every bar (thinned only
+                when there are too many to fit) so the chart is readable. */}
+            <div className="flex gap-1.5">
+              {/* Y axis — top tick is the peak bar value, bottom is $0. */}
+              <div className="flex flex-col justify-between items-end shrink-0" style={{ height: 100 }}>
+                <span className="text-[8px] font-semibold tabular-nums" style={{ color: C.muted, lineHeight: 1 }}>{fmtMoneyCompact(chartMax, currency)}</span>
+                <span className="text-[8px] font-semibold tabular-nums" style={{ color: C.muted, lineHeight: 1 }}>{fmtMoneyCompact(0, currency)}</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                {/* Bars */}
+                <div className="flex items-end gap-1" style={{ height: 100, borderBottom: `1px solid ${C.hairline}` }}>
+                  {report.series.map((p, i) => (
+                    <div key={i} className="flex-1 flex items-end justify-center min-w-0" style={{ gap: 2 }}>
+                      <div title={`${p.label}: ${fmtMoney(p.current, currency)}`} style={{ width: "42%", maxWidth: 12, height: Math.max(2, Math.round((p.current / chartMax) * 100)), background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`, borderRadius: "3px 3px 0 0" }} />
+                      <div title={`${p.label} (previous): ${fmtMoney(p.previous, currency)}`} style={{ width: "42%", maxWidth: 12, height: Math.max(2, Math.round((p.previous / chartMax) * 100)), background: C.mutedSoft, opacity: 0.55, borderRadius: "3px 3px 0 0" }} />
+                    </div>
+                  ))}
                 </div>
-              ))}
+                {/* X axis — one cell per bar so labels line up; thinned to
+                    avoid overlap when there are many buckets. */}
+                <div className="flex gap-1 mt-1">
+                  {report.series.map((p, i) => {
+                    const showLabel = i % labelEvery === 0 || i === report.series.length - 1;
+                    return (
+                      <span key={i} className="flex-1 text-center min-w-0" style={{ fontSize: 8, fontWeight: 600, color: C.muted, whiteSpace: "nowrap", overflow: "hidden" }}>
+                        {showLabel ? p.label : ""}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
             <div className="flex gap-4 justify-center mt-2">
               <span className="text-[10px] font-semibold inline-flex items-center gap-1" style={{ color: C.muted }}><span style={{ width: 8, height: 8, borderRadius: 2, background: C.gold }} /> This period</span>
@@ -27248,9 +27288,9 @@ const ReportsScreen = ({ store, onBack, focus, onFocusConsumed }: { store: any; 
             <SectionTitle>Data cleanup</SectionTitle>
             <Card className="p-4">
               <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
-                {cancelled.length} cancelled appointment{cancelled.length === 1 ? " is" : "s are"} still
-                saved. They&apos;re already excluded from the numbers above, but you can permanently
-                remove them to keep your history tidy.
+                {cancelled.length === 1
+                  ? "1 cancelled appointment is still saved. It’s already excluded from the numbers above, but you can permanently remove it to keep your history tidy."
+                  : `${cancelled.length} cancelled appointments are still saved. They’re already excluded from the numbers above, but you can permanently remove them to keep your history tidy.`}
               </p>
               <div className="mt-3">
                 <Button
@@ -43300,22 +43340,41 @@ export default function App() {
   const goToMoney = (p: string) => { setMoneyPeriod(p); setActive("money"); };
   const [secondary, setSecondary] = useState<string | null>(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
 
-  // Every screen and feature opens scrolled to the top. The app scrolls
-  // at the document level (see Frame: min-height:100dvh, no overflow
-  // container), so navigating between tabs/features otherwise inherits
-  // the previous screen's scroll position and lands mid-page. Reset the
-  // document scroll whenever the primary tab or a secondary feature
-  // screen changes. Window-level scroll only — never a nested scrollTop,
-  // which leaks to the page on iOS WKWebView. rAF + a short timeout
-  // re-assert it after layout settles.
+  // Per-screen scroll memory. The app scrolls at the document level (see
+  // Frame: min-height:100dvh, no overflow container). A screen you open
+  // for the first time lands at the top, but returning to one you've
+  // already been on — e.g. tapping Back out of a Settings sub-page —
+  // drops you right back where you left off instead of the top. Keyed by
+  // the active tab + secondary overlay so each screen keeps its own spot.
+  const scrollMemory = useRef<Record<string, number>>({});
+  const navScrollKey = `${active}|${secondary ?? ""}`;
+  const navScrollKeyRef = useRef(navScrollKey);
+  // Continuously remember the current screen's scroll position (rAF-
+  // throttled). Because it writes under navScrollKeyRef — flipped in the
+  // layout effect below BEFORE paint — a post-navigation scroll can never
+  // clobber the screen we just left.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const toTop = () => window.scrollTo(0, 0);
-    toTop();
-    const raf = requestAnimationFrame(toTop);
-    const t = setTimeout(toTop, 60);
+    let raf = 0;
+    const record = () => { raf = 0; scrollMemory.current[navScrollKeyRef.current] = window.scrollY; };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(record); };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => { window.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); };
+  }, []);
+  // On a tab/overlay change, flip the key and restore the destination's
+  // remembered position (top for a screen we haven't seen). Layout effect
+  // + rAF + a short timeout re-assert it after content lays out. Window-
+  // level only — never a nested scrollTop, which leaks on iOS WKWebView.
+  React.useLayoutEffect(() => {
+    if (typeof window === "undefined") return;
+    navScrollKeyRef.current = navScrollKey;
+    const target = scrollMemory.current[navScrollKey] ?? 0;
+    const go = () => window.scrollTo(0, target);
+    go();
+    const raf = requestAnimationFrame(go);
+    const t = setTimeout(go, 60);
     return () => { cancelAnimationFrame(raf); clearTimeout(t); };
-  }, [active, secondary]);
+  }, [navScrollKey]);
 
   // One-time Tap to Pay awareness splash. Shows once on a supported iPhone
   // that hasn't enabled Tap to Pay yet, then never again (flag persisted).
@@ -43371,11 +43430,11 @@ export default function App() {
   // below so a returning user lands on Home instead of deep in a sub-screen.
   const NAV_LAST_SEEN_KEY = "nav:lastSeen";
   // How long the user has to be away before we treat the next return as a
-  // fresh visit and drop them back on the Home dashboard. 30 min: short
-  // enough that a return after a real break starts fresh, long enough that
-  // a quick context switch (answer a text, glance at the calendar) keeps
-  // them right where they were.
-  const NAV_IDLE_RESET_MS = 30 * 60 * 1000;
+  // fresh visit and drop them back on the Home dashboard. 60s: reopening
+  // the app after even a short break lands on Home, while a quick glance
+  // at another app — or a pull-to-refresh, which stamps "last seen" right
+  // before it reloads (see pagehide below) — keeps you where you were.
+  const NAV_IDLE_RESET_MS = 60 * 1000;
   const navRestored = useRef(false);
   useEffect(() => {
     let cancelled = false;
@@ -43428,15 +43487,20 @@ export default function App() {
       });
     };
     document.addEventListener("visibilitychange", onVisibility);
+    // A reload (pull-to-refresh) fires pagehide but not always
+    // visibilitychange, so stamp here too — it keeps "last seen" fresh
+    // right before the reload so the remount restores the screen instead
+    // of treating a refresh as a reopen and bouncing to Home.
+    window.addEventListener("pagehide", stamp);
     // Heartbeat so "last seen" tracks active presence even when the user
-    // lingers on one screen without navigating. First fire is at +60s, by
-    // which point the one-time restore above has already run, so it can't
-    // race the idle check on mount.
+    // lingers on one screen without navigating. Kept well under the 60s
+    // idle window so a genuine refresh never looks stale enough to reset.
     const heartbeat = setInterval(() => {
       if (document.visibilityState === "visible") stamp();
-    }, 60 * 1000);
+    }, 15 * 1000);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", stamp);
       clearInterval(heartbeat);
     };
   }, []);
