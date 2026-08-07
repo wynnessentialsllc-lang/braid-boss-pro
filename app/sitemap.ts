@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { FEATURE_PAGES, featurePath } from "./lib/feature-pages";
+import { listStoreProducts } from "./lib/store-catalog";
 
 // Public sitemap for search engines. Only marketing / SEO-facing routes
 // belong here — transactional pages (success screens, settings, admin,
@@ -34,6 +35,13 @@ const ROUTES: Array<{ path: string; priority: number; changeFrequency: MetadataR
   { path: "/compare/braid-boss-pro-vs-square-appointments", priority: 0.8, changeFrequency: "monthly" },
   { path: "/guides/best-booking-app-for-braiders", priority: 0.7, changeFrequency: "monthly" },
   { path: "/discover", priority: 0.9, changeFrequency: "daily" },
+  // Braid Boss Pro Store — first-party storefront + each product page.
+  { path: "/store", priority: 0.8, changeFrequency: "weekly" },
+  ...listStoreProducts().map((p) => ({
+    path: `/store/${p.slug}`,
+    priority: 0.7,
+    changeFrequency: "weekly" as const,
+  })),
   { path: "/faq", priority: 0.6, changeFrequency: "monthly" },
   { path: "/founding-access", priority: 0.6, changeFrequency: "monthly" },
   { path: "/support", priority: 0.4, changeFrequency: "yearly" },
