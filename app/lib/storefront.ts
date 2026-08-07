@@ -1064,6 +1064,10 @@ export const fetchPublicServiceRecommendations = async (
     variants: [],
     is_gift_card: false,
     gift_card_allow_custom: false,
+    // Service-recommendation RPC doesn't surface the digital flag; default
+    // off so the shape satisfies PublicProduct. Digital delivery still
+    // resolves correctly on the product page / checkout via its own RPCs.
+    is_digital: false,
   }));
   return { ok: true, products };
 };
