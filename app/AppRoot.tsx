@@ -852,6 +852,22 @@ const fmtMoney = (n: number, currency: string = "USD"): string => {
   try { return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(num); } catch { return `$${num.toFixed(2)}`; }
 };
 
+// Compact money for tight spots like chart axis ticks — "$3.2k", "$840".
+const fmtMoneyCompact = (n: number, currency: string = "USD"): string => {
+  const num = Number(n) || 0;
+  let sym = "$";
+  try {
+    sym = new Intl.NumberFormat("en-US", { style: "currency", currency })
+      .formatToParts(0).find((p) => p.type === "currency")?.value || "$";
+  } catch { /* fall back to $ */ }
+  const abs = Math.abs(num);
+  if (abs >= 1000) {
+    const k = num / 1000;
+    return `${sym}${k >= 10 ? Math.round(k) : Number(k.toFixed(1))}k`;
+  }
+  return `${sym}${Math.round(num)}`;
+};
+
 // --- Style-customization snapshot -----------------------------------
 // Single source of truth for rendering the client's booked style
 // configuration in the approval card AND the Edit Appointment sheet,
@@ -26978,6 +26994,10 @@ const ReportsScreen = ({ store, onBack, focus, onFocusConsumed }: { store: any; 
     { label: "Discounts & comps", value: s.discounts > 0 ? `(${fmtMoney(s.discounts, currency)})` : fmtMoney(0, currency), negative: s.discounts > 0, kind: "discounts", count: report.details.discounts.length },
   ];
   const chartMax = Math.max(1, ...report.series.map(p => Math.max(p.current, p.previous)));
+  // Show a period label under every bar, but thin them out when a range
+  // has more buckets than comfortably fit (e.g. 1Y = 13 months) so labels
+  // never overlap. First and last always show for orientation.
+  const labelEvery = Math.max(1, Math.ceil(report.series.length / 14));
   const topItems = [...report.topItems].sort((a, b) => (itemMode === "gross" ? b.gross - a.gross : b.count - a.count));
   const topCategories = [...report.topCategories].sort((a, b) => (catMode === "gross" ? b.gross - a.gross : b.count - a.count));
 
@@ -27074,18 +27094,38 @@ const ReportsScreen = ({ store, onBack, focus, onFocusConsumed }: { store: any; 
             <p className="text-[11px]" style={{ color: C.muted }}>vs previous {fmtMoney(report.previousGross, currency)}</p>
           </div>
           <Card className="p-4">
-            <div className="flex items-end gap-1" style={{ height: 120 }}>
-              {report.series.map((p, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-0">
-                  <div className="flex items-end justify-center w-full" style={{ height: 100, gap: 2 }}>
-                    <div style={{ width: "42%", maxWidth: 12, height: Math.max(2, Math.round((p.current / chartMax) * 100)), background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`, borderRadius: "3px 3px 0 0" }} />
-                    <div style={{ width: "42%", maxWidth: 12, height: Math.max(2, Math.round((p.previous / chartMax) * 100)), background: C.mutedSoft, opacity: 0.55, borderRadius: "3px 3px 0 0" }} />
-                  </div>
-                  {report.series.length <= 12 && (
-                    <span className="text-[8px] font-semibold" style={{ color: C.muted, whiteSpace: "nowrap" }}>{p.label}</span>
-                  )}
+            {/* Plot: a small $ scale on the left (peak → $0), bars in the
+                middle, and a period label under every bar (thinned only
+                when there are too many to fit) so the chart is readable. */}
+            <div className="flex gap-1.5">
+              {/* Y axis — top tick is the peak bar value, bottom is $0. */}
+              <div className="flex flex-col justify-between items-end shrink-0" style={{ height: 100 }}>
+                <span className="text-[8px] font-semibold tabular-nums" style={{ color: C.muted, lineHeight: 1 }}>{fmtMoneyCompact(chartMax, currency)}</span>
+                <span className="text-[8px] font-semibold tabular-nums" style={{ color: C.muted, lineHeight: 1 }}>{fmtMoneyCompact(0, currency)}</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                {/* Bars */}
+                <div className="flex items-end gap-1" style={{ height: 100, borderBottom: `1px solid ${C.hairline}` }}>
+                  {report.series.map((p, i) => (
+                    <div key={i} className="flex-1 flex items-end justify-center min-w-0" style={{ gap: 2 }}>
+                      <div title={`${p.label}: ${fmtMoney(p.current, currency)}`} style={{ width: "42%", maxWidth: 12, height: Math.max(2, Math.round((p.current / chartMax) * 100)), background: `linear-gradient(180deg, ${C.gold}, ${C.goldDeep})`, borderRadius: "3px 3px 0 0" }} />
+                      <div title={`${p.label} (previous): ${fmtMoney(p.previous, currency)}`} style={{ width: "42%", maxWidth: 12, height: Math.max(2, Math.round((p.previous / chartMax) * 100)), background: C.mutedSoft, opacity: 0.55, borderRadius: "3px 3px 0 0" }} />
+                    </div>
+                  ))}
                 </div>
-              ))}
+                {/* X axis — one cell per bar so labels line up; thinned to
+                    avoid overlap when there are many buckets. */}
+                <div className="flex gap-1 mt-1">
+                  {report.series.map((p, i) => {
+                    const showLabel = i % labelEvery === 0 || i === report.series.length - 1;
+                    return (
+                      <span key={i} className="flex-1 text-center min-w-0" style={{ fontSize: 8, fontWeight: 600, color: C.muted, whiteSpace: "nowrap", overflow: "hidden" }}>
+                        {showLabel ? p.label : ""}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
             <div className="flex gap-4 justify-center mt-2">
               <span className="text-[10px] font-semibold inline-flex items-center gap-1" style={{ color: C.muted }}><span style={{ width: 8, height: 8, borderRadius: 2, background: C.gold }} /> This period</span>
