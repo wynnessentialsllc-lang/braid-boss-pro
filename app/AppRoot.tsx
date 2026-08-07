@@ -34527,10 +34527,24 @@ const InboxScreen = ({
                     <div style={{
                       background: mine ? C.gold : C.ivory,
                       color: mine ? "#FFFFFF" : C.espresso,
-                      borderRadius: 14, padding: "9px 13px", fontSize: 14, lineHeight: 1.45,
+                      borderRadius: 14, padding: m.image_url && !m.body ? 4 : "9px 13px",
+                      fontSize: 14, lineHeight: 1.45,
                       border: mine ? "none" : `1px solid ${C.hairline}`,
                       whiteSpace: "pre-wrap", wordBreak: "break-word",
                     }}>
+                      {m.image_url && (
+                        <a href={m.image_url} target="_blank" rel="noopener noreferrer" style={{ display: "block" }}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={m.image_url}
+                            alt="Attached photo"
+                            style={{
+                              display: "block", maxWidth: "100%", width: 220, maxHeight: 260,
+                              objectFit: "cover", borderRadius: 10, marginBottom: m.body ? 6 : 0,
+                            }}
+                          />
+                        </a>
+                      )}
                       {m.body}
                     </div>
                     <p style={{ margin: "3px 4px 0", fontSize: 10.5, color: C.muted, textAlign: mine ? "right" : "left" }}>

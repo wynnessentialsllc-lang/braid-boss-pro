@@ -21,9 +21,19 @@ export type ClientMessage = {
   booking_request_id: string;
   sender: MessageSender;
   body: string;
+  image_url: string | null;
   read_by_owner: boolean;
   read_by_client: boolean;
   created_at: string;
+};
+
+// A short one-line preview for a thread row — an image-only message has
+// no body text, so show a small placeholder instead of a blank line.
+export const messagePreview = (body: string, imageUrl?: string | null): string => {
+  const t = (body || "").trim();
+  if (t) return t;
+  if (imageUrl) return "📷 Photo";
+  return "";
 };
 
 // One conversation, grouped from the flat message rows + the
@@ -46,7 +56,41 @@ export type PortalMessage = {
   id: string;
   sender: MessageSender;
   body: string;
+  image_url: string | null;
   created_at: string;
+};
+
+// Upload a screenshot / photo for a portal message. The portal is
+// anonymous, so the bytes go through the service-role API route keyed by
+// the portal token; it returns a public URL that postPortalMessage then
+// attaches to the message.
+export const uploadPortalMessagePhoto = async (
+  token: string,
+  file: File,
+): Promise<{ ok: boolean; url?: string; error?: string }> => {
+  if (!token || !file) return { ok: false, error: "missing" };
+  if (file.size > 7 * 1024 * 1024) {
+    return { ok: false, error: "That photo is too large. Please use an image under 7 MB." };
+  }
+  try {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const base64 = typeof window !== "undefined" ? window.btoa(binary) : "";
+    const res = await fetch("/api/client-message-photo", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token, image_base64: base64, media_type: file.type || "image/jpeg" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.url) {
+      return { ok: false, error: (data as any)?.error || "Couldn't upload that photo." };
+    }
+    return { ok: true, url: String(data.url) };
+  } catch {
+    return { ok: false, error: "Couldn't upload that photo." };
+  }
 };
 
 export const listPortalMessages = async (
@@ -72,14 +116,17 @@ export const listPortalMessages = async (
 export const postPortalMessage = async (
   token: string,
   body: string,
+  imageUrl?: string | null,
 ): Promise<boolean> => {
   const trimmed = (body || "").trim();
-  if (!token || !trimmed) return false;
+  const image = (imageUrl || "").trim();
+  if (!token || (!trimmed && !image)) return false;
   try {
     const supabase = getSupabase();
     const { data, error } = await supabase.rpc("public_post_client_message", {
       token_in: token,
       body_in: trimmed,
+      image_url_in: image || null,
     });
     return !error && !!data && (data as any).ok === true;
   } catch {
@@ -119,7 +166,7 @@ export const useClientMessages = (
       const supabase = getSupabase();
       const { data, error: msgErr } = await supabase
         .from("client_messages")
-        .select("id, booking_request_id, sender, body, read_by_owner, read_by_client, created_at")
+        .select("id, booking_request_id, sender, body, image_url, read_by_owner, read_by_client, created_at")
         .eq("user_id", userId)
         .order("created_at", { ascending: true });
       if (msgErr) throw msgErr;
@@ -187,7 +234,7 @@ export const useClientMessages = (
         preferredDate: info?.preferredDate || null,
         messages: sorted,
         lastMessageAt: last.created_at,
-        lastMessageBody: last.body,
+        lastMessageBody: messagePreview(last.body, last.image_url),
         lastSender: last.sender,
         unread: sorted.filter((m) => m.sender === "client" && !m.read_by_owner).length,
       });
@@ -218,7 +265,7 @@ export const useClientMessages = (
             read_by_owner: true,
             read_by_client: false,
           })
-          .select("id, booking_request_id, sender, body, read_by_owner, read_by_client, created_at")
+          .select("id, booking_request_id, sender, body, image_url, read_by_owner, read_by_client, created_at")
           .single();
         if (insErr || !data) return false;
         setMessages((prev) => [...prev, data as ClientMessage]);
