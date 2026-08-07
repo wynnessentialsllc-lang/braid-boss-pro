@@ -104,11 +104,11 @@ export const STORE_PRODUCTS: StoreProduct[] = [
     currency: "usd",
 
     isDigital: true,
-    // TODO: upload the planner PDF to the `store-files` bucket and set its
-    // object path here (e.g. "planner/braid-boss-pro-business-planner.pdf").
-    // Until then the product shows "coming soon" and cannot be purchased.
-    digitalFilePath: undefined,
-    digitalFileName: "The-Braid-Boss-Pro-Business-Planner.pdf",
+    // Object path in the private `store-files` bucket (uploaded via the
+    // Supabase dashboard). digitalFileName is what the buyer's browser
+    // saves it as (Content-Disposition), independent of the storage path.
+    digitalFilePath: "Braid_Boss_Pro_Business_Planner_DIGITAL.pdf",
+    digitalFileName: "The Braid Boss Pro Business Planner.pdf",
 
     // TODO: replace with real mockups in /public/store (see the shot list
     // the owner provided: iPad + Pencil hero, dashboard w/ "tap to jump",
@@ -214,9 +214,9 @@ export const STORE_PRODUCTS: StoreProduct[] = [
     ],
 
     featured: true,
-    // TODO: flip to true once priceCents, image(s) and digitalFilePath are
-    // all real. Kept false so the launch page can showcase it without
-    // taking payment for an undeliverable file.
+    // File is uploaded ✓. Still TODO before flipping active: confirm the
+    // real priceCents and add product images. Kept false so the launch page
+    // showcases the planner without selling at a placeholder price.
     active: false,
   },
 ];
