@@ -114,6 +114,10 @@ export default function ProductDetailPage() {
     customAmountNum != null && Number.isFinite(customAmountNum) &&
     customAmountNum >= 10 && customAmountNum <= 200;
   const hasVariants = (product?.variants?.length || 0) > 0;
+  // A pure digital item (downloadable, nothing to ship) skips the whole
+  // fulfillment flow — no shipping/pickup selector, no address. A bundle
+  // (digital + requires_shipping) still ships, so it keeps the selector.
+  const pureDigital = !!product?.is_digital && !product?.requires_shipping;
   // A buyer-chosen amount stands in for the variant pick.
   const needsVariantPick = hasVariants && !selectedVariantId && !customMode;
   const selectedVariant = useMemo(
@@ -304,7 +308,7 @@ export default function ProductDetailPage() {
           custom_amount: customMode ? customAmountNum : null,
           // Chosen shipping / delivery / pickup method (null when the shop
           // hasn't enabled any — server then uses legacy behavior).
-          fulfillment_method: ful ? fulMethod : null,
+          fulfillment_method: ful && !pureDigital ? fulMethod : null,
           delivery_zip: fulMethod === "delivery" ? deliveryZip.trim() || null : null,
           pickup_preferred_time: fulMethod === "pickup" ? pickupPreferredTime.trim() || null : null,
         }),
@@ -507,6 +511,19 @@ export default function ProductDetailPage() {
               : "In stock"}
           </p>
         )}
+        {product.is_digital && (
+          <span
+            className="inline-flex items-center gap-1.5 mt-3 px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-widest"
+            style={{
+              background: `${C.brandPrimary}14`,
+              color: C.brandPrimary,
+              letterSpacing: "0.10em",
+            }}
+          >
+            <span aria-hidden>⬇</span>
+            {pureDigital ? "Instant digital download" : "Includes digital download"}
+          </span>
+        )}
       </section>
 
       {/* Variant picker — only renders for products that declare a
@@ -638,7 +655,7 @@ export default function ProductDetailPage() {
       {/* Fulfillment picker — only when the shop enabled methods and this
           isn't an external-link or gift-card product. Feeds Buy Now; the
           cart has its own copy of this selector. */}
-      {ful && !product.external_checkout_url && !customMode && (
+      {ful && !product.external_checkout_url && !customMode && !pureDigital && (
         <section className="mt-5">
           <p
             className="text-[11px] font-bold uppercase tracking-widest mb-2"

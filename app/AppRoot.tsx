@@ -111,6 +111,7 @@ import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
 import FeaturesContent from "./components/marketing/FeaturesContent";
 import AuthScreen from "./components/AuthScreen";
 import { ProductImageUploader } from "./components/ProductImageUploader";
+import { ProductFileUploader } from "./components/ProductFileUploader";
 import {
   PreviewStyleCard,
   SectionEyebrow,
@@ -35144,6 +35145,9 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
     weight_oz: number | null;
     requires_signature: boolean;
     insurance_amount: number | null;
+    is_digital: boolean;
+    digital_file_path: string | null;
+    digital_file_name: string | null;
   }>;
   const [editing, setEditing] = useState<Draft | null>(null);
   // Raw textarea content for the variants list. Decoupled from
@@ -35350,6 +35354,9 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                 weight_oz: (p as any).weight_oz ?? null,
                 requires_signature: !!(p as any).requires_signature,
                 insurance_amount: (p as any).insurance_amount ?? null,
+                is_digital: !!(p as any).is_digital,
+                digital_file_path: (p as any).digital_file_path ?? null,
+                digital_file_name: (p as any).digital_file_name ?? null,
               });
               // Seed the textarea with the existing variant names so
               // editing keeps them visible; new picks tack on as the
@@ -35845,6 +35852,51 @@ const ProductsScreen = ({ store, onBack, openOrders, openShippingSettings, openI
                 <Toggle checked={!!editing.requires_shipping} onChange={(v: boolean) => setEditing({ ...editing, requires_shipping: v })} />
               </div>
             </Card>
+            {/* Digital download — an ebook / PDF the buyer downloads after
+                paying. Independent of shipping: leave "Requires shipping"
+                off for a pure ebook, or on to sell a paperback + PDF
+                bundle. Hidden for gift cards (their delivery is a code). */}
+            {!editing.is_gift_card && (
+              <Card className="p-3.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold" style={{ color: C.espresso }}>Digital download</p>
+                    <p className="text-[11px]" style={{ color: C.muted }}>
+                      Sell an ebook, PDF, or guide. After payment the buyer gets a secure download link —
+                      no shipping needed. Turn on &quot;Requires shipping&quot; too if you also mail a printed copy.
+                    </p>
+                  </div>
+                  <Toggle
+                    checked={!!editing.is_digital}
+                    onChange={(v: boolean) => setEditing({ ...editing, is_digital: v })}
+                  />
+                </div>
+                {editing.is_digital && (
+                  <div className="mt-3">
+                    <ProductFileUploader
+                      userId={store.userId}
+                      path={editing.digital_file_path ?? null}
+                      fileName={editing.digital_file_name ?? null}
+                      onChange={(path, fileName) =>
+                        setEditing({ ...editing, digital_file_path: path, digital_file_name: fileName })
+                      }
+                      tokens={{
+                        border: C.hairline,
+                        muted: C.muted,
+                        error: C.brandError,
+                        primary: C.brandPrimary,
+                        paper: C.paper,
+                      }}
+                    />
+                    {!editing.digital_file_path && (
+                      <p className="mt-2 text-[11px]" style={{ color: C.brandError }}>
+                        Upload the file buyers will download — without it the download can&apos;t be delivered.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </Card>
+            )}
             <Card className="p-3.5">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">

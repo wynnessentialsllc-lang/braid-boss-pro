@@ -56,6 +56,7 @@ type ResolvedLine = {
   unit_amount_cents: number;
   quantity: number;
   requires_shipping: boolean;
+  is_digital: boolean;
   variant_label: string | null;
   variant_id: string | null;
   variant_name: string | null;
@@ -277,6 +278,11 @@ export async function POST(req: Request) {
       unit_amount_cents: Math.round(priceDollars * 100),
       quantity: item.quantity,
       requires_shipping: !!product.requires_shipping,
+      // Snapshot the digital flag so the order page + confirmation email
+      // know which lines deliver a download, without re-resolving the
+      // product. The download route re-checks the live product as the
+      // authority before minting a signed URL.
+      is_digital: !!product.is_digital,
       variant_label: resolvedVariant ? (product.variant_label || null) : null,
       variant_id: resolvedVariant?.id || null,
       variant_name: resolvedVariant ? String(resolvedVariant.name || "").trim() : null,
@@ -288,6 +294,14 @@ export async function POST(req: Request) {
   if (!chargesEnabled) return fail(409, "Stylist's Stripe account isn't ready to take charges.");
 
   const requiresShipping = resolved.some((r) => r.requires_shipping);
+  // A cart that's entirely digital with nothing to ship (pure ebooks /
+  // downloads) never needs a fulfillment method, address, or shipping fee
+  // — even if the shop has shipping/pickup enabled for its physical
+  // catalog. This gate keeps a buyer from being asked for a shipping
+  // address just to download a PDF. A MIXED cart (any physical line)
+  // falls through to the normal fulfillment path below.
+  const allDigitalNoShip =
+    resolved.length > 0 && resolved.every((r) => r.is_digital && !r.requires_shipping);
   const subtotalCents = resolved.reduce((s, r) => s + r.unit_amount_cents * r.quantity, 0);
   const subtotalDollars = subtotalCents / 100;
 
@@ -355,7 +369,7 @@ export async function POST(req: Request) {
   // the picked service and phase 3b (label purchase) can reuse the rate id.
   let carrierRate: NormalizedRate | null = null;
 
-  if (anyFulfillmentEnabled && shopCfg) {
+  if (anyFulfillmentEnabled && shopCfg && !allDigitalNoShip) {
     const enabled: Record<string, boolean> = {
       shipping: !!shopCfg.shipping_enabled,
       delivery: !!shopCfg.delivery_enabled,
@@ -450,6 +464,7 @@ export async function POST(req: Request) {
     unit_amount: r.unit_amount_dollars,
     quantity: r.quantity,
     requires_shipping: r.requires_shipping,
+    is_digital: r.is_digital,
     image_url: r.image_url,
     variant_label: r.variant_label,
     variant_id: r.variant_id,

@@ -13,6 +13,39 @@ const BUCKET = "booking-logos";
 const MAX_DIM = 512;     // logos compress to 512px on the long side
 const JPEG_QUALITY = 0.88;
 
+// Resolve the CURRENT auth session's user id. The bucket's INSERT/UPDATE
+// policies require (storage.foldername(name))[1] = auth.uid()::text, so
+// the upload path MUST be built from the live session uid — not a uid the
+// caller cached earlier. If they drift (a stale prop, a switched account,
+// an expired session), Storage rejects the write with the opaque "new row
+// violates row-level security policy". We read the truth here so the path
+// can't drift, and surface a clear error when the session is really gone.
+const resolveSessionUid = async (fallbackUserId?: string): Promise<string> => {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.auth.getUser();
+  const sessionUid = data?.user?.id;
+  if (error || !sessionUid) {
+    throw new Error("Your session expired — please sign in again, then retry.");
+  }
+  if (fallbackUserId && fallbackUserId !== sessionUid && typeof console !== "undefined") {
+    console.warn("[booking-logo-storage] userId mismatch — using session uid", {
+      passed: fallbackUserId,
+      session: sessionUid,
+    });
+  }
+  return sessionUid;
+};
+
+// Rewrite Storage's opaque RLS rejection into something a stylist can act
+// on; pass every other error through verbatim (file-too-large, network…).
+const throwUploadError = (upErr: unknown): never => {
+  const msg = String((upErr as any)?.message || "");
+  if (msg.toLowerCase().includes("row-level security")) {
+    throw new Error("Upload was rejected. Please sign out and sign back in, then try again.");
+  }
+  throw upErr as Error;
+};
+
 // Resize + compress an image client-side so we never upload more than
 // a few hundred KB. Returns a Blob ready to upload.
 const compressLogo = (file: File): Promise<Blob> =>
@@ -60,16 +93,18 @@ export const uploadBookingLogo = async (
   // name under the user's folder is allowed — no new bucket needed.
   filename: string = "logo.jpg",
 ): Promise<UploadLogoResult> => {
-  if (!userId) throw new Error("Sign in required.");
   if (!file) throw new Error("No file selected.");
   if (!/^image\//.test(file.type)) throw new Error("Please choose an image file.");
   if (file.size > 8 * 1024 * 1024) throw new Error("Image is larger than 8 MB.");
 
   const blob = await compressLogo(file);
   const supabase = getSupabase();
+  // Build the path from the live session uid so it always matches the
+  // bucket's owner-folder RLS check (see resolveSessionUid).
+  const sessionUid = await resolveSessionUid(userId);
   // Stable filename so the upload upserts in place. Cache-bust handled
   // via the public URL query param below.
-  const path = `${userId}/${filename}`;
+  const path = `${sessionUid}/${filename}`;
   const { error: upErr } = await supabase
     .storage
     .from(BUCKET)
@@ -78,7 +113,7 @@ export const uploadBookingLogo = async (
       contentType: "image/jpeg",
       cacheControl: "3600",
     });
-  if (upErr) throw upErr;
+  if (upErr) throwUploadError(upErr);
 
   const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
   const base = data?.publicUrl;
@@ -146,14 +181,16 @@ export const uploadBookingBanner = async (
   // "shop-banner.jpg" so the shop hero can differ from the booking one.
   filename: string = "banner.jpg",
 ): Promise<UploadLogoResult> => {
-  if (!userId) throw new Error("Sign in required.");
   if (!file) throw new Error("No file selected.");
   if (!/^image\//.test(file.type)) throw new Error("Please choose an image file.");
   if (file.size > 12 * 1024 * 1024) throw new Error("Image is larger than 12 MB.");
 
   const blob = await compressBanner(file);
   const supabase = getSupabase();
-  const path = `${userId}/${filename}`;
+  // Path from the live session uid so it satisfies the bucket's owner-
+  // folder RLS check even if the caller's userId prop has gone stale.
+  const sessionUid = await resolveSessionUid(userId);
+  const path = `${sessionUid}/${filename}`;
   const { error: upErr } = await supabase
     .storage
     .from(BUCKET)
@@ -162,7 +199,7 @@ export const uploadBookingBanner = async (
       contentType: "image/jpeg",
       cacheControl: "3600",
     });
-  if (upErr) throw upErr;
+  if (upErr) throwUploadError(upErr);
 
   const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
   const base = data?.publicUrl;

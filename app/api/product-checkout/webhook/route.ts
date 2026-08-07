@@ -266,6 +266,28 @@ export async function POST(req: Request) {
         ? `${baseUrl}/order/${customerToken}`
         : "";
 
+      // Digital downloads — distinct digital line items get a direct
+      // download link in the receipt so the buyer can grab their ebook
+      // straight from the email. Links point at /api/product-download,
+      // which re-verifies the order is paid before minting a signed URL.
+      const downloads = baseUrl && customerToken
+        ? Array.from(
+            new Map(
+              (Array.isArray(orderForEmail.line_items) ? (orderForEmail.line_items as any[]) : [])
+                .filter((li) => li?.is_digital && li?.product_id)
+                .map((li): [string, { title: string; url: string }] => [
+                  String(li.product_id),
+                  {
+                    title: li?.title || "Download",
+                    url: `${baseUrl}/api/product-download?token=${encodeURIComponent(
+                      customerToken,
+                    )}&product=${encodeURIComponent(String(li.product_id))}`,
+                  },
+                ]),
+            ).values(),
+          )
+        : [];
+
       await admin.rpc("queue_notification", {
         user_id_in: orderForEmail.user_id,
         channel_in: "email",
@@ -284,6 +306,7 @@ export async function POST(req: Request) {
           total,
           isPickup,
           viewOrderUrl,
+          downloads,
         },
         // Dedupe on order id so a Stripe webhook replay can't send
         // two confirmations. queue_notification respects this key.

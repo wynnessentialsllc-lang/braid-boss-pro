@@ -1285,6 +1285,16 @@ const renderOrderConfirmation = (p: Record<string, any>) => {
   const items        = Array.isArray(p.items) ? p.items : [];
   const isPickup     = !!p.isPickup;
   const viewOrderUrl = String(p.viewOrderUrl || "").trim();
+  // Digital downloads (ebooks / PDFs). Each { title, url } points at the
+  // secure /api/product-download endpoint, which re-verifies the order is
+  // paid before minting a signed URL.
+  const downloads    = Array.isArray(p.downloads)
+    ? p.downloads.filter((d: any) => d && d.url).map((d: any) => ({
+        title: String(d.title || "Download"),
+        url: String(d.url),
+      }))
+    : [];
+  const hasDownloads = downloads.length > 0;
   const fmtMoney = (n: number | string | null | undefined): string => {
     const v = Number(n);
     if (!Number.isFinite(v)) return "—";
@@ -1321,7 +1331,11 @@ const renderOrderConfirmation = (p: Record<string, any>) => {
     <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Order confirmed</p>
     <h1 style="font-size:22px;line-height:1.25;margin:0 0 12px;color:${C.espresso};">Thanks, ${escape(customerName)}.</h1>
     <p style="font-size:15px;line-height:24px;margin:0 0 16px;color:${C.coffee};">
-      Your order from <strong>${escape(studioName)}</strong> is in. We'll let you know when it's ${isPickup ? "ready for pickup" : "shipped"}.
+      Your order from <strong>${escape(studioName)}</strong> is in. ${
+        hasDownloads && isPickup
+          ? "Your download is ready below."
+          : `We'll let you know when it's ${isPickup ? "ready for pickup" : "shipped"}.`
+      }
     </p>
     ${orderRef ? `<p style="font-size:12px;color:${C.muted};margin:0 0 14px;">Order reference · <span style="font-family:SFMono-Regular,Menlo,Monaco,Consolas,monospace;color:${C.coffee};">${escape(orderRef)}</span></p>` : ""}
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;margin:8px 0 6px;">
@@ -1341,6 +1355,17 @@ const renderOrderConfirmation = (p: Record<string, any>) => {
         <td style="padding:10px 0 0;text-align:right;font-size:16px;font-weight:700;color:${C.espresso};">${fmtMoney(total)}</td>
       </tr>
     </table>
+    ${hasDownloads ? `
+      <div style="margin:18px 0 4px;padding:16px;background:${C.paper};border:1px solid ${C.hairline};border-radius:14px;">
+        <p style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 4px;font-weight:700;">Your downloads</p>
+        ${downloads.map((d: any) => ctaButton(
+          downloads.length === 1 ? "Download your file" : `Download: ${d.title}`,
+          d.url,
+        )).join("")}
+        <p style="font-size:12px;color:${C.muted};line-height:18px;margin:4px 0 0;">
+          These links stay available on your order page anytime you need them.
+        </p>
+      </div>` : ""}
     ${viewOrderUrl ? ctaButton("View order", viewOrderUrl) : ""}
     <p style="font-size:12px;color:${C.muted};line-height:18px;margin:18px 0 0;">
       Questions about your order? Reply to this email and ${escape(studioName)} will be in touch.
