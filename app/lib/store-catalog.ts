@@ -102,10 +102,10 @@ export const STORE_PRODUCTS: StoreProduct[] = [
     category: "Digital Planners",
     badge: "New",
 
-    // Introductory launch price $19.00, anchored against the $39.99 regular
+    // Introductory launch price $19.00, anchored against the $29.00 regular
     // price (shown struck through on the storefront).
     priceCents: 1900,
-    compareAtCents: 3999,
+    compareAtCents: 2900,
     currency: "usd",
 
     isDigital: true,
@@ -227,7 +227,7 @@ export const STORE_PRODUCTS: StoreProduct[] = [
     ],
 
     featured: true,
-    // LIVE: file ✓, price ✓ ($19 intro / $39.99 anchor), images ✓.
+    // LIVE: file ✓, price ✓ ($19 intro / $29 regular), images ✓.
     // The planner is purchasable — checkout charges the platform Stripe
     // account and delivers the PDF by email + secure signed URL.
     active: true,
