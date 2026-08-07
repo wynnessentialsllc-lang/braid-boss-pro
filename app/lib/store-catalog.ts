@@ -97,10 +97,10 @@ export const STORE_PRODUCTS: StoreProduct[] = [
     category: "Digital Planners",
     badge: "New",
 
-    // TODO: set the real launch price (cents). Placeholder: $27.00.
-    priceCents: 2700,
-    // TODO (optional): a launch/anchor "was" price. Placeholder: $45.00.
-    compareAtCents: 4500,
+    // Introductory launch price $19.00, anchored against the $39.99 regular
+    // price (shown struck through on the storefront).
+    priceCents: 1900,
+    compareAtCents: 3999,
     currency: "usd",
 
     isDigital: true,
@@ -214,9 +214,9 @@ export const STORE_PRODUCTS: StoreProduct[] = [
     ],
 
     featured: true,
-    // File is uploaded ✓. Still TODO before flipping active: confirm the
-    // real priceCents and add product images. Kept false so the launch page
-    // showcases the planner without selling at a placeholder price.
+    // File ✓ and price ✓. Waiting only on product images before going live;
+    // flip to true once `image`/`gallery` are set. Kept false so the launch
+    // page showcases the planner with a branded placeholder in the meantime.
     active: false,
   },
 ];
