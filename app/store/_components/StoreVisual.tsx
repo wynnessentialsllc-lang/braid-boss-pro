@@ -21,21 +21,36 @@ export const StoreVisual = ({
   showLabel?: boolean;
 }) => {
   if (product.image) {
+    // Fixed square frame + object-contain: every product tile renders at
+    // the SAME size regardless of the source image's aspect ratio (square
+    // planner mockups, wide sticker sheets), and nothing is ever cropped —
+    // non-square art is letterboxed on a neutral background instead.
     return (
-      // eslint-disable-next-line @next/next/no-img-element -- catalog images may be local /public paths or remote; plain img keeps the store dependency-free
-      <img
-        src={product.image}
-        alt={product.name}
+      <div
         style={{
-          display: "block",
+          position: "relative",
           width: "100%",
-          height: "auto",
+          aspectRatio: "1 / 1",
           minHeight,
-          objectFit: "cover",
           borderRadius: rounded,
+          overflow: "hidden",
           border: `1px solid ${C.brandBorder}`,
+          background: "#FFFFFF",
         }}
-      />
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element -- catalog images may be local /public paths or remote; plain img keeps the store dependency-free */}
+        <img
+          src={product.image}
+          alt={product.name}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+          }}
+        />
+      </div>
     );
   }
 
