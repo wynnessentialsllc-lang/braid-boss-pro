@@ -78,9 +78,12 @@ export async function GET(req: Request) {
   }
 
   // 4. Mint a short-lived signed URL with a sensible download filename.
+  //    The bucket comes from the catalog (defaulting to store-files), so a
+  //    product whose file lives in a different private bucket delivers too.
   const fileName = String(product.digitalFileName || "").trim();
+  const bucket = product.storageBucket || "store-files";
   const { data: signed, error: signErr } = await admin.storage
-    .from("store-files")
+    .from(bucket)
     .createSignedUrl(product.digitalFilePath, SIGNED_URL_TTL, {
       download: fileName || true,
     });

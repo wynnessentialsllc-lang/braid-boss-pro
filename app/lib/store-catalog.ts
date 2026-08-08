@@ -51,6 +51,14 @@ export type StoreProduct = {
   digitalFilePath?: string;
   /** Filename the buyer's browser saves it as (Content-Disposition). */
   digitalFileName?: string;
+  /**
+   * PRIVATE Supabase Storage bucket that holds `digitalFilePath`. Defaults
+   * to "store-files" (where the planner lives) when omitted, so existing
+   * products need no change. Set this per-product when a file was uploaded
+   * to a different private bucket. The download route reads it as the
+   * authority and mints the signed URL from this bucket.
+   */
+  storageBucket?: string;
 
   /** Hero/card image — a path under /public (e.g. "/store/planner.png")
    *  or an absolute URL. Used by the landing card, OG image, Product
@@ -230,6 +238,132 @@ export const STORE_PRODUCTS: StoreProduct[] = [
     // LIVE: file ✓, price ✓ ($19 intro / $29 regular), images ✓.
     // The planner is purchasable — checkout charges the platform Stripe
     // account and delivers the PDF by email + secure signed URL.
+    active: true,
+  },
+
+  // Second product: the Braid Boss Pro Sticker Pack — 34 designs, each in
+  // 3 versions (102 transparent PNGs), delivered as one zip.
+  {
+    slug: "braid-boss-pro-sticker-pack",
+    name: "Braid Boss Pro Sticker Pack",
+    tagline:
+      "34 digital planner stickers made for braiders — deposits, no-shows, rebookings, tax set-asides and the mindset ones — in transparent PNG for GoodNotes, Notability and Canva.",
+    category: "Digital Stickers",
+    badge: "New",
+
+    // $8 in the shop (the copy's recommended shop price). Launch at full
+    // price and run a discount rather than listing low, so no compareAt.
+    priceCents: 800,
+    currency: "usd",
+
+    isDigital: true,
+    // The sticker zip was uploaded to a dedicated PRIVATE bucket
+    // ("sticker-bucket") rather than the shared store-files bucket.
+    storageBucket: "sticker-bucket",
+    // Object path inside sticker-bucket — the file was uploaded with NO
+    // extension, so this matches it exactly (spaces are fine; supabase-js
+    // encodes the path). digitalFileName still ends in .zip so the buyer's
+    // browser saves a usable, correctly-named archive.
+    digitalFilePath: "Braid Boss Pro Sticker Pack",
+    digitalFileName: "Braid Boss Pro Sticker Pack.zip",
+
+    // Preview sheet (2000×1600) — the 34-sticker lineup with the 3-versions
+    // footer. Lives in /public/store/stickers, served as a static asset.
+    image: "/store/stickers/1_hero.png",
+    imageAlt:
+      "Braid Boss Pro Digital Planner Sticker Pack — 34 stickers, 102 transparent PNGs, GoodNotes ready",
+
+    shortDescription:
+      "34 digital planner stickers made for braiders — deposits, no-shows, rebookings, tax set-asides and the mindset ones — in transparent PNG for GoodNotes, Notability and Canva.",
+    longDescription: [
+      "Generic planner stickers don't have a \"deposit paid.\" They definitely don't have a \"no show.\" That's the whole reason these exist.",
+      "Every sticker pack out there has coffee cups and gym days. None of them have the things that actually happen in your week — the client who rescheduled twice, the deposit that finally cleared, the money you set aside for taxes before you were tempted to spend it. These do.",
+      "34 stickers, built for how braiders actually plan: the status ones you'll reach for every week, label banners that organize a whole day, nav tabs that build your own sidebar, and the mindset ones that make a planner you actually enjoy opening.",
+      "Every sticker comes three ways — die-cut with the classic white outline, borderless for layering over colored pages and photos, and full size for social posts. They're all true transparent PNGs: no white box behind them, so the page shows through.",
+    ],
+    highlights: [
+      "34 stickers · 102 transparent PNGs · GoodNotes ready",
+      "Every sticker in 3 versions — die-cut, borderless & full size",
+      "Made for braiders — deposit paid, no show, tax set aside, rebooked",
+      "True transparent PNGs — no white box behind them",
+      "Aligned footprints — drop two on a page and they line up",
+      "Instant download — buy once, use forever, never expires",
+    ],
+    whatsInside: [
+      "13 Hype stickers — Braid Boss, Booked & Busy, Braids Pay Bills, My Chair My Rules, Counting My Coins & more",
+      "8 Status stickers — Deposit Paid, Paid In Full, No Show, Rescheduled, Rebooked, Restock, Tax Set Aside, Goal Hit",
+      "5 Label banners — Priority Today, Busy Braiding, Content Day, Appointments, Reminder",
+      "8 Nav tabs — Home, Year, Goals, Monthly, Money, Clients, Grow, Notes",
+      "3 versions of every design — die-cut, borderless & full size",
+      "Aligned footprints — same category, same size, artwork centered, so they line up without nudging",
+    ],
+    whatYouGet: [
+      "Instant download — one zip, delivered by email + secure signed link",
+      "34 sticker designs, each in 3 versions = 102 transparent PNG files",
+      "Organized into 4 folders: Hype (13), Status (8), Labels (5), Nav Tabs (8)",
+      "A Start Here guide with step-by-step GoodNotes import instructions",
+      "3 preview sheets for reference",
+      "Terms of use — nothing is shipped, nothing is dated, nothing expires",
+    ],
+    requirements: [
+      "A tablet or computer that can unzip a file (on iPad, tap the zip in the Files app and it opens)",
+      "GoodNotes, Notability, Noteshelf, Canva, Procreate, Keynote, PowerPoint — or anything that accepts a PNG",
+      "No fonts to install, no software to buy",
+      "Works on iPad, Android tablet, Mac and Windows — in any digital planner, not just ours",
+    ],
+    whoItsFor:
+      "Braiders, loticians and natural hair stylists who want a planner that speaks their language — built to sit nicely in the Braid Boss Pro Business Planner, but they're plain PNGs that work in any digital planner, from any shop, or a blank notebook.",
+    policyNote:
+      "Licence: for personal and business use by one braider — use them in your planner, your content and your marketing. Not for resale, redistribution or sharing as files. Because this is an instant digital download, all sales are final; if a file won't open or looks damaged, message us and we'll replace it.",
+    faqs: [
+      {
+        q: "Do these only work with your planner?",
+        a: "No. They're plain PNG files — they'll work in any digital planner, from any shop, or in a blank notebook. They're sized to sit nicely in the Braid Boss Pro Business Planner, but nothing is locked to it.",
+      },
+      {
+        q: "Why does the sticker look like it has a white background?",
+        a: "That white edge is the die-cut outline — it's part of the sticker design, like a real sticker's paper border. The file itself is fully transparent. If you'd rather not have it, use the Borderless folder, included with every sticker.",
+      },
+      {
+        q: "Can I print these?",
+        a: "Yes, for your own use. Print on sticker paper and cut along the white outline. They're built at a resolution that prints cleanly at normal sticker size.",
+      },
+      {
+        q: "Will it expire? Is it dated?",
+        a: "Neither. No dates anywhere. Use the same file this year, next year and the year after.",
+      },
+      {
+        q: "Can I resize them?",
+        a: "Scale down as much as you want. Scale up to about 1.5× before edges start to soften.",
+      },
+      {
+        q: "Can I use these in my own business content?",
+        a: "Yes — your posts, your Stories, your marketing, your own planner. What you can't do is resell the files themselves. Full terms are in the download.",
+      },
+      {
+        q: "I bought it and I'm stuck.",
+        a: "Message us. We'd rather spend five minutes helping you than have you sit with a file you can't open.",
+      },
+    ],
+    keywords: [
+      "digital stickers",
+      "goodnotes stickers",
+      "planner stickers",
+      "braider planner",
+      "hair stylist planner",
+      "salon stickers",
+      "png stickers",
+      "transparent png stickers",
+      "digital planner stickers",
+      "braiding business",
+      "stylist stickers",
+      "precropped stickers",
+      "digital sticker pack",
+    ],
+
+    // LIVE: file ✓ (sticker-bucket), price ✓ ($8), image ✓. Purchasable —
+    // checkout charges the platform Stripe account and delivers the zip by
+    // email + secure signed URL, same flow as the planner.
     active: true,
   },
 ];
