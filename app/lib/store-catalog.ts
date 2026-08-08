@@ -260,11 +260,11 @@ export const STORE_PRODUCTS: StoreProduct[] = [
     // The sticker zip was uploaded to a dedicated PRIVATE bucket
     // ("sticker-bucket") rather than the shared store-files bucket.
     storageBucket: "sticker-bucket",
-    // TODO GO LIVE: set digitalFilePath to the zip's exact object path
-    // inside sticker-bucket (e.g. "Braid_Boss_Pro_Sticker_Pack.zip"). Until
-    // then the product lists as "Coming soon" and checkout refuses to sell
-    // it — exactly the safe half-configured state the planner shipped in.
-    //   digitalFilePath: "<exact filename in sticker-bucket>",
+    // Object path inside sticker-bucket — the file was uploaded with NO
+    // extension, so this matches it exactly (spaces are fine; supabase-js
+    // encodes the path). digitalFileName still ends in .zip so the buyer's
+    // browser saves a usable, correctly-named archive.
+    digitalFilePath: "Braid Boss Pro Sticker Pack",
     digitalFileName: "Braid Boss Pro Sticker Pack.zip",
 
     // Preview sheet (2000×1600) — the 34-sticker lineup with the 3-versions
@@ -361,9 +361,9 @@ export const STORE_PRODUCTS: StoreProduct[] = [
       "digital sticker pack",
     ],
 
-    // Listed on the storefront as "Coming soon" (active) but not yet
-    // purchasable — it becomes purchasable automatically the moment
-    // digitalFilePath is set to the uploaded zip's object path above.
+    // LIVE: file ✓ (sticker-bucket), price ✓ ($8), image ✓. Purchasable —
+    // checkout charges the platform Stripe account and delivers the zip by
+    // email + secure signed URL, same flow as the planner.
     active: true,
   },
 ];
