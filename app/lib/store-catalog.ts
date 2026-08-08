@@ -267,9 +267,11 @@ export const STORE_PRODUCTS: StoreProduct[] = [
     //   digitalFilePath: "<exact filename in sticker-bucket>",
     digitalFileName: "Braid Boss Pro Sticker Pack.zip",
 
-    // TODO: drop the preview sheets in /public/store/stickers and reference
-    // the hero here (e.g. "/store/stickers/1_hero.png") + the rest in
-    // `gallery`. Until then the branded placeholder renders.
+    // Preview sheet (2000×1600) — the 34-sticker lineup with the 3-versions
+    // footer. Lives in /public/store/stickers, served as a static asset.
+    image: "/store/stickers/1_hero.png",
+    imageAlt:
+      "Braid Boss Pro Digital Planner Sticker Pack — 34 stickers, 102 transparent PNGs, GoodNotes ready",
 
     shortDescription:
       "34 digital planner stickers made for braiders — deposits, no-shows, rebookings, tax set-asides and the mindset ones — in transparent PNG for GoodNotes, Notability and Canva.",
