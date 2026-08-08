@@ -51,6 +51,14 @@ export type StoreProduct = {
   digitalFilePath?: string;
   /** Filename the buyer's browser saves it as (Content-Disposition). */
   digitalFileName?: string;
+  /**
+   * PRIVATE Supabase Storage bucket that holds `digitalFilePath`. Defaults
+   * to "store-files" (where the planner lives) when omitted, so existing
+   * products need no change. Set this per-product when a file was uploaded
+   * to a different private bucket. The download route reads it as the
+   * authority and mints the signed URL from this bucket.
+   */
+  storageBucket?: string;
 
   /** Hero/card image — a path under /public (e.g. "/store/planner.png")
    *  or an absolute URL. Used by the landing card, OG image, Product
@@ -249,12 +257,14 @@ export const STORE_PRODUCTS: StoreProduct[] = [
     currency: "usd",
 
     isDigital: true,
-    // TODO GO LIVE: upload the sticker zip to the private `store-files`
-    // Supabase bucket, then set digitalFilePath to its object path. Until
+    // The sticker zip was uploaded to a dedicated PRIVATE bucket
+    // ("sticker-bucket") rather than the shared store-files bucket.
+    storageBucket: "sticker-bucket",
+    // TODO GO LIVE: set digitalFilePath to the zip's exact object path
+    // inside sticker-bucket (e.g. "Braid_Boss_Pro_Sticker_Pack.zip"). Until
     // then the product lists as "Coming soon" and checkout refuses to sell
     // it — exactly the safe half-configured state the planner shipped in.
-    // Suggested object path once uploaded:
-    //   digitalFilePath: "Braid_Boss_Pro_Sticker_Pack_DIGITAL.zip",
+    //   digitalFilePath: "<exact filename in sticker-bucket>",
     digitalFileName: "Braid Boss Pro Sticker Pack.zip",
 
     // TODO: drop the preview sheets in /public/store/stickers and reference
