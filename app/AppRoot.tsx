@@ -435,6 +435,7 @@ import {
   useClientMessages,
   uploadStylistMessagePhoto,
 } from "./lib/messages";
+import { sendClientOutreach, maskDestination } from "./lib/client-outreach";
 import {
   type IntakeForm,
   type IntakeQuestion,
@@ -3912,15 +3913,47 @@ const RebookingScreen = ({
   const [aiCopied, setAiCopied] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
+  const [aiSending, setAiSending] = useState(false);
+  const [aiSent, setAiSent] = useState<string | null>(null);
+  const [aiSendError, setAiSendError] = useState<string | null>(null);
+
   const openAi = (op: RebookingOpportunity) => {
     setAiOp(op); setAiResult(null); setAiError(null);
     setAiOffer(""); setAiChannel("sms"); setAiTone("auto");
+    setAiSent(null); setAiSendError(null);
   };
+
+  // Send the generated message to the contact on file. The consent and
+  // ownership checks live in the RPC; this just reports the outcome.
+  const sendAiResult = async () => {
+    if (!aiOp || !aiResult || aiSending) return;
+    setAiSending(true); setAiSendError(null); setAiSent(null);
+    const res = await sendClientOutreach(
+      aiOp.client_id,
+      aiResult.channel === "sms" ? "sms" : "email",
+      aiResult.channel === "email" ? aiResult.subject : null,
+      aiResult.channel === "sms" ? aiResult.message : aiResult.body,
+    );
+    setAiSending(false);
+    if (res.ok) setAiSent(maskDestination(res.channel, res.to));
+    else setAiSendError(res.error || "Couldn't send that message.");
+  };
+
+  // What we know about the destination before sending, so the button can
+  // say where it's going — and go quiet when there's nothing to send to.
+  const aiDestination = useMemo(() => {
+    if (!aiOp) return null;
+    const c = clients.find((x: any) => x?.id === aiOp.client_id);
+    return aiChannel === "sms"
+      ? (aiOp.client_phone || c?.phone || null)
+      : (aiOp.client_email || c?.email || null);
+  }, [aiOp, aiChannel, clients]);
 
   const generateNudge = async () => {
     const op = aiOp;
     if (!op) return;
     setAiBusy(true); setAiResult(null); setAiError(null);
+    setAiSent(null); setAiSendError(null);
     try {
       const { data: sess } = await getSupabase().auth.getSession();
       const token = sess?.session?.access_token;
@@ -4168,8 +4201,35 @@ const RebookingScreen = ({
                 <p className="text-[13px] whitespace-pre-wrap" style={{ color: C.coffee, lineHeight: 1.55 }}>
                   {aiResult.channel === "sms" ? aiResult.message : aiResult.body}
                 </p>
-                <button type="button" onClick={copyAiResult}
+                {/* Send it for them — the copy/paste route stays right
+                    below for anyone who'd rather send from their own
+                    phone or inbox. */}
+                <button type="button" onClick={() => void sendAiResult()}
+                  disabled={aiSending || !!aiSent || !aiDestination}
                   className="mt-3 w-full rounded-full py-2.5 text-[12px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-1.5"
+                  style={{
+                    background: aiSent ? C.success : C.espresso,
+                    color: C.cream,
+                    opacity: aiSending || !aiDestination ? 0.55 : 1,
+                  }}>
+                  {aiSent
+                    ? <><Check size={14} /> Sent to {aiSent}</>
+                    : aiSending
+                      ? "Sending…"
+                      : <><Send size={14} /> {aiResult.channel === "sms" ? "Send text" : "Send email"}</>}
+                </button>
+                {!aiSent && (
+                  <p className="text-[10.5px] text-center mt-1.5" style={{ color: C.muted }}>
+                    {aiDestination
+                      ? <>Goes to {aiDestination} — the {aiResult.channel === "sms" ? "number" : "address"} on file.</>
+                      : <>No {aiResult.channel === "sms" ? "mobile number" : "email address"} on file for {aiOp.client_name.split(" ")[0]} — copy it instead.</>}
+                  </p>
+                )}
+                {aiSendError && (
+                  <p className="text-[11.5px] text-center mt-1.5" style={{ color: C.danger, lineHeight: 1.45 }}>{aiSendError}</p>
+                )}
+                <button type="button" onClick={copyAiResult}
+                  className="mt-2 w-full rounded-full py-2.5 text-[12px] font-semibold active:scale-[0.98] transition flex items-center justify-center gap-1.5"
                   style={{ background: C.gold, color: C.espresso, border: `1px solid ${C.goldDeep}` }}>
                   <Copy size={14} /> {aiCopied ? "Copied" : aiResult.channel === "sms" ? "Copy message" : "Copy email"}
                 </button>
