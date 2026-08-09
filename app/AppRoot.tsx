@@ -24113,6 +24113,12 @@ const DeleteAccountSheet = ({ open, onClose, onSignOut }: {
 // Email + in-app bell still fire — only the OS-level push is muted.
 const PUSH_CATEGORIES: { key: string; label: string; hint: string; types: string[] }[] = [
   {
+    key: "client_messages",
+    label: "Client messages",
+    hint: "When a client writes to you from their appointment link",
+    types: ["client_message_owner_alert"],
+  },
+  {
     key: "reviews",
     label: "New reviews",
     hint: "When a client leaves a review on a completed appointment",
