@@ -433,6 +433,7 @@ import {
 import {
   type MessageThread,
   useClientMessages,
+  uploadStylistMessagePhoto,
 } from "./lib/messages";
 import {
   type IntakeForm,
@@ -34697,6 +34698,10 @@ const InboxScreen = ({
   const [openId, setOpenId] = useState<string | null>(initialThreadId || null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "unread">("all");
@@ -34726,13 +34731,33 @@ const InboxScreen = ({
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [openThread?.messages.length]);
 
+  // Attach a photo: upload first, then hold the public URL until the
+  // stylist hits Send (so she can add a caption, or change her mind).
+  const pickPhoto = async (file: File | null) => {
+    if (!file || !openId) return;
+    setPhotoError(null);
+    setUploading(true);
+    const res = await uploadStylistMessagePhoto(openId, file);
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = "";
+    if (res.ok && res.url) setPendingImage(res.url);
+    else setPhotoError(res.error || "Couldn't upload that photo.");
+  };
+
   const handleSend = async () => {
     const body = draft.trim();
-    if (!body || !openId || sending) return;
+    const image = pendingImage;
+    if ((!body && !image) || !openId || sending || uploading) return;
     setSending(true);
-    const ok = await api.send(openId, body);
+    const ok = await api.send(openId, body, image);
     setSending(false);
-    if (ok) setDraft("");
+    if (ok) {
+      setDraft("");
+      setPendingImage(null);
+      setPhotoError(null);
+    } else {
+      setPhotoError("Couldn't send that message. Please try again.");
+    }
   };
 
   // ---- Thread view ----
@@ -34742,7 +34767,9 @@ const InboxScreen = ({
         <Header
           title={openThread.clientName}
           subtitle={openThread.serviceName || "Conversation"}
-          leftAction={{ icon: <ChevronLeft size={20} />, onClick: () => { setOpenId(null); setDraft(""); } }}
+          leftAction={{ icon: <ChevronLeft size={20} />, onClick: () => {
+            setOpenId(null); setDraft(""); setPendingImage(null); setPhotoError(null);
+          } }}
         />
         <div className="px-5 pt-2">
           <div
@@ -34786,7 +34813,51 @@ const InboxScreen = ({
               );
             })}
           </div>
+          {/* Pending attachment preview */}
+          {pendingImage && (
+            <div className="flex items-center gap-2.5 pt-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={pendingImage}
+                alt="Attachment preview"
+                style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, border: `1px solid ${C.hairline}` }}
+              />
+              <span className="text-[12px]" style={{ color: C.muted }}>Photo ready to send</span>
+              <button
+                type="button"
+                onClick={() => setPendingImage(null)}
+                className="ml-auto text-[12px] font-bold"
+                style={{ background: "transparent", border: "none", color: C.danger }}
+              >
+                Remove
+              </button>
+            </div>
+          )}
+          {photoError && (
+            <p className="text-[12px] pt-2" style={{ color: C.danger }}>{photoError}</p>
+          )}
           <div className="flex gap-2 items-end pt-3">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => void pickPhoto(e.target.files?.[0] || null)}
+            />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading || sending}
+              aria-label="Attach a photo"
+              title="Attach a photo"
+              className="flex-shrink-0 flex items-center justify-center rounded-xl"
+              style={{
+                width: 42, height: 42, border: `1px solid ${C.hairline}`,
+                background: C.paper, color: uploading || sending ? C.muted : C.goldDeep,
+              }}
+            >
+              {uploading ? "…" : <Camera size={18} />}
+            </button>
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -34796,12 +34867,17 @@ const InboxScreen = ({
               className="flex-1 rounded-xl px-3 py-2 text-sm"
               style={{ resize: "none", border: `1px solid ${C.hairline}`, background: C.paper, color: C.espresso, outline: "none" }}
             />
-            <Button onClick={() => void handleSend()} disabled={sending || !draft.trim()} icon={<Send size={16} />}>
+            <Button
+              onClick={() => void handleSend()}
+              disabled={sending || uploading || (!draft.trim() && !pendingImage)}
+              icon={<Send size={16} />}
+            >
               {sending ? "…" : "Send"}
             </Button>
           </div>
           <p className="text-[11px] text-center pt-3" style={{ color: C.muted, lineHeight: 1.5 }}>
-            Replies are texted to {openThread.clientName.split(" ")[0]} when they have SMS on, and always saved here.
+            Tap the camera to send {openThread.clientName.split(" ")[0]} a photo — style options, aftercare, directions.
+            Messages and photos show up on their appointment link.
           </p>
         </div>
       </div>
