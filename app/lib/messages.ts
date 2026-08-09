@@ -93,6 +93,90 @@ export const uploadPortalMessagePhoto = async (
   }
 };
 
+// ---- Stylist-side photo upload -------------------------------------
+// The stylist is signed in, so she writes to the same public
+// client-message-photos bucket directly under RLS (writes are pinned to
+// {auth.uid()}/…). Photos are downscaled in the browser first so a
+// straight-off-the-camera shot doesn't cost megabytes on both ends.
+
+const MESSAGE_PHOTO_MAX_DIM = 1600;
+const MESSAGE_PHOTO_QUALITY = 0.85;
+
+const compressMessagePhoto = (file: File): Promise<Blob> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error("read failed"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("decode failed"));
+      img.onload = () => {
+        const ratio = Math.min(
+          1,
+          MESSAGE_PHOTO_MAX_DIM / img.width,
+          MESSAGE_PHOTO_MAX_DIM / img.height,
+        );
+        const w = Math.max(1, Math.round(img.width * ratio));
+        const h = Math.max(1, Math.round(img.height * ratio));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { reject(new Error("canvas unavailable")); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(
+          (blob) => blob ? resolve(blob) : reject(new Error("encode failed")),
+          "image/jpeg",
+          MESSAGE_PHOTO_QUALITY,
+        );
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+
+// Upload a photo the stylist wants to attach to a message. Returns the
+// public URL to hand to send(); never throws.
+export const uploadStylistMessagePhoto = async (
+  bookingRequestId: string,
+  file: File,
+): Promise<{ ok: boolean; url?: string; error?: string }> => {
+  if (!file) return { ok: false, error: "No photo selected." };
+  if (!/^image\//.test(file.type)) return { ok: false, error: "Please choose an image file." };
+  if (file.size > 12 * 1024 * 1024) {
+    return { ok: false, error: "That photo is larger than 12 MB." };
+  }
+  try {
+    const supabase = getSupabase();
+    // Build the path from the LIVE session uid — the bucket's insert
+    // policy checks (storage.foldername(name))[1] = auth.uid()::text, so
+    // a stale cached id would be rejected with an opaque RLS error.
+    const { data: sessionData, error: sessionErr } = await supabase.auth.getUser();
+    const uid = sessionData?.user?.id;
+    if (sessionErr || !uid) {
+      return { ok: false, error: "Your session expired — please sign in again, then retry." };
+    }
+    const blob = await compressMessagePhoto(file);
+    const thread = (bookingRequestId || "thread").replace(/[^a-zA-Z0-9-]/g, "");
+    const path = `${uid}/${thread}/${crypto.randomUUID()}.jpg`;
+    const { error: upErr } = await supabase
+      .storage
+      .from("client-message-photos")
+      .upload(path, blob, { contentType: "image/jpeg", upsert: false, cacheControl: "3600" });
+    if (upErr) {
+      const msg = String((upErr as any)?.message || "");
+      if (msg.toLowerCase().includes("row-level security")) {
+        return { ok: false, error: "Upload was rejected. Please sign out and back in, then retry." };
+      }
+      return { ok: false, error: msg || "Couldn't upload that photo." };
+    }
+    const { data } = supabase.storage.from("client-message-photos").getPublicUrl(path);
+    if (!data?.publicUrl) return { ok: false, error: "Couldn't resolve the uploaded photo." };
+    return { ok: true, url: data.publicUrl };
+  } catch {
+    return { ok: false, error: "Couldn't upload that photo." };
+  }
+};
+
 export const listPortalMessages = async (
   token: string,
 ): Promise<{ ok: boolean; studioName: string; messages: PortalMessage[] }> => {
@@ -144,7 +228,7 @@ export const useClientMessages = (
   error: string | null;
   unreadCount: number;
   refresh: () => Promise<void>;
-  send: (bookingRequestId: string, body: string) => Promise<boolean>;
+  send: (bookingRequestId: string, body: string, imageUrl?: string | null) => Promise<boolean>;
   markThreadRead: (bookingRequestId: string) => Promise<void>;
 } => {
   const [messages, setMessages] = useState<ClientMessage[]>([]);
@@ -250,9 +334,11 @@ export const useClientMessages = (
   );
 
   const send = useCallback(
-    async (bookingRequestId: string, body: string): Promise<boolean> => {
+    async (bookingRequestId: string, body: string, imageUrl?: string | null): Promise<boolean> => {
       const trimmed = (body || "").trim();
-      if (!userId || !bookingRequestId || !trimmed) return false;
+      const image = (imageUrl || "").trim() || null;
+      // A message needs text, a photo, or both (mirrors the DB check).
+      if (!userId || !bookingRequestId || (!trimmed && !image)) return false;
       try {
         const supabase = getSupabase();
         const { data, error: insErr } = await supabase
@@ -262,6 +348,7 @@ export const useClientMessages = (
             booking_request_id: bookingRequestId,
             sender: "stylist",
             body: trimmed.slice(0, 4000),
+            image_url: image,
             read_by_owner: true,
             read_by_client: false,
           })
