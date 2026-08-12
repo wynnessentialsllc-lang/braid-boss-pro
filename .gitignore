@@ -41,3 +41,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# rendered email previews (node scripts/render-email-previews.mjs)
+/.email-previews/
+

@@ -1,0 +1,16 @@
+BRAID BOSS PRO
+
+Your chair. Your clients. Your business.
+
+Hi there, you are one step away from opening your Braid Boss Pro dashboard.
+Verify your email to secure your account and begin setting up the business behind your chair.
+
+Verify my email:
+{{ .ConfirmationURL }}
+
+This secure link expires in 24 hours. If you did not create a Braid Boss Pro account, you can safely ignore this email and nothing will happen.
+---
+You received this because someone used this address to create a Braid Boss Pro account.
+Questions? hello@braidbosspro.app
+Wynn Essentials, LLC (DBA Braid Boss Pro)
+3680 Wilshire Blvd, Ste P04 #A118, Los Angeles, CA 90010

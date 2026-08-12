@@ -1,20 +1,28 @@
-# Auth emails via Resend (custom SMTP)
+# Account and billing emails
 
-Route Supabase Auth's transactional emails — **signup confirmation**, the
-in-app **resend**, **password reset**, and **email change** — through the
-Resend account you already use for booking confirmations. This removes
-Supabase's built-in ~2–4 emails/hour cap (the root of the early
-"no email / try again in 51 seconds" reports) and makes every auth email
-land from your own verified `braidbosspro.app` domain.
+How the stylist-facing lifecycle emails are produced, and what still has
+to be set in a provider dashboard by hand.
 
-Everything here is done in the **Supabase dashboard** for the
-`braid-boss` project (`bjqazhplxqqhftekspfl`). Nothing in this repo needs
-to change — the app already passes the right redirect
-(`https://braidbosspro.app/auth/callback`).
+There are **two** delivery paths, on purpose:
+
+| Path | Emails | Who renders | Who sends |
+|------|--------|-------------|-----------|
+| Supabase Auth (custom SMTP → Resend) | verify email, password reset, email change | Supabase, from a template pasted into its dashboard | Supabase Auth |
+| `notification_queue` → `process-notification-queue` → Resend | welcome, trial started, trial ending, subscription confirmed | the worker, from `supabase/functions/_shared/lifecycle-emails.ts` | the worker |
+
+Auth links must be minted and sent by the auth provider, so path one
+cannot move into the app. Everything else rides the queue the rest of
+the product already uses. There is no third email system.
+
+Both paths render from the **same design kit**
+(`supabase/functions/_shared/email-kit.ts`), so the two look identical
+in the inbox even though different services send them.
 
 ---
 
-## Step 1 — Turn on custom SMTP
+## Path one — Supabase Auth templates
+
+### Step 1. Custom SMTP
 
 **Dashboard → Authentication → Emails → SMTP Settings → enable "Custom SMTP".**
 
@@ -29,61 +37,214 @@ to change — the app already passes the right redirect
 
 Notes:
 - The sender domain (`braidbosspro.app`) is already verified in Resend, so
-  no new DNS is needed. Any `@braidbosspro.app` address works; a dedicated
-  `no-reply@braidbosspro.app` is also fine if you prefer replies not to hit
-  your `hello@` inbox.
+  no new DNS is needed.
 - Port `587` also works (STARTTLS) if `465` is ever blocked.
-- The API key is pasted directly into Supabase — it is **not** stored in
+- The API key is pasted directly into Supabase. It is **not** stored in
   this repo.
 
-## Step 2 — Confirm the URL configuration
+### Step 2. URL configuration
 
 **Dashboard → Authentication → URL Configuration.**
 
 - **Site URL:** `https://braidbosspro.app`
-- **Redirect URLs (allow-list):** add
+- **Redirect URLs (allow-list):**
   - `https://braidbosspro.app/auth/callback`
-  - `https://braidbosspro.app/**` (covers previews/other flows)
+  - `https://braidbosspro.app/**`
 
 These must match what the app sends as `emailRedirectTo`, or the
 confirmation link will bounce.
 
-## Step 3 — Raise the email rate limit
+### Step 3. Email rate limit
 
 **Dashboard → Authentication → Rate Limits → "Rate limit for sending emails".**
 
-The built-in service caps this at a handful per hour. On custom SMTP you
-can safely raise it (e.g. **100/hour** to start) — Resend's free tier is
-100/day / 3,000/mo, and paid scales far beyond that. The **per-email**
-resend cooldown (~60s) is separate and stays; the app already shows a
-friendly countdown for it, so leave that as-is.
+On custom SMTP this can be raised well past the built-in cap (e.g.
+**100/hour** to start). The per-email resend cooldown (~60s) is separate
+and stays; the app already shows a friendly countdown for it.
 
-## Step 4 — Brand the confirmation email
+### Step 4. Paste the templates
 
-**Dashboard → Authentication → Emails → Templates → "Confirm signup".**
+Generated files live in `docs/email-templates/`. Rebuild them with:
 
-**Subject:**
-
-```
-Confirm your email to start your 14-day free trial
+```bash
+node scripts/build-auth-email-templates.mjs
 ```
 
-**Message body (HTML):** paste `confirm-signup.html` from this folder.
-It uses Supabase's `{{ .ConfirmationURL }}` variable, so the button and
-fallback link are filled in automatically. The same look can be pasted
-into the **Reset password** and **Magic Link** templates — just swap the
-headline/CTA copy; the confirmation link variable is the same.
+| File | Paste into |
+|------|-----------|
+| `supabase-confirm-signup.html` | Authentication → Emails → Templates → **Confirm signup** |
+| `supabase-reset-password.html` | Authentication → Emails → Templates → **Reset password** |
+| `supabase-email-change.html` | Authentication → Emails → Templates → **Change email address** |
+
+Set the subject line for each from the banner comment at the top of the
+file. For confirm signup that is:
+
+```
+Boss move pending: verify your Braid Boss Pro account
+```
+
+Two things to check before pasting:
+
+1. **Expiry wording.** Each template states how long the link is good
+   for ("24 hours" for signup and email change, "1 hour" for reset).
+   Confirm those match the project's actual Auth expiry settings and, if
+   not, change the values in `scripts/build-auth-email-templates.mjs`
+   and regenerate. Do not leave a wrong number in customer-facing copy.
+2. **No click tracking.** `{{ .ConfirmationURL }}` carries an
+   authentication token. It must not be wrapped in a Resend or
+   third-party click tracker, which would hand that token to another
+   service. Leave click tracking off for this sending domain.
+
+### Test checklist
+
+1. Sign up with a fresh address in an incognito window.
+2. Confirm the email arrives **from `hello@braidbosspro.app`**.
+3. Tap the button → it lands on `braidbosspro.app/auth/callback` and
+   signs you in.
+4. In Resend's dashboard the send shows `delivered`.
+5. Hit "Resend email" within a minute → the friendly countdown shows.
 
 ---
 
-## Test checklist
+## Path two — queued lifecycle emails
 
-1. Sign up with a fresh address in an incognito window.
-2. Confirm the email arrives **from `hello@braidbosspro.app`** (not
-   `noreply@mail.app.supabase.io`) — that proves SMTP is live.
-3. Tap the button → it lands on `braidbosspro.app/auth/callback` and signs
-   you in.
-4. In Resend's dashboard, the send shows up under **Emails** with a
-   `delivered` status.
-5. Hit "Resend email" in the app within a minute → the friendly countdown
-   shows instead of a raw error.
+| Email | Notification type | Triggered by |
+|-------|-------------------|--------------|
+| Welcome and account confirmed | `stylist_welcome` | DB trigger on `auth.users` when `email_confirmed_at` goes null → set |
+| Free trial started | `stylist_trial_started` | Stripe `checkout.session.completed`, only when the subscription reports `trialing` |
+| Trial ending soon | `stylist_trial_ending` | Stripe `customer.subscription.trial_will_end` (fires 3 days out) |
+| Subscription confirmed / receipt | `stylist_subscription_confirmed` | Stripe `invoice.payment_succeeded`, amount > 0 |
+
+Rendering happens in `process-notification-queue`, which imports the
+templates from `_shared/`. Deploying the function (the
+`deploy-edge-functions` workflow, or `supabase functions deploy`) is what
+ships template changes.
+
+### Stripe dashboard: enable two more events
+
+The subscription webhook endpoint (`/api/subscribe/webhook`) must have
+these enabled, in addition to the four it already listens for:
+
+- `customer.subscription.trial_will_end`
+- `invoice.payment_succeeded`
+
+Until they are enabled the trial reminder and the payment receipt simply
+never fire. Nothing else changes and no billing behaviour depends on
+them: both events are read-only as far as this endpoint is concerned.
+
+**Stripe → Developers → Webhooks → the Braid Boss Pro subscription
+endpoint → Add events.**
+
+### Duplicate protection
+
+Three independent layers, all pre-existing:
+
+1. `record_stripe_webhook_event` drops a replayed Stripe **event id**.
+2. `queue_notification`'s `dedupe_key` drops a second row describing the
+   same real-world moment (see `dedupeKeys` in
+   `app/lib/subscription-emails.ts`).
+3. The worker's atomic claim plus terminal `sent` state stops two
+   workers sending the same row.
+
+### Environment variables
+
+Nothing new. The lifecycle emails use the variables the queue already
+needs:
+
+| Variable | Where | Used for |
+|----------|-------|----------|
+| `RESEND_API_KEY` | edge function secrets | sending |
+| `RESEND_FROM_EMAIL` | edge function secrets | transactional From |
+| `NEXT_PUBLIC_SITE_URL` | app + edge function | link and image origin |
+| `SUPABASE_SERVICE_ROLE_KEY` | app + edge function | enqueue and dispatch |
+| `STRIPE_SECRET_KEY` | app | re-reading the subscription for plan and card |
+| `STRIPE_SUBSCRIPTION_WEBHOOK_SECRET` | app | signature verification |
+
+---
+
+## Previewing and testing without sending
+
+```bash
+# Browse every email at 320 / 375 / 640 px. Dev server only, 404s in prod.
+npm run dev
+open http://localhost:3000/api/dev/email-preview
+
+# Or render every fixture to disk (no server, no network).
+node scripts/render-email-previews.mjs
+open .email-previews/index.html
+
+# Unit tests for the templates and the Stripe payload mapping.
+npx vitest run app/lib/lifecycle-emails.test.ts
+```
+
+### Sending a real test to an internal address
+
+There is no "send test" button in the app on purpose. To put a real
+message in a real inbox, use one of these:
+
+**Auth emails.** Sign up with an internal address in an incognito
+window. That is the only way to get a genuine, working confirmation
+token, and it exercises SMTP, the template, and the redirect together.
+
+**Queued lifecycle emails.** Insert one queue row for an internal
+address and let the worker pick it up. Run this in the Supabase SQL
+editor, substituting a **real internal user id and address**:
+
+```sql
+select public.queue_notification(
+  user_id_in           => '<internal-user-uuid>',
+  channel_in           => 'email',
+  notification_type_in => 'stylist_trial_started',
+  body_in              => 'Plain-text fallback for the trial started email.',
+  subject_in           => 'Your 14-day Braid Boss Pro trial has started',
+  recipient_email_in   => 'you@braidbosspro.app',
+  payload_in           => jsonb_build_object(
+    'firstName',             'Sheree',
+    'planLabel',             'Monthly',
+    'trialStart',            1755000000,
+    'trialEnd',              1756209600,
+    'amountAfterTrialMinor', 1499,
+    'currency',              'usd',
+    'interval',              'month',
+    'cardBrand',             'visa',
+    'cardLast4',             '4242',
+    'timeZone',              'America/Los_Angeles',
+    'stripeConnectActive',   true
+  ),
+  dedupe_key_in        => 'manual-test:' || gen_random_uuid()::text
+);
+```
+
+Swap `notification_type_in` and the payload for the other three types.
+The `dedupe_key_in` above is randomised so repeated tests are not
+swallowed as duplicates; production keys are deterministic.
+
+Do this against a **test** Stripe mode and a non-customer address. The
+worker sends to whatever address the row carries, so a typo mails a
+stranger.
+
+### Stripe end-to-end, in test mode
+
+1. Subscribe with a Stripe test card (`4242 4242 4242 4242`) →
+   trial started should arrive.
+2. Stripe → the test subscription → **Advance the clock** to three days
+   before trial end → trial ending should arrive.
+3. Advance past trial end → subscription confirmed should arrive.
+
+---
+
+## Known email-client limits
+
+- **Outlook (Windows, Word engine)** ignores `border-radius`, so the
+  buttons and cards render as squares. Colour, size, and tap target are
+  unaffected.
+- **Gmail web** strips `<head><style>`, so the max-width media queries
+  do not apply there. The layout is fluid without them, which is why
+  every band is a percentage-width table rather than a fixed one.
+- **Dark mode.** Templates pin `color-scheme: light only`. Gmail's
+  Android client and Outlook.com force-invert regardless; the palette
+  stays legible because every band sets an explicit background and a
+  matching foreground.
+- **Cormorant Garamond** is not available in email. Headlines fall back
+  to Georgia, which is installed nearly everywhere and holds the same
+  editorial tone.
