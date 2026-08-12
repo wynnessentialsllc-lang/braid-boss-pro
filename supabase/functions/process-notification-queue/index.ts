@@ -28,6 +28,16 @@
 // deno-lint-ignore-file no-explicit-any
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+// Account + billing lifecycle templates. Kept in _shared so the Next.js
+// preview route and the Supabase Auth template generator render the
+// byte-identical markup this worker sends. Pure functions, no I/O.
+import {
+  renderPaymentFailed,
+  renderSubscriptionConfirmed,
+  renderTrialEnding,
+  renderTrialStarted,
+  renderWelcome,
+} from "../_shared/lifecycle-emails.ts";
 
 // =====================================================================
 // Env
@@ -62,6 +72,14 @@ const OWNER_FACING_NOTIFICATION_TYPES = new Set<string>([
   "review_received",
   "daily_sales_summary",
   "founding_welcome",
+  // Account + billing lifecycle (see _shared/lifecycle-emails.ts). These
+  // go TO the stylist about her own account, so the From name is the
+  // platform, never a studio name.
+  "stylist_welcome",
+  "stylist_trial_started",
+  "stylist_trial_ending",
+  "stylist_subscription_confirmed",
+  "stylist_payment_failed",
 ]);
 
 // Pull the bare address out of a "Name <addr>" or plain "addr" string.
@@ -1940,7 +1958,107 @@ const renderGeneric = (row: ClaimedRow) => {
 };
 
 // ---- dispatcher -----------------------------------------------------
-type Rendered = { subject: string; html: string };
+// `text` is optional: templates that build their own plain-text
+// alternative return it here and it wins over the queue row's `body`.
+// Everything older keeps using `body`, unchanged.
+type Rendered = { subject: string; html: string; text?: string };
+
+// ---- account + billing lifecycle ------------------------------------
+// Thin adapters over the shared templates. The payload keys mirror the
+// template argument names, so an enqueue site reads the same as the
+// render site. Every value is optional at the template level: a missing
+// card, plan, or date drops its row instead of rendering a placeholder.
+const APP_BASE = (Deno.env.get("NEXT_PUBLIC_SITE_URL") || "https://braidbosspro.app")
+  .replace(/\/$/, "");
+
+const lifecycleBase = (p: Record<string, any>): string =>
+  String(p.baseUrl || "").trim() || APP_BASE;
+
+const renderStylistWelcome = (p: Record<string, any>): Rendered =>
+  renderWelcome({
+    firstName: p.firstName ?? null,
+    dashboardUrl: p.dashboardUrl ?? null,
+    setupUrl: p.setupUrl ?? null,
+    completed: Array.isArray(p.completed) ? p.completed : null,
+    baseUrl: lifecycleBase(p),
+  });
+
+const renderStylistTrialStarted = (p: Record<string, any>): Rendered =>
+  renderTrialStarted({
+    firstName: p.firstName ?? null,
+    planLabel: p.planLabel ?? null,
+    trialStart: p.trialStart ?? null,
+    trialEnd: p.trialEnd ?? null,
+    amountAfterTrialMinor: numOrNull(p.amountAfterTrialMinor),
+    currency: p.currency ?? null,
+    interval: p.interval ?? null,
+    cardBrand: p.cardBrand ?? null,
+    cardLast4: p.cardLast4 ?? null,
+    timeZone: p.timeZone ?? null,
+    dashboardUrl: p.dashboardUrl ?? null,
+    setupUrl: p.setupUrl ?? null,
+    stripeConnectActive: p.stripeConnectActive === true,
+    completed: Array.isArray(p.completed) ? p.completed : null,
+    baseUrl: lifecycleBase(p),
+  });
+
+const renderStylistTrialEnding = (p: Record<string, any>): Rendered =>
+  renderTrialEnding({
+    firstName: p.firstName ?? null,
+    planLabel: p.planLabel ?? null,
+    trialEnd: p.trialEnd ?? null,
+    amountMinor: numOrNull(p.amountMinor),
+    currency: p.currency ?? null,
+    interval: p.interval ?? null,
+    cardBrand: p.cardBrand ?? null,
+    cardLast4: p.cardLast4 ?? null,
+    cancelAtPeriodEnd: p.cancelAtPeriodEnd === true,
+    timeZone: p.timeZone ?? null,
+    dashboardUrl: p.dashboardUrl ?? null,
+    manageUrl: p.manageUrl ?? null,
+    baseUrl: lifecycleBase(p),
+  });
+
+const renderStylistSubscriptionConfirmed = (p: Record<string, any>): Rendered =>
+  renderSubscriptionConfirmed({
+    firstName: p.firstName ?? null,
+    mode: p.mode === "renewal" ? "renewal" : "first",
+    planLabel: p.planLabel ?? null,
+    amountPaidMinor: numOrNull(p.amountPaidMinor),
+    currency: p.currency ?? null,
+    interval: p.interval ?? null,
+    paidAt: p.paidAt ?? null,
+    nextBillingDate: p.nextBillingDate ?? null,
+    cardBrand: p.cardBrand ?? null,
+    cardLast4: p.cardLast4 ?? null,
+    invoiceUrl: p.invoiceUrl ?? null,
+    timeZone: p.timeZone ?? null,
+    dashboardUrl: p.dashboardUrl ?? null,
+    manageUrl: p.manageUrl ?? null,
+    baseUrl: lifecycleBase(p),
+  });
+
+const renderStylistPaymentFailed = (p: Record<string, any>): Rendered =>
+  renderPaymentFailed({
+    firstName: p.firstName ?? null,
+    planLabel: p.planLabel ?? null,
+    amountDueMinor: numOrNull(p.amountDueMinor),
+    currency: p.currency ?? null,
+    interval: p.interval ?? null,
+    failedAt: p.failedAt ?? null,
+    nextRetryAt: p.nextRetryAt ?? null,
+    cardBrand: p.cardBrand ?? null,
+    cardLast4: p.cardLast4 ?? null,
+    invoiceUrl: p.invoiceUrl ?? null,
+    timeZone: p.timeZone ?? null,
+    manageUrl: p.manageUrl ?? null,
+    baseUrl: lifecycleBase(p),
+  });
+
+const numOrNull = (v: unknown): number | null => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
 
 // ---- braid_care_guide (editable post-service aftercare guide) --------
 // Renders the studio's stored, editable care-guide content (see
@@ -2090,6 +2208,16 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderAppointmentUpdated(row.payload || {});
     case "founding_welcome":
       return renderFoundingWelcome(row.payload || {});
+    case "stylist_welcome":
+      return renderStylistWelcome(row.payload || {});
+    case "stylist_trial_started":
+      return renderStylistTrialStarted(row.payload || {});
+    case "stylist_trial_ending":
+      return renderStylistTrialEnding(row.payload || {});
+    case "stylist_subscription_confirmed":
+      return renderStylistSubscriptionConfirmed(row.payload || {});
+    case "stylist_payment_failed":
+      return renderStylistPaymentFailed(row.payload || {});
     case "order_confirmation":
       return renderOrderConfirmation(row.payload || {});
     case "order_ready_for_pickup":
@@ -2160,7 +2288,9 @@ const sendViaResend = async (
         reply_to: replyTo || undefined,
         subject: rendered.subject,
         html: rendered.html,
-        text: row.body,
+        // Templates that compose their own plain-text alternative win;
+        // everything older falls back to the row's `body` as before.
+        text: rendered.text || row.body,
       }),
     });
     if (!res.ok) {
