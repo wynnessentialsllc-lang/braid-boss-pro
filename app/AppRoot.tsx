@@ -19107,22 +19107,34 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
     return result ? all.filter(c => c.count > 0 || c.id === "all" || c.id === activeCat) : all;
   }, [result, activeCat]);
 
-  // Log searches once typing settles. What braiders look for — and what
-  // finds nothing — is how the hub's content gaps get spotted.
+  // Log searches once typing settles, so the topics that find nothing
+  // can guide future lessons.
+  //
+  // What a braider types never leaves the device. This reports shape
+  // (how long, how many words, how well it landed) plus canonical topic
+  // keys drawn from the synonym table — a fixed vocabulary. Words that
+  // table doesn't recognize are dropped rather than logged, so no
+  // payload can be reassembled into the original query.
   useEffect(() => {
     if (!result) return;
     const t = setTimeout(() => {
       trackEvent("braider_education_search", {
         category: "feature",
         metadata: {
-          query: trimmed.slice(0, 60).toLowerCase(),
-          results: result.hits.length,
-          loose: result.loose,
+          results: hits.length,
+          mode: hits.length === 0 ? "empty" : result.mode,
+          category: activeCat === "all" ? null : activeCat,
+          // Joined, not an array — trackEvent's sanitizer keeps only
+          // scalar metadata values and would drop a list silently.
+          topics: result.topics.join(",") || null,
+          top_lesson_id: hits[0]?.lesson.id ?? null,
+          query_chars: trimmed.length,
+          query_tokens: result.terms.length,
         },
       });
     }, 900);
     return () => clearTimeout(t);
-  }, [result, trimmed]);
+  }, [result, hits, activeCat, trimmed]);
 
   const runSearch = (q: string) => { setQuery(q); setOpenLesson(null); };
   const activeCatName = EDUCATION_CATEGORIES.find(c => c.id === activeCat)?.name || "";
@@ -19197,7 +19209,7 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
               </button>
             </div>
 
-            {result?.loose && hits.length > 0 && (
+            {result?.mode === "loose" && hits.length > 0 && (
               <p className="text-[11.5px]" style={{ color: C.muted, lineHeight: 1.5 }}>
                 No single lesson covers everything you typed — these are the closest.
               </p>

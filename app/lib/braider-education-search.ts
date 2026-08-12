@@ -33,6 +33,13 @@ export type EducationSearchHit = {
   snippet: string | null;
 };
 
+// How well the hub answered the query:
+//   exact   — every word of the query was found, together, in the hits
+//   partial — some words are in no lesson at all and were dropped
+//   loose   — the words all exist, but no one lesson has them all
+//   empty   — nothing matched, or the query was too short to run
+export type EducationSearchMode = "exact" | "partial" | "loose" | "empty";
+
 export type EducationSearchResult = {
   hits: EducationSearchHit[];
   // Normalized, deduped words parsed out of the raw query.
@@ -40,9 +47,10 @@ export type EducationSearchResult = {
   // Every word the query expanded to (terms + synonyms), with the
   // rule used to match each — what the UI highlights.
   matchers: EducationMatcher[];
-  // True when no lesson matched *every* term, so `hits` are the
-  // closest partial matches rather than exact ones. The UI says so.
-  loose: boolean;
+  // Canonical topic keys for the terms the synonym table recognizes.
+  // Safe to log: fixed vocabulary, never the braider's own wording.
+  topics: string[];
+  mode: EducationSearchMode;
 };
 
 // Shortest query we'll act on. One character matches half the hub and
@@ -180,6 +188,32 @@ const SYNONYMS: Map<string, string[]> = (() => {
   for (const [word, set] of buckets) out.set(word, [...set]);
   return out;
 })();
+
+// term -> the first word of the first group it belongs to. This is the
+// only form of a query that ever leaves the device: a fixed key from
+// the table above, never what the braider typed. "insta", "ig" and
+// "instagram" all report as "instagram".
+const TOPIC_KEYS: Map<string, string> = (() => {
+  const out = new Map<string, string>();
+  for (const group of SYNONYM_GROUPS) {
+    for (const word of group) if (!out.has(word)) out.set(word, group[0]);
+  }
+  return out;
+})();
+
+/**
+ * The topics a query is about, as canonical keys from the synonym
+ * table. Words the table doesn't know are left out entirely — nothing
+ * here can be traced back to the braider's own wording.
+ */
+export const educationTopicKeys = (terms: string[]): string[] => {
+  const out: string[] = [];
+  for (const term of terms) {
+    const key = TOPIC_KEYS.get(term);
+    if (key && !out.includes(key)) out.push(key);
+  }
+  return out;
+};
 
 /**
  * Split a raw query into the words we search on: normalized, deduped,
@@ -398,16 +432,17 @@ const snippetFor = (lesson: EducationLesson, matchers: EducationMatcher[]): stri
  * Rank every lesson against a free-text query.
  *
  * Lessons matching all terms win; if nothing matches all of them the
- * partial matches are returned with `loose: true` so the screen can
- * label them "closest matches" instead of pretending they're exact.
+ * partial matches are returned as mode "loose" so the screen can label
+ * them "closest matches" instead of pretending they're exact.
  */
 export const searchEducation = (rawQuery: string): EducationSearchResult => {
   // Cap the term count so a pasted paragraph can't turn into a scan
   // of the whole hub per word.
   const terms = parseEducationQuery(rawQuery).slice(0, 8);
   const matchers = dedupeMatchers(terms.flatMap(variantsFor));
+  const topics = educationTopicKeys(terms);
   if (!terms.length || normalizeEducationText(rawQuery).length < EDUCATION_MIN_QUERY) {
-    return { hits: [], terms, matchers, loose: false };
+    return { hits: [], terms, matchers, topics, mode: "empty" };
   }
 
   const phrase = normalizeEducationText(rawQuery);
@@ -436,6 +471,11 @@ export const searchEducation = (rawQuery: string): EducationSearchResult => {
   const complete = scored.filter(s => s.matched.length === findable.size);
   const loose = complete.length === 0 && scored.length > 0;
   const use = loose ? scored : complete;
+  const mode: EducationSearchMode =
+    use.length === 0 ? "empty"
+      : loose ? "loose"
+        : findable.size < terms.length ? "partial"
+          : "exact";
 
   // Exact results rank on score; loose ones rank on how much of the
   // query they covered first, so "closest" means closest.
@@ -456,7 +496,8 @@ export const searchEducation = (rawQuery: string): EducationSearchResult => {
     })),
     terms,
     matchers,
-    loose,
+    topics,
+    mode,
   };
 };
 

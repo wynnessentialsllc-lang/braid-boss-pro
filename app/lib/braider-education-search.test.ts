@@ -3,6 +3,7 @@ import {
   EDUCATION_MIN_QUERY,
   EDUCATION_QUICK_SEARCHES,
   allEducationLessons,
+  educationTopicKeys,
   normalizeEducationText,
   parseEducationQuery,
   searchEducation,
@@ -77,14 +78,14 @@ describe("searchEducation", () => {
 
   it("requires every term when something matches them all", () => {
     const r = searchEducation("cancellation policy");
-    expect(r.loose).toBe(false);
+    expect(r.mode).toBe("exact");
     expect(r.hits.length).toBeGreaterThan(0);
     expect(r.hits[0].lesson.title).toBe("Writing a cancellation policy");
   });
 
   it("ignores a word no lesson uses instead of losing the good ones", () => {
     const r = searchEducation("zzzzq deposits");
-    expect(r.loose).toBe(false);
+    expect(r.mode).toBe("partial");
     expect(r.hits[0].lesson.title).toBe("How deposits protect your time");
   });
 
@@ -96,14 +97,18 @@ describe("searchEducation", () => {
   it("falls back to closest matches instead of an empty screen", () => {
     // Both words are in the hub, but no single lesson covers both.
     const r = searchEducation("zoom taxes");
-    expect(r.loose).toBe(true);
+    expect(r.mode).toBe("loose");
     expect(r.hits.length).toBeGreaterThan(0);
   });
 
   it("returns nothing when nothing is close", () => {
     const r = searchEducation("zzzzq qqqqz");
     expect(r.hits).toHaveLength(0);
-    expect(r.loose).toBe(false);
+    expect(r.mode).toBe("empty");
+  });
+
+  it("reports empty for a query too short to run", () => {
+    expect(searchEducation("d").mode).toBe("empty");
   });
 
   it("carries the category and a body snippet for each hit", () => {
@@ -131,8 +136,35 @@ describe("searchEducation", () => {
     for (const q of EDUCATION_QUICK_SEARCHES) {
       const r = searchEducation(q);
       expect(r.hits.length, `"${q}" found nothing`).toBeGreaterThan(0);
-      expect(r.loose, `"${q}" only matched loosely`).toBe(false);
+      expect(r.mode, `"${q}" did not match cleanly`).toBe("exact");
     }
+  });
+});
+
+describe("educationTopicKeys", () => {
+  it("reports one canonical key however the topic was worded", () => {
+    for (const q of ["insta", "ig", "instagram"]) {
+      expect(searchEducation(q).topics).toEqual(["instagram"]);
+    }
+    expect(searchEducation("no show").topics).toEqual(["noshow"]);
+    expect(searchEducation("write offs").topics).toEqual(["tax"]);
+  });
+
+  it("never reports a word that isn't in the synonym table", () => {
+    // The only words that can be logged are table keys, so a query
+    // can't be reassembled from what analytics receives.
+    const r = searchEducation("zzzzq deposits mrsjohnson");
+    expect(r.topics).toEqual(["deposit"]);
+    expect(educationTopicKeys(["zzzzq", "mrsjohnson"])).toEqual([]);
+  });
+
+  it("dedupes topics that share a group", () => {
+    // "pay" and "money" are the same topic; one key comes back.
+    expect(educationTopicKeys(["pay", "money"])).toEqual(["money"]);
+  });
+
+  it("is empty for a query with no recognized topic", () => {
+    expect(searchEducation("zzzzq qqqqz").topics).toEqual([]);
   });
 });
 
