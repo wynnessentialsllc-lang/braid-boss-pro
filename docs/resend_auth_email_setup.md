@@ -8,7 +8,7 @@ There are **two** delivery paths, on purpose:
 | Path | Emails | Who renders | Who sends |
 |------|--------|-------------|-----------|
 | Supabase Auth (custom SMTP → Resend) | verify email, password reset, email change | Supabase, from a template pasted into its dashboard | Supabase Auth |
-| `notification_queue` → `process-notification-queue` → Resend | welcome, trial started, trial ending, subscription confirmed | the worker, from `supabase/functions/_shared/lifecycle-emails.ts` | the worker |
+| `notification_queue` → `process-notification-queue` → Resend | welcome, trial started, trial ending, subscription confirmed, payment failed | the worker, from `supabase/functions/_shared/lifecycle-emails.ts` | the worker |
 
 Auth links must be minted and sent by the auth provider, so path one
 cannot move into the app. Everything else rides the queue the rest of
@@ -114,23 +114,28 @@ Two things to check before pasting:
 | Free trial started | `stylist_trial_started` | Stripe `checkout.session.completed`, only when the subscription reports `trialing` |
 | Trial ending soon | `stylist_trial_ending` | Stripe `customer.subscription.trial_will_end` (fires 3 days out) |
 | Subscription confirmed / receipt | `stylist_subscription_confirmed` | Stripe `invoice.payment_succeeded`, amount > 0 |
+| Payment failed (dunning) | `stylist_payment_failed` | Stripe `invoice.payment_failed`, amount due > 0 |
 
 Rendering happens in `process-notification-queue`, which imports the
 templates from `_shared/`. Deploying the function (the
 `deploy-edge-functions` workflow, or `supabase functions deploy`) is what
 ships template changes.
 
-### Stripe dashboard: enable two more events
+### Stripe dashboard: enable three more events
 
 The subscription webhook endpoint (`/api/subscribe/webhook`) must have
 these enabled, in addition to the four it already listens for:
 
 - `customer.subscription.trial_will_end`
 - `invoice.payment_succeeded`
+- `invoice.payment_failed`
 
-Until they are enabled the trial reminder and the payment receipt simply
-never fire. Nothing else changes and no billing behaviour depends on
-them: both events are read-only as far as this endpoint is concerned.
+Until they are enabled the trial reminder, the payment receipt, and the
+dunning notice simply never fire. Nothing else changes and no billing
+behaviour depends on them: all three are read-only as far as this
+endpoint is concerned. Subscription state during a failed payment still
+arrives through `customer.subscription.updated` (status → `past_due`),
+which was already enabled.
 
 **Stripe → Developers → Webhooks → the Braid Boss Pro subscription
 endpoint → Add events.**
@@ -145,6 +150,26 @@ Three independent layers, all pre-existing:
    `app/lib/subscription-emails.ts`).
 3. The worker's atomic claim plus terminal `sent` state stops two
    workers sending the same row.
+
+The dunning key is per **attempt** (`invoice id` + `attempt_count`), not
+per invoice. Stripe retries a failed invoice several times over roughly
+two weeks; each genuine attempt sends one notice, and a replayed webhook
+for the same attempt sends none.
+
+### What the failed-payment email deliberately does not say
+
+- **No Stripe internals.** Decline codes, `last_payment_error` strings,
+  and network responses are never read into the payload, let alone
+  rendered. They mean nothing to a stylist and leak processor detail.
+- **No raw billing-portal URL.** A portal session is a short-lived
+  bearer credential. Mailing one would expire before many people open
+  it and would hand billing access to anyone who saw the message. The
+  button opens the app, which mints a fresh authenticated session on
+  tap. The Stripe-hosted invoice link is included when Stripe provides
+  one, since that link is designed to be emailed.
+- **No threat.** `past_due` counts as live access in
+  `app/lib/guest-limits.ts`, so the email says the account stays open,
+  because it does. If that ever changes, the copy must change with it.
 
 ### Environment variables
 
@@ -215,7 +240,7 @@ select public.queue_notification(
 );
 ```
 
-Swap `notification_type_in` and the payload for the other three types.
+Swap `notification_type_in` and the payload for the other four types.
 The `dedupe_key_in` above is randomised so repeated tests are not
 swallowed as duplicates; production keys are deterministic.
 
@@ -230,6 +255,8 @@ stranger.
 2. Stripe → the test subscription → **Advance the clock** to three days
    before trial end → trial ending should arrive.
 3. Advance past trial end → subscription confirmed should arrive.
+4. Swap in a card that always declines (`4000 0000 0000 0341`) and
+   advance to the next cycle → payment failed should arrive.
 
 ---
 

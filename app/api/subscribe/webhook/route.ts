@@ -20,7 +20,8 @@
 //   • checkout.session.completed          → trial started
 //   • customer.subscription.trial_will_end→ trial ending soon
 //   • invoice.payment_succeeded           → subscription confirmed / receipt
-// The last two must be enabled on the Stripe endpoint; until they are,
+//   • invoice.payment_failed              → payment failed (dunning)
+// The last three must be enabled on the Stripe endpoint; until they are,
 // nothing breaks, those two emails simply never fire. Enqueue is
 // fail-soft everywhere: a mail problem must never turn into a non-200
 // that makes Stripe retry a billing event.
@@ -29,6 +30,7 @@ import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createHmac, timingSafeEqual } from "crypto";
 import {
+  buildPaymentFailedPayload,
   buildSubscriptionConfirmedPayload,
   buildTrialEndingPayload,
   buildTrialStartedPayload,
@@ -266,6 +268,7 @@ export async function POST(req: Request) {
     // from data Stripe already knows.
     "customer.subscription.trial_will_end",
     "invoice.payment_succeeded",
+    "invoice.payment_failed",
   ]);
   if (!handledTypes.has(evt?.type)) {
     return NextResponse.json({ received: true, ignored: evt?.type }, { status: 200 });
@@ -452,6 +455,59 @@ export async function POST(req: Request) {
           baseUrl: appBaseUrl(),
         }),
         dedupeKey: dedupeKeys.subscriptionConfirmed(invoiceId),
+      });
+    }
+    return NextResponse.json({ received: true }, { status: 200 });
+  }
+
+  // ---- invoice.payment_failed --------------------------------------
+  // Dunning notice. Subscription state still flows through the
+  // customer.subscription.updated event that Stripe sends alongside
+  // this one (status → past_due); nothing about billing is decided
+  // here, we only tell the stylist her card needs a look.
+  //
+  // Nothing from Stripe's failure detail is read: no decline code, no
+  // network response, no last_payment_error. Those are processor
+  // internals and never belong in a customer inbox.
+  if (evt.type === "invoice.payment_failed") {
+    const invoice = (evt?.data?.object || {}) as StripeInvoiceLike;
+    const invoiceId = idOf(invoice?.id);
+    const subId = idOf(invoice?.subscription);
+    const custId = idOf(invoice?.customer);
+    const amountDue = Number(invoice?.amount_due);
+
+    if (!invoiceId || !subId) {
+      return NextResponse.json({ received: true, ignored: "not_subscription_invoice" }, { status: 200 });
+    }
+    // A zero-amount invoice cannot meaningfully fail, and telling
+    // somebody their $0.00 payment was declined is pure confusion.
+    if (!Number.isFinite(amountDue) || amountDue <= 0) {
+      return NextResponse.json({ received: true, ignored: "zero_amount" }, { status: 200 });
+    }
+
+    const userId = await findUserIdForSubscription(admin, subId, custId);
+    if (!userId) {
+      return NextResponse.json({ received: true, ignored: "no_profile_match" }, { status: 200 });
+    }
+    const full = (await retrieveSubscription(stripeSecret, subId)) as StripeSubscriptionLike | null;
+    const stylist = await loadStylist(admin, userId);
+    if (stylist.email) {
+      await enqueueLifecycleEmail({
+        admin,
+        userId,
+        recipientEmail: stylist.email,
+        recipientName: stylist.firstName,
+        type: "stylist_payment_failed",
+        payload: buildPaymentFailedPayload(invoice, full, {
+          firstName: stylist.firstName,
+          timeZone: stylist.timeZone,
+          baseUrl: appBaseUrl(),
+          // The event's own timestamp is when the attempt failed. The
+          // invoice's `created` is when it was raised, which can be
+          // days earlier on a retry.
+          failedAt: Number.isFinite(Number(evt?.created)) ? Number(evt.created) : null,
+        }),
+        dedupeKey: dedupeKeys.paymentFailed(invoiceId, invoice?.attempt_count ?? null),
       });
     }
     return NextResponse.json({ received: true }, { status: 200 });

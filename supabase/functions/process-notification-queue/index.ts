@@ -32,6 +32,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // preview route and the Supabase Auth template generator render the
 // byte-identical markup this worker sends. Pure functions, no I/O.
 import {
+  renderPaymentFailed,
   renderSubscriptionConfirmed,
   renderTrialEnding,
   renderTrialStarted,
@@ -78,6 +79,7 @@ const OWNER_FACING_NOTIFICATION_TYPES = new Set<string>([
   "stylist_trial_started",
   "stylist_trial_ending",
   "stylist_subscription_confirmed",
+  "stylist_payment_failed",
 ]);
 
 // Pull the bare address out of a "Name <addr>" or plain "addr" string.
@@ -2036,6 +2038,23 @@ const renderStylistSubscriptionConfirmed = (p: Record<string, any>): Rendered =>
     baseUrl: lifecycleBase(p),
   });
 
+const renderStylistPaymentFailed = (p: Record<string, any>): Rendered =>
+  renderPaymentFailed({
+    firstName: p.firstName ?? null,
+    planLabel: p.planLabel ?? null,
+    amountDueMinor: numOrNull(p.amountDueMinor),
+    currency: p.currency ?? null,
+    interval: p.interval ?? null,
+    failedAt: p.failedAt ?? null,
+    nextRetryAt: p.nextRetryAt ?? null,
+    cardBrand: p.cardBrand ?? null,
+    cardLast4: p.cardLast4 ?? null,
+    invoiceUrl: p.invoiceUrl ?? null,
+    timeZone: p.timeZone ?? null,
+    manageUrl: p.manageUrl ?? null,
+    baseUrl: lifecycleBase(p),
+  });
+
 const numOrNull = (v: unknown): number | null => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -2197,6 +2216,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderStylistTrialEnding(row.payload || {});
     case "stylist_subscription_confirmed":
       return renderStylistSubscriptionConfirmed(row.payload || {});
+    case "stylist_payment_failed":
+      return renderStylistPaymentFailed(row.payload || {});
     case "order_confirmation":
       return renderOrderConfirmation(row.payload || {});
     case "order_ready_for_pickup":

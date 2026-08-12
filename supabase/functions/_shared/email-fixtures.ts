@@ -13,6 +13,7 @@
 import {
   renderEmailChange,
   renderPasswordReset,
+  renderPaymentFailed,
   renderSubscriptionConfirmed,
   renderTrialEnding,
   renderTrialStarted,
@@ -32,6 +33,7 @@ export type Fixture = {
     | "3. Free trial started"
     | "4. Trial ending soon"
     | "5. Subscription confirmed"
+    | "6. Payment failed"
     | "Other auth emails";
   /** What this fixture is here to prove. */
   note: string;
@@ -47,6 +49,8 @@ const TRIAL_END = 1_756_209_600; // 2025-08-26T12:00:00Z
 // date formatting.
 const TRIAL_END_EDGE = 1_756_263_600; // 2025-08-27T03:00:00Z
 const PAID_AT = 1_756_209_700;
+const FAILED_AT = 1_756_209_700;
+const NEXT_RETRY = 1_756_555_200; // 2025-08-30T12:00:00Z
 const NEXT_BILLING = 1_758_888_000;
 // Reference "now" for the day-count copy, so previews and snapshots do
 // not change meaning as real time passes. Three days before TRIAL_END,
@@ -411,6 +415,74 @@ export const FIXTURES: Fixture[] = [
         cardBrand: "visa",
         cardLast4: "4242",
       }),
+  },
+
+  // ---- 6. Payment failed --------------------------------------------
+  {
+    id: "failed-with-retry",
+    label: "Payment failed, retry scheduled",
+    group: "6. Payment failed",
+    note: "The common case. Stripe will try again, so the copy says when and stays calm.",
+    render: () =>
+      renderPaymentFailed({
+        firstName: "Sheree",
+        planLabel: "Monthly",
+        amountDueMinor: 1499,
+        currency: "usd",
+        interval: "month",
+        failedAt: FAILED_AT,
+        nextRetryAt: NEXT_RETRY,
+        cardBrand: "visa",
+        cardLast4: "4242",
+        invoiceUrl: "https://invoice.stripe.com/i/preview_only_not_a_real_invoice",
+        timeZone: "America/Los_Angeles",
+      }),
+  },
+  {
+    id: "failed-final-attempt",
+    label: "Payment failed, no more retries",
+    group: "6. Payment failed",
+    note: "Stripe has exhausted its retry schedule. The email must not imply another attempt is coming.",
+    render: () =>
+      renderPaymentFailed({
+        firstName: "Sheree",
+        planLabel: "Monthly",
+        amountDueMinor: 1499,
+        currency: "usd",
+        interval: "month",
+        failedAt: FAILED_AT,
+        nextRetryAt: null,
+        cardBrand: "visa",
+        cardLast4: "4242",
+        invoiceUrl: "https://invoice.stripe.com/i/preview_only_not_a_real_invoice",
+        timeZone: "America/Los_Angeles",
+      }),
+  },
+  {
+    id: "failed-annual",
+    label: "Payment failed, annual plan",
+    group: "6. Payment failed",
+    note: "Larger annual amount and interval wording.",
+    render: () =>
+      renderPaymentFailed({
+        firstName: "Nia",
+        planLabel: "Annual",
+        amountDueMinor: 14900,
+        currency: "usd",
+        interval: "year",
+        failedAt: FAILED_AT,
+        nextRetryAt: NEXT_RETRY,
+        cardBrand: "mastercard",
+        cardLast4: "5555",
+        timeZone: "America/New_York",
+      }),
+  },
+  {
+    id: "failed-minimal",
+    label: "Payment failed, minimal data",
+    group: "6. Payment failed",
+    note: "No name, no card, no plan, no invoice link. Every row drops out and the email still reads as a complete, actionable message.",
+    render: () => renderPaymentFailed({}),
   },
 
   // ---- Other auth emails --------------------------------------------

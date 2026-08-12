@@ -87,6 +87,14 @@ const REASON = {
   billing: "You received this because it is a billing notice for your Braid Boss Pro subscription.",
 } as const;
 
+/**
+ * Access rule this product actually implements, mirrored from
+ * app/lib/guest-limits.ts: trialing, active, AND past_due all count as
+ * live. That is why the failed-payment email can say the account stays
+ * open during retries. If that set ever changes, this copy must too.
+ */
+const PAST_DUE_KEEPS_ACCESS = true;
+
 // ---------------------------------------------------------------------
 // 1. Verify your email  (Supabase Auth template)
 // ---------------------------------------------------------------------
@@ -1020,6 +1028,186 @@ export const renderSubscriptionConfirmed = (
     `Manage my subscription: ${manageUrl}`,
     "",
     "You bring the talent. Braid Boss Pro helps run the business around it.",
+    textFooter(REASON.billing),
+  ]);
+
+  return { subject, preheader, html: document_({ title: subject, preheader, bands }), text };
+};
+
+// ---------------------------------------------------------------------
+// 6. Payment failed
+// ---------------------------------------------------------------------
+
+export type PaymentFailedArgs = {
+  firstName?: string | null;
+  planLabel?: string | null;
+  /** Minor units still owed on the invoice. */
+  amountDueMinor?: number | null;
+  currency?: string | null;
+  interval?: string | null;
+  /** When the attempt failed. */
+  failedAt?: string | number | Date | null;
+  /**
+   * Stripe's next automatic retry. Null means Stripe has finished
+   * retrying, which changes the copy: we say so plainly instead of
+   * implying another attempt is coming.
+   */
+  nextRetryAt?: string | number | Date | null;
+  cardBrand?: string | null;
+  cardLast4?: string | null;
+  /**
+   * Stripe-hosted invoice page. Optional. Stripe issues these to be
+   * emailed, and it is the one link that lets a stylist settle the
+   * invoice without signing in first.
+   */
+  invoiceUrl?: string | null;
+  timeZone?: string | null;
+  /**
+   * Where the recipient updates the card. This is the APP, not a raw
+   * billing-portal session URL: portal sessions are short-lived bearer
+   * credentials, so mailing one would both break by the time many
+   * people open it and hand anyone with the message full access to the
+   * billing account. The app creates a fresh, authenticated portal
+   * session on tap instead.
+   */
+  manageUrl?: string | null;
+  baseUrl?: string | null;
+};
+
+/**
+ * Dunning notice.
+ *
+ * Rules this template holds to:
+ *   • calm and direct. No countdown pressure, no threat, no red alarm
+ *     styling. A declined card is usually a bank hold or an expiry, not
+ *     a crisis, and the recipient is a business owner mid-appointment.
+ *   • no Stripe internals. Decline codes, `last_payment_error` strings,
+ *     network responses, and failure reasons are never rendered. They
+ *     are noise to the reader and leak processor detail into an inbox.
+ *   • no payment details beyond a masked brand and last four, and only
+ *     when the caller supplied them.
+ *   • no claim about losing access beyond what the app truly does.
+ */
+export const renderPaymentFailed = (args: PaymentFailedArgs): RenderedEmail => {
+  const base = normalizeBase(args.baseUrl);
+  const manageUrl = String(args.manageUrl || "").trim() || `${base}/`;
+  const amount = money(args.amountDueMinor, args.currency || "usd");
+  const card = maskedCard(args.cardBrand, args.cardLast4);
+  const failedLabel = fmtDate(args.failedAt, args.timeZone);
+  const retryLabel = fmtDate(args.nextRetryAt, args.timeZone);
+  const invoice = escUrl(args.invoiceUrl);
+
+  const subject = "We could not process your Braid Boss Pro payment";
+  const preheader = "Your account is still open. Update your card when you get a minute.";
+
+  const bodyCopy = `${greeting(
+    args.firstName,
+  )}, your bank did not approve the latest payment for your Braid Boss Pro subscription${
+    amount ? ` of ${amount}` : ""
+  }. This happens often, usually an expired card or a routine hold, and it is quick to sort out.`;
+
+  const retryCopy = retryLabel
+    ? `Stripe will automatically try again on ${retryLabel}. If you update your card before then, the next attempt uses the new one.`
+    : "Stripe has finished its automatic attempts on this invoice, so the next step is yours: update your card and the balance is settled.";
+
+  const accessCopy = PAST_DUE_KEEPS_ACCESS
+    ? "Your account is still open in the meantime. Your booking page, calendar, clients, and payments all keep working while this is sorted."
+    : "";
+
+  const bands = [
+    masthead(base),
+    band({
+      bg: C.purple,
+      padding: "40px 32px 46px",
+      content: [
+        eyebrow("Payment update", "rgba(255,255,255,0.82)"),
+        headline("Your card needs a quick update.", { color: C.white, size: 35 }),
+        rule(C.coral),
+        p(esc(bodyCopy), {
+          color: "rgba(255,255,255,0.92)",
+          size: 16,
+          margin: "22px 0 0",
+        }),
+      ].join(""),
+    }),
+    band({
+      bg: C.ink,
+      padding: "32px 32px 34px",
+      content: [
+        eyebrow("What we tried", "rgba(255,255,255,0.65)"),
+        `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">
+          <tr><td bgcolor="${C.white}" style="background-color:${C.white};border-radius:14px;padding:22px;">
+            ${detailRows([
+              ["Plan", args.planLabel || ""],
+              ["Amount due", amount],
+              ["Billing interval", intervalLabel(args.interval)],
+              ["Attempted on", failedLabel],
+              ["Next automatic attempt", retryLabel],
+              ["Card on file", card],
+            ])}
+          </td></tr>
+        </table>`,
+      ].join(""),
+    }),
+    band({
+      bg: C.white,
+      padding: "36px 32px 38px",
+      content: [
+        headline("Two minutes and you are back to normal.", { size: 29 }),
+        p(esc(retryCopy), { color: C.body, size: 15, margin: "12px 0 0" }),
+        accessCopy ? p(esc(accessCopy), { color: C.body, size: 15, margin: "12px 0 0" }) : "",
+        button({
+          label: "Update my payment method",
+          url: manageUrl,
+          bg: C.ink,
+          marginTop: 26,
+        }),
+        p(
+          "That opens Braid Boss Pro. Go to Account then Manage subscription to reach the Stripe billing portal, where you can change your card. We do not put a billing link in an email, so nobody but you can open your billing account.",
+          { color: C.muted, size: 13, margin: "16px 0 0" },
+        ),
+        invoice
+          ? `<p style="margin:16px 0 0;font-family:${FONT_BODY};font-size:14px;line-height:1.6;word-break:break-word;overflow-wrap:anywhere;"><a href="${invoice}" style="color:${C.purple};text-decoration:underline;font-weight:700;">View this invoice on Stripe</a></p>`
+          : "",
+      ].join(""),
+    }),
+    band({
+      bg: C.tint,
+      padding: "30px 32px 34px",
+      align: "center",
+      content: [
+        p(
+          `Something not adding up? Reply to this email or write to <a href="mailto:${BUSINESS.supportEmail}" style="color:${C.purple};text-decoration:underline;">${BUSINESS.supportEmail}</a> and a person will help.`,
+          { color: C.body, size: 15, margin: "0", align: "center" },
+        ),
+      ].join(""),
+    }),
+    footer({ base, reason: REASON.billing }),
+  ].join("");
+
+  const text = textBody([
+    "BRAID BOSS PRO / PAYMENT UPDATE",
+    "",
+    "Your card needs a quick update.",
+    "",
+    bodyCopy,
+    "",
+    "WHAT WE TRIED",
+    args.planLabel ? `Plan: ${args.planLabel}` : "",
+    amount ? `Amount due: ${amount}` : "",
+    intervalLabel(args.interval) ? `Billing interval: ${intervalLabel(args.interval)}` : "",
+    failedLabel ? `Attempted on: ${failedLabel}` : "",
+    retryLabel ? `Next automatic attempt: ${retryLabel}` : "",
+    card ? `Card on file: ${card}` : "",
+    "",
+    retryCopy,
+    accessCopy,
+    "",
+    `Update my payment method: ${manageUrl}`,
+    "Go to Account then Manage subscription to reach the Stripe billing portal.",
+    args.invoiceUrl ? `View this invoice on Stripe: ${args.invoiceUrl}` : "",
+    "",
+    `Questions? ${BUSINESS.supportEmail}`,
     textFooter(REASON.billing),
   ]);
 

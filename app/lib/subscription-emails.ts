@@ -1,5 +1,5 @@
-// Payload builders + enqueue helpers for the three billing lifecycle
-// emails (trial started, trial ending, subscription confirmed).
+// Payload builders + enqueue helpers for the billing lifecycle emails
+// (trial started, trial ending, subscription confirmed, payment failed).
 //
 // Split out of /api/subscribe/webhook so the mapping from a raw Stripe
 // object to an email payload is unit-testable without a webhook, a
@@ -20,7 +20,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type LifecycleEmailType =
   | "stylist_trial_started"
   | "stylist_trial_ending"
-  | "stylist_subscription_confirmed";
+  | "stylist_subscription_confirmed"
+  | "stylist_payment_failed";
 
 /** Minimal shape of the bits of a Stripe subscription we read. */
 export type StripeSubscriptionLike = {
@@ -51,6 +52,9 @@ export type StripePaymentMethodLike = {
 export type StripeInvoiceLike = {
   id?: string;
   amount_paid?: number | null;
+  amount_due?: number | null;
+  attempt_count?: number | null;
+  next_payment_attempt?: number | null;
   currency?: string | null;
   status?: string | null;
   billing_reason?: string | null;
@@ -221,6 +225,52 @@ export const buildSubscriptionConfirmedPayload = (
   };
 };
 
+/**
+ * Dunning payload.
+ *
+ * Deliberately narrow. Stripe puts a decline code, a network response,
+ * and a `last_payment_error` on the surrounding objects; none of it is
+ * copied here, so processor internals cannot reach an inbox even if a
+ * future template tried to render them.
+ *
+ * `failedAt` is passed in by the caller (the webhook uses the event's
+ * own timestamp) rather than guessed from the invoice, because an
+ * invoice's `created` is when it was raised, not when the attempt
+ * failed.
+ */
+export const buildPaymentFailedPayload = (
+  invoice: StripeInvoiceLike,
+  sub: StripeSubscriptionLike | null,
+  ctx: RecipientContext & { failedAt?: number | null },
+): Record<string, unknown> => {
+  const line = invoice?.lines?.data?.[0] ?? null;
+  const price = line?.price ?? (sub ? priceOf(sub) : null);
+  const { cardBrand, cardLast4 } = sub
+    ? cardOf(sub)
+    : { cardBrand: null, cardLast4: null };
+  const interval = str(price?.recurring?.interval) || (sub ? intervalOf(sub) : null);
+  const planLabel =
+    interval === "year" ? "Annual" : interval === "month" ? "Monthly" : sub ? planLabelOf(sub) : null;
+
+  return {
+    firstName: ctx.firstName ?? null,
+    planLabel,
+    amountDueMinor: typeof invoice?.amount_due === "number" ? invoice.amount_due : null,
+    currency: str(invoice?.currency) || "usd",
+    interval,
+    failedAt: ctx.failedAt ?? invoice?.created ?? null,
+    // Absent when Stripe has exhausted its retry schedule. The template
+    // says so plainly rather than implying another attempt is coming.
+    nextRetryAt: invoice?.next_payment_attempt ?? null,
+    cardBrand,
+    cardLast4,
+    invoiceUrl: str(invoice?.hosted_invoice_url) || null,
+    timeZone: ctx.timeZone ?? null,
+    baseUrl: ctx.baseUrl,
+    manageUrl: `${ctx.baseUrl}/`,
+  };
+};
+
 // ---------------------------------------------------------------------
 // Dedupe keys
 // ---------------------------------------------------------------------
@@ -240,6 +290,12 @@ export const dedupeKeys = {
     `stylist_trial_ending:${subscriptionId}:${trialEnd ?? "na"}`,
   subscriptionConfirmed: (invoiceId: string) =>
     `stylist_subscription_confirmed:${invoiceId}`,
+  // Keyed by ATTEMPT, not just by invoice. Stripe retries a failed
+  // invoice several times over about two weeks, and each genuine
+  // attempt deserves one notice, while a replayed webhook for the same
+  // attempt must not produce a second.
+  paymentFailed: (invoiceId: string, attemptCount?: number | null) =>
+    `stylist_payment_failed:${invoiceId}:${attemptCount ?? 1}`,
 } as const;
 
 // ---------------------------------------------------------------------
@@ -250,6 +306,7 @@ const SUBJECTS: Record<LifecycleEmailType, string> = {
   stylist_trial_started: "Your 14-day Braid Boss Pro trial has started",
   stylist_trial_ending: "Your Braid Boss Pro trial is ending soon",
   stylist_subscription_confirmed: "You're officially a Braid Boss Pro",
+  stylist_payment_failed: "We could not process your Braid Boss Pro payment",
 };
 
 /**
@@ -265,6 +322,8 @@ const FALLBACK_BODY: Record<LifecycleEmailType, string> = {
     "Your Braid Boss Pro trial is ending soon. Open the app to review your plan, or to manage or cancel your subscription from Account.",
   stylist_subscription_confirmed:
     "Your Braid Boss Pro subscription payment went through. Open the app to keep running your booking, payments, and client tools.",
+  stylist_payment_failed:
+    "Your bank did not approve the latest payment for your Braid Boss Pro subscription. Your account is still open. Open the app and go to Account then Manage subscription to update your card.",
 };
 
 export type EnqueueArgs = {

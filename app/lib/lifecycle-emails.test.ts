@@ -19,6 +19,7 @@ import {
 import {
   renderEmailChange,
   renderPasswordReset,
+  renderPaymentFailed,
   renderSubscriptionConfirmed,
   renderTrialEnding,
   renderTrialStarted,
@@ -27,6 +28,7 @@ import {
 } from "../../supabase/functions/_shared/lifecycle-emails.ts";
 import { FIXTURES } from "../../supabase/functions/_shared/email-fixtures.ts";
 import {
+  buildPaymentFailedPayload,
   buildSubscriptionConfirmedPayload,
   buildTrialEndingPayload,
   buildTrialStartedPayload,
@@ -635,5 +637,186 @@ describe("duplicate-send protection", () => {
       renderTrialEnding({ trialEnd: end, now: now.getTime() }).subject,
     );
     expect(trialEndingSubject(null)).toBe("Your Braid Boss Pro trial is ending soon");
+  });
+});
+
+// ---------------------------------------------------------------------
+// 6. Payment failed
+// ---------------------------------------------------------------------
+
+describe("payment failed email", () => {
+  const failed = {
+    firstName: "Sheree",
+    planLabel: "Monthly",
+    amountDueMinor: 1499,
+    currency: "usd",
+    interval: "month",
+    failedAt: 1_756_209_700,
+    nextRetryAt: 1_756_555_200,
+    cardBrand: "visa",
+    cardLast4: "4242",
+    invoiceUrl: "https://invoice.stripe.com/i/test",
+    timeZone: "America/Los_Angeles",
+  };
+
+  it("states the amount due, plan, failure date, and retry date", () => {
+    const r = renderPaymentFailed(failed);
+    expect(r.html).toContain("$14.99");
+    expect(r.html).toContain("Monthly");
+    expect(r.html).toContain("Billed monthly");
+    expect(r.html).toContain("August 26, 2025"); // attempted on
+    expect(r.html).toContain("August 30, 2025"); // next automatic attempt
+  });
+
+  it("says when Stripe will retry", () => {
+    expect(renderPaymentFailed(failed).html).toContain(
+      "Stripe will automatically try again on August 30, 2025",
+    );
+  });
+
+  it("does not imply another attempt once retries are exhausted", () => {
+    const r = renderPaymentFailed({ ...failed, nextRetryAt: null });
+    expect(r.html).toContain("finished its automatic attempts");
+    expect(r.html).not.toContain("will automatically try again");
+    expect(r.html).not.toContain("Next automatic attempt");
+  });
+
+  it("routes card updates through the app, never a raw billing-portal URL", () => {
+    const r = renderPaymentFailed({ ...failed, manageUrl: "https://braidbosspro.app/" });
+    expect(r.html).toContain("Update my payment method");
+    expect(r.html).toContain('href="https://braidbosspro.app/"');
+    // A portal session URL is a short-lived bearer credential and must
+    // never be embedded in mail.
+    expect(r.html).not.toContain("billing.stripe.com");
+    expect(r.text).not.toContain("billing.stripe.com");
+  });
+
+  it("links the Stripe invoice when there is one and omits it when not", () => {
+    expect(renderPaymentFailed(failed).html).toContain('href="https://invoice.stripe.com/i/test"');
+    expect(renderPaymentFailed({ ...failed, invoiceUrl: null }).html).not.toContain(
+      "View this invoice on Stripe",
+    );
+  });
+
+  it("shows at most a masked card, never full payment details", () => {
+    const r = renderPaymentFailed(failed);
+    expect(r.html).toContain("Visa ending in 4242");
+    expect(r.html).not.toMatch(/\b\d{13,19}\b/); // no PAN
+    expect(r.html).not.toMatch(/\bcvc\b|\bcvv\b|exp_month|exp_year/i);
+    expect(renderPaymentFailed({ ...failed, cardLast4: null }).html).not.toContain("Card on file");
+  });
+
+  it("uses calm, non-punitive language", () => {
+    const r = renderPaymentFailed(failed);
+    // Source comments are not customer copy, so strip them before
+    // judging the wording. The plain-text part is checked too, since
+    // that is what some clients actually display.
+    const html = (r.html.replace(/<!--[\s\S]*?-->/g, "") + " " + r.text).toLowerCase();
+    for (const word of [
+      "urgent",
+      "immediately",
+      "suspended",
+      "terminated",
+      "failure to",
+      "act now",
+      "last chance",
+      "overdue",
+      "delinquent",
+    ]) {
+      expect(html.includes(word), word).toBe(false);
+    }
+  });
+
+  it("tells the truth about access, which past_due preserves", () => {
+    expect(renderPaymentFailed(failed).html).toContain("Your account is still open");
+  });
+
+  it("offers a human to talk to", () => {
+    expect(renderPaymentFailed(failed).html).toContain("hello@braidbosspro.app");
+  });
+
+  it("still reads as a complete email with nothing supplied", () => {
+    const r = renderPaymentFailed({});
+    expect(r.html).toContain("Hi there,");
+    expect(r.html).not.toContain("undefined");
+    expect(r.html).not.toContain("null");
+    expect(r.html).not.toContain("NaN");
+    expect(r.html).not.toContain("$0.00");
+  });
+});
+
+describe("payment failed payload", () => {
+  const failedInvoice = {
+    id: "in_9",
+    amount_due: 1499,
+    amount_paid: 0,
+    attempt_count: 2,
+    next_payment_attempt: 1_756_555_200,
+    currency: "usd",
+    created: 1_755_000_000,
+    hosted_invoice_url: "https://invoice.stripe.com/i/test",
+    lines: { data: [{ price: { recurring: { interval: "month" } } }] },
+  };
+
+  it("maps the invoice onto the template arguments", () => {
+    const payload = buildPaymentFailedPayload(failedInvoice, subscription, {
+      firstName: "Sheree",
+      baseUrl: "https://braidbosspro.app",
+      failedAt: 1_756_209_700,
+    });
+    expect(payload).toMatchObject({
+      planLabel: "Monthly",
+      amountDueMinor: 1499,
+      nextRetryAt: 1_756_555_200,
+      failedAt: 1_756_209_700,
+      cardBrand: "visa",
+      cardLast4: "4242",
+      manageUrl: "https://braidbosspro.app/",
+    });
+  });
+
+  it("prefers the event timestamp over the invoice creation date", () => {
+    const withEvent = buildPaymentFailedPayload(failedInvoice, null, {
+      baseUrl: "https://braidbosspro.app",
+      failedAt: 1_756_209_700,
+    });
+    expect(withEvent.failedAt).toBe(1_756_209_700);
+    const withoutEvent = buildPaymentFailedPayload(failedInvoice, null, {
+      baseUrl: "https://braidbosspro.app",
+    });
+    expect(withoutEvent.failedAt).toBe(1_755_000_000);
+  });
+
+  it("carries no Stripe failure internals through to the template", () => {
+    const noisy = {
+      ...failedInvoice,
+      last_payment_error: { message: "Your card was declined.", decline_code: "do_not_honor" },
+      charge: { outcome: { network_status: "declined_by_network", reason: "do_not_honor" } },
+    };
+    const payload = buildPaymentFailedPayload(noisy as never, subscription, {
+      baseUrl: "https://braidbosspro.app",
+    });
+    const serialized = JSON.stringify(payload);
+    for (const leak of ["decline_code", "do_not_honor", "declined_by_network", "last_payment_error", "was declined"]) {
+      expect(serialized.includes(leak), leak).toBe(false);
+    }
+    const html = renderPaymentFailed(payload as never).html;
+    expect(html).not.toContain("do_not_honor");
+  });
+
+  it("reports null when Stripe scheduled no further retry", () => {
+    const payload = buildPaymentFailedPayload(
+      { ...failedInvoice, next_payment_attempt: null },
+      null,
+      { baseUrl: "https://braidbosspro.app" },
+    );
+    expect(payload.nextRetryAt).toBe(null);
+  });
+
+  it("keys dedupe per attempt so each retry notifies once", () => {
+    expect(dedupeKeys.paymentFailed("in_9", 2)).toBe("stylist_payment_failed:in_9:2");
+    expect(dedupeKeys.paymentFailed("in_9", 2)).toBe(dedupeKeys.paymentFailed("in_9", 2));
+    expect(dedupeKeys.paymentFailed("in_9", 2)).not.toBe(dedupeKeys.paymentFailed("in_9", 3));
+    expect(dedupeKeys.paymentFailed("in_9", null)).toBe("stylist_payment_failed:in_9:1");
   });
 });
