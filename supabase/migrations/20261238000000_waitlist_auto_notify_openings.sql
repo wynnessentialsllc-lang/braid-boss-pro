@@ -53,9 +53,15 @@ begin;
 --
 -- Holds the horizon (max bookable date) the waitlist has been told
 -- about. A drop is detected as "the horizon moved past this", which is
--- self-healing: a missed cron day, a paused project, or a braider
--- changing release_months all resolve on the next run without needing
--- the sweep to land exactly on the release date.
+-- self-healing: a missed cron day or a paused project resolves on the
+-- next run without needing the sweep to land exactly on the release
+-- date.
+--
+-- The mark tracks the horizon in BOTH directions. Shrinking a window
+-- (fewer months, a later drop day) has to pull the mark down with it,
+-- or it strands itself above the calendar and silences every drop
+-- until the horizon climbs back — see the clamp in
+-- process_waitlist_release_drops().
 -- ---------------------------------------------------------------------
 alter table public.booking_policies
   add column if not exists waitlist_release_notified_through date;
@@ -225,6 +231,23 @@ begin
     v_key := coalesce(v_type, 'waitlist') || ':' || r.id::text || ':' ||
              coalesce(nullif(trim(coalesce(dedupe_scope_in, '')), ''), v_range);
 
+    -- Belt and braces on top of the dedupe key: whatever happens to a
+    -- braider's window settings, one person hears about newly-opened
+    -- dates at most once a day. Drops are monthly, so this can only
+    -- ever catch a repeat — never a legitimate second announcement.
+    -- Cancellations are exempt: two spots really can free up in a day,
+    -- and each is worth knowing about.
+    if kind_in = 'dates_open' and exists (
+      select 1
+        from public.notification_queue q
+       where q.user_id = user_id_in
+         and q.notification_type = 'waitlist_dates_open'
+         and q.created_at > now() - interval '20 hours'
+         and q.payload->>'waitlistRequestId' = r.id::text
+    ) then
+      continue;
+    end if;
+
     if kind_in = 'dates_open' then
       v_subject := 'New dates just opened — ' || v_studio;
       v_body :=
@@ -262,6 +285,8 @@ begin
            recipient_email_in   => r.client_email,
            recipient_name_in    => nullif(trim(coalesce(r.client_name, '')), ''),
            payload_in           => jsonb_build_object(
+             -- Also what the once-a-day guard above matches on.
+             'waitlistRequestId', r.id,
              'clientName',    coalesce(nullif(trim(coalesce(r.client_name, '')), ''), 'there'),
              'studioName',    v_studio,
              'rangeLabel',    v_range,
@@ -355,7 +380,27 @@ begin
         continue;  -- bootstrap only
       end if;
 
-      if w.max_date <= p.announced_through then
+      -- Horizon SHRANK — fewer months opened, a later drop day, a spell
+      -- on a different booking mode. Those dates aren't bookable any
+      -- more, so forget we announced them and drop the mark to match.
+      --
+      -- Without this the mark strands itself above the calendar and
+      -- every drop is silent until the horizon climbs back past it —
+      -- months of nothing, with no clue beyond a waitlist that went
+      -- quiet. Clamping makes it self-correct on the next sweep.
+      --
+      -- Re-announcing after a clamp is the right outcome, not a bug:
+      -- those dates closed and re-opened, which is news. And a braider
+      -- who shrinks then restores lands back on the same horizon, whose
+      -- dedupe key was already used, so the flip-flop sends nothing.
+      if w.max_date < p.announced_through then
+        update public.booking_policies
+           set waitlist_release_notified_through = w.max_date
+         where user_id = p.user_id;
+        continue;
+      end if;
+
+      if w.max_date = p.announced_through then
         continue;  -- horizon hasn't moved
       end if;
 
