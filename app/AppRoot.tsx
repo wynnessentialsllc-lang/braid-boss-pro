@@ -19948,6 +19948,24 @@ const SupportCenterScreen = ({
   );
 };
 
+// One icon treatment for every Settings row: a filled brand-gradient
+// bubble. Uniformity is the point — the tinted-outline and flat-gold
+// variants this replaces made a scattering of rows read as disabled
+// next to their neighbours. New rows route through here rather than
+// hand-rolling a bubble, so the column can't drift again.
+const SettingsRowIcon = ({ icon }: { icon: React.ReactNode }) => (
+  <div
+    aria-hidden
+    style={{
+      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+      background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0,
+      boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
+    }}
+  >
+    {icon}
+  </div>
+);
+
 const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, openReminderSettings, openCommunicationLog, openAccount, openDiscounts, openServices, openInventory, openMarketing, openReferrals, openMarketplace, openGiftCards, openLoyalty, openSmsCredits, openReports, openTaxPack, openPolicies, openAvailability, openWaitlist, openIntelligence, openApprovals, openContracts, openReviews, openInbox, openIntakeForm, openPackages, openProducts, openClasses, openVideos, openSupport, openTapToPay }: { store: any; onBack: any; openBossGrowthGuide?: () => void; openEducationHub?: () => void; openReminderSettings: any; openCommunicationLog?: () => void; openAccount?: () => void; openDiscounts?: () => void; openServices?: () => void; openInventory?: () => void; openMarketing?: () => void; openReferrals?: () => void; openMarketplace?: () => void; openGiftCards?: () => void; openLoyalty?: () => void; openSmsCredits?: () => void; openReports?: () => void; openTaxPack?: () => void; openPolicies?: () => void; openAvailability?: () => void; openWaitlist?: () => void; openIntelligence?: () => void; openApprovals?: () => void; openContracts?: () => void; openReviews?: () => void; openInbox?: () => void; openIntakeForm?: () => void; openPackages?: () => void; openProducts?: () => void; openClasses?: () => void; openVideos?: () => void; openSupport?: () => void; openTapToPay?: () => void }) => {
   // Stripe Connect status — read from the cached profile via the same
   // hook the /settings/payments screen uses, so the badge here can't
@@ -20221,15 +20239,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99]" onClick={openServices}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.secondary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(255, 77, 109, 0.32)",
-                      }}
-                    >
-                      <Layers size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<Layers size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Services & styles</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20250,15 +20260,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openInventory}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
-                      }}
-                    >
-                      <Layers size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<Layers size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Inventory</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20282,15 +20284,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openMarketing}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.hero, color: "#FFFFFF", flexShrink: 0,
-                      }}
-                    >
-                      <Sparkles size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<Sparkles size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Marketing</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20312,15 +20306,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openReferrals}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
-                      }}
-                    >
-                      <Users size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<Users size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Referrals</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Reward clients who send you new business</p>
@@ -20334,15 +20320,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openMarketplace}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
-                      }}
-                    >
-                      <MapPin size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<MapPin size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Marketplace listing</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Get found on the public &quot;Find a braider&quot; page</p>
@@ -20356,15 +20334,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openGiftCards}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
-                      }}
-                    >
-                      <Gift size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<Gift size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Gift cards</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Sell gift cards and track issued codes</p>
@@ -20378,15 +20348,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openLoyalty}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
-                      }}
-                    >
-                      <Star size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<Star size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Loyalty points</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Reward clients for every visit</p>
@@ -20400,15 +20362,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openSmsCredits}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
-                      }}
-                    >
-                      <MessageSquare size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<MessageSquare size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>SMS credits</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Buy text-message credits for reminders</p>
@@ -20422,15 +20376,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openReports}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
-                      }}
-                    >
-                      <BarChart3 size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<BarChart3 size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Reports</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Revenue · top styles · repeat clients</p>
@@ -20444,15 +20390,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openTaxPack}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
-                      }}
-                    >
-                      <FileText size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<FileText size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Tax pack</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Annual P&amp;L · Schedule C map · PDF for your accountant</p>
@@ -20469,15 +20407,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                 <Card className="p-4 active:scale-[0.99]" onClick={openBossGrowthGuide}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div
-                        aria-hidden
-                        style={{
-                          width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                          background: GRADIENTS.hero, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124,58,237,0.4)",
-                        }}
-                      >
-                        <Sparkles size={15} />
-                      </div>
+                      <SettingsRowIcon icon={<Sparkles size={15} />} />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold" style={{ color: C.espresso }}>Boss Growth Guide</p>
                         <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20492,15 +20422,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                   <Card className="p-4 active:scale-[0.99]" onClick={openEducationHub}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <div
-                          aria-hidden
-                          style={{
-                            width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                            background: GRADIENTS.hero, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124,58,237,0.4)",
-                          }}
-                        >
-                          <ScrollText size={15} />
-                        </div>
+                        <SettingsRowIcon icon={<ScrollText size={15} />} />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold" style={{ color: C.espresso }}>Braider Education Hub</p>
                           <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20521,15 +20443,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                 <Card className="p-4 active:scale-[0.99]" onClick={openSupport}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div
-                        aria-hidden
-                        style={{
-                          width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                          background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                        }}
-                      >
-                        <LifeBuoy size={15} />
-                      </div>
+                      <SettingsRowIcon icon={<LifeBuoy size={15} />} />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold" style={{ color: C.espresso }}>Support Center</p>
                         <p className="text-[11px]" style={{ color: C.muted }}>Help, guides, feedback, and app updates</p>
@@ -20546,15 +20460,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99]" onClick={openPolicies}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <ScrollText size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<ScrollText size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Booking policies</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Deposits · cancellations · prep · templates</p>
@@ -20568,15 +20474,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openAvailability}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.secondary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(255, 77, 109, 0.32)",
-                      }}
-                    >
-                      <Clock size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<Clock size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Availability</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>Weekly hours · time off · one-time changes</p>
@@ -20590,15 +20488,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openWaitlist}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <UserPlus size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<UserPlus size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Waitlist</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20619,15 +20509,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openApprovals}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <CheckCircle2 size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<CheckCircle2 size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Requests</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20656,15 +20538,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openContracts}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <FileText size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<FileText size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Contracts</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20680,15 +20554,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openInbox}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <MessageSquare size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<MessageSquare size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Inbox</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20715,15 +20581,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openIntakeForm}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <ScrollText size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<ScrollText size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Intake form</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20739,15 +20597,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openPackages}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <Gift size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<Gift size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Packages & Memberships</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20763,15 +20613,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openReviews}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <Sparkles size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<Sparkles size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Client Love</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20787,15 +20629,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openProducts}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <Layers size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<Layers size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Shop</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20811,15 +20645,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openClasses}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <Calendar size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<Calendar size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Classes</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20835,15 +20661,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openVideos}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <PlayCircle size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<PlayCircle size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Video Lessons</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20859,15 +20677,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openIntelligence}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <BarChart3 size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<BarChart3 size={15} />} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Booking intelligence</p>
                       <p className="text-[11px]" style={{ color: C.muted }}>
@@ -20888,15 +20698,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div
-                    aria-hidden
-                    style={{
-                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                      background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                    }}
-                  >
-                    <CalcIcon size={15} />
-                  </div>
+                  <SettingsRowIcon icon={<CalcIcon size={15} />} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold" style={{ color: C.espresso }}>Product Profit Calculator</p>
                     <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
@@ -20917,15 +20719,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div
-                    aria-hidden
-                    style={{
-                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                      background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                    }}
-                  >
-                    <DollarSign size={15} />
-                  </div>
+                  <SettingsRowIcon icon={<DollarSign size={15} />} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-semibold" style={{ color: C.espresso }}>Stripe Connect</p>
@@ -20948,15 +20742,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div
-                    aria-hidden
-                    style={{
-                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                      background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                    }}
-                  >
-                    <Receipt size={15} />
-                  </div>
+                  <SettingsRowIcon icon={<Receipt size={15} />} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold" style={{ color: C.espresso }}>Payments &amp; Transactions</p>
                     <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
@@ -20972,15 +20758,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
               <Card className="p-4 active:scale-[0.99] mt-2" onClick={openTapToPay}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div
-                      aria-hidden
-                      style={{
-                        width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                        background: GRADIENTS.primary, color: "#FFFFFF", border: 0, flexShrink: 0, boxShadow: "0 4px 12px -4px rgba(124, 58, 237, 0.30)",
-                      }}
-                    >
-                      <DollarSign size={15} />
-                    </div>
+                    <SettingsRowIcon icon={<DollarSign size={15} />} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-semibold" style={{ color: C.espresso }}>Tap to Pay</p>
@@ -21003,15 +20781,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
             <Card className="p-4 active:scale-[0.99]" onClick={openDiscounts}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div
-                    aria-hidden
-                    style={{
-                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                      background: C.ivory, color: C.gold, border: `1px solid ${C.hairline}`, flexShrink: 0,
-                    }}
-                  >
-                    <Sparkles size={15} />
-                  </div>
+                  <SettingsRowIcon icon={<Sparkles size={15} />} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold" style={{ color: C.espresso }}>Discounts</p>
                     <p className="text-[11px]" style={{ color: C.muted }}>
@@ -21074,15 +20844,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div
-                    aria-hidden
-                    style={{
-                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                      background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
-                    }}
-                  >
-                    <Crown size={15} />
-                  </div>
+                  <SettingsRowIcon icon={<Crown size={15} />} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold" style={{ color: C.espresso }}>Command center</p>
                     <p className="text-[11px]" style={{ color: C.muted }}>
@@ -21101,15 +20863,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div
-                    aria-hidden
-                    style={{
-                      width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
-                      background: C.ivory, color: C.goldDeep, border: `1px solid ${C.hairline}`, flexShrink: 0,
-                    }}
-                  >
-                    <BarChart3 size={15} />
-                  </div>
+                  <SettingsRowIcon icon={<BarChart3 size={15} />} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold" style={{ color: C.espresso }}>Analytics</p>
                     <p className="text-[11px]" style={{ color: C.muted }}>
@@ -21155,9 +20909,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
           }}
         >
           <div className="flex items-center gap-3" style={{ pointerEvents: "none" }}>
-            <div className="rounded-full p-2 flex-shrink-0" style={{ background: C.gold, color: C.espresso }}>
-              <Upload size={16} />
-            </div>
+            <SettingsRowIcon icon={<Upload size={15} />} />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold" style={{ color: C.espresso }}>Import studio data</p>
               <p className="text-[11px]" style={{ color: C.muted }}>Bring clients and services from another app.</p>
