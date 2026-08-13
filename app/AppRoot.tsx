@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useMemo, useCallback, useRef, useId } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef, useId, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import {
   getSupabase,
@@ -123,6 +123,12 @@ import { useStripeConnect, type StripeConnectProfile } from "./lib/stripe-connec
 import { trackEvent } from "./lib/track";
 import { isAdminUser } from "./lib/admin";
 import { getAuthRedirectUrl } from "./lib/site-url";
+import {
+  ACADEMY_SETUP_GUIDES,
+  academyGuideStorageKey,
+  type AcademyGuideIcon,
+  type AcademyGuideTopic,
+} from "./lib/academy-setup-guide";
 import { useModalA11y } from "./lib/use-modal-a11y";
 import {
   startSubscription,
@@ -36435,6 +36441,255 @@ const AcademyReviewsToggle = ({ userId }: { userId: string | null }) => {
   );
 };
 
+// ── Academy: "how do I set this up?" carousel ───────────────────────
+// A swipeable setup guide pinned to the top of the Classes and Video
+// Lessons screens. Copy lives in lib/academy-setup-guide.ts; this is
+// just the player.
+//
+// Behaviour: native horizontal scroll-snap (so a thumb swipe works on
+// iOS without a gesture library), plus arrow buttons, dots, and ←/→
+// keys once the track has focus. The last slide swaps its Next button
+// for the real "create one" action. Hiding it writes a localStorage
+// flag per topic so it stays gone, with a slim "How to…" chip left
+// behind to bring it back.
+
+// "Has this braider hidden the guide?" lives in localStorage, which is
+// an external store — so it's read through useSyncExternalStore rather
+// than an on-mount setState. That keeps the server render (guide shown)
+// and the hydrated client render honest, and lets both Academy screens
+// react at once if they're ever mounted together. Private-browsing
+// throws on write, so we keep a session-only fallback.
+const academyGuideListeners = new Set<() => void>();
+const academyGuideFallback = new Map<string, boolean>();
+
+const subscribeAcademyGuide = (onChange: () => void) => {
+  academyGuideListeners.add(onChange);
+  return () => { academyGuideListeners.delete(onChange); };
+};
+
+const readAcademyGuideHidden = (key: string): boolean => {
+  try { return window.localStorage.getItem(key) === "1"; }
+  catch { return academyGuideFallback.get(key) ?? false; }
+};
+
+const writeAcademyGuideHidden = (key: string, hidden: boolean) => {
+  try {
+    if (hidden) window.localStorage.setItem(key, "1");
+    else window.localStorage.removeItem(key);
+  } catch { academyGuideFallback.set(key, hidden); }
+  academyGuideListeners.forEach((cb) => cb());
+};
+
+// Icon slot → lucide component. Keeps the content file JSX-free.
+const ACADEMY_GUIDE_ICONS: Record<AcademyGuideIcon, React.ComponentType<{ size?: number }>> = {
+  payouts: CreditCard,
+  create: Plus,
+  format: Layers,
+  schedule: Clock,
+  location: MapPin,
+  source: Upload,
+  preview: PlayCircle,
+  price: DollarSign,
+  cover: ImageIcon,
+  publish: Sparkles,
+  share: Share2,
+  roster: Users,
+};
+
+const AcademySetupCarousel = ({ topic, onStart }: {
+  topic: AcademyGuideTopic;
+  /** Opens the new class / new video editor from the final slide. */
+  onStart: () => void;
+}) => {
+  const guide = ACADEMY_SETUP_GUIDES[topic];
+  const storageKey = academyGuideStorageKey(topic);
+  const slides = guide.slides;
+  const last = slides.length - 1;
+
+  const hidden = useSyncExternalStore(
+    subscribeAcademyGuide,
+    () => readAcademyGuideHidden(storageKey),
+    () => false, // server render: show the guide
+  );
+  const [index, setIndex] = useState(0);
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const headingId = useId();
+
+  const reducedMotion = useMemo(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+    catch { return false; }
+  }, []);
+
+  // Scrolling the track is what moves the carousel — the arrows and
+  // dots just drive the scroll, and onScroll is the single source of
+  // truth for which slide is showing.
+  const goTo = useCallback((next: number) => {
+    const el = trackRef.current;
+    const i = Math.max(0, Math.min(last, next));
+    if (!el) { setIndex(i); return; }
+    el.scrollTo({ left: i * el.clientWidth, behavior: reducedMotion ? "auto" : "smooth" });
+    setIndex(i);
+  }, [last, reducedMotion]);
+
+  const onScroll = () => {
+    const el = trackRef.current;
+    if (!el || el.clientWidth === 0) return;
+    const i = Math.round(el.scrollLeft / el.clientWidth);
+    setIndex((prev) => (prev === i ? prev : Math.max(0, Math.min(last, i))));
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowRight") { e.preventDefault(); goTo(index + 1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); goTo(index - 1); }
+  };
+
+  if (hidden) {
+    return (
+      <button
+        type="button"
+        onClick={() => { writeAcademyGuideHidden(storageKey, false); setIndex(0); }}
+        className="w-full flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-[12.5px] font-semibold"
+        style={{ background: C.brandSurface, border: `1px solid ${C.brandBorder}`, color: C.brandPrimary }}
+      >
+        <HelpCircle size={15} />
+        {guide.title}
+      </button>
+    );
+  }
+
+  return (
+    <Card className="overflow-hidden" style={{ boxShadow: SHADOWS.card }}>
+      <div className="flex items-start gap-3 px-4 pt-4">
+        <div className="flex-1 min-w-0">
+          <p id={headingId} className="text-[15px] font-semibold" style={{ color: C.espresso, fontFamily: FONT_DISPLAY }}>
+            {guide.title}
+          </p>
+          <p className="text-[11.5px] mt-0.5" style={{ color: C.muted }}>{guide.subtitle}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => writeAcademyGuideHidden(storageKey, true)}
+          className="p-1.5 -mr-1 -mt-1 rounded-lg shrink-0"
+          style={{ color: C.mutedSoft }}
+          aria-label={`Hide ${guide.title.toLowerCase()}`}
+        >
+          <X size={16} />
+        </button>
+      </div>
+
+      <div
+        ref={trackRef}
+        onScroll={onScroll}
+        onKeyDown={onKeyDown}
+        tabIndex={0}
+        role="group"
+        aria-labelledby={headingId}
+        className="bbp-scroll mt-3 flex overflow-x-auto"
+        style={{ scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch", outline: "none" }}
+      >
+        {slides.map((s, i) => {
+          const Icon = ACADEMY_GUIDE_ICONS[s.icon];
+          return (
+            <div
+              key={s.key}
+              // aria-hidden on the off-screen slides so a screen reader
+              // reads one step at a time instead of the whole guide.
+              aria-hidden={i !== index}
+              className="shrink-0 w-full px-4 pb-1"
+              style={{ scrollSnapAlign: "start", scrollSnapStop: "always" }}
+            >
+              <div className="flex items-center gap-2.5">
+                <div
+                  className="grid place-items-center rounded-xl shrink-0"
+                  style={{ width: 34, height: 34, background: GRADIENTS.primary, color: "#FFFFFF" }}
+                >
+                  <Icon size={17} />
+                </div>
+                <span
+                  className="text-[10.5px] font-bold uppercase"
+                  style={{ color: C.brandPrimary, letterSpacing: "0.08em" }}
+                >
+                  {s.eyebrow}
+                </span>
+              </div>
+              <p className="text-[15px] font-semibold mt-2.5" style={{ color: C.espresso }}>{s.title}</p>
+              <p className="text-[13px] leading-relaxed mt-1" style={{ color: C.coffee }}>{s.body}</p>
+              {s.tips && s.tips.length > 0 && (
+                <ul className="mt-2.5 space-y-1.5">
+                  {s.tips.map((t) => (
+                    <li key={t} className="flex items-start gap-2">
+                      <Check size={13} style={{ color: C.success, flexShrink: 0, marginTop: 2 }} />
+                      <span className="text-[12px] leading-snug" style={{ color: C.muted }}>{t}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center gap-2 px-4 py-3 mt-1">
+        <button
+          type="button"
+          onClick={() => goTo(index - 1)}
+          disabled={index === 0}
+          className="p-2 rounded-full disabled:opacity-30"
+          style={{ border: `1px solid ${C.hairline}`, color: C.coffee, background: C.paper }}
+          aria-label="Previous step"
+        >
+          <ChevronLeft size={16} />
+        </button>
+
+        <div className="flex-1 flex items-center justify-center gap-1.5" aria-hidden>
+          {slides.map((s, i) => (
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => goTo(i)}
+              tabIndex={-1}
+              style={{
+                width: i === index ? 18 : 6,
+                height: 6,
+                borderRadius: 999,
+                border: 0,
+                padding: 0,
+                background: i === index ? GRADIENTS.primary : C.hairline,
+                backgroundColor: i === index ? C.brandPrimary : C.hairline,
+                transition: "width 200ms ease",
+              }}
+            />
+          ))}
+        </div>
+
+        {index === last ? (
+          <button
+            type="button"
+            onClick={onStart}
+            className="rounded-full px-4 py-2 text-[12.5px] font-semibold"
+            style={{ background: GRADIENTS.primary, color: "#FFFFFF", border: 0, boxShadow: SHADOWS.primaryGlow }}
+          >
+            {guide.cta}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => goTo(index + 1)}
+            className="p-2 rounded-full"
+            style={{ border: `1px solid ${C.hairline}`, color: C.coffee, background: C.paper }}
+            aria-label="Next step"
+          >
+            <ChevronRight size={16} />
+          </button>
+        )}
+      </div>
+
+      <p className="sr-only" aria-live="polite">Step {index + 1} of {slides.length}: {slides[index].title}</p>
+    </Card>
+  );
+};
+
 // ── Academy: Classes management (Phase 2) ───────────────────────────
 // Braider-facing CRUD for ticketed workshops. Create/edit an offering,
 // publish it to the /@handle/classes storefront, and view the paid
@@ -36639,6 +36894,7 @@ const ClassesScreen = ({ store, onBack }: { store: any; onBack: () => void }) =>
         }
       />
       <div className="px-5 pt-2 space-y-3">
+        <AcademySetupCarousel topic="classes" onStart={startNew} />
         {items.length > 0 && <AcademyReviewsToggle userId={userId} />}
         {api.loading ? (
           <p className="text-[13px] py-6 text-center" style={{ color: C.muted }}>Loading…</p>
@@ -37010,6 +37266,7 @@ const VideosScreen = ({ store, onBack }: { store: any; onBack: () => void }) => 
         }
       />
       <div className="px-5 pt-2 space-y-3">
+        <AcademySetupCarousel topic="videos" onStart={startNew} />
         {items.length > 0 && <AcademyReviewsToggle userId={userId} />}
         {api.loading ? (
           <p className="text-[13px] py-6 text-center" style={{ color: C.muted }}>Loading…</p>
