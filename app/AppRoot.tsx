@@ -391,7 +391,17 @@ import {
 import {
   EDUCATION_CATEGORIES,
   EDUCATION_TOTAL_LESSONS,
+  type EducationLesson,
 } from "./lib/braider-education-content";
+import {
+  EDUCATION_MIN_QUERY,
+  EDUCATION_QUICK_SEARCHES,
+  normalizeEducationText,
+  searchEducation,
+  splitEducationHighlight,
+  type EducationMatcher,
+  type EducationSearchHit,
+} from "./lib/braider-education-search";
 import {
   type BookingPolicy,
   type BookingPolicyInput,
@@ -18965,18 +18975,173 @@ const BossGrowthGuideScreen = ({ store, onBack }: { store: any; onBack: () => vo
 };
 
 // ---- Braider Education Hub ------------------------------------------
-// Static, content-first learning hub. No business-logic coupling:
-// reads only from lib/braider-education-content.ts. Filter chips +
-// expandable lesson cards, mobile-first.
+// Static, content-first learning hub. No business-logic coupling: it
+// reads lib/braider-education-content.ts and ranks it with the pure
+// helpers in lib/braider-education-search.ts.
+//
+// ~90 lessons is more than anyone scrolls, so search leads and the
+// category chips narrow whatever is on screen — browse or results.
+
+// Query words picked out inside a title or snippet.
+const EducationHighlight = ({ text, matchers }: { text: string; matchers: EducationMatcher[] }) => {
+  if (!matchers.length) return <>{text}</>;
+  return (
+    <>
+      {splitEducationHighlight(text, matchers).map((part, i) => (
+        part.hit
+          ? <mark key={i} style={{ background: "rgba(124,58,237,0.16)", color: "inherit", fontWeight: 700, borderRadius: 4, padding: "0 2px" }}>{part.text}</mark>
+          : <React.Fragment key={i}>{part.text}</React.Fragment>
+      ))}
+    </>
+  );
+};
+
+const EducationLessonCard = ({ lesson, categoryName, snippet, matchers, isOpen, onToggle }: {
+  lesson: EducationLesson;
+  categoryName: string;
+  // Result preview — omitted while browsing, where the title is enough.
+  snippet?: string | null;
+  matchers: EducationMatcher[];
+  isOpen: boolean;
+  onToggle: () => void;
+}) => (
+  <Card className="p-4 active:scale-[0.99]" onClick={onToggle}>
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold" style={{ color: C.espresso, lineHeight: 1.35 }}>
+          <EducationHighlight text={lesson.title} matchers={matchers} />
+        </p>
+        <div className="flex items-center gap-2 mt-1.5">
+          <Pill tone="gold">{categoryName}</Pill>
+          <span className="text-[11px]" style={{ color: C.muted }}>{lesson.readMinutes} min read</span>
+        </div>
+        {!isOpen && snippet && (
+          <p className="text-[12px] mt-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+            <EducationHighlight text={snippet} matchers={matchers} />
+          </p>
+        )}
+      </div>
+      <ChevronRight
+        size={18}
+        style={{ color: C.muted, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}
+      />
+    </div>
+
+    {isOpen && (
+      <div className="mt-3 space-y-2.5" onClick={(e) => e.stopPropagation()}>
+        {lesson.body.map((para, i) => (
+          <p key={i} className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.55 }}>{para}</p>
+        ))}
+        <div className="p-3 rounded-xl" style={{ background: C.ivory }}>
+          <p className="text-[11px] font-bold mb-1" style={{ color: C.goldDeep, letterSpacing: "0.1em", textTransform: "uppercase" }}>Try this week</p>
+          <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>{lesson.tryThisWeek}</p>
+        </div>
+        {lesson.relatedTool && (
+          <p className="text-[11px]" style={{ color: C.muted }}>
+            <span style={{ fontWeight: 700, color: C.coffee }}>Related Braid Boss tool:</span> {lesson.relatedTool}
+          </p>
+        )}
+      </div>
+    )}
+  </Card>
+);
+
+// Tappable suggestion / filter chip.
+const EducationChip = ({ label, count, active, onClick }: {
+  label: string;
+  count?: number;
+  active?: boolean;
+  onClick: () => void;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="text-xs font-semibold whitespace-nowrap"
+    style={{
+      padding: "8px 14px", borderRadius: 999,
+      background: active ? C.espresso : "transparent",
+      color: active ? C.cream : C.coffee,
+      border: `1px solid ${active ? C.espresso : C.hairline}`,
+      flexShrink: 0,
+    }}
+  >
+    {label}
+    {count !== undefined && (
+      <span style={{ marginLeft: 6, opacity: 0.65, fontWeight: 700 }}>{count}</span>
+    )}
+  </button>
+);
+
 const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
   useEffect(() => { trackEvent("braider_education_hub_view", { category: "feature" }); }, []);
+  const [query, setQuery] = useState("");
   const [activeCat, setActiveCat] = useState<string>("all");
   const [openLesson, setOpenLesson] = useState<string | null>(null);
 
-  const cats = activeCat === "all"
+  const trimmed = query.trim();
+  const searching = normalizeEducationText(trimmed).length >= EDUCATION_MIN_QUERY;
+  // ~90 short lessons scan in well under a frame, so there's no debounce
+  // between typing and results — only the analytics ping waits.
+  const result = useMemo(() => (searching ? searchEducation(trimmed) : null), [searching, trimmed]);
+
+  const hits: EducationSearchHit[] = useMemo(() => {
+    if (!result) return [];
+    return activeCat === "all" ? result.hits : result.hits.filter(h => h.categoryId === activeCat);
+  }, [result, activeCat]);
+
+  // Chips count results while searching, lessons while browsing.
+  const chips = useMemo(() => {
+    const counts: Record<string, number> = {};
+    if (result) for (const h of result.hits) counts[h.categoryId] = (counts[h.categoryId] || 0) + 1;
+    const all = [
+      { id: "all", name: "All", count: result ? result.hits.length : EDUCATION_TOTAL_LESSONS },
+      ...EDUCATION_CATEGORIES.map(c => ({
+        id: c.id,
+        name: c.name,
+        count: result ? (counts[c.id] || 0) : c.lessons.length,
+      })),
+    ];
+    // A category with no results is noise mid-search — except the one
+    // that's selected, which still needs to be tappable to get back out.
+    return result ? all.filter(c => c.count > 0 || c.id === "all" || c.id === activeCat) : all;
+  }, [result, activeCat]);
+
+  // Log searches once typing settles, so the topics that find nothing
+  // can guide future lessons.
+  //
+  // What a braider types never leaves the device. This reports shape
+  // (how long, how many words, how well it landed) plus canonical topic
+  // keys drawn from the synonym table — a fixed vocabulary. Words that
+  // table doesn't recognize are dropped rather than logged, so no
+  // payload can be reassembled into the original query.
+  useEffect(() => {
+    if (!result) return;
+    const t = setTimeout(() => {
+      trackEvent("braider_education_search", {
+        category: "feature",
+        metadata: {
+          results: hits.length,
+          mode: hits.length === 0 ? "empty" : result.mode,
+          category: activeCat === "all" ? null : activeCat,
+          // Joined, not an array — trackEvent's sanitizer keeps only
+          // scalar metadata values and would drop a list silently.
+          topics: result.topics.join(",") || null,
+          top_lesson_id: hits[0]?.lesson.id ?? null,
+          query_chars: trimmed.length,
+          query_tokens: result.terms.length,
+        },
+      });
+    }, 900);
+    return () => clearTimeout(t);
+  }, [result, hits, activeCat, trimmed]);
+
+  const runSearch = (q: string) => { setQuery(q); setOpenLesson(null); };
+  const activeCatName = EDUCATION_CATEGORIES.find(c => c.id === activeCat)?.name || "";
+  const browseCats = activeCat === "all"
     ? EDUCATION_CATEGORIES
     : EDUCATION_CATEGORIES.filter(c => c.id === activeCat);
+  const matchers = result?.matchers || [];
 
   return (
     <div className="bbp-fade pb-32">
@@ -18994,76 +19159,133 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
           </p>
         </div>
 
-        {/* Category chips */}
-        <div className="flex gap-2 overflow-x-auto bbp-scroll" style={{ paddingBottom: 2 }}>
-          {[{ id: "all", name: "All" }, ...EDUCATION_CATEGORIES.map(c => ({ id: c.id, name: c.name }))].map(chip => (
-            <button
-              type="button"
-              key={chip.id}
-              onClick={() => { setActiveCat(chip.id); setOpenLesson(null); }}
-              className="text-xs font-semibold whitespace-nowrap"
-              style={{
-                padding: "8px 14px", borderRadius: 999,
-                background: activeCat === chip.id ? C.espresso : "transparent",
-                color: activeCat === chip.id ? C.cream : C.coffee,
-                border: `1px solid ${activeCat === chip.id ? C.espresso : C.hairline}`,
-                flexShrink: 0,
-              }}
-            >
-              {chip.name}
+        {/* Search */}
+        <div className="flex items-center gap-2 px-3 py-2.5 rounded-2xl"
+          style={{ background: C.paper, border: `1px solid ${C.hairline}` }}>
+          <Search size={16} style={{ color: C.muted, flexShrink: 0 }} />
+          <input
+            value={query}
+            onChange={e => { setQuery(e.target.value); setOpenLesson(null); }}
+            onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
+            placeholder={`Search ${EDUCATION_TOTAL_LESSONS} lessons — deposits, taxes, no-shows…`}
+            aria-label="Search lessons"
+            enterKeyHint="search"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            className="flex-1 bg-transparent outline-none text-[13.5px] min-w-0"
+            style={{ color: C.espresso }}
+          />
+          {query && (
+            <button type="button" onClick={() => runSearch("")} aria-label="Clear search" style={{ color: C.muted, flexShrink: 0 }}>
+              <X size={16} />
             </button>
+          )}
+        </div>
+
+        {/* Category filter */}
+        <div className="flex gap-2 overflow-x-auto bbp-scroll" style={{ paddingBottom: 2 }}>
+          {chips.map(chip => (
+            <EducationChip
+              key={chip.id}
+              label={chip.name}
+              count={chip.count}
+              active={activeCat === chip.id}
+              onClick={() => { setActiveCat(chip.id); setOpenLesson(null); }}
+            />
           ))}
         </div>
 
-        {cats.map(cat => (
-          <div key={cat.id} className="space-y-2.5">
-            <div>
-              <SectionTitle>{cat.name}</SectionTitle>
-              <p className="text-[12px] -mt-1" style={{ color: C.muted }}>{cat.blurb}</p>
+        {searching ? (
+          <div className="space-y-2.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-[12px]" style={{ color: C.muted }}>
+                {hits.length === 0
+                  ? "No lessons found"
+                  : `${hits.length} lesson${hits.length === 1 ? "" : "s"}${activeCat === "all" ? "" : ` in ${activeCatName}`}`}
+              </p>
+              <button type="button" onClick={() => runSearch("")} className="text-[12px] font-semibold" style={{ color: C.gold, flexShrink: 0 }}>
+                Clear search
+              </button>
             </div>
-            {cat.lessons.map(lesson => {
-              const isOpen = openLesson === lesson.id;
-              return (
-                <Card
-                  key={lesson.id}
-                  className="p-4 active:scale-[0.99]"
-                  onClick={() => setOpenLesson(isOpen ? null : lesson.id)}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold" style={{ color: C.espresso, lineHeight: 1.35 }}>{lesson.title}</p>
-                      <div className="flex items-center gap-2 mt-1.5">
-                        <Pill tone="gold">{cat.name}</Pill>
-                        <span className="text-[11px]" style={{ color: C.muted }}>{lesson.readMinutes} min read</span>
-                      </div>
-                    </div>
-                    <ChevronRight
-                      size={18}
-                      style={{ color: C.muted, flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}
-                    />
-                  </div>
 
-                  {isOpen && (
-                    <div className="mt-3 space-y-2.5" onClick={(e) => e.stopPropagation()}>
-                      {lesson.body.map((para, i) => (
-                        <p key={i} className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.55 }}>{para}</p>
+            {result?.mode === "loose" && hits.length > 0 && (
+              <p className="text-[11.5px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+                No single lesson covers everything you typed — these are the closest.
+              </p>
+            )}
+
+            {hits.length === 0 && (
+              <Card className="p-4 space-y-3">
+                {result && result.hits.length > 0 ? (
+                  <>
+                    <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                      Nothing in {activeCatName} matches &ldquo;{trimmed}&rdquo; — but {result.hits.length} lesson{result.hits.length === 1 ? "" : "s"} elsewhere in the hub {result.hits.length === 1 ? "does" : "do"}.
+                    </p>
+                    <Button variant="outline" onClick={() => setActiveCat("all")}>Search all categories</Button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>
+                      No lesson matches &ldquo;{trimmed}&rdquo;. Try one word instead of a sentence — or start from one of these:
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {EDUCATION_QUICK_SEARCHES.slice(0, 6).map(q => (
+                        <EducationChip key={q} label={q} onClick={() => runSearch(q)} />
                       ))}
-                      <div className="p-3 rounded-xl" style={{ background: C.ivory }}>
-                        <p className="text-[11px] font-bold mb-1" style={{ color: C.goldDeep, letterSpacing: "0.1em", textTransform: "uppercase" }}>Try this week</p>
-                        <p className="text-[13px]" style={{ color: C.coffee, lineHeight: 1.5 }}>{lesson.tryThisWeek}</p>
-                      </div>
-                      {lesson.relatedTool && (
-                        <p className="text-[11px]" style={{ color: C.muted }}>
-                          <span style={{ fontWeight: 700, color: C.coffee }}>Related Braid Boss tool:</span> {lesson.relatedTool}
-                        </p>
-                      )}
                     </div>
-                  )}
-                </Card>
-              );
-            })}
+                  </>
+                )}
+              </Card>
+            )}
+
+            {hits.map(hit => (
+              <EducationLessonCard
+                key={hit.lesson.id}
+                lesson={hit.lesson}
+                categoryName={hit.categoryName}
+                snippet={hit.snippet}
+                matchers={matchers}
+                isOpen={openLesson === hit.lesson.id}
+                onToggle={() => setOpenLesson(openLesson === hit.lesson.id ? null : hit.lesson.id)}
+              />
+            ))}
           </div>
-        ))}
+        ) : (
+          <>
+            {/* Popular searches — the fastest way in for anyone who
+                doesn't know what the hub calls the thing they want. */}
+            <div>
+              <p className="text-[11px] font-bold uppercase mb-2" style={{ color: C.muted, letterSpacing: "0.1em" }}>
+                Popular searches
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {EDUCATION_QUICK_SEARCHES.map(q => (
+                  <EducationChip key={q} label={q} onClick={() => runSearch(q)} />
+                ))}
+              </div>
+            </div>
+
+            {browseCats.map(cat => (
+              <div key={cat.id} className="space-y-2.5">
+                <div>
+                  <SectionTitle>{cat.name}</SectionTitle>
+                  <p className="text-[12px] -mt-1" style={{ color: C.muted }}>{cat.blurb}</p>
+                </div>
+                {cat.lessons.map(lesson => (
+                  <EducationLessonCard
+                    key={lesson.id}
+                    lesson={lesson}
+                    categoryName={cat.name}
+                    matchers={matchers}
+                    isOpen={openLesson === lesson.id}
+                    onToggle={() => setOpenLesson(openLesson === lesson.id ? null : lesson.id)}
+                  />
+                ))}
+              </div>
+            ))}
+          </>
+        )}
 
         <p className="text-[11px] text-center px-4" style={{ color: C.muted, lineHeight: 1.5 }}>
           Guidance only — pricing, tax, and policy choices depend on your situation. Check your local requirements for anything legal or financial.
