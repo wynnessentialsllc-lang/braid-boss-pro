@@ -439,6 +439,9 @@ function WaitlistForm({ handle, classSlug }: { handle: string; classSlug: string
         <p className="text-[13px] mt-1" style={{ color: C.muted }}>
           If a seat opens up, your braider will reach out at {email.trim()}.
         </p>
+        <p className="text-[12px] mt-2" style={{ color: C.muted }}>
+          We&apos;ve emailed you a confirmation.
+        </p>
       </div>
     );
   }

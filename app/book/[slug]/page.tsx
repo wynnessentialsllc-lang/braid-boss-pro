@@ -4976,6 +4976,14 @@ export default function PublicBookingPage() {
                 <p style={{ fontSize: 13, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
                   The stylist will contact you if an opening becomes available.
                 </p>
+                {/* Email is optional on this form, so only promise a
+                    confirmation when we actually have somewhere to send
+                    it (the trigger skips the send otherwise). */}
+                <p style={{ fontSize: 13, color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
+                  {email.trim()
+                    ? `We've emailed a confirmation to ${email.trim()}.`
+                    : "Nothing is booked yet — a waitlist spot isn't an appointment."}
+                </p>
               </div>
             )}
           </div>
