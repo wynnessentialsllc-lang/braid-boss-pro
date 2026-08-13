@@ -1864,6 +1864,80 @@ const renderWaitlistOpening = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- waitlist_join_client (booking waitlist join receipt) ----------
+// Sent to the person who just joined a stylist's waitlist from the
+// public booking page, so they have their request in writing. Enqueued
+// by waitlist_requests_notify_joined() — only when they left an email
+// (the form asks for a name and nothing else).
+const renderWaitlistJoinClient = (p: Record<string, any>) => {
+  const clientName  = p.clientName || "there";
+  const studioName  = p.studioName || "your stylist";
+  const serviceName = String(p.serviceName || "").trim();
+  const date        = fmtDate(p.preferredDate);
+  const time        = String(p.preferredTime || "").trim();
+  const flexibility = String(p.flexibility || "").trim();
+  const bookUrl     = String(p.bookUrl || "").trim();
+  const when        = [date, time].filter(Boolean).join(" · ");
+
+  const trow = (label: string, value: string) =>
+    `<tr><td style="padding:4px 0;color:${C.muted};font-size:13px;vertical-align:top;">${escape(label)}</td><td style="padding:4px 0 4px 14px;text-align:right;color:${C.espresso};font-size:13px;font-weight:600;vertical-align:top;">${escape(value)}</td></tr>`;
+  const rows = [
+    serviceName ? trow("Service", serviceName) : "",
+    when ? trow("Preferred", when) : "",
+    flexibility ? trow("Flexibility", flexibility) : "",
+  ].filter(Boolean).join("");
+
+  const subject = `You're on the waitlist — ${studioName}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Waitlist confirmed</p>
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">You're on the list, ${escape(clientName)}.</h1>
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0 0 8px;">
+      ${escape(studioName)} has your waitlist request. If an opening comes up that fits what you asked for, they'll reach out to you directly.
+    </p>
+    ${rows ? `
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:14px 0;padding:14px;background:${C.tint};border-radius:12px;">
+        ${rows}
+      </table>` : ""}
+    ${bookUrl ? ctaButton("See open times", bookUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:14px 0 0;">
+      Nothing is booked yet — a waitlist spot isn't an appointment. Reply to this email if anything changes or you'd like to come off the list.
+    </p>
+  `);
+  return { subject, html };
+};
+
+// ---- class_waitlist_join_client (class waitlist join receipt) ------
+// Sent when someone joins the waitlist for a full class on a braider's
+// public class page. Enqueued by class_waitlist_notify_joined().
+const renderClassWaitlistJoinClient = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your braider";
+  const classTitle = String(p.classTitle || "").trim() || "the class";
+  const whenLabel  = String(p.whenLabel || "").trim();
+  const classUrl   = String(p.classUrl || "").trim();
+
+  const subject = `You're on the waitlist — ${classTitle}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Waitlist confirmed</p>
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">You're on the list, ${escape(clientName)}.</h1>
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0 0 8px;">
+      You joined the waitlist for <strong>${escape(classTitle)}</strong> with ${escape(studioName)}.
+    </p>
+    ${whenLabel ? `
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:14px 0;padding:14px;background:${C.tint};border-radius:12px;">
+        <tr><td style="padding:4px 0;color:${C.muted};font-size:13px;">When</td><td style="padding:4px 0 4px 14px;text-align:right;color:${C.espresso};font-size:13px;font-weight:600;">${escape(whenLabel)}</td></tr>
+      </table>` : ""}
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0 0 8px;">
+      The class is full right now. If a seat frees up, ${escape(studioName)} will email you at this address.
+    </p>
+    ${classUrl ? ctaButton("View class details", classUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:14px 0 0;">
+      Your seat isn't reserved and you haven't been charged — this only confirms you're on the waitlist.
+    </p>
+  `);
+  return { subject, html };
+};
+
 // ---- daily_sales_summary (owner end-of-day report) -----------------
 // Sent to the stylist at their local midnight summarizing the prior
 // day's sales. Enqueued by process_daily_sales_summaries() only when
@@ -2244,6 +2318,10 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderReorderNudge(row.payload || {});
     case "waitlist_opening":
       return renderWaitlistOpening(row.payload || {});
+    case "waitlist_join_client":
+      return renderWaitlistJoinClient(row.payload || {});
+    case "class_waitlist_join_client":
+      return renderClassWaitlistJoinClient(row.payload || {});
     case "daily_sales_summary":
       return renderDailySalesSummary(row.payload || {});
     default:
