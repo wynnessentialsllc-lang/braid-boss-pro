@@ -1864,6 +1864,38 @@ const renderWaitlistOpening = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- waitlist_dates_open (the monthly drop) -------------------------
+// Sent automatically when a braider on the monthly_release booking
+// window opens a new stretch of dates (migration 20261238) — the thing
+// the public page has always promised the waitlist. Announces a range,
+// not a single slot, and reminds the reader which date they asked about
+// when they named one.
+const renderWaitlistDatesOpen = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your stylist";
+  const rangeLabel = String(p.rangeLabel || "").trim();
+  const preferred  = fmtDate(p.preferredDate);
+  const bookUrl    = String(p.bookUrl || "").trim();
+
+  const subject = `New dates just opened — ${studioName}`;
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">Books are open</p>
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">${escape(clientName)}, new dates just opened.</h1>
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0 0 4px;">
+      ${escape(studioName)} just released more availability${rangeLabel ? ` — now booking <strong>${escape(rangeLabel)}</strong>` : ""}.
+      ${preferred ? `You asked about <strong>${escape(preferred)}</strong>.` : ""}
+    </p>
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0 0 4px;">
+      These go fast — it's first come, first served.
+    </p>
+    ${bookUrl ? ctaButton("Book your spot", bookUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:14px 0 0;">
+      You're getting this because you joined ${escape(studioName)}'s waitlist.
+    </p>
+  `);
+  return { subject, html };
+};
+
 // ---- waitlist_join_client (booking waitlist join receipt) ----------
 // Sent to the person who just joined a stylist's waitlist from the
 // public booking page, so they have their request in writing. Enqueued
@@ -2540,6 +2572,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderReorderNudge(row.payload || {});
     case "waitlist_opening":
       return renderWaitlistOpening(row.payload || {});
+    case "waitlist_dates_open":
+      return renderWaitlistDatesOpen(row.payload || {});
     case "waitlist_join_client":
       return renderWaitlistJoinClient(row.payload || {});
     case "class_waitlist_join_client":
