@@ -63,6 +63,17 @@ export default function StylistShopPage() {
     };
   }, [profileState.status, profileState.status === "ready" ? profileState.profile.slug : ""]);
 
+  // Shop turned off: send old links (an Instagram bio, a shared
+  // screenshot) to the booking page instead of a storefront the braider
+  // has opted out of. replace() so Back returns where they came from,
+  // matching how /@handle itself bounces.
+  const shopHidden = profileState.status === "ready" && profileState.profile.shop_hidden;
+  const bookingSlug = profileState.status === "ready" ? profileState.profile.slug : "";
+  useEffect(() => {
+    if (!shopHidden || !bookingSlug) return;
+    router.replace(`/book/${encodeURIComponent(bookingSlug)}`);
+  }, [shopHidden, bookingSlug, router]);
+
   // Build the category set the stylist actually has products in,
   // so the filter row only shows pills that have content. Always
   // include "All" first.
@@ -94,6 +105,14 @@ export default function StylistShopPage() {
       </div>
     );
   }
+  // Bounce in flight (see the effect above) — don't flash the grid.
+  if (shopHidden) {
+    return (
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: C.muted }}>
+        Taking you to the booking page…
+      </div>
+    );
+  }
 
   return (
     <StorefrontShell
@@ -102,6 +121,7 @@ export default function StylistShopPage() {
       description={profileState.profile.shop_description}
       bannerUrl={profileState.profile.shop_banner_url || profileState.profile.banner_image_url}
       logoUrl={profileState.profile.shop_logo_url || profileState.profile.logo_url}
+      shopHidden={profileState.profile.shop_hidden}
       active="shop"
     >
       {productsLoading ? (

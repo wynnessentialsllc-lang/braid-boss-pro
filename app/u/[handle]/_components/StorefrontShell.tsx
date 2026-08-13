@@ -75,6 +75,7 @@ export const StorefrontShell = ({
   bannerUrl,
   logoUrl,
   active,
+  shopHidden = false,
   children,
 }: {
   handle: string;             // Without the leading "@" — e.g. "janestylist".
@@ -85,6 +86,11 @@ export const StorefrontShell = ({
   bannerUrl: string | null;
   logoUrl: string | null;
   active: Tab;
+  // Braider turned the Shop off (booking_links.shop_hidden). Drops the
+  // Shop tab so a storefront that doesn't sell anything stops offering
+  // a door into "Shop coming soon". Passed by every caller from the
+  // resolved profile, so the tab never renders and then vanishes.
+  shopHidden?: boolean;
   children: ReactNode;
 }) => {
   const router = useRouter();
@@ -298,18 +304,20 @@ export const StorefrontShell = ({
         </div>
 
         {/* Tab nav: Profile / Shop / Classes / Videos. Classes and
-            Videos always render (like Shop) — each destination shows
-            its own "coming soon" empty state when the braider hasn't
-            published anything yet, so the nav stays consistent across
-            storefronts. The nav is horizontally scrollable on narrow
-            phones so four tabs never wrap. */}
+            Videos render once the braider has published something —
+            each destination shows its own "coming soon" empty state in
+            the meantime. Shop renders unless the braider has turned it
+            off, which is the one section a braider can opt out of
+            entirely (plenty only take bookings). The nav is
+            horizontally scrollable on narrow phones so four tabs never
+            wrap. */}
         <nav
           className="mt-5 flex gap-2 border-b overflow-x-auto bbp-no-scrollbar"
           style={{ borderColor: C.brandBorder }}
         >
           {([
             ["profile", "Profile"] as const,
-            ["shop", "Shop"] as const,
+            ...(shopHidden ? [] : [["shop", "Shop"] as const]),
             ...(sections.hasClasses ? [["classes", "Classes"] as const] : []),
             ...(sections.hasVideos ? [["videos", "Videos"] as const] : []),
           ]).map(([t, label]) => {
