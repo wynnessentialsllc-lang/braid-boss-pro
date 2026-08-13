@@ -94,6 +94,7 @@ export default function PoliciesPage() {
     logoUrl: (profileState.status === "ready"
       ? profileState.profile.shop_logo_url || profileState.profile.logo_url
       : null) as string | null,
+    shopHidden: profileState.status === "ready" ? profileState.profile.shop_hidden : false,
     active: "shop" as const,
   };
 

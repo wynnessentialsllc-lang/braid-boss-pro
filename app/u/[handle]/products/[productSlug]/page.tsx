@@ -348,6 +348,7 @@ export default function ProductDetailPage() {
         description={profileState.profile.shop_description}
         bannerUrl={profileState.profile.shop_banner_url || profileState.profile.banner_image_url}
         logoUrl={profileState.profile.shop_logo_url || profileState.profile.logo_url}
+        shopHidden={profileState.profile.shop_hidden}
         active="shop"
       >
         <div
@@ -384,6 +385,7 @@ export default function ProductDetailPage() {
       description={profileState.profile.shop_description}
       bannerUrl={profileState.profile.shop_banner_url || profileState.profile.banner_image_url}
       logoUrl={profileState.profile.shop_logo_url || profileState.profile.logo_url}
+      shopHidden={profileState.profile.shop_hidden}
       active="shop"
     >
       {/* Gallery */}

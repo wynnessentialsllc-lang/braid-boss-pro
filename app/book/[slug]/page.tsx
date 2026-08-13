@@ -325,6 +325,10 @@ type LinkConfig = {
   // /@handle storefront header as the @ display below the title.
   // Falls back to the canonical slug when not set.
   branded_slug?: string | null;
+  // Braider opted out of selling (20261237). Drops the Shop tab below
+  // so a stylist who only takes bookings doesn't advertise a door into
+  // "Shop coming soon".
+  shop_hidden?: boolean;
 };
 
 const SUPABASE_URL =
@@ -909,6 +913,20 @@ export default function PublicBookingPage() {
               }
             } catch { /* leave as null; UI falls back to "Braid Boss Pro" */ }
           }
+          // shop_hidden isn't in the resolver's return type, so read it
+          // alongside the name lookup — awaited here rather than in its
+          // own effect so the Shop tab is decided before the header
+          // paints and never appears and then vanishes. Defaults to
+          // shown if the read fails.
+          let shopHidden = false;
+          try {
+            const { data: extra } = await supabase
+              .from("booking_links")
+              .select("shop_hidden")
+              .eq("slug", row.slug)
+              .maybeSingle();
+            shopHidden = (extra as any)?.shop_hidden === true;
+          } catch { /* leave the Shop tab in place */ }
           // The rest of the page already keys off booking_links.slug
           // (services / availability RPCs, the submit RPC, etc.), so
           // expose row.slug as link.slug — never the URL slug, which
@@ -938,6 +956,7 @@ export default function PublicBookingPage() {
             about: (row.about as string | null) ?? null,
             stylist_photo_url: (row.stylist_photo_url as string | null) ?? null,
             branded_slug: (row.branded_slug as string | null) ?? null,
+            shop_hidden: shopHidden,
           };
           setLink(config);
         }
@@ -2445,7 +2464,13 @@ export default function PublicBookingPage() {
         {/* Profile / Shop tab nav. Profile is the active page —
             tapping it is a no-op. Shop links to the storefront
             grid using the canonical slug; the /@handle resolver
-            accepts either branded or random slugs. */}
+            accepts either branded or random slugs.
+
+            A braider who turned the Shop off loses the whole nav
+            rather than keeping a lone "Profile" tab that navigates
+            nowhere — with one destination there's nothing to tab
+            between. */}
+        {!link?.shop_hidden && (
         <nav
           style={{
             marginTop: 20, display: "flex", gap: 8,
@@ -2482,6 +2507,7 @@ export default function PublicBookingPage() {
             );
           })}
         </nav>
+        )}
       </div>
       <div
         className="mx-auto"

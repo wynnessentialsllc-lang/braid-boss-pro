@@ -4850,6 +4850,10 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   const [shopName, setShopName] = useState<string>(link?.shop_name || "");
   // Short shop description shown under the shop name on the storefront.
   const [shopDescription, setShopDescription] = useState<string>(link?.shop_description || "");
+  // Opt out of selling entirely. Stored inverted (shop_hidden) so the
+  // column defaults to "shop shown" for every existing link; the UI
+  // asks the positive question instead — "show my shop?".
+  const [shopVisible, setShopVisible] = useState<boolean>(link?.shop_hidden !== true);
   // Storefront-only branding overrides. Blank falls back to the
   // booking logo / banner on the public shop.
   const [shopLogoUrl, setShopLogoUrl] = useState<string>(link?.shop_logo_url || "");
@@ -4932,6 +4936,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
     setBusinessName(link?.business_name || "");
     setShopName(link?.shop_name || "");
     setShopDescription(link?.shop_description || "");
+    setShopVisible(link?.shop_hidden !== true);
     setShopLogoUrl(link?.shop_logo_url || "");
     setShopBannerUrl(link?.shop_banner_url || "");
     setIntro(link?.intro || "");
@@ -5023,6 +5028,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         business_name: businessName.trim() || null,
         shop_name: shopName.trim() || null,
         shop_description: shopDescription.trim().slice(0, 200) || null,
+        shop_hidden: !shopVisible,
         shop_logo_url: shopLogoUrl.trim() || null,
         shop_banner_url: shopBannerUrl.trim() || null,
         intro: intro.trim() || null,
@@ -5092,13 +5098,30 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         <Field label="Studio name" hint="Shown on your booking page — your stylist name (e.g. “Sheree”).">
           <Input value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="Sheree" />
         </Field>
-        <Field label="Shop name" hint="Optional — shown on your shop page. Use your brand/store name (e.g. “SBW Braiding”). Leave blank to reuse your studio name.">
-          <Input value={shopName} onChange={(e) => setShopName(e.target.value)} placeholder="SBW Braiding" />
-        </Field>
-        <Field label="Shop description" hint="Optional — a short line under your shop name describing what you sell.">
-          <Textarea value={shopDescription} onChange={(e) => setShopDescription(e.target.value)} rows={2}
-            placeholder="Hair bundles, edge control & growth oils — shipped fast." />
-        </Field>
+        {/* Sell-or-not switch. Sits above the shop fields so turning
+            the shop off visibly puts them away — no point naming a shop
+            nobody can reach. */}
+        <div className="rounded-2xl p-3" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+          <ToggleRow
+            label="Show my shop"
+            hint={shopVisible
+              ? "A Shop tab appears on your booking page for hair, products and gift cards."
+              : "Your booking page shows no Shop tab, and old shop links send visitors to your booking page."}
+            checked={shopVisible}
+            onChange={setShopVisible}
+          />
+        </div>
+        {shopVisible && (
+          <>
+            <Field label="Shop name" hint="Optional — shown on your shop page. Use your brand/store name (e.g. “SBW Braiding”). Leave blank to reuse your studio name.">
+              <Input value={shopName} onChange={(e) => setShopName(e.target.value)} placeholder="SBW Braiding" />
+            </Field>
+            <Field label="Shop description" hint="Optional — a short line under your shop name describing what you sell.">
+              <Textarea value={shopDescription} onChange={(e) => setShopDescription(e.target.value)} rows={2}
+                placeholder="Hair bundles, edge control & growth oils — shipped fast." />
+            </Field>
+          </>
+        )}
         <Field label="Intro line" hint="Optional — one sentence that greets visitors.">
           <Input value={intro} onChange={(e) => setIntro(e.target.value)} placeholder="Welcome — let's get you on the books." />
         </Field>
@@ -24565,6 +24588,9 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
     shop_name?: string | null;
     // Storefront-only description shown under the shop name (20260913).
     shop_description?: string | null;
+    // Braider opted out of selling (20261237) — hides the Shop tab on
+    // the booking page and across the storefront.
+    shop_hidden?: boolean;
     // Storefront-only branding overrides (20260912). Each falls back to
     // its booking-page counterpart on the public shop when blank.
     shop_logo_url?: string | null;
@@ -24634,15 +24660,22 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
       // The pending-request badge no longer queries here — it comes in
       // as a prop derived from the shared approvals queue so it stays
       // in lockstep with the Approvals screen's Active count.
-      const { data: link } = await supabase
+      const LINK_COLS =
+        "slug, active, intro, business_name, shop_name, shop_description, shop_logo_url, shop_banner_url, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business, header_theme, tagline, about, stylist_photo_url, mobile_base_address, mobile_base_lat, mobile_base_lng, mobile_base_zip, mobile_radius_miles, mobile_blocked_zips";
+      const readLink = (cols: string) => supabase
         .from("booking_links")
-        .select(
-          "slug, active, intro, business_name, shop_name, shop_description, shop_logo_url, shop_banner_url, logo_url, location_text, phone, policies, accent_color, gallery_photos, banner_image_url, business_city, business_state, instagram_url, tiktok_url, website_url, years_in_business, header_theme, tagline, about, stylist_photo_url, mobile_base_address, mobile_base_lat, mobile_base_lng, mobile_base_zip, mobile_radius_miles, mobile_blocked_zips"
-        )
+        .select(cols)
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+      // shop_hidden arrives with migration 20261237. If the app ships
+      // before the migration runs, PostgREST rejects the WHOLE select
+      // over the one unknown column — which nulls the link out and lets
+      // the Customize sheet hydrate blank fields over a populated page.
+      // Retry without it; the toggle reads "shop shown" until it lands.
+      let { data: link, error: linkErr } = await readLink(`${LINK_COLS}, shop_hidden`);
+      if (linkErr) ({ data: link } = await readLink(LINK_COLS));
       if (cancelled) return;
       setBookingLink(link as any);
     })();
