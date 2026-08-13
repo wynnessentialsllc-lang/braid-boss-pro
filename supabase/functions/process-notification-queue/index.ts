@@ -1938,6 +1938,228 @@ const renderClassWaitlistJoinClient = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- Academy: classes + video lessons -------------------------------
+// Everything after the sale — schedule changes, cancellations, the
+// day-before reminder, a freed seat, an expiring rental. All enqueued
+// from SQL (migration 20261236) so the copy in the plain-text `body`
+// and the payload these read stay in step.
+
+// Shared label/value table used across the Academy templates.
+const academyRows = (rows: Array<[string, string | null | undefined]>): string => {
+  const cells = rows
+    .filter(([, v]) => String(v ?? "").trim() !== "")
+    .map(([label, value]) =>
+      `<tr><td style="padding:5px 0;color:${C.muted};font-size:13px;vertical-align:top;white-space:nowrap;">${escape(label)}</td>` +
+      `<td style="padding:5px 0 5px 14px;text-align:right;color:${C.espresso};font-size:13px;font-weight:600;vertical-align:top;word-break:break-word;">${escape(String(value))}</td></tr>`)
+    .join("");
+  return cells
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:16px 0;padding:14px;background:${C.tint};border-radius:12px;">${cells}</table>`
+    : "";
+};
+
+const eyebrow = (text: string): string =>
+  `<p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${C.goldDeep};margin:0 0 10px;font-weight:700;">${escape(text)}</p>`;
+
+// ---- class_schedule_updated -----------------------------------------
+// The braider moved the class or changed where/how it happens. Only the
+// details a student has to re-plan around trigger this.
+const renderClassScheduleUpdated = (p: Record<string, any>) => {
+  const clientName  = p.clientName || "there";
+  const studioName  = p.studioName || "your braider";
+  const classTitle  = String(p.classTitle || "").trim() || "your class";
+  const whenLabel   = String(p.whenLabel || "").trim();
+  const previous    = String(p.previousWhenLabel || "").trim();
+  const wasMoved    = !!p.wasMoved;
+  const accessLabel = String(p.accessLabel || "Location").trim();
+  const accessValue = String(p.accessValue || "").trim();
+  const seats       = Number(p.seats || 1);
+  const classUrl    = String(p.classUrl || "").trim();
+
+  const subject = wasMoved ? `New date: ${classTitle}` : `Updated details: ${classTitle}`;
+  const html = wrapHtml(subject, `
+    ${eyebrow(wasMoved ? "New date" : "Details updated")}
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">Hi ${escape(clientName)} — ${escape(classTitle)} has changed.</h1>
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0 0 4px;">
+      ${escape(studioName)} updated the details for your class. Your seat is still yours — there's nothing to re-book.
+    </p>
+    ${academyRows([
+      [wasMoved ? "New time" : "When", whenLabel],
+      [wasMoved ? "Previously" : "", wasMoved ? previous : ""],
+      [accessLabel, accessValue],
+      [seats > 1 ? "Seats" : "", seats > 1 ? String(seats) : ""],
+    ])}
+    ${classUrl ? ctaButton("View your details", classUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:14px 0 0;">
+      Can't make the new time? Reply to this email and ${escape(studioName)} will sort it out with you.
+    </p>
+  `);
+  return { subject, html };
+};
+
+// ---- class_cancelled -------------------------------------------------
+// Deliberately does not promise a refund the platform doesn't issue —
+// the braider refunds from the app, so this points the student at them.
+const renderClassCancelled = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your braider";
+  const classTitle = String(p.classTitle || "").trim() || "your class";
+  const previous   = String(p.previousWhenLabel || "").trim() || String(p.whenLabel || "").trim();
+
+  const subject = `Cancelled: ${classTitle}`;
+  const html = wrapHtml(subject, `
+    ${eyebrow("Class cancelled")}
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">Sorry, ${escape(clientName)} — this one's off.</h1>
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0 0 4px;">
+      ${escape(studioName)} has cancelled <strong>${escape(classTitle)}</strong>.
+    </p>
+    ${academyRows([["Was scheduled", previous]])}
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0;">
+      You don't need to do anything to give up your seat. If you already paid, reply to this email and ${escape(studioName)} will sort out your refund.
+    </p>
+  `);
+  return { subject, html };
+};
+
+// ---- class_reminder --------------------------------------------------
+const renderClassReminder = (p: Record<string, any>) => {
+  const clientName  = p.clientName || "there";
+  const studioName  = p.studioName || "your braider";
+  const classTitle  = String(p.classTitle || "").trim() || "your class";
+  const whenLabel   = String(p.whenLabel || "").trim();
+  const accessLabel = String(p.accessLabel || "Location").trim();
+  const accessValue = String(p.accessValue || "").trim();
+  const isVirtual   = String(p.format || "") === "virtual";
+  const seats       = Number(p.seats || 1);
+  const classUrl    = String(p.classUrl || "").trim();
+
+  const subject = `Tomorrow: ${classTitle}`;
+  const html = wrapHtml(subject, `
+    ${eyebrow("Coming up")}
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">See you soon, ${escape(clientName)}.</h1>
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0 0 4px;">
+      <strong>${escape(classTitle)}</strong> with ${escape(studioName)} is nearly here.
+    </p>
+    ${academyRows([
+      ["When", whenLabel],
+      [accessLabel, accessValue],
+      [seats > 1 ? "Seats" : "", seats > 1 ? String(seats) : ""],
+    ])}
+    ${accessValue && isVirtual ? ctaButton("Join the class", accessValue) : classUrl ? ctaButton("View your details", classUrl) : ""}
+    ${!accessValue ? `<p style="font-size:13px;line-height:20px;color:${C.coffee};margin:0;">${escape(isVirtual ? "Your join link is on its way from " + studioName + "." : "Location details are coming from " + studioName + ".")}</p>` : ""}
+  `);
+  return { subject, html };
+};
+
+// ---- class_seat_opened -----------------------------------------------
+// Goes to the class waitlist when a paid seat is refunded. First come,
+// first served — hence the urgency and the direct link to the class.
+const renderClassSeatOpened = (p: Record<string, any>) => {
+  const clientName = p.clientName || "there";
+  const studioName = p.studioName || "your braider";
+  const classTitle = String(p.classTitle || "").trim() || "the class";
+  const whenLabel  = String(p.whenLabel || "").trim();
+  const classUrl   = String(p.classUrl || "").trim();
+
+  const subject = `A seat just opened — ${classTitle}`;
+  const html = wrapHtml(subject, `
+    ${eyebrow("Seat available")}
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">Good news, ${escape(clientName)} — a seat opened up.</h1>
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0 0 4px;">
+      Someone gave up their place in <strong>${escape(classTitle)}</strong> with ${escape(studioName)}, and you're on the waitlist.
+    </p>
+    ${academyRows([["When", whenLabel]])}
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0 0 4px;">
+      It's first come, first served — the first person to sign up gets it.
+    </p>
+    ${classUrl ? ctaButton("Grab the seat", classUrl) : ""}
+    <p style="font-size:12px;color:${C.muted};line-height:18px;margin:14px 0 0;">
+      You're getting this because you joined the waitlist for this class.
+    </p>
+  `);
+  return { subject, html };
+};
+
+// ---- video_access_expiring -------------------------------------------
+// Rentals only. Two CTAs on purpose: watch it while you still can, or
+// rent it again.
+const renderVideoAccessExpiring = (p: Record<string, any>) => {
+  const clientName   = p.clientName || "there";
+  const studioName   = p.studioName || "your braider";
+  const videoTitle   = String(p.videoTitle || "").trim() || "your video";
+  const expiresLabel = String(p.expiresLabel || "").trim();
+  const watchUrl     = String(p.watchUrl || "").trim();
+  const buyUrl       = String(p.buyUrl || "").trim();
+
+  const subject = `Last chance to watch: ${videoTitle}`;
+  const html = wrapHtml(subject, `
+    ${eyebrow("Access ending")}
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">${escape(clientName)}, your rental is nearly up.</h1>
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0 0 4px;">
+      Your access to <strong>${escape(videoTitle)}</strong> from ${escape(studioName)} ends soon. Watch it before then and you're all set.
+    </p>
+    ${academyRows([["Access ends", expiresLabel]])}
+    ${watchUrl ? ctaButton("Watch now", watchUrl) : ""}
+    ${buyUrl ? `<p style="font-size:13px;line-height:20px;color:${C.coffee};margin:6px 0 0;text-align:center;">
+      Need longer? <a href="${escape(buyUrl)}" style="color:${C.purple};font-weight:600;">Rent it again</a>.
+    </p>` : ""}
+  `);
+  return { subject, html };
+};
+
+// ---- class_reminder_owner (braider head-count) -----------------------
+const renderClassReminderOwner = (p: Record<string, any>) => {
+  const classTitle  = String(p.classTitle || "").trim() || "Your class";
+  const whenLabel   = String(p.whenLabel || "").trim();
+  const seatsSold   = Number(p.seatsSold || 0);
+  const signUps     = Number(p.signUps || 0);
+  const accessValue = String(p.accessValue || "").trim();
+
+  const subject = `Tomorrow: ${classTitle} (${seatsSold} seat${seatsSold === 1 ? "" : "s"} sold)`;
+  const html = wrapHtml(subject, `
+    ${eyebrow("Teaching tomorrow")}
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">${escape(classTitle)} is nearly here.</h1>
+    ${academyRows([
+      ["When", whenLabel],
+      ["Seats sold", `${seatsSold}`],
+      ["Sign-ups", `${signUps}`],
+      ["Where", accessValue],
+    ])}
+    ${!accessValue ? `<p style="font-size:13px;line-height:20px;color:${C.coral};margin:0 0 8px;font-weight:600;">
+      No location or join link is set yet — add one and everyone who paid is emailed automatically.
+    </p>` : ""}
+    <p style="font-size:13px;line-height:20px;color:${C.coffee};margin:0;">
+      Open Braid Boss Pro → Classes to see the full roster.
+    </p>
+  `);
+  return { subject, html };
+};
+
+// ---- class_waitlist_join_owner ---------------------------------------
+const renderClassWaitlistJoinOwner = (p: Record<string, any>) => {
+  const classTitle   = String(p.classTitle || "").trim() || "your class";
+  const joinerName   = String(p.joinerName || "").trim();
+  const joinerEmail  = String(p.joinerEmail || "").trim();
+  const waitingCount = Number(p.waitingCount || 0);
+  const who          = joinerName || joinerEmail || "Someone";
+
+  const subject = `${who} joined the waitlist for ${classTitle}`;
+  const html = wrapHtml(subject, `
+    ${eyebrow("Class waitlist")}
+    <h1 style="font-size:20px;margin:0 0 12px;color:${C.espresso};">${escape(who)} wants in.</h1>
+    <p style="font-size:14px;line-height:22px;color:${C.coffee};margin:0 0 4px;">
+      They joined the waitlist for <strong>${escape(classTitle)}</strong>.
+    </p>
+    ${academyRows([
+      ["Contact", joinerEmail],
+      ["Waiting", waitingCount ? `${waitingCount}` : ""],
+    ])}
+    <p style="font-size:13px;line-height:20px;color:${C.coffee};margin:0;">
+      Add seats or free one up and everyone waiting is emailed automatically.
+    </p>
+  `);
+  return { subject, html };
+};
+
 // ---- daily_sales_summary (owner end-of-day report) -----------------
 // Sent to the stylist at their local midnight summarizing the prior
 // day's sales. Enqueued by process_daily_sales_summaries() only when
@@ -2322,6 +2544,20 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderWaitlistJoinClient(row.payload || {});
     case "class_waitlist_join_client":
       return renderClassWaitlistJoinClient(row.payload || {});
+    case "class_schedule_updated":
+      return renderClassScheduleUpdated(row.payload || {});
+    case "class_cancelled":
+      return renderClassCancelled(row.payload || {});
+    case "class_reminder":
+      return renderClassReminder(row.payload || {});
+    case "class_seat_opened":
+      return renderClassSeatOpened(row.payload || {});
+    case "video_access_expiring":
+      return renderVideoAccessExpiring(row.payload || {});
+    case "class_reminder_owner":
+      return renderClassReminderOwner(row.payload || {});
+    case "class_waitlist_join_owner":
+      return renderClassWaitlistJoinOwner(row.payload || {});
     case "daily_sales_summary":
       return renderDailySalesSummary(row.payload || {});
     default:
