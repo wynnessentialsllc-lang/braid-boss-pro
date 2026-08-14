@@ -67,19 +67,31 @@ self.addEventListener("notificationclick", (event) => {
   const target = (event.notification.data && event.notification.data.url) || "/";
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((all) => {
+      // Resolve against the SW origin so we can compare parts and hand
+      // `navigate` an absolute URL.
+      let targetUrl;
+      try { targetUrl = new URL(target, self.location.origin); }
+      catch (_) { targetUrl = new URL("/", self.location.origin); }
+      // "/" with no query is the no-destination payload — just surface
+      // the app. Anything else is a real deep link and must navigate.
+      const hasDestination = targetUrl.pathname !== "/" || targetUrl.search !== "";
+
       for (const client of all) {
-        if ("focus" in client) {
-          try {
-            const u = new URL(client.url);
-            if (u.pathname === "/" || u.pathname === target) {
-              client.focus();
-              if ("navigate" in client && target !== "/") client.navigate(target);
-              return;
-            }
-          } catch (_) { /* ignore */ }
+        if (!("focus" in client)) continue;
+        // Reuse the first app window and navigate it. The previous
+        // version compared `u.pathname` against the whole target string,
+        // so any target carrying a query — i.e. every deep link — failed
+        // to match. A window parked on another screen was then either
+        // focused without navigating or duplicated by openWindow, which
+        // is why tapping a push appeared to "do nothing" and left you on
+        // whatever screen you had open last.
+        client.focus();
+        if (hasDestination && "navigate" in client) {
+          return client.navigate(targetUrl.href).catch(function () {});
         }
+        return;
       }
-      if (self.clients.openWindow) return self.clients.openWindow(target);
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl.href);
     })
   );
 });

@@ -7,6 +7,9 @@ import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   type NotificationRule,
 } from "./notification-rules";
+import { decodeTargetUrl } from "./notification-target-url";
+
+const ORIGIN = "https://braidbosspro.app";
 
 // Fixed "now" so deltas are deterministic. 2026-06-07T09:00 local.
 const NOW = new Date(2026, 5, 7, 9, 0, 0).getTime();
@@ -213,7 +216,9 @@ describe("formatNotificationPayload — rebooking deep link", () => {
 
   it("deep-links a retention push to the rebooking Pause sheet", () => {
     const payload = formatNotificationPayload(retentionRule);
-    expect(payload.data.url).toBe("/?focus=client&id=client-1&action=rebooking");
+    expect(payload.data.url).toBe("/?n=client&id=client-1&a=rebooking");
+    expect(decodeTargetUrl(payload.data.url, ORIGIN))
+      .toEqual({ kind: "client", clientId: "client-1", action: "rebooking" });
   });
 
   it("opens the plain profile for a non-retention client push", () => {
@@ -221,7 +226,31 @@ describe("formatNotificationPayload — rebooking deep link", () => {
       ...retentionRule,
       category: "appointment",
     });
-    expect(payload.data.url).toBe("/?focus=client&id=client-1");
+    expect(payload.data.url).toBe("/?n=client&id=client-1");
+    expect(decodeTargetUrl(payload.data.url, ORIGIN))
+      .toEqual({ kind: "client", clientId: "client-1" });
+  });
+
+  // The bug this format replaced: appointment pushes went out as
+  // `?focus=appointment&id=…`, which routeDeepLinkUrl never handled, so
+  // the tap silently no-opped and the app just refocused its last screen.
+  it("deep-links an appointment push to that appointment", () => {
+    const payload = formatNotificationPayload({
+      ...retentionRule,
+      category: "appointment",
+      appointmentId: "appt-7",
+      action: { label: "View appointment", target: "appointment:appt-7" },
+    });
+    expect(decodeTargetUrl(payload.data.url, ORIGIN))
+      .toEqual({ kind: "appointment", appointmentId: "appt-7" });
+  });
+
+  it("falls back to / when a rule has no action target", () => {
+    const payload = formatNotificationPayload({
+      ...retentionRule,
+      action: undefined,
+    });
+    expect(payload.data.url).toBe("/");
   });
 });
 
