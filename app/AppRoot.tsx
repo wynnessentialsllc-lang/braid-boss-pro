@@ -226,6 +226,8 @@ import {
   type CampaignDraft,
   describeSegment,
   listCampaigns,
+  ensureDropTemplate,
+  fetchDropTemplate,
   saveCampaign,
   scheduleCampaign,
   sendCampaignNow,
@@ -33005,6 +33007,61 @@ const BookingIntelligenceScreen = ({ store, onBack }: { store: any; onBack: () =
 };
 
 const AvailabilityScreen = ({ store, onBack }: { store: any; onBack: () => void }) => {
+  const userId: string | null = store?.userId || null;
+  const [dropComposerOpen, setDropComposerOpen] = useState(false);
+  const [dropTemplate, setDropTemplate] = useState<MarketingCampaign | null>(null);
+  // ---- Book drop announcement ------------------------------------------
+  // Off by default. "Draft" prepares the campaign on drop day and waits
+  // for the stylist to read and send; "Auto" sends it for her. The
+  // message and audience live in a template campaign edited through this
+  // same composer, so there's no second editor to keep in step.
+  const [dropMode, setDropMode] = useState<"off" | "draft" | "auto">("off");
+  const [dropBusy, setDropBusy] = useState(false);
+  const loadDropMode = async () => {
+    if (!userId) return;
+    try {
+      const { data } = await getSupabase()
+        .from("booking_policies")
+        .select("drop_announce_mode")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const m = (data as any)?.drop_announce_mode;
+      setDropMode(m === "draft" || m === "auto" ? m : "off");
+    } catch { /* column lands with the migration; until then it reads Off */ }
+  };
+  useEffect(() => { void loadDropMode(); }, [userId]);
+
+  const saveDropMode = async (next: "off" | "draft" | "auto") => {
+    if (!userId || dropBusy) return;
+    const prev = dropMode;
+    setDropMode(next);          // optimistic — the control shouldn't lag a tap
+    setDropBusy(true);
+    try {
+      // Make sure there's something to send before switching it on.
+      if (next !== "off") await ensureDropTemplate(userId);
+      const { error } = await getSupabase()
+        .from("booking_policies")
+        .upsert({ user_id: userId, drop_announce_mode: next }, { onConflict: "user_id" });
+      if (error) throw error;
+    } catch {
+      setDropMode(prev);
+    } finally {
+      setDropBusy(false);
+    }
+  };
+
+  const editDropAnnouncement = async () => {
+    if (!userId) return;
+    setDropBusy(true);
+    try {
+      await ensureDropTemplate(userId);
+      const tpl = await fetchDropTemplate(userId);
+      if (tpl) { setDropTemplate(tpl); setDropComposerOpen(true); }
+    } catch { /* nothing to open */ }
+    finally { setDropBusy(false); }
+  };
+
+
   const api = store.availabilityApi;
   const rules: AvailabilityRule[] = api?.rules || [];
   const exceptions: AvailabilityException[] = api?.exceptions || [];
@@ -33231,6 +33288,69 @@ const AvailabilityScreen = ({ store, onBack }: { store: any; onBack: () => void 
             </div>
           </Card>
         </div>
+
+        {/* Only meaningful alongside a monthly book drop — there's no
+            drop to announce on a rolling or fixed window. */}
+        {windowConfig.mode === "monthly_release" && (
+        <div>
+          <SectionTitle>Book drop announcement</SectionTitle>
+          <Card className="p-4 space-y-3">
+            <p className="text-[12px]" style={{ color: C.muted, lineHeight: 1.5 }}>
+              Your waitlist always hears when your books open. This tells your client list too.
+            </p>
+            <div style={{ display: "grid", gap: 8 }}>
+              {([
+                { id: "off",   name: "Off",                 desc: "Waitlist only — your client list hears nothing." },
+                { id: "draft", name: "Draft it for me",     desc: "Written and waiting on drop day. You read it and tap Send." },
+                { id: "auto",  name: "Send automatically",  desc: "Goes out on its own each drop, like your waitlist alerts." },
+              ] as const).map(opt => {
+                const selected = dropMode === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => void saveDropMode(opt.id)}
+                    disabled={dropBusy}
+                    style={{
+                      textAlign: "left",
+                      padding: "11px 13px",
+                      borderRadius: 14,
+                      border: selected ? `2px solid ${C.goldDeep}` : `1px solid ${C.hairline}`,
+                      background: selected ? "rgba(124, 58, 237, 0.06)" : C.paper,
+                      cursor: dropBusy ? "wait" : "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 11,
+                    }}
+                  >
+                    <span
+                      aria-hidden
+                      style={{
+                        width: 16, height: 16, borderRadius: 999, flexShrink: 0,
+                        border: selected ? `5px solid ${C.goldDeep}` : `2px solid ${C.caramel}`,
+                        background: C.cream,
+                      }}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-[13px] font-semibold" style={{ color: C.espresso }}>{opt.name}</span>
+                      <span className="block text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>{opt.desc}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {dropMode !== "off" && (
+              <Button variant="outline" size="sm" fullWidth onClick={() => void editDropAnnouncement()} disabled={dropBusy}>
+                Edit message and audience
+              </Button>
+            )}
+            <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.45 }}>
+              Clients who unsubscribed are never included.
+            </p>
+          </Card>
+        </div>
+
+        )}
 
         {/* EXCEPTIONS */}
         <div>
@@ -33536,6 +33656,19 @@ const AvailabilityScreen = ({ store, onBack }: { store: any; onBack: () => void 
           </div>
         )}
       </Sheet>
+
+      {/* Same composer the Marketing screen uses, so the announcement's
+          audience and copy are edited in one place only. */}
+      {dropComposerOpen && (
+        <CampaignComposerSheet
+          campaign={dropTemplate}
+          prefill={null}
+          userId={userId}
+          clients={(store.clients || []) as EntityRecord[]}
+          onClose={() => { setDropComposerOpen(false); setDropTemplate(null); }}
+          onSaved={async () => { /* template edits need no list refresh here */ }}
+        />
+      )}
     </div>
   );
 };
@@ -41296,6 +41429,10 @@ const CampaignComposerSheet = ({
   onDelete?: () => Promise<void> | void;
 }) => {
   const isReadOnly = campaign?.status === "sent" || campaign?.status === "sending";
+  // The book-drop announcement is edited here but never sent from here —
+  // each drop copies it — so the send/schedule controls are replaced by
+  // a plain save.
+  const isDropTemplate = !!campaign?.is_drop_template;
   const [name, setName]       = useState(campaign?.name || prefill?.name || "");
   const [subject, setSubject] = useState(campaign?.subject || prefill?.subject || "");
   const [body, setBody]       = useState(campaign?.body_text || prefill?.body || "");
@@ -41728,13 +41865,15 @@ const CampaignComposerSheet = ({
 
         {!isReadOnly && (
           <>
-            <Field label="Schedule for later (optional)" hint="Leave blank to send now.">
-              <Input
-                type="datetime-local"
-                value={scheduledFor}
-                onChange={e => setScheduledFor(e.target.value)}
-              />
-            </Field>
+            {!isDropTemplate && (
+              <Field label="Schedule for later (optional)" hint="Leave blank to send now.">
+                <Input
+                  type="datetime-local"
+                  value={scheduledFor}
+                  onChange={e => setScheduledFor(e.target.value)}
+                />
+              </Field>
+            )}
 
             {msg && (
               <p className="text-[12px] font-semibold" style={{ color: msg.kind === "error" ? C.danger : C.success }}>
@@ -41743,7 +41882,11 @@ const CampaignComposerSheet = ({
             )}
 
             <div className="space-y-2 pt-1">
-              {scheduledFor ? (
+              {isDropTemplate ? (
+                <Button variant="primary" fullWidth onClick={handleSaveDraft} disabled={busy}>
+                  {busy ? "Saving…" : "Save announcement"}
+                </Button>
+              ) : scheduledFor ? (
                 <Button variant="primary" fullWidth onClick={handleSchedule} disabled={busy}>
                   {busy ? "Scheduling…" : "Schedule send"}
                 </Button>
@@ -41753,9 +41896,11 @@ const CampaignComposerSheet = ({
                 </Button>
               )}
               <div className="grid grid-cols-2 gap-2">
+                {!isDropTemplate && (
                 <Button variant="outline" onClick={handleSaveDraft} disabled={busy}>
                   {busy ? "Saving…" : "Save draft"}
                 </Button>
+                )}
                 {onDelete && (
                   <Button variant="outline" onClick={() => { void onDelete(); onClose(); }} disabled={busy}>
                     Delete

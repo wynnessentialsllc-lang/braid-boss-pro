@@ -37,6 +37,8 @@ export type MarketingCampaign = {
   recipient_count: number | null;
   failed_count: number;
   last_error: string | null;
+  // True for the stored book-drop announcement (never sent directly).
+  is_drop_template?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -77,7 +79,34 @@ export const listCampaigns = async (userId: string): Promise<MarketingCampaign[]
     .order("created_at", { ascending: false })
     .limit(100);
   if (error) throw error;
-  return (data || []) as MarketingCampaign[];
+  // The book-drop announcement is stored as a campaign so the composer
+  // can edit it, but it's a template — each drop copies it — so it
+  // doesn't belong in the history list. Filtered here rather than in
+  // the query: a `.eq()` on a column that doesn't exist yet would fail
+  // the whole request and empty the screen before the migration runs.
+  return (data || []).filter(c => !(c as any).is_drop_template) as MarketingCampaign[];
+};
+
+// The stylist's reusable "my books just opened" announcement, created
+// on first use. Returns the campaign id so the composer can open it.
+export const ensureDropTemplate = async (userId: string): Promise<string | null> => {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("ensure_drop_announcement_template", {
+    user_id_in: userId,
+  });
+  if (error) return null;
+  return typeof data === "string" ? data : null;
+};
+
+export const fetchDropTemplate = async (userId: string): Promise<MarketingCampaign | null> => {
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from("marketing_campaigns")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("is_drop_template", true)
+    .maybeSingle();
+  return (data as MarketingCampaign) || null;
 };
 
 export const saveCampaign = async (
