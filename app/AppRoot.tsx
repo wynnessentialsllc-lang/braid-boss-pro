@@ -584,6 +584,7 @@ import {
   saveDeliveredHistory,
   sendTestPush,
 } from "./lib/push-dispatch";
+import { decodeTargetUrl } from "./lib/notification-target-url";
 import {
   detectPushCapability,
   subscribeWebPush,
@@ -21277,6 +21278,8 @@ export type NotificationTarget =
   | { kind: "inbox" }
   | { kind: "packages" }
   | { kind: "styleRequests" }
+  | { kind: "waitlist" }
+  | { kind: "clientsTab" }
   | { kind: "booking_approval"; requestId: string }
   | { kind: "email_log"; queueId: string }
   | { kind: "contract_view"; contractId: string };
@@ -21923,13 +21926,19 @@ type NotificationRouterCtx = {
   setContractViewId: (id: string | null) => void;
 };
 
-const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
-  if (!n.target) {
+// Takes the target rather than the whole NotifItem: the bell passes
+// `item.target`, and the push deep-link router passes a target decoded
+// straight from the notification URL, so both transports land on the
+// same screen without either one having to fabricate a NotifItem.
+const routeNotification = (
+  target: NotificationTarget | undefined,
+  ctx: NotificationRouterCtx,
+): void => {
+  if (!target) {
     // Fallback for legacy items without a target — surface on Schedule.
     ctx.setActive("schedule");
     return;
   }
-  const target = n.target;
   switch (target.kind) {
     case "appointment": {
       const appt = (ctx.appointments || []).find(a => a?.id === target.appointmentId);
@@ -21959,8 +21968,14 @@ const routeNotification = (n: NotifItem, ctx: NotificationRouterCtx): void => {
     case "styleRequests":
       ctx.setSecondary("styleRequests");
       break;
+    case "waitlist":
+      ctx.setSecondary("waitlist");
+      break;
     case "schedule":
       ctx.setActive("schedule");
+      break;
+    case "clientsTab":
+      ctx.setActive("clients");
       break;
     case "booking_approval": {
       // Stash the request id so the Approvals queue can scroll to and
@@ -44286,7 +44301,7 @@ export default function App() {
   const handleNotificationTap = useCallback((n: NotifItem) => {
     notifications.markRead(n.id);
     setNotifOpen(false);
-    routeNotification(n, {
+    routeNotification(n.target, {
       appointments: store.appointments,
       setActive,
       setSecondary,
@@ -44298,32 +44313,54 @@ export default function App() {
     });
   }, [notifications, store.appointments]);
 
-  // Shared push-notification deep-link router. Parses a notification's
-  // target URL (/?focus=client&id=...(&action=rebooking)) and routes:
-  // a retention ("due for rebooking") link pops the Pause sheet so
-  // snooze / stop is one tap from the push; any other client link opens
-  // the profile. Used by both the web URL consumer and the native iOS
-  // tap listener so the two transports behave identically. Accepts a
-  // relative or absolute URL. Returns true when it handled a client link.
+  // Shared push-notification deep-link router. Decodes the notification's
+  // target URL (see lib/notification-target-url) and sends the tap to the
+  // thing the notification is ABOUT — an appointment reminder opens that
+  // appointment, a waitlist alert opens Waitlist, a review push opens
+  // Reviews. Used by both the web URL consumer and the native iOS tap
+  // listener so the two transports behave identically. Accepts a relative
+  // or absolute URL, canonical or legacy. Returns true when it routed.
+  //
+  // Live handle on appointments for the deep-link router. Kept in a ref
+  // rather than a dependency so routeDeepLinkUrl stays referentially
+  // stable: it is wired into the native push listener effect below, and
+  // re-creating it whenever appointments change would tear that listener
+  // down and re-register it on every sync.
+  const appointmentsRef = useRef<any[]>([]);
+  useEffect(() => {
+    appointmentsRef.current = Array.isArray(store.appointments) ? store.appointments : [];
+  }, [store.appointments]);
+
   const routeDeepLinkUrl = useCallback((rawUrl: string): boolean => {
     if (typeof window === "undefined" || !rawUrl) return false;
-    let params: URLSearchParams;
-    try { params = new URL(rawUrl, window.location.origin).searchParams; }
-    catch { return false; }
-    // Inbox deep link — the client-message email/push CTA points at
-    // /?focus=inbox so tapping it lands on the Inbox, not the home page.
-    if (params.get("focus") === "inbox") {
-      setSecondary("inbox");
+    const target = decodeTargetUrl(rawUrl, window.location.origin);
+    // No recognisable target — the caller leaves the app where it is
+    // rather than guessing at a destination.
+    if (!target) return false;
+
+    // Retention "due for rebooking" pushes pop the Pause sheet so
+    // snooze / stop is one tap from the notification. Handled here
+    // rather than in routeNotification because the pause sheet is not
+    // part of the bell's router context.
+    if (target.kind === "client" && target.action === "rebooking") {
+      if (!target.clientId) return false;
+      setPauseRemindersId(target.clientId);
       return true;
     }
-    const id = params.get("id");
-    if (params.get("focus") !== "client" || !id) return false;
-    if (params.get("action") === "rebooking") {
-      setPauseRemindersId(id);
-    } else {
-      setActive("clients");
-      setClientToOpenId(id);
-    }
+
+    // Everything else reuses the bell's router, so a push and its
+    // matching bell row land on exactly the same screen. PushTarget and
+    // NotificationTarget are deliberate mirrors of one another.
+    routeNotification(target as NotificationTarget, {
+      appointments: appointmentsRef.current,
+      setActive,
+      setSecondary,
+      setApptPrefill,
+      setClientToOpenId,
+      setApprovalFocusId,
+      setEmailLogId,
+      setContractViewId,
+    });
     return true;
   }, []);
 
@@ -44341,7 +44378,10 @@ export default function App() {
     if (!handled) { deepLinkConsumedRef.current = false; return; }
     try {
       const url = new URL(window.location.href);
-      ["focus", "id", "action"].forEach((k) => url.searchParams.delete(k));
+      // Strip both the canonical target params and every legacy shape, so
+      // a refresh after consuming the link can't re-open the same screen.
+      ["n", "a", "focus", "id", "action", "tab", "notification"]
+        .forEach((k) => url.searchParams.delete(k));
       window.history.replaceState({}, "", url.pathname + url.search + url.hash);
     } catch { /* leave the URL as-is */ }
   }, [auth.mode, routeDeepLinkUrl]);

@@ -7,6 +7,7 @@
 // client communications — those still live exclusively in commLog.
 
 import { isRebookingMuted } from "./rebooking/rebooking-intelligence";
+import { encodeTargetUrl, type PushTarget } from "./notification-target-url";
 
 export type NotificationCategory = "appointment" | "balance" | "retention" | "business";
 export type NotificationPriority = "low" | "medium" | "high";
@@ -356,18 +357,27 @@ export const formatNotificationPayload = (rule: NotificationRule): {
   data: { url: string; ruleId: string; appointmentId?: string; clientId?: string };
   tag: string;
 } => {
-  let url = "/";
-  if (rule.action?.target?.startsWith("appointment:")) url = `/?focus=appointment&id=${rule.appointmentId || ""}`;
-  else if (rule.action?.target?.startsWith("client:")) {
+  // Build the tap destination as a canonical target so the push lands on
+  // the thing it is ABOUT. encodeTargetUrl degrades to "/" on its own when
+  // a record-scoped target is missing its id, so an incomplete rule still
+  // opens the app instead of shipping a dead link.
+  let target: PushTarget | null = null;
+  if (rule.action?.target?.startsWith("appointment:")) {
+    target = { kind: "appointment", appointmentId: rule.appointmentId || "" };
+  } else if (rule.action?.target?.startsWith("client:")) {
     // Retention nudges deep-link straight to the rebooking Pause sheet so
     // "snooze / stop reminders" is one tap from the push — the way to make
     // a "due for rebooking" pop-up actually stay dismissed. Other
     // client-targeted pushes just open the profile.
-    const base = `/?focus=client&id=${rule.clientId || ""}`;
-    url = rule.category === "retention" ? `${base}&action=rebooking` : base;
+    target = rule.category === "retention"
+      ? { kind: "client", clientId: rule.clientId || "", action: "rebooking" }
+      : { kind: "client", clientId: rule.clientId || "" };
+  } else if (rule.action?.target === "tab:schedule") {
+    target = { kind: "schedule" };
+  } else if (rule.action?.target === "tab:clients") {
+    target = { kind: "clientsTab" };
   }
-  else if (rule.action?.target === "tab:schedule") url = "/?tab=schedule";
-  else if (rule.action?.target === "tab:clients") url = "/?tab=clients";
+  const url = encodeTargetUrl(target);
   return {
     title: rule.title,
     body: rule.body,
