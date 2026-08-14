@@ -21457,8 +21457,23 @@ const buildNotifications = (store: any): NotifItem[] => {
   for (const a of upcoming) {
     const apptMs = a.date && a.time ? new Date(`${a.date}T${a.time}:00`).getTime() : null;
     const soon = apptMs && apptMs - now < 48 * 3600000;
+    // Key the id to the reminder milestone, for the same reason the
+    // approval rows above are keyed to the reschedule count: the id must
+    // change when this becomes a NEW thing needing attention. A static
+    // `up_<id>` persisted in the read/dismissed lists for the whole
+    // 7-day window, so an appointment badged once and then stayed silent
+    // through its 48h, 24h and 2h pushes — the push fired, the bell
+    // didn't move. Milestones mirror the push rules in
+    // notification-rules (appt_48h / appt_24h / appt_2h) so every push
+    // has a matching unread row.
+    const msOut = apptMs ? apptMs - now : null;
+    const milestone = msOut == null ? "nt"
+      : msOut < 2 * 3600000 ? "2h"
+      : msOut < 24 * 3600000 ? "24h"
+      : msOut < 48 * 3600000 ? "48h"
+      : "wk";
     items.push({
-      id: `up_${a.id}`,
+      id: `up_${a.id}_${milestone}`,
       category: "appointment",
       kind: "upcoming_appointment",
       tone: soon ? "gold" : "neutral",
