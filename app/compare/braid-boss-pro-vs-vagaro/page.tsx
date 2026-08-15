@@ -32,10 +32,18 @@ const rows: ComparisonRow[] = [
   // anyone who has actually opened their pricing page.
   { feature: "Monthly price (1 stylist)", bbp: { mark: "text", note: "$14.99" }, them: { mark: "text", note: "$30 list, $23.99 promo — 1 bookable calendar" } },
   { feature: "Cost to add a second chair", bbp: { mark: "text", note: "$14.99 — unchanged" }, them: { mark: "text", note: "+$10/mo per extra calendar" } },
-  // The load-bearing row, same as on the Square page: a booking deposit
-  // is an online payment, and Vagaro's small-merchant keyed-in rate sits
-  // 0.6% above Stripe standard.
-  { feature: "Online rate (deposits)", bbp: { mark: "text", note: "2.9% + 30¢ — Stripe standard" }, them: { mark: "text", note: "3.5% + 30¢ keyed-in under $4k/mo volume" } },
+  // A processing-rate row used to sit here, sourced from a third-party
+  // pricing roundup. Vagaro does not publish per-transaction rates on
+  // its pricing page — they live inside the Merchant Services
+  // agreement — so the figure could not be confirmed against them and
+  // was removed rather than left standing on one secondary source.
+  // Do not re-add it without a Vagaro-published number.
+  //
+  // What IS published, in the merchant-services fine print: the free
+  // EMV reader carries a 12-month processing commitment and a $150
+  // early cancellation fee. That is the real lock-in, and it is
+  // quotable verbatim.
+  { feature: "Free card reader with no strings", bbp: { mark: "text", note: "No hardware, no commitment" }, them: { mark: "no", note: "12-month processing commitment; $150 to leave early" } },
   // Parity row, deliberately. This used to read "14-day free trial" with
   // Vagaro marked "partial — 30-day, requires card", which dinged them
   // for a card requirement we also have (app/api/subscribe/route.ts
@@ -122,11 +130,14 @@ export default function VsVagaroPage() {
           }}
         >
           <strong style={{ color: C.brandPrimary }}>The base price is not the price.</strong>{" "}
-          Vagaro&apos;s entry tier covers scheduling. The pieces a braider
-          reaches for are sold separately: <strong>Forms</strong> for
-          waivers and intake at $10/mo, <strong>Text Marketing</strong> at
-          $20/mo, <strong>MySite</strong> for a branded website at $20/mo,
-          and a <strong>branded app</strong> at $100/mo.
+          Vagaro is upfront about this — their pricing page says{" "}
+          <em>&ldquo;only pay for what you need.&rdquo;</em> The catch for a
+          braider is that you need most of it. The entry tier covers
+          scheduling; the rest is sold separately:{" "}
+          <strong>Forms</strong> for waivers and intake at $10/mo,{" "}
+          <strong>Text Marketing</strong> at $20/mo, <strong>MySite</strong>{" "}
+          for a branded website at $20/mo, and a{" "}
+          <strong>branded app</strong> at $100/mo.
           <br />
           <br />
           A solo braider who wants waivers and marketing is at{" "}
@@ -140,19 +151,33 @@ export default function VsVagaroPage() {
           $90. Ours stays $14.99 at every one of those.
           <br />
           <br />
+          One line worth reading twice before you take the free card
+          reader. Vagaro&apos;s pricing page says{" "}
+          <em>&ldquo;no contract fees, cancellation fees, setup fees&rdquo;</em>{" "}
+          — and for the software subscription, that is true. The Merchant
+          Services agreement is a separate document, and it says the reader
+          comes with a <strong>12-month processing commitment</strong> and a{" "}
+          <strong>$150 early cancellation fee</strong> if you stop before
+          then. Both statements are accurate; they just are not on the same
+          page.
+          <br />
+          <br />
           <span style={{ fontSize: 12.5, opacity: 0.8 }}>
-            Vagaro also runs a standing promotional rate — $23.99 on the
-            first calendar at the time of writing — and prices processing in
-            tiers by monthly volume. Pricing is theirs to change; check it
-            before deciding. Ours is one number: $14.99/month, every
-            feature, no per-calendar fee.
+            Fair to them on two counts: Vagaro runs a standing promotional
+            rate — $23.99 on the first calendar at the time of writing — and
+            they take $0 commission on your bookings and marketplace
+            revenue, which is more than some competitors can say. Their
+            per-transaction processing rates are not published on the
+            pricing page, so we do not quote one. Pricing is theirs to
+            change; check it before deciding. Ours is one number:
+            $14.99/month, every feature, no per-calendar fee.
           </span>
         </div>
       </Section>
 
       <Section eyebrow="Where Vagaro wins" title="Honest take" background="#FBFAFD">
         <p style={{ fontSize: 15.5, lineHeight: 1.7, color: "#3D3447", maxWidth: 720, margin: "0 auto" }}>
-          Vagaro is the right pick if you run a multi-chair salon with multiple service providers (hair, nails, skin, lashes) and need one back office for all of it. Its marketplace (&ldquo;Find Beauty Pros&rdquo;) brings in walk-in discovery, its retail and payroll tooling is genuinely deep, and appointment reminders come with a text allowance rather than a meter. The catch is the shape of the pricing: a base that climbs with every bookable calendar, and the features around scheduling sold one at a time — $10 for waivers, $20 for marketing, $20 for a website, $100 for your own branded app. The workflow also assumes a 60-minute clinical appointment, not an 8-hour boho knotless install with a $150 hair-included add-on and a 50% deposit. If you&apos;re a solo braider or run a small braid-focused chair, Vagaro is over-built and over-priced for your reality.
+          Vagaro is the right pick if you run a multi-chair salon with multiple service providers (hair, nails, skin, lashes) and need one back office for all of it. Its marketplace (&ldquo;Find Beauty Pros&rdquo;) brings in walk-in discovery, its retail and payroll tooling is genuinely deep, and appointment reminders come with a text allowance rather than a meter. Credit where it is due on two more: Vagaro takes no commission on your bookings or your marketplace revenue, and their support — free data migration, training, 24/7 phone — is better than anything a one-person company can offer. The catch is the shape of the pricing: a base that climbs with every bookable calendar, and the features around scheduling sold one at a time — $10 for waivers, $20 for marketing, $20 for a website, $100 for your own branded app. The workflow also assumes a 60-minute clinical appointment, not an 8-hour boho knotless install with a $150 hair-included add-on and a 50% deposit. If you&apos;re a solo braider or run a small braid-focused chair, Vagaro is over-built and over-priced for your reality.
         </p>
       </Section>
 
