@@ -204,16 +204,16 @@ export default function GuidePage() {
           <Card
             rank="#4 · Best free tier"
             name="Square Appointments"
-            price="$0 free tier · $29 Plus · per-staff fees apply"
+            price="$0 free tier · $49 Plus · priced per location"
             pros={[
               "Free tier for solo stylists",
               "Strong retail + tap-to-pay hardware ecosystem",
               "Reliable payment processing",
             ]}
             cons={[
-              "Reminders, marketing, contracts are paid add-ons that erase the &quot;free&quot; advantage",
+              "Free plan charges 3.3% + 30¢ online, and text marketing is not available on it",
               "Built around quick clinical appointments, not 8-hour braid installs",
-              "Per-staff fees as you grow",
+              "Marketing and full team management start at $49/mo per location",
             ]}
             verdict="Solid if you already use Square for retail and need basic appointment booking with zero monthly fee. Once you need braider workflow features, add-on creep makes it pricier than Braid Boss Pro."
             href="/compare/braid-boss-pro-vs-square-appointments"

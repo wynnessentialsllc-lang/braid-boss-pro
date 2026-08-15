@@ -34,7 +34,7 @@ const rows: ComparisonRow[] = [
   { feature: "Built specifically for braiders", bbp: { mark: "yes", note: "Hair-included pricing, long appointments, allergy/aftercare" }, them: { mark: "no", note: "Generic appointment software" } },
   { feature: "Stripe Connect (you own payouts)", bbp: { mark: "yes" }, them: { mark: "no", note: "Square processing only" } },
   { feature: "Pricing calculator for braid quotes", bbp: { mark: "yes" }, them: { mark: "no" } },
-  { feature: "Digital contracts + e-signature", bbp: { mark: "yes" }, them: { mark: "partial", note: "Forms add-on" } },
+  { feature: "Digital contracts + e-signature", bbp: { mark: "yes", note: "Braid-specific templates — allergy, aftercare, take-down" }, them: { mark: "yes" } },
   { feature: "Branded /@handle booking link", bbp: { mark: "yes" }, them: { mark: "partial", note: "square.site URL" } },
   { feature: "Retail storefront", bbp: { mark: "yes", note: "Variants + inventory" }, them: { mark: "yes", note: "Strong retail tools" } },
   { feature: "SMS text marketing", bbp: { mark: "yes", note: "Prepaid credits, no monthly fee" }, them: { mark: "no", note: "Not available on Free; Plus has 500 then 3¢/text" } },
@@ -80,7 +80,7 @@ export default function VsSquarePage() {
             Braid Boss Pro vs Square Appointments <em style={{ fontStyle: "italic", background: "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>for braid stylists.</em>
           </>
         }
-        body="Square Appointments has a free tier — but every braider-specific feature (reminders, marketing, contracts) is a paid add-on, and the system is built around quick clinical appointments, not 8-hour braid installs with deposit policies and hair-included pricing. Here's the side-by-side."
+        body="Square Appointments has a free tier — but it prices online payments at 3.3% + 30¢ where we run on Stripe's 2.9%, text marketing isn't available on that plan at all, and the system is built around quick clinical appointments rather than 8-hour braid installs with deposit policies and hair-included pricing. Here's the side-by-side."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See pricing", href: "/pricing" }}
       />
@@ -146,7 +146,7 @@ export default function VsSquarePage() {
 
       <Section eyebrow="Where Square wins" title="Honest take" background="#FBFAFD">
         <p style={{ fontSize: 15.5, lineHeight: 1.7, color: "#3D3447", maxWidth: 720, margin: "0 auto" }}>
-          Square&apos;s strongest move is its hardware ecosystem: tap-to-pay readers, registers, retail terminals — all of it integrates seamlessly if you have a brick-and-mortar studio doing both services and physical product sales. The free tier looks attractive on paper. But once you actually need SMS reminders, marketing automation, contracts, or any of the workflow that keeps your book full, you&apos;re bolting on $15–40/month of add-ons that erase the &quot;free&quot; advantage. And the appointment defaults are tuned for a quick chair turnover, not braiders.
+          Square&apos;s strongest move is its hardware ecosystem: tap-to-pay readers, registers, retail terminals — all of it integrates seamlessly if you have a brick-and-mortar studio doing both services and physical product sales. The free tier looks attractive on paper, and it does more than people expect — it takes deposits and it does contracts. What it does not do is match the rate: 3.3% + 30¢ on online payments against Stripe&apos;s standard 2.9%. Text marketing is not available on it at all, and marketing plus full team management start at Plus, $49/month per location, with no free trial to test it on. And the appointment defaults are tuned for a quick chair turnover, not braiders.
         </p>
       </Section>
 

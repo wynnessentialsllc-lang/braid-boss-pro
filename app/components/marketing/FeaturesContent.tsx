@@ -70,9 +70,13 @@ const heroEm = {
 // `variant` picks the hero. Both surfaces share every section below it,
 // but they are answering different questions:
 //   "features"  (/features) — "what do I get?" Leads with breadth.
-//   "home"      (/)         — "why pay when Square is free?" Leads with
-//                             deposits and signed contracts, because
-//                             those are what free booking does not do.
+//   "home"      (/)         — "why pay when Square is free?" Answers it
+//                             on price and on braid-specific work, not
+//                             on features Square also has. Square takes
+//                             deposits and does contracts; what it does
+//                             not do is charge 2.9%, price a
+//                             hair-included quote, or hold a nine-hour
+//                             window.
 // Keeping them distinct also stops / and /features shipping the same h1.
 export default function FeaturesContent({
   directory,
@@ -89,7 +93,7 @@ export default function FeaturesContent({
               <em style={heroEm}>Contracts signed.</em>
             </>
           }
-          body="Square Appointments is free, and it will take a deposit. What it won't do is get your policy e-signed before a nine-hour install, or price a hair-included quote — and it bills separately for the reminders and contracts that make a deposit stick. Braid Boss Pro does all of it for $14.99 a month."
+          body="Square Appointments is free, and it will take a deposit — at 3.3% + 30¢, where we run on Stripe's 2.9%. That's 72¢ more on every $180 install. And free doesn't price a hair-included quote, hold a nine-hour window, or put allergy and aftercare terms in what your client signs."
           proof={
             <>
               <strong style={{ color: C.brandPrimary }}>
