@@ -9,6 +9,7 @@ import { ComparisonTable, type ComparisonRow } from "../../components/marketing/
 import { FaqAccordion } from "../../components/marketing/FeaturePageKit";
 import CompareSchema from "../../components/marketing/CompareSchema";
 import { type FaqEntry } from "../../components/marketing/FeatureSchema";
+import { C } from "../../components/marketing/tokens";
 
 export const metadata: Metadata = {
   title: "Braid Boss Pro vs Square Appointments · Which is better for braiders?",
@@ -83,6 +84,46 @@ export default function VsSquarePage() {
 
       <Section eyebrow="At a glance" title="The numbers that matter">
         <ComparisonTable competitorName="Square Appointments" rows={rows} />
+        {/* The table above prices each add-on separately, which reads as a
+            row of small asterisks. This adds them up once, using only the
+            figures already in the rows — Plus at $29 and Marketing at
+            $15+ — so the total cannot drift from the table above it.
+            Deliberately "at least": the SMS and Forms add-ons are real
+            costs we do not put a number on. */}
+        <div
+          style={{
+            marginTop: 22,
+            padding: 18,
+            background: "#FBFAFD",
+            border: `1px dashed ${C.brandBorder}`,
+            borderRadius: 18,
+            color: C.coffee,
+            fontSize: 14,
+            lineHeight: 1.6,
+          }}
+        >
+          <strong style={{ color: C.brandPrimary }}>Add it up.</strong>{" "}
+          Square&apos;s free tier is genuinely free — but the things braiders
+          actually ask for are priced separately. Appointments Plus ($29/mo)
+          for no-show protection and a custom booking site, Square Marketing
+          ($15+/mo) for campaigns, then the SMS and Forms add-ons on top.
+          That is <strong>at least $44/month</strong> before per-staff
+          charges, against <strong>$14.99</strong> with everything switched
+          on from day one.
+          <br />
+          <br />
+          Some of it you cannot buy on Square at any price: a pricing
+          calculator that understands hair-included quotes, braiding-hair
+          inventory by color and length, aftercare guides, or long-appointment
+          deposit windows.
+          <br />
+          <br />
+          <span style={{ fontSize: 12.5, opacity: 0.8 }}>
+            Square&apos;s pricing is theirs to change — check their current
+            rates before deciding. Ours is one number: $14.99/month, every
+            feature, no per-staff fee.
+          </span>
+        </div>
       </Section>
 
       <Section eyebrow="Where Square wins" title="Honest take" background="#FBFAFD">

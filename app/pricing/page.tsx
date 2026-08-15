@@ -190,6 +190,32 @@ export default function PricingPage() {
         background="#FBFAFD"
       >
         <PricingComparison />
+        {/* Square is the one that matters — it is the free option, and
+            "free" is what a braider weighs $14.99 against. The answer is
+            not that we are cheaper than Square's entry tier (we are not);
+            it is that Square's entry tier does not do the job, and the
+            tier that does costs more than we do. Stated once, plainly.
+            Figures mirror the /compare/...-vs-square-appointments table. */}
+        <p
+          style={{
+            marginTop: 18,
+            padding: "14px 18px",
+            background: "#FFFFFF",
+            border: `1px dashed ${C.brandBorder}`,
+            borderRadius: 16,
+            color: C.coffee,
+            fontSize: 13.5,
+            lineHeight: 1.6,
+            textAlign: "center",
+          }}
+        >
+          <strong style={{ color: C.brandPrimary }}>On Square, this costs more.</strong>{" "}
+          Their free tier is free — but no-show protection and a custom
+          booking site need Appointments Plus at $29/mo, campaigns need
+          Square Marketing at $15+/mo, and SMS and Forms are separate again.
+          Every one of those is included here. Square&apos;s pricing is
+          theirs to change; check it before you decide.
+        </p>
         <p style={{ marginTop: 16, textAlign: "center", fontSize: 13.5, color: C.coffee }}>
           Want the detail?{" "}
           <a href="/compare/braid-boss-pro-vs-styleseat" style={{ color: C.brandPrimary, fontWeight: 700, textDecoration: "underline" }}>vs StyleSeat</a>
