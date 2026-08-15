@@ -189,17 +189,18 @@ export default function GuidePage() {
             name="Vagaro"
             price="$30/mo · +$10 per extra calendar"
             pros={[
-              "Mature, all-in-one salon platform",
+              "Mature, all-in-one salon platform — deep base plan at $23.99",
+              "Published card rate of 2.29%–2.6%, lower than ours",
+              "24/7 human phone support and free data migration",
               "Marketplace presence (Find Beauty Pros)",
-              "Strong if you offer hair + nails + skin + lashes together",
             ]}
             cons={[
-              "Per-calendar pricing climbs fast — 3 chairs is $50/mo, 7 is $90",
-              "Waivers ($10/mo) and marketing ($20/mo) are separate add-ons",
+              "Per-calendar pricing climbs — 3 chairs is $50/mo, 7 is $90",
+              "Free card reader carries a 12-month commitment, $150 to exit",
               "Built around generic clinical appointments, not long braid installs",
               "Vagaro Pay processes payments — not direct Stripe ownership",
             ]}
-            verdict="Right pick for a multi-service salon owner who needs one back office for hair + nails + skin. Over-built and over-priced for a solo or small braid-focused chair."
+            verdict="The strongest all-round platform here, and the better buy if you run a multi-service shop or want a support line at 9pm. It just has no idea what a hair-included quote is."
             href="/compare/braid-boss-pro-vs-vagaro"
             cta="Read full comparison"
           />
