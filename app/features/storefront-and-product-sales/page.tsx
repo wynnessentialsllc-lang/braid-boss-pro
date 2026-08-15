@@ -25,12 +25,6 @@ export const metadata: Metadata = {
   description:
     "Sell hair, products, and gift cards from a branded storefront with multi-variant listings, a cart, pickup, local delivery, and Shippo shipping with live rates, labels, and public order tracking.",
   alternates: { canonical: PATH },
-  keywords: [
-    "braider storefront",
-    "sell hair products online",
-    "salon ecommerce software",
-    "online store for braiders",
-  ],
   openGraph: {
     title: "Storefront & Product Sales for Braiders · Braid Boss Pro",
     description:

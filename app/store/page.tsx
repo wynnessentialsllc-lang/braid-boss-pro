@@ -26,15 +26,6 @@ export const metadata: Metadata = {
   description:
     "The Braid Boss Pro Store: braider essentials made for the chair. Shop the Braid Boss Pro Business Planner — a fully hyperlinked GoodNotes digital planner for bookings, income, clients, taxes and growth. Instant download.",
   alternates: { canonical: "/store" },
-  keywords: [
-    "braider essentials",
-    "digital planner for braiders",
-    "goodnotes planner braider",
-    "braid business planner",
-    "hair stylist digital planner",
-    "braider booking planner",
-    "braid boss pro store",
-  ],
   openGraph: {
     title: "Braid Boss Pro Store — Braider Essentials",
     description:

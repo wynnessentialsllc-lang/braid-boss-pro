@@ -25,13 +25,6 @@ export const metadata: Metadata = {
   description:
     "Accept deposits online, collect balances and tips, protect against no-shows, and track every transaction. Stripe Connect, Tap to Pay on iPhone, BNPL, Stripe Tax, and a full ledger built for braiders.",
   alternates: { canonical: PATH },
-  keywords: [
-    "deposit software for braiders",
-    "payment software for braiders",
-    "accept deposits online",
-    "no-show protection for braiders",
-    "Stripe Connect for braiders",
-  ],
   openGraph: {
     title: "Payments & Deposits for Braiders · Braid Boss Pro",
     description:

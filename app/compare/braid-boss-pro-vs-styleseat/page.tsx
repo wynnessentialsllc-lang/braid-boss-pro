@@ -15,13 +15,6 @@ export const metadata: Metadata = {
   description:
     "Side-by-side comparison of Braid Boss Pro and StyleSeat for braid stylists. Pricing, deposits, retail storefront, contracts, and creator-economy workflow.",
   alternates: { canonical: "/compare/braid-boss-pro-vs-styleseat" },
-  keywords: [
-    "Braid Boss Pro vs StyleSeat",
-    "StyleSeat for braiders",
-    "StyleSeat alternative",
-    "booking app for braid stylists",
-    "StyleSeat fees",
-  ],
   openGraph: {
     title: "Braid Boss Pro vs StyleSeat for braiders",
     description: "Side-by-side comparison for braid stylists choosing between Braid Boss Pro and StyleSeat.",

@@ -36,7 +36,6 @@ export async function generateMetadata({
   return {
     title,
     description,
-    ...(product.keywords && product.keywords.length ? { keywords: product.keywords } : {}),
     alternates: { canonical: `/store/${product.slug}` },
     openGraph: {
       title,

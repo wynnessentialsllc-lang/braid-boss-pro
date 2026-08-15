@@ -11,12 +11,6 @@ export const metadata: Metadata = {
   description:
     "Braid Boss Pro was built at a working braid chair (SBW Braiding) to replace the notes-app-and-three-payment-apps way of running a braid business. Meet the story, mission, and the people behind it.",
   alternates: { canonical: "/about" },
-  keywords: [
-    "about braid boss pro",
-    "braider business software founder",
-    "built by braiders",
-    "braid business app story",
-  ],
   openGraph: {
     title: "About Braid Boss Pro — built by a braider, for braiders",
     description:

@@ -13,16 +13,6 @@ export const metadata: Metadata = {
   description:
     "Common questions about Braid Boss Pro — the booking + commerce app for braid stylists. 14-day free trial, Stripe Connect, deposits, storefront, PWA install on iPhone + Android.",
   alternates: { canonical: "/faq" },
-  keywords: [
-    "braider booking app FAQ",
-    "booking app for braiders questions",
-    "braider scheduling app help",
-    "braid business management app",
-    "Stripe Connect for braiders",
-    "deposits for braiders",
-    "PWA install braider app",
-    "iPhone Android booking app for braiders",
-  ],
   openGraph: {
     title: "FAQ · Braid Boss Pro",
     description:

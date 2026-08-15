@@ -22,17 +22,6 @@ export const metadata: Metadata = {
   description:
     "Braid Boss Pro is the business operating system for braiders — bookings, deposits, contracts, storefront, and marketing. Start a 14-day free trial, then $14.99/month. Cancel anytime.",
   alternates: { canonical: "/pricing" },
-  keywords: [
-    "braid business software",
-    "braid business management app",
-    "booking app for braiders",
-    "braider booking software",
-    "braider scheduling app",
-    "business tools for braiders",
-    "braid pricing software",
-    "creator economy braid platform",
-    "braider app monthly price",
-  ],
   openGraph: {
     title: "Pricing · Braid Boss Pro",
     description:

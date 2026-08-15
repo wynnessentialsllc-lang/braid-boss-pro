@@ -23,12 +23,6 @@ export const metadata: Metadata = {
   description:
     "Braid Boss Pro is an all-in-one business platform built specifically for professional braiders — bookings, deposits, inventory, AI tools, contracts, storefront, memberships, marketing, profile, and analytics in one mobile-first system.",
   alternates: { canonical: PATH },
-  keywords: [
-    "why Braid Boss Pro",
-    "all-in-one platform for braiders",
-    "business platform for braiders",
-    "software for professional braiders",
-  ],
   openGraph: {
     title: "Why Braid Boss Pro · The All-in-One Platform for Braiders",
     description:

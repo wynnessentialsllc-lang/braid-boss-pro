@@ -25,12 +25,6 @@ export const metadata: Metadata = {
   description:
     "Track braiding hair by color, length, quantity, and cost, watch low-stock levels, and price products with a profit calculator. Inventory management built for braiders and retail products.",
   alternates: { canonical: PATH },
-  keywords: [
-    "braiding hair inventory management",
-    "inventory software for braiders",
-    "braiding inventory tracker",
-    "hair stock tracking for braiders",
-  ],
   openGraph: {
     title: "Braiding Hair Inventory Management · Braid Boss Pro",
     description:

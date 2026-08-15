@@ -25,12 +25,6 @@ export const metadata: Metadata = {
   description:
     "A public stylist profile and link-in-bio page with your bio, services, gallery, reviews, shop, and a book-now CTA — plus a discover marketplace that helps clients find braiders.",
   alternates: { canonical: PATH },
-  keywords: [
-    "braider marketplace",
-    "find braiders",
-    "braid stylist directory",
-    "public profile for hairstylists",
-  ],
   openGraph: {
     title: "Braider Marketplace & Public Profile · Braid Boss Pro",
     description:

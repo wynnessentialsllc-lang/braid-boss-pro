@@ -25,12 +25,6 @@ export const metadata: Metadata = {
   description:
     "All-in-one business management software for braiders — clients, policies, services, availability, branding, notifications, analytics, billing, and a settings hub in one mobile-first dashboard. 14-day free trial.",
   alternates: { canonical: PATH },
-  keywords: [
-    "business software for braiders",
-    "braid business management software",
-    "salon management software for braiders",
-    "braider admin dashboard",
-  ],
   openGraph: {
     title: "Business Management Software for Braiders · Braid Boss Pro",
     description:

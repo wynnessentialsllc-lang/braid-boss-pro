@@ -25,13 +25,6 @@ export const metadata: Metadata = {
   description:
     "Booking and scheduling software built for braiders — a branded booking microsite, real-time availability calendar, service variations, digital intake forms, and self-service rescheduling. Start a 14-day free trial.",
   alternates: { canonical: PATH },
-  keywords: [
-    "booking software for braiders",
-    "braider booking app",
-    "braider scheduling software",
-    "online booking for braiders",
-    "appointment scheduling for braiders",
-  ],
   openGraph: {
     title: "Booking Software for Braiders · Braid Boss Pro",
     description:

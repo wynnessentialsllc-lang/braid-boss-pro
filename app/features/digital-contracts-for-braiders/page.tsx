@@ -25,12 +25,6 @@ export const metadata: Metadata = {
   description:
     "Send tokenized, e-signature agreements clients sign from their phone — typed name, signature, optional initials, agree checkbox, and decline-with-reason, with a clear status lifecycle that protects your policies.",
   alternates: { canonical: PATH },
-  keywords: [
-    "digital contracts for braiders",
-    "braider contracts",
-    "hairstylist contracts",
-    "salon liability forms",
-  ],
   openGraph: {
     title: "Digital Contracts for Braiders · Braid Boss Pro",
     description:

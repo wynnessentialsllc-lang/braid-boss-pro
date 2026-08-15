@@ -42,14 +42,6 @@ export const metadata: Metadata = {
   description:
     "The all-in-one booking and business app built specifically for braid stylists: branded booking links, Stripe deposits, contracts, retail, and reminders. $14.99/mo, 14-day free trial.",
   applicationName: "Braid Boss Pro",
-  keywords: [
-    "booking app for braiders",
-    "booking app for braid stylists",
-    "salon software for braiders",
-    "braider business app",
-    "take deposits as a braider",
-    "branded booking link for braiders",
-  ],
   // NOTE: deliberately no `alternates.canonical` or `openGraph.url` here.
   // Pages without their own metadata (privacy, terms, support, admin…)
   // inherit root metadata, and a root canonical of "/" would wrongly

@@ -87,8 +87,6 @@ export type StoreProduct = {
   policyNote?: string;
   /** Product FAQ — also emitted as FAQPage JSON-LD for SEO. */
   faqs?: StoreFaq[];
-  /** SEO keywords for the product page. */
-  keywords?: string[];
 
   /** Featured on the store landing hero. */
   featured?: boolean;
@@ -217,22 +215,6 @@ export const STORE_PRODUCTS: StoreProduct[] = [
         a: "No. It's a standalone product and works completely on its own.",
       },
     ],
-    keywords: [
-      "digital planner",
-      "goodnotes planner",
-      "hair braider",
-      "braiding business",
-      "reusable planner",
-      "ipad planner",
-      "hyperlinked planner",
-      "salon planner",
-      "stylist planner",
-      "hairstylist business",
-      "natural hair",
-      "client tracker",
-      "income tracker",
-      "small business planner",
-    ],
 
     featured: true,
     // LIVE: file ✓, price ✓ ($19 intro / $29 regular), images ✓.
@@ -344,21 +326,6 @@ export const STORE_PRODUCTS: StoreProduct[] = [
         q: "I bought it and I'm stuck.",
         a: "Message us. We'd rather spend five minutes helping you than have you sit with a file you can't open.",
       },
-    ],
-    keywords: [
-      "digital stickers",
-      "goodnotes stickers",
-      "planner stickers",
-      "braider planner",
-      "hair stylist planner",
-      "salon stickers",
-      "png stickers",
-      "transparent png stickers",
-      "digital planner stickers",
-      "braiding business",
-      "stylist stickers",
-      "precropped stickers",
-      "digital sticker pack",
     ],
 
     // LIVE: file ✓ (sticker-bucket), price ✓ ($8), image ✓. Purchasable —

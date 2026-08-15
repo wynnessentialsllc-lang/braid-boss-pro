@@ -15,13 +15,6 @@ export const metadata: Metadata = {
   description:
     "Side-by-side comparison of Braid Boss Pro and Vagaro for braid stylists. Pricing, deposits, contracts, retail, and braider-specific workflow features.",
   alternates: { canonical: "/compare/braid-boss-pro-vs-vagaro" },
-  keywords: [
-    "Braid Boss Pro vs Vagaro",
-    "Vagaro for braiders",
-    "best booking app for braiders",
-    "Vagaro alternative for braid stylists",
-    "salon software for braiders",
-  ],
   openGraph: {
     title: "Braid Boss Pro vs Vagaro for braiders",
     description: "Side-by-side comparison for braid stylists choosing between Braid Boss Pro and Vagaro.",

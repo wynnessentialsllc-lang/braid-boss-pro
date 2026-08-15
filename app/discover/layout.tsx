@@ -9,13 +9,6 @@ export const metadata: Metadata = {
   description:
     "Search braid stylists near you by city and style. Browse box braids, knotless, locs, twists, and cornrow specialists, then book directly through their Braid Boss Pro booking page.",
   alternates: { canonical: "/discover" },
-  keywords: [
-    "find a braider near me",
-    "braid stylists near me",
-    "book a braider",
-    "knotless braids near me",
-    "loctitian near me",
-  ],
   openGraph: {
     title: "Find a Braider Near You",
     description: "Search braid stylists by city and style, then book directly.",

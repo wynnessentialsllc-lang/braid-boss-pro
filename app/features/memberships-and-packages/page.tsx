@@ -25,12 +25,6 @@ export const metadata: Metadata = {
   description:
     "Sell prepaid visit bundles, credit packages, and recurring monthly or yearly memberships with subscription billing, self-service cancellation, and public buy pages. Built for braiders.",
   alternates: { canonical: PATH },
-  keywords: [
-    "braider memberships",
-    "prepaid hair packages",
-    "salon membership software",
-    "prepaid visit bundles for braiders",
-  ],
   openGraph: {
     title: "Memberships & Packages for Braiders · Braid Boss Pro",
     description:

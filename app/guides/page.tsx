@@ -14,12 +14,6 @@ export const metadata: Metadata = {
   description:
     "Practical guides for professional braiders — choosing booking software, taking deposits, pricing braid work, and growing your business. Honest, braider-focused advice from Braid Boss Pro.",
   alternates: { canonical: "/guides" },
-  keywords: [
-    "guides for braiders",
-    "braider business guides",
-    "how to take deposits as a braider",
-    "booking software guide for braiders",
-  ],
   openGraph: {
     title: "Guides for Braiders · Braid Boss Pro",
     description: "Practical, braider-focused guides on booking software, deposits, pricing, and growth.",

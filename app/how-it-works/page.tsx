@@ -27,16 +27,6 @@ export const metadata: Metadata = {
   description:
     "How Braid Boss Pro works — the business operating system for braiders. Bookings, deposits, Stripe Connect, retail storefronts, PWA install on iPhone + Android. Set up in under 10 minutes.",
   alternates: { canonical: "/how-it-works" },
-  keywords: [
-    "braid business software",
-    "braid business management app",
-    "booking app for braiders",
-    "braider booking software",
-    "braider scheduling app",
-    "braid Stripe Connect setup",
-    "braid storefront app",
-    "PWA install braider app",
-  ],
   openGraph: {
     title: "How It Works · Braid Boss Pro",
     description:

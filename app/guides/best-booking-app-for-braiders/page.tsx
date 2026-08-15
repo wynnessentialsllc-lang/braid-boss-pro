@@ -13,14 +13,6 @@ export const metadata: Metadata = {
   description:
     "Honest, side-by-side guide to the best booking apps for braid stylists in 2026. We compare Braid Boss Pro, StyleSeat, Vagaro, Square Appointments, and GlossGenius on price, deposits, contracts, and braider-specific workflow.",
   alternates: { canonical: "/guides/best-booking-app-for-braiders" },
-  keywords: [
-    "best booking app for braiders",
-    "best booking app for braid stylists",
-    "booking app for braiders 2026",
-    "salon software for braiders",
-    "how to take deposits as a braider",
-    "Stripe Connect for braiders",
-  ],
   openGraph: {
     title: "The Best Booking App for Braiders in 2026",
     description: "Honest, side-by-side guide for braid stylists choosing booking software.",

@@ -26,12 +26,6 @@ export const metadata: Metadata = {
   description:
     "Confirmations, reminders, review requests, rebooking and win-back messages, newsletters, and segmented marketing blasts — opt-in SMS and email retention tools built for braiders.",
   alternates: { canonical: PATH },
-  keywords: [
-    "marketing software for braiders",
-    "client retention software",
-    "rebooking software for braiders",
-    "SMS reminders for braiders",
-  ],
   openGraph: {
     title: "Marketing & Client Retention for Braiders · Braid Boss Pro",
     description:

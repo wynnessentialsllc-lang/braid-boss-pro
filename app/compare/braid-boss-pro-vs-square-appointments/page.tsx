@@ -15,13 +15,6 @@ export const metadata: Metadata = {
   description:
     "Side-by-side comparison of Braid Boss Pro and Square Appointments for braid stylists. Pricing, deposits, contracts, retail, and braid-specific workflow.",
   alternates: { canonical: "/compare/braid-boss-pro-vs-square-appointments" },
-  keywords: [
-    "Braid Boss Pro vs Square Appointments",
-    "Square Appointments for braiders",
-    "Square Appointments alternative",
-    "booking app for braid stylists",
-    "Square fees salon",
-  ],
   openGraph: {
     title: "Braid Boss Pro vs Square Appointments for braiders",
     description: "Side-by-side comparison for braid stylists choosing between Braid Boss Pro and Square Appointments.",
