@@ -209,12 +209,13 @@ export default function PricingPage() {
             textAlign: "center",
           }}
         >
-          <strong style={{ color: C.brandPrimary }}>On Square, this costs more.</strong>{" "}
-          Their free tier is free — but no-show protection and a custom
-          booking site need Appointments Plus at $29/mo, campaigns need
-          Square Marketing at $15+/mo, and SMS and Forms are separate again.
-          Every one of those is included here. Square&apos;s pricing is
-          theirs to change; check it before you decide.
+          <strong style={{ color: C.brandPrimary }}>Free is not the same as cheaper.</strong>{" "}
+          Square&apos;s free plan charges 3.3% + 30¢ on online payments, and a
+          booking deposit is an online payment. We run on Stripe&apos;s
+          standard 2.9% + 30¢ — 72¢ less on a $180 deposit, every time.
+          Matching our rate means Square Plus at $49/month, three times this
+          price, with no free trial. Square&apos;s pricing is theirs to
+          change; check it before you decide.
         </p>
         <p style={{ marginTop: 16, textAlign: "center", fontSize: 13.5, color: C.coffee }}>
           Want the detail?{" "}

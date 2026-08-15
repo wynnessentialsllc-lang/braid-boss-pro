@@ -25,9 +25,12 @@ export const metadata: Metadata = {
 };
 
 const rows: ComparisonRow[] = [
-  { feature: "Monthly price (1 stylist)", bbp: { mark: "text", note: "$14.99" }, them: { mark: "text", note: "$0 (free tier) — $29 Plus" } },
-  { feature: "Payment processing fees", bbp: { mark: "text", note: "Stripe standard (~2.9% + 30¢)" }, them: { mark: "text", note: "~2.6% + 10¢ (in-person) / 2.9% + 30¢ online" } },
-  { feature: "Per-staff fees", bbp: { mark: "no", note: "Flat" }, them: { mark: "yes", note: "$20–35/mo per additional staff" } },
+  { feature: "Monthly price (1 stylist)", bbp: { mark: "text", note: "$14.99" }, them: { mark: "text", note: "$0 Free · $49 Plus · $149 Premium" } },
+  // The row that matters most: a booking deposit is an online payment, and
+  // Square's free tier prices those 0.4% above Stripe's standard rate.
+  { feature: "Online rate (deposits)", bbp: { mark: "text", note: "2.9% + 30¢ — Stripe standard" }, them: { mark: "text", note: "3.3% + 30¢ on Free; 2.9% needs Plus ($49/mo)" } },
+  { feature: "Free trial", bbp: { mark: "yes", note: "30 days, every feature" }, them: { mark: "no", note: "None on paid plans" } },
+  { feature: "Team management", bbp: { mark: "yes", note: "Included" }, them: { mark: "partial", note: "Limited on Free; full needs Plus ($49/mo)" } },
   { feature: "Built specifically for braiders", bbp: { mark: "yes", note: "Hair-included pricing, long appointments, allergy/aftercare" }, them: { mark: "no", note: "Generic appointment software" } },
   { feature: "Stripe Connect (you own payouts)", bbp: { mark: "yes" }, them: { mark: "no", note: "Square processing only" } },
   { feature: "Pricing calculator for braid quotes", bbp: { mark: "yes" }, them: { mark: "no" } },
@@ -102,14 +105,25 @@ export default function VsSquarePage() {
             lineHeight: 1.6,
           }}
         >
-          <strong style={{ color: C.brandPrimary }}>Add it up.</strong>{" "}
-          Square&apos;s free tier is genuinely free, and it will take a
-          deposit. What costs extra is everything that makes the deposit
-          stick: contracts through the Forms add-on, SMS reminders as a paid
-          add-on, and campaigns through Square Marketing at $15+/mo — then
-          $20–35/mo per additional stylist, and $29/mo for Plus if you want
-          a booking site that is not a square.site URL. Every one of those is
-          included here, in <strong>$14.99</strong>.
+          <strong style={{ color: C.brandPrimary }}>Free is not the same as cheaper.</strong>{" "}
+          Square&apos;s free tier has no monthly fee, and it will take a
+          deposit — but it prices online payments at{" "}
+          <strong>3.3% + 30¢</strong>, and a booking deposit is an online
+          payment. Braid Boss Pro runs on Stripe&apos;s standard{" "}
+          <strong>2.9% + 30¢</strong>. On a $180 deposit that is 72¢ more,
+          every time, on Square.
+          <br />
+          <br />
+          To match our rate you need Square Plus at{" "}
+          <strong>$49/month</strong> — which is also where team management
+          and marketing features start. That is more than three times
+          $14.99, and Square runs no free trial on its paid plans.
+          <br />
+          <br />
+          The crossover is about <strong>$45,000 a year</strong> in online
+          payments, roughly $3,750 a month. Above that, the 0.4% rate
+          difference alone covers our subscription and Braid Boss Pro costs
+          you less than Square&apos;s free plan outright.
           <br />
           <br />
           Some of it you cannot buy on Square at any price: a pricing
