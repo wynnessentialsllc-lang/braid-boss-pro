@@ -11,12 +11,6 @@ export const metadata: Metadata = {
   description:
     "Braid Boss Pro was built at a working braid chair (SBW Braiding) to replace the notes-app-and-three-payment-apps way of running a braid business. Meet the story, mission, and the people behind it.",
   alternates: { canonical: "/about" },
-  keywords: [
-    "about braid boss pro",
-    "braider business software founder",
-    "built by braiders",
-    "braid business app story",
-  ],
   openGraph: {
     title: "About Braid Boss Pro — built by a braider, for braiders",
     description:
@@ -93,7 +87,7 @@ export default function AboutPage() {
 
       <CtaFooter
         title="Run your braid business like a brand."
-        body="Start with a 14-day free trial — every feature unlocked. Then $14.99/month, or $149/year. No contracts, cancel anytime."
+        body="Start with a 30-day free trial — every feature unlocked. Then $14.99/month, or $149/year. No contracts, cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See pricing", href: "/pricing" }}
       />

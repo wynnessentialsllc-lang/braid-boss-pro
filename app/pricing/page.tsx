@@ -16,27 +16,17 @@ import {
 import { PricingPlanCard } from "../components/marketing/PricingPlanCard";
 import { PricingComparison } from "../components/marketing/PricingComparison";
 import { C, FONT_DISPLAY, GRADIENTS, SHADOWS } from "../components/marketing/tokens";
+import { TRIAL_DAYS } from "../lib/plan";
 
 export const metadata: Metadata = {
   title: "Pricing · Braid Boss Pro — the business OS for braiders",
   description:
-    "Braid Boss Pro is the business operating system for braiders — bookings, deposits, contracts, storefront, and marketing. Start a 14-day free trial, then $14.99/month. Cancel anytime.",
+    "Braid Boss Pro is the business operating system for braiders — bookings, deposits, contracts, storefront, and marketing. Start a 30-day free trial, then $14.99/month. Cancel anytime.",
   alternates: { canonical: "/pricing" },
-  keywords: [
-    "braid business software",
-    "braid business management app",
-    "booking app for braiders",
-    "braider booking software",
-    "braider scheduling app",
-    "business tools for braiders",
-    "braid pricing software",
-    "creator economy braid platform",
-    "braider app monthly price",
-  ],
   openGraph: {
     title: "Pricing · Braid Boss Pro",
     description:
-      "Everything braiders need to run their chair — for $14.99/month. Start with a 14-day free trial. Cancel anytime.",
+      "Everything braiders need to run their chair — for $14.99/month. Start with a 30-day free trial. Cancel anytime.",
     url: "/pricing",
     siteName: "Braid Boss Pro",
     type: "website",
@@ -45,17 +35,60 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Pricing · Braid Boss Pro",
     description:
-      "Everything braiders need to run their chair — $14.99/month after a 14-day free trial.",
+      "Everything braiders need to run their chair — $14.99/month after a 30-day free trial.",
   },
 };
 
-const TRIAL_DAYS = 14;
+// Product + Offer JSON-LD. The homepage owns the SoftwareApplication
+// rich result; this page owns the priced offer, so the two plans are
+// declared where the plans are actually shown and bought.
+//
+// No priceValidUntil: these are open-ended subscription prices, and a
+// baked-in date would go stale in a static build and cost the offer its
+// rich-result eligibility. Add one only if a plan gets a real end date.
+const PRICING_SCHEMA = {
+  "@context": "https://schema.org",
+  "@type": "Product",
+  name: "Braid Boss Pro",
+  description:
+    "The business operating system for braid stylists — bookings, deposits, digital contracts, retail storefront, marketing, and analytics. Every feature included on every plan.",
+  brand: { "@type": "Brand", name: "Braid Boss Pro" },
+  category: "Salon and Spa Management Software",
+  url: "https://braidbosspro.app/pricing",
+  image: "https://braidbosspro.app/icons/icon-512.png",
+  offers: [
+    {
+      "@type": "Offer",
+      name: "Monthly",
+      price: "14.99",
+      priceCurrency: "USD",
+      availability: "https://schema.org/InStock",
+      url: "https://braidbosspro.app/pricing",
+      description: `${TRIAL_DAYS}-day free trial, then $14.99/month. Cancel anytime.`,
+    },
+    {
+      "@type": "Offer",
+      name: "Annual",
+      price: "149",
+      priceCurrency: "USD",
+      availability: "https://schema.org/InStock",
+      url: "https://braidbosspro.app/pricing",
+      description: `$149/year — save $30.88 vs monthly. ${TRIAL_DAYS}-day free trial.`,
+    },
+  ],
+};
 
 export default function PricingPage() {
   return (
     <MarketingShell>
+      {/* Structured data — emitted as an inline <script> in the
+          server-rendered HTML so crawlers see it on first load. */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(PRICING_SCHEMA) }}
+      />
       <MarketingHero
-        eyebrow="Simple pricing · 14-day free trial"
+        eyebrow="Simple pricing · 30-day free trial"
         title={
           <>
             The business operating system{" "}
@@ -72,7 +105,7 @@ export default function PricingPage() {
             </em>
           </>
         }
-        body="Braid Boss Pro is built specifically for braid stylists — bookings, deposits, contracts, retail storefronts, analytics, and modern creator-economy tools designed around how braiders actually run their chairs. Every feature included. Start free for 14 days, then just $14.99/month. Less than every major salon app, with no per-staff fees."
+        body="Braid Boss Pro is built specifically for braid stylists — bookings, deposits, contracts, retail storefronts, analytics, and modern creator-economy tools designed around how braiders actually run their chairs. Every feature included. Start free for 30 days, then just $14.99/month. Less than every major salon app, with no per-staff fees."
         primaryCta={{ label: "Start Your Free Trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See the platform", href: "/tour" }}
       />
@@ -187,7 +220,7 @@ export default function PricingPage() {
           />
           <Benefit
             icon={<Zap size={20} />}
-            title="Try it free for 14 days"
+            title="Try it free for 30 days"
             body="Take real bookings and get paid before you ever pay us. Cancel anytime, no questions."
           />
           <Benefit

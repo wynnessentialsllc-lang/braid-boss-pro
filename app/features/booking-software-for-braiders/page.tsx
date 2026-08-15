@@ -23,15 +23,8 @@ const PATH = featurePath(SLUG);
 export const metadata: Metadata = {
   title: "Booking Software for Braiders · Braid Boss Pro",
   description:
-    "Booking and scheduling software built for braiders — a branded booking microsite, real-time availability calendar, service variations, digital intake forms, and self-service rescheduling. Start a 14-day free trial.",
+    "Booking and scheduling software built for braiders — a branded booking microsite, real-time availability calendar, service variations, digital intake forms, and self-service rescheduling. Start a 30-day free trial.",
   alternates: { canonical: PATH },
-  keywords: [
-    "booking software for braiders",
-    "braider booking app",
-    "braider scheduling software",
-    "online booking for braiders",
-    "appointment scheduling for braiders",
-  ],
   openGraph: {
     title: "Booking Software for Braiders · Braid Boss Pro",
     description:
@@ -218,7 +211,7 @@ export default function BookingSoftwarePage() {
 
       <CtaFooter
         title="Give clients a booking link they'll love."
-        body="Start a 14-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
+        body="Start a 30-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See pricing", href: "/pricing" }}
       />

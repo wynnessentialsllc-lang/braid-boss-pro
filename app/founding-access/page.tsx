@@ -1,5 +1,5 @@
 // The $9.99 one-time Founding / Lifetime offer has ended. This sales
-// page now redirects to /pricing, where the current offer (a 14-day
+// page now redirects to /pricing, where the current offer (a 30-day
 // free trial, then $14.99/month) lives.
 //
 // Existing founding & lifetime members keep their access — it's stored

@@ -399,7 +399,7 @@ export default function AuthScreen({ mode, onBack, children }: AuthScreenProps) 
             </p>
           </div>
 
-          {/* 14-day free trial badge — signup only, prominent. */}
+          {/* 30-day free trial badge — signup only, prominent. */}
           {mode === "signup" && (
             <div className="bbpa-anim" style={{ display: "flex", justifyContent: "center", animation: reduced ? "none" : "bbpa-fade-up 600ms 280ms both" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 16px", borderRadius: 16, background: GRADIENTS.primary, color: "#FFFFFF", boxShadow: SHADOWS.primaryGlow, width: "100%" }}>

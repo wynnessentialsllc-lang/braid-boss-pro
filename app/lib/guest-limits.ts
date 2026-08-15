@@ -49,8 +49,8 @@ export const FEATURE_LABEL: Record<GatedFeature, string> = {
 // Calm, premium copy — no aggressive lock language.
 export const UPGRADE_HEADLINE = "Your guest workspace has reached its limit.";
 export const UPGRADE_BODY =
-  "Start your 14-day free trial of Braid Boss Pro — every feature unlocked, just $14.99/month after. Cancel anytime.";
-export const UPGRADE_BADGE = "14-day free trial · then $14.99/mo";
+  "Start your 30-day free trial of Braid Boss Pro — every feature unlocked, just $14.99/month after. Cancel anytime.";
+export const UPGRADE_BADGE = "30-day free trial · then $14.99/mo";
 
 // Subscription statuses that count as "live" access. trialing + active
 // are obvious; past_due keeps access during Stripe's retry/grace window

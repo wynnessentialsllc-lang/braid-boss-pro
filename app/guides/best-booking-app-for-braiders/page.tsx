@@ -13,14 +13,6 @@ export const metadata: Metadata = {
   description:
     "Honest, side-by-side guide to the best booking apps for braid stylists in 2026. We compare Braid Boss Pro, StyleSeat, Vagaro, Square Appointments, and GlossGenius on price, deposits, contracts, and braider-specific workflow.",
   alternates: { canonical: "/guides/best-booking-app-for-braiders" },
-  keywords: [
-    "best booking app for braiders",
-    "best booking app for braid stylists",
-    "booking app for braiders 2026",
-    "salon software for braiders",
-    "how to take deposits as a braider",
-    "Stripe Connect for braiders",
-  ],
   openGraph: {
     title: "The Best Booking App for Braiders in 2026",
     description: "Honest, side-by-side guide for braid stylists choosing booking software.",
@@ -155,7 +147,7 @@ export default function GuidePage() {
           <Card
             rank="#1 · Best for braiders"
             name="Braid Boss Pro"
-            price="$14.99/mo · 14-day free trial"
+            price="$14.99/mo · 30-day free trial"
             pros={[
               "Built specifically for braid work — hair-included pricing, long-appointment deposits",
               "Branded /@handle booking link (Linktree-style)",
@@ -269,7 +261,7 @@ export default function GuidePage() {
 
       <CtaFooter
         title="The booking app built for the way braiders work."
-        body="14-day free trial. Then $14.99/month — every feature unlocked. Cancel anytime."
+        body="30-day free trial. Then $14.99/month — every feature unlocked. Cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See features", href: "/features" }}
       />

@@ -25,12 +25,6 @@ export const metadata: Metadata = {
   description:
     "Sell prepaid visit bundles, credit packages, and recurring monthly or yearly memberships with subscription billing, self-service cancellation, and public buy pages. Built for braiders.",
   alternates: { canonical: PATH },
-  keywords: [
-    "braider memberships",
-    "prepaid hair packages",
-    "salon membership software",
-    "prepaid visit bundles for braiders",
-  ],
   openGraph: {
     title: "Memberships & Packages for Braiders · Braid Boss Pro",
     description:
@@ -189,7 +183,7 @@ export default function MembershipsPage() {
 
       <CtaFooter
         title="Turn one-off visits into recurring revenue."
-        body="Start a 14-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
+        body="Start a 30-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See pricing", href: "/pricing" }}
       />

@@ -9,12 +9,6 @@ export const metadata: Metadata = {
   description:
     "Get help with Braid Boss Pro — answers to common questions about booking links, deposits, payments, and your account, plus how to reach the team directly.",
   alternates: { canonical: "/support" },
-  keywords: [
-    "Braid Boss Pro support",
-    "Braid Boss Pro help",
-    "booking app help for braiders",
-    "contact Braid Boss Pro",
-  ],
   openGraph: {
     title: "Braid Boss Pro Support & Help",
     description: "Answers to common questions and how to reach the team.",

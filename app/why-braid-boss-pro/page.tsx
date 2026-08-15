@@ -23,12 +23,6 @@ export const metadata: Metadata = {
   description:
     "Braid Boss Pro is an all-in-one business platform built specifically for professional braiders — bookings, deposits, inventory, AI tools, contracts, storefront, memberships, marketing, profile, and analytics in one mobile-first system.",
   alternates: { canonical: PATH },
-  keywords: [
-    "why Braid Boss Pro",
-    "all-in-one platform for braiders",
-    "business platform for braiders",
-    "software for professional braiders",
-  ],
   openGraph: {
     title: "Why Braid Boss Pro · The All-in-One Platform for Braiders",
     description:
@@ -132,7 +126,7 @@ const FAQS: FaqEntry[] = [
   },
   {
     q: "How much does Braid Boss Pro cost?",
-    a: "Braid Boss Pro is $14.99/month (or $149/year) after a 14-day free trial, with every feature unlocked. There are no contracts and you can cancel anytime.",
+    a: "Braid Boss Pro is $14.99/month (or $149/year) after a 30-day free trial, with every feature unlocked. There are no contracts and you can cancel anytime.",
   },
   {
     q: "Do I keep ownership of my clients and payments?",
@@ -147,12 +141,12 @@ export default function WhyBraidBossProPage() {
         path={PATH}
         breadcrumbName="Why Braid Boss Pro"
         faqs={FAQS}
-        software={{
-          name: "Braid Boss Pro",
-          description:
-            "An all-in-one business platform built specifically for professional braiders — bookings, deposits, inventory, AI tools, contracts, storefront, memberships, marketing, public profile, and analytics in one mobile-first system.",
-          featureList: PILLARS.map((p) => p.title),
-        }}
+        // No `software` block here on purpose. This page emitted a
+        // SoftwareApplication named exactly "Braid Boss Pro" — the same
+        // entity the homepage declares — so the two competed for the one
+        // app rich result. The /features/* pages keep theirs because
+        // each names a distinct thing ("Braid Boss Pro — Payments &
+        // Deposits for Braiders"), not a second copy of the product.
       />
       <Breadcrumbs
         trail={[
@@ -353,7 +347,7 @@ export default function WhyBraidBossProPage() {
 
       <CtaFooter
         title="The all-in-one platform built for braiders."
-        body="Start a 14-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
+        body="Start a 30-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See pricing", href: "/pricing" }}
       />

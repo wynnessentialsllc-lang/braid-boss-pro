@@ -26,12 +26,6 @@ export const metadata: Metadata = {
   description:
     "Confirmations, reminders, review requests, rebooking and win-back messages, newsletters, and segmented marketing blasts — opt-in SMS and email retention tools built for braiders.",
   alternates: { canonical: PATH },
-  keywords: [
-    "marketing software for braiders",
-    "client retention software",
-    "rebooking software for braiders",
-    "SMS reminders for braiders",
-  ],
   openGraph: {
     title: "Marketing & Client Retention for Braiders · Braid Boss Pro",
     description:
@@ -226,7 +220,7 @@ export default function MarketingPage() {
 
       <CtaFooter
         title="Cut no-shows. Keep clients coming back."
-        body="Start a 14-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
+        body="Start a 30-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See pricing", href: "/pricing" }}
       />

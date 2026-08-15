@@ -57,7 +57,7 @@ export default function OpengraphImage() {
             maxWidth: 900,
           }}
         >
-          Branded booking links, Stripe deposits, contracts, retail, and reminders. $14.99/mo · 14-day free trial.
+          Branded booking links, Stripe deposits, contracts, retail, and reminders. $14.99/mo · 30-day free trial.
         </div>
       </div>
     ),

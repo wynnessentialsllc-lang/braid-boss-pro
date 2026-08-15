@@ -27,16 +27,6 @@ export const metadata: Metadata = {
   description:
     "How Braid Boss Pro works — the business operating system for braiders. Bookings, deposits, Stripe Connect, retail storefronts, PWA install on iPhone + Android. Set up in under 10 minutes.",
   alternates: { canonical: "/how-it-works" },
-  keywords: [
-    "braid business software",
-    "braid business management app",
-    "booking app for braiders",
-    "braider booking software",
-    "braider scheduling app",
-    "braid Stripe Connect setup",
-    "braid storefront app",
-    "PWA install braider app",
-  ],
   openGraph: {
     title: "How It Works · Braid Boss Pro",
     description:
@@ -93,7 +83,7 @@ export default function HowItWorksPage() {
             body={
               <>
                 Sign up with your email — the dashboard opens to a guided
-                walkthrough. Start with a 14-day free trial; every feature
+                walkthrough. Start with a 30-day free trial; every feature
                 unlocked from day one.
               </>
             }
@@ -314,7 +304,7 @@ export default function HowItWorksPage() {
       </Section>
 
       <CtaFooter
-        title="Ten minutes to live. Try it free for 14 days."
+        title="Ten minutes to live. Try it free for 30 days."
         body="Every feature unlocked from day one. Then $14.99/month. No contracts, cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "Browse features", href: "/features" }}

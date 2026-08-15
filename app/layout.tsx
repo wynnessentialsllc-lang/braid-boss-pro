@@ -40,16 +40,8 @@ export const metadata: Metadata = {
   // description, and canonical individually.
   title: "Braid Boss Pro — Booking & Business App Built for Braid Stylists",
   description:
-    "The all-in-one booking and business app built specifically for braid stylists: branded booking links, Stripe deposits, contracts, retail, and reminders. $14.99/mo, 14-day free trial.",
+    "The all-in-one booking and business app built specifically for braid stylists: branded booking links, Stripe deposits, contracts, retail, and reminders. $14.99/mo, 30-day free trial.",
   applicationName: "Braid Boss Pro",
-  keywords: [
-    "booking app for braiders",
-    "booking app for braid stylists",
-    "salon software for braiders",
-    "braider business app",
-    "take deposits as a braider",
-    "branded booking link for braiders",
-  ],
   // NOTE: deliberately no `alternates.canonical` or `openGraph.url` here.
   // Pages without their own metadata (privacy, terms, support, admin…)
   // inherit root metadata, and a root canonical of "/" would wrongly
@@ -67,7 +59,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Braid Boss Pro — Built for Braid Stylists",
     description:
-      "Booking links, Stripe deposits, contracts, retail, and reminders — built specifically for braiders. $14.99/mo, 14-day free trial.",
+      "Booking links, Stripe deposits, contracts, retail, and reminders — built specifically for braiders. $14.99/mo, 30-day free trial.",
   },
   appleWebApp: {
     capable: true,
@@ -102,80 +94,30 @@ export default function RootLayout({
             hoists these <link> tags into <head>. */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        {/* SoftwareApplication structured data — gives LLMs and
-            search engines a machine-readable summary of what this
-            product is, who it's for, and what it costs. Emitted once
-            on the root layout so every page carries it. */}
-        <script
-          type="application/ld+json"
-          // eslint-disable-next-line react/no-danger
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify({
-              "@context": "https://schema.org",
-              "@type": "SoftwareApplication",
-              name: "Braid Boss Pro",
-              description:
-                "The business operating system for braid stylists — branded booking links, deposits, contracts, retail storefronts, marketing, and analytics, built specifically for braiders.",
-              applicationCategory: "BusinessApplication",
-              applicationSubCategory: "Salon and Spa Management",
-              operatingSystem: "iOS, Android, Web (PWA)",
-              url: "https://braidbosspro.app",
-              image: "https://braidbosspro.app/icons/icon-512.png",
-              offers: [
-                {
-                  "@type": "Offer",
-                  name: "Monthly",
-                  price: "14.99",
-                  priceCurrency: "USD",
-                  category: "Subscription",
-                  description: "14-day free trial, then $14.99/month. Cancel anytime.",
-                },
-                {
-                  "@type": "Offer",
-                  name: "Annual",
-                  price: "149",
-                  priceCurrency: "USD",
-                  category: "Subscription",
-                  description: "$149/year — save $30.88 vs monthly. 14-day free trial.",
-                },
-              ],
-              featureList: [
-                "Branded /@handle booking links",
-                "Stripe Connect deposits and balance payments",
-                "Digital contracts with e-signature",
-                "Pricing calculator and saved quotes",
-                "Client CRM with histories, allergies, photos",
-                "Retail storefront with product variants and inventory",
-                "SMS and email reminder automation",
-                "Marketing automation (rebooking, win-back, birthday)",
-                "Analytics dashboard",
-                "Public reviews and testimonials",
-                "Web push notifications",
-                "Progressive Web App — installs to home screen, no app store",
-              ],
-              audience: {
-                "@type": "Audience",
-                audienceType: "Braid stylists, loctitians, natural hair specialists, protective-style braiders",
-              },
-              provider: {
-                "@type": "Organization",
-                name: "Wynn Essentials",
-                url: "https://braidbosspro.app",
-              },
-            }),
-          }}
-        />
-        {/* No-JavaScript fallback. The homepage (app/page.tsx) is a
-            client-rendered SPA that paints a loading splash until its
-            JS executes, so a crawler or reviewer that doesn't run
-            scripts would otherwise see no content. This <noscript>
-            block — rendered server-side into the initial HTML and
-            never shown when JS runs — gives those clients a plain,
-            self-contained description of the product, what it costs,
-            and links to the full marketing and legal pages. */}
+        {/* NOTE: the SoftwareApplication JSON-LD used to live here, which
+            put it on all 20 routes — /privacy, /terms, /payment-success
+            and the rest all claimed to BE the product. It now lives on
+            the homepage alone (app/lib/home-schema.ts, rendered by
+            app/page.tsx), so one page owns the app rich result and it is
+            the page carrying the CTA. Per-page schema lives with its
+            page: FAQPage on /faq, Product + Offer on /pricing. */}
+        {/* No-JavaScript fallback, kept as a safety net for the
+            client-rendered transactional routes (payment-success,
+            subscription-success, unsubscribe) which still render
+            nothing without JS.
+
+            It is no longer load-bearing for the marketing pages: the
+            homepage server-renders its full landing (see app/page.tsx),
+            as /features, /pricing, /how-it-works and /faq always did.
+
+            The heading here is a <div>, not an <h1>. This block sits in
+            the ROOT layout, so an <h1> here landed on every route — the
+            first <h1> in the document on all of them, identical
+            everywhere, ahead of each page's real hero heading. Demoting
+            it leaves exactly one <h1> per page: the page's own. */}
         <noscript>
           <div style={{ maxWidth: 720, margin: "0 auto", padding: "32px 20px", fontFamily: "system-ui, sans-serif", lineHeight: 1.6, color: "#2b211c" }}>
-            <h1 style={{ fontSize: 28, margin: "0 0 8px" }}>Braid Boss Pro</h1>
+            <div style={{ fontSize: 28, fontWeight: 700, margin: "0 0 8px" }}>Braid Boss Pro</div>
             <p style={{ fontSize: 18, margin: "0 0 16px" }}>
               The all-in-one booking and business app built specifically for braid stylists, operated by Wynn Essentials LLC.
             </p>
@@ -190,7 +132,7 @@ export default function RootLayout({
               <li>Automated SMS and email appointment reminders (opt-in only)</li>
             </ul>
             <p style={{ margin: "0 0 16px" }}>
-              <strong>Pricing:</strong> 14-day free trial, then $14.99/month or $149/year. Cancel anytime.
+              <strong>Pricing:</strong> 30-day free trial, then $14.99/month or $149/year. Cancel anytime.
             </p>
             <p style={{ margin: 0 }}>
               Learn more:{" "}

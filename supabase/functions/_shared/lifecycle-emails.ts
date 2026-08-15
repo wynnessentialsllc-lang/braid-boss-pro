@@ -556,7 +556,7 @@ export const renderTrialStarted = (args: TrialStartedArgs): RenderedEmail => {
   const card = maskedCard(args.cardBrand, args.cardLast4);
   const days = daysUntil(args.trialEnd, args.now);
 
-  const subject = "Your 14-day Braid Boss Pro trial has started";
+  const subject = "Your 30-day Braid Boss Pro trial has started";
   const preheader = "Every feature is open. Here is what to do first.";
 
   const openingCopy = trialEndLabel

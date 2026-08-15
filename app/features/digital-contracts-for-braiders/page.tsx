@@ -25,12 +25,6 @@ export const metadata: Metadata = {
   description:
     "Send tokenized, e-signature agreements clients sign from their phone — typed name, signature, optional initials, agree checkbox, and decline-with-reason, with a clear status lifecycle that protects your policies.",
   alternates: { canonical: PATH },
-  keywords: [
-    "digital contracts for braiders",
-    "braider contracts",
-    "hairstylist contracts",
-    "salon liability forms",
-  ],
   openGraph: {
     title: "Digital Contracts for Braiders · Braid Boss Pro",
     description:
@@ -178,7 +172,7 @@ export default function ContractsPage() {
 
       <CtaFooter
         title="Protect your policies on every appointment."
-        body="Start a 14-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
+        body="Start a 30-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See pricing", href: "/pricing" }}
       />

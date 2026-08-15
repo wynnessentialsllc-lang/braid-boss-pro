@@ -7,17 +7,6 @@ export const metadata: Metadata = {
   description:
     "Explore every feature of Braid Boss Pro — booking software, payments and deposits, inventory, AI tools, contracts, storefront, memberships, marketing, public profile, and the mobile app. Built specifically for professional braiders.",
   alternates: { canonical: "/features" },
-  keywords: [
-    "braid business software",
-    "braid business management app",
-    "booking app for braiders",
-    "braider booking software",
-    "braider scheduling app",
-    "business tools for braiders",
-    "braid pricing software",
-    "braider client management app",
-    "all-in-one platform for braiders",
-  ],
   openGraph: {
     title: "Features · Braid Boss Pro — the all-in-one platform for braiders",
     description:

@@ -25,12 +25,6 @@ export const metadata: Metadata = {
   description:
     "AI-powered tools built for braiding businesses — an AI Business Coach, Social Media Studio, rebooking and win-back assistant, style consultant, booking concierge, and AI quotes for Build Your Style.",
   alternates: { canonical: PATH },
-  keywords: [
-    "AI for braiders",
-    "AI hairstylist assistant",
-    "AI salon software",
-    "AI booking assistant for braiders",
-  ],
   openGraph: {
     title: "AI Tools for Braiders · Braid Boss Pro",
     description:
@@ -196,7 +190,7 @@ export default function AiToolsPage() {
 
       <CtaFooter
         title="Put AI to work for your braid business."
-        body="Start a 14-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
+        body="Start a 30-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See pricing", href: "/pricing" }}
       />

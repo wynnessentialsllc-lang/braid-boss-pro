@@ -18,15 +18,30 @@
 //
 // The gating decision mirrors useAuth() in ./AppRoot exactly (URL
 // intent → guest flag → live Supabase session), so behavior is
-// unchanged — only the bundle boundary moved. The first render is the
-// cream splash on both server and client, so there's no hydration
-// mismatch (same reasoning as the old App() loading guard).
+// unchanged — only the bundle boundary moved.
+//
+// The undecided render is the MARKETING landing, not a splash. This
+// file is "use client", but client components still server-render, so
+// whatever the first render returns is what a crawler receives. It
+// used to return <Splash/>, which is why `/` prerendered ~750
+// characters — a logo and nothing else — while /features prerendered
+// ~10.5k from this very same <FeaturesContent/>. The homepage is the
+// page most worth indexing, and it was the only one with no body copy.
+//
+// Rendering marketing while undecided means a signed-in visitor could
+// see it flash before <AppRoot/> takes over. The synchronous signals
+// (URL intent, guest flag) are therefore read in a layout effect, which
+// commits before the browser paints, so those paths never flash. The
+// session lookup is genuinely async and can show one frame of marketing
+// on a cold start; that is the deliberate trade for having a homepage
+// that exists to search engines.
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { Sparkles } from "lucide-react";
 import FeaturesContent from "./components/marketing/FeaturesContent";
 import { getSupabase } from "./lib/supabase";
+import { HOME_SCHEMA } from "./lib/home-schema";
 import { C } from "./components/marketing/tokens";
 
 // Must stay in sync with useAuth()'s GUEST_FLAG_KEY in ./AppRoot.
@@ -56,10 +71,17 @@ const AppRoot = dynamic(() => import("./AppRoot"), {
   loading: () => <Splash />,
 });
 
+// useLayoutEffect commits before paint but does not run on the server,
+// where React warns about it. Falling back to useEffect there keeps the
+// server render silent while preserving the no-flash behaviour in the
+// browser.
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
 export default function HomeRoute() {
   const [view, setView] = useState<"pending" | "app" | "marketing">("pending");
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     let cancelled = false;
 
     // Synchronous signals first — the URL intent and the guest flag
@@ -74,7 +96,8 @@ export default function HomeRoute() {
     }
 
     if (immediate) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot route decision on mount
+      // Committed in a layout effect, so this lands before paint and a
+      // returning app user never sees the marketing landing flash.
       setView(immediate);
       return;
     }
@@ -101,7 +124,23 @@ export default function HomeRoute() {
     };
   }, []);
 
-  if (view === "app") return <AppRoot />;
-  if (view === "marketing") return <FeaturesContent />;
-  return <Splash />;
+  // The SoftwareApplication schema is the homepage's alone (it used to
+  // sit in the root layout and land on all 20 routes). Rendered outside
+  // the branch so `/` carries it whichever view wins.
+  const schema = (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(HOME_SCHEMA) }}
+    />
+  );
+
+  // "pending" renders marketing too, so the server render — and every
+  // crawler — gets the real landing page. <Splash/> is still used as
+  // AppRoot's dynamic loading fallback above.
+  return (
+    <>
+      {schema}
+      {view === "app" ? <AppRoot /> : <FeaturesContent variant="home" />}
+    </>
+  );
 }

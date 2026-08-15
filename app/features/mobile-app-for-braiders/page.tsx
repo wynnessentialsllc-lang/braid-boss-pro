@@ -25,12 +25,6 @@ export const metadata: Metadata = {
   description:
     "A mobile-first app experience for professional braiders — an iOS app with push notifications, native share, receipt and export downloads, an offline fallback, and client booking from any phone.",
   alternates: { canonical: PATH },
-  keywords: [
-    "mobile app for braiders",
-    "iPhone app for braiders",
-    "braider business app",
-    "mobile booking app for braiders",
-  ],
   openGraph: {
     title: "Mobile App for Braiders · Braid Boss Pro",
     description:
@@ -198,7 +192,7 @@ export default function MobileAppPage() {
 
       <CtaFooter
         title="Your braid business, in your pocket."
-        body="Start a 14-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
+        body="Start a 30-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See pricing", href: "/pricing" }}
       />

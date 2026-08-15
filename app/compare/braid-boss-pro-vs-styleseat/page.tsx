@@ -15,13 +15,6 @@ export const metadata: Metadata = {
   description:
     "Side-by-side comparison of Braid Boss Pro and StyleSeat for braid stylists. Pricing, deposits, retail storefront, contracts, and creator-economy workflow.",
   alternates: { canonical: "/compare/braid-boss-pro-vs-styleseat" },
-  keywords: [
-    "Braid Boss Pro vs StyleSeat",
-    "StyleSeat for braiders",
-    "StyleSeat alternative",
-    "booking app for braid stylists",
-    "StyleSeat fees",
-  ],
   openGraph: {
     title: "Braid Boss Pro vs StyleSeat for braiders",
     description: "Side-by-side comparison for braid stylists choosing between Braid Boss Pro and StyleSeat.",
@@ -111,7 +104,7 @@ export default function VsStyleSeatPage() {
 
       <CtaFooter
         title="Keep your clients. Keep your money."
-        body="The StyleSeat alternative built specifically for braiders. 14-day free trial, then $14.99/month flat."
+        body="The StyleSeat alternative built specifically for braiders. 30-day free trial, then $14.99/month flat."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See features", href: "/features" }}
       />

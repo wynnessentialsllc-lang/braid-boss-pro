@@ -15,13 +15,6 @@ export const metadata: Metadata = {
   description:
     "Side-by-side comparison of Braid Boss Pro and Vagaro for braid stylists. Pricing, deposits, contracts, retail, and braider-specific workflow features.",
   alternates: { canonical: "/compare/braid-boss-pro-vs-vagaro" },
-  keywords: [
-    "Braid Boss Pro vs Vagaro",
-    "Vagaro for braiders",
-    "best booking app for braiders",
-    "Vagaro alternative for braid stylists",
-    "salon software for braiders",
-  ],
   openGraph: {
     title: "Braid Boss Pro vs Vagaro for braiders",
     description: "Side-by-side comparison for braid stylists choosing between Braid Boss Pro and Vagaro.",
@@ -33,7 +26,12 @@ export const metadata: Metadata = {
 const rows: ComparisonRow[] = [
   { feature: "Monthly price", bbp: { mark: "text", note: "$14.99" }, them: { mark: "text", note: "$30+ (per user)" } },
   { feature: "Per-staff fees", bbp: { mark: "no", note: "Flat price" }, them: { mark: "yes", note: "Scales with team" } },
-  { feature: "14-day free trial", bbp: { mark: "yes" }, them: { mark: "partial", note: "30-day, requires card" } },
+  // Parity row, deliberately. This used to read "14-day free trial" with
+  // Vagaro marked "partial — 30-day, requires card", which dinged them
+  // for a card requirement we also have (app/api/subscribe/route.ts
+  // collects one up front) while their trial was the longer of the two.
+  // Now that ours is 30 days, both offers match, so both are marked yes.
+  { feature: "30-day free trial", bbp: { mark: "yes", note: "Card required" }, them: { mark: "yes", note: "Card required" } },
   { feature: "Built specifically for braiders", bbp: { mark: "yes", note: "Braid styles, hair-included pricing, long-appointment deposits" }, them: { mark: "no", note: "General salon software" } },
   { feature: "Branded /@handle booking link", bbp: { mark: "yes" }, them: { mark: "partial", note: "Generic Vagaro URL" } },
   { feature: "Stripe Connect (you own payouts)", bbp: { mark: "yes" }, them: { mark: "no", note: "Vagaro Pay processes" } },
@@ -65,7 +63,7 @@ const FAQS: FaqEntry[] = [
   },
   {
     q: "Can I move to Braid Boss Pro if I already use Vagaro?",
-    a: "Yes. You can set up your services, booking link, and policies on Braid Boss Pro and run the 14-day free trial alongside your current tools before switching. Your client list stays in your own account and is exportable at any time.",
+    a: "Yes. You can set up your services, booking link, and policies on Braid Boss Pro and run the 30-day free trial alongside your current tools before switching. Your client list stays in your own account and is exportable at any time.",
   },
 ];
 
@@ -111,7 +109,7 @@ export default function VsVagaroPage() {
 
       <CtaFooter
         title="The braider-first alternative to Vagaro."
-        body="Every feature unlocked. 14-day free trial. Then $14.99/month. Cancel anytime."
+        body="Every feature unlocked. 30-day free trial. Then $14.99/month. Cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See features", href: "/features" }}
       />
