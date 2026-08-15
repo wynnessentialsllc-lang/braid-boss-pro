@@ -93,7 +93,7 @@ export default function FeaturesContent({
               <em style={heroEm}>Contracts signed.</em>
             </>
           }
-          body="Square Appointments is free, and it will take a deposit — at 3.3% + 30¢, where we run on Stripe's 2.9%. That's 72¢ more on every $180 install. And free doesn't price a hair-included quote, hold a nine-hour window, or put allergy and aftercare terms in what your client signs."
+          body="Square Appointments is free, and it will take a deposit — at 3.3% + 30¢, where we run on Stripe's 2.9%. It will send a contract too, but requiring your client to actually sign it starts at $49 a month. Here the deposit and the signature are both just part of booking."
           proof={
             <>
               <strong style={{ color: C.brandPrimary }}>
