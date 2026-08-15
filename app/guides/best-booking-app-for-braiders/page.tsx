@@ -186,14 +186,15 @@ export default function GuidePage() {
           <Card
             rank="#3 · Best for multi-service salons"
             name="Vagaro"
-            price="$30+/mo · scales per staff member"
+            price="$30/mo · +$10 per extra calendar"
             pros={[
               "Mature, all-in-one salon platform",
               "Marketplace presence (Find Beauty Pros)",
               "Strong if you offer hair + nails + skin + lashes together",
             ]}
             cons={[
-              "Per-staff pricing climbs fast on a multi-chair team",
+              "Per-calendar pricing climbs fast — 3 chairs is $50/mo, 7 is $90",
+              "Waivers ($10/mo) and marketing ($20/mo) are separate add-ons",
               "Built around generic clinical appointments, not long braid installs",
               "Vagaro Pay processes payments — not direct Stripe ownership",
             ]}
@@ -250,11 +251,11 @@ export default function GuidePage() {
           </div>
           <div>
             <p style={{ fontWeight: 800, color: C.ink, margin: "0 0 4px" }}>3. What&apos;s the true monthly cost?</p>
-            <p style={{ margin: 0 }}>Add up the add-ons. SMS reminders, marketing automation, contracts, retail — most platforms charge separately for each. Braid Boss Pro is $14.99 flat with everything included.</p>
+            <p style={{ margin: 0 }}>Add up the add-ons. Marketing automation, waivers, a branded website — most platforms charge separately for each, and the base price rarely covers what you actually need. Braid Boss Pro is $14.99 flat with everything included.</p>
           </div>
           <div>
             <p style={{ fontWeight: 800, color: C.ink, margin: "0 0 4px" }}>4. Does it scale with you?</p>
-            <p style={{ margin: 0 }}>If you add a chair, do you pay double? Vagaro and Square charge per staff. Braid Boss Pro doesn&apos;t — same flat price as your team grows.</p>
+            <p style={{ margin: 0 }}>If you add a chair, does the bill move? Vagaro charges per bookable calendar and Square prices per location. Braid Boss Pro doesn&apos;t — same flat price as your team grows.</p>
           </div>
         </div>
       </Section>
