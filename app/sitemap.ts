@@ -34,7 +34,11 @@ const ROUTES: Array<{ path: string; priority: number; changeFrequency: MetadataR
   { path: "/compare/braid-boss-pro-vs-vagaro", priority: 0.8, changeFrequency: "monthly" },
   { path: "/compare/braid-boss-pro-vs-square-appointments", priority: 0.8, changeFrequency: "monthly" },
   { path: "/guides/best-booking-app-for-braiders", priority: 0.7, changeFrequency: "monthly" },
-  { path: "/discover", priority: 0.9, changeFrequency: "daily" },
+  // /discover is deliberately absent: it is noindex until the directory
+  // has real inventory (see the note in app/discover/layout.tsx).
+  // Advertising a noindex page here just spends crawl budget to be told
+  // not to index it. Restore this entry at the same time as removing
+  // that page's `robots` block.
   // Braid Boss Pro Store — first-party storefront + each product page.
   { path: "/store", priority: 0.8, changeFrequency: "weekly" },
   ...listStoreProducts().map((p) => ({
