@@ -40,9 +40,54 @@ export const metadata: Metadata = {
 
 const TRIAL_DAYS = 14;
 
+// Product + Offer JSON-LD. The homepage owns the SoftwareApplication
+// rich result; this page owns the priced offer, so the two plans are
+// declared where the plans are actually shown and bought.
+//
+// No priceValidUntil: these are open-ended subscription prices, and a
+// baked-in date would go stale in a static build and cost the offer its
+// rich-result eligibility. Add one only if a plan gets a real end date.
+const PRICING_SCHEMA = {
+  "@context": "https://schema.org",
+  "@type": "Product",
+  name: "Braid Boss Pro",
+  description:
+    "The business operating system for braid stylists — bookings, deposits, digital contracts, retail storefront, marketing, and analytics. Every feature included on every plan.",
+  brand: { "@type": "Brand", name: "Braid Boss Pro" },
+  category: "Salon and Spa Management Software",
+  url: "https://braidbosspro.app/pricing",
+  image: "https://braidbosspro.app/icons/icon-512.png",
+  offers: [
+    {
+      "@type": "Offer",
+      name: "Monthly",
+      price: "14.99",
+      priceCurrency: "USD",
+      availability: "https://schema.org/InStock",
+      url: "https://braidbosspro.app/pricing",
+      description: `${TRIAL_DAYS}-day free trial, then $14.99/month. Cancel anytime.`,
+    },
+    {
+      "@type": "Offer",
+      name: "Annual",
+      price: "149",
+      priceCurrency: "USD",
+      availability: "https://schema.org/InStock",
+      url: "https://braidbosspro.app/pricing",
+      description: `$149/year — save $30.88 vs monthly. ${TRIAL_DAYS}-day free trial.`,
+    },
+  ],
+};
+
 export default function PricingPage() {
   return (
     <MarketingShell>
+      {/* Structured data — emitted as an inline <script> in the
+          server-rendered HTML so crawlers see it on first load. */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(PRICING_SCHEMA) }}
+      />
       <MarketingHero
         eyebrow="Simple pricing · 14-day free trial"
         title={

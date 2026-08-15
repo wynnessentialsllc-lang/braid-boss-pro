@@ -141,12 +141,12 @@ export default function WhyBraidBossProPage() {
         path={PATH}
         breadcrumbName="Why Braid Boss Pro"
         faqs={FAQS}
-        software={{
-          name: "Braid Boss Pro",
-          description:
-            "An all-in-one business platform built specifically for professional braiders — bookings, deposits, inventory, AI tools, contracts, storefront, memberships, marketing, public profile, and analytics in one mobile-first system.",
-          featureList: PILLARS.map((p) => p.title),
-        }}
+        // No `software` block here on purpose. This page emitted a
+        // SoftwareApplication named exactly "Braid Boss Pro" — the same
+        // entity the homepage declares — so the two competed for the one
+        // app rich result. The /features/* pages keep theirs because
+        // each names a distinct thing ("Braid Boss Pro — Payments &
+        // Deposits for Braiders"), not a second copy of the product.
       />
       <Breadcrumbs
         trail={[

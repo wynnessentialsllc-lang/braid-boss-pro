@@ -41,6 +41,7 @@ import dynamic from "next/dynamic";
 import { Sparkles } from "lucide-react";
 import FeaturesContent from "./components/marketing/FeaturesContent";
 import { getSupabase } from "./lib/supabase";
+import { HOME_SCHEMA } from "./lib/home-schema";
 import { C } from "./components/marketing/tokens";
 
 // Must stay in sync with useAuth()'s GUEST_FLAG_KEY in ./AppRoot.
@@ -123,9 +124,23 @@ export default function HomeRoute() {
     };
   }, []);
 
+  // The SoftwareApplication schema is the homepage's alone (it used to
+  // sit in the root layout and land on all 20 routes). Rendered outside
+  // the branch so `/` carries it whichever view wins.
+  const schema = (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(HOME_SCHEMA) }}
+    />
+  );
+
   // "pending" renders marketing too, so the server render — and every
   // crawler — gets the real landing page. <Splash/> is still used as
   // AppRoot's dynamic loading fallback above.
-  if (view === "app") return <AppRoot />;
-  return <FeaturesContent />;
+  return (
+    <>
+      {schema}
+      {view === "app" ? <AppRoot /> : <FeaturesContent />}
+    </>
+  );
 }
