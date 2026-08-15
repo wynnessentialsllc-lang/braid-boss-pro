@@ -264,10 +264,11 @@ export default function HowItWorksPage() {
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Faq q="Is Braid Boss Pro free?">
-            Creating an account is free. You pay nothing for the dashboard or
-            booking link. We charge a small platform fee on bookings + retail
-            orders that pay through Stripe; you can see exact pricing in the
-            app before connecting Stripe.
+            Creating an account is free, and every feature is unlocked for your
+            first 30 days. After that it&apos;s $14.99/month. We don&apos;t take
+            a percentage of your bookings or retail orders — deposits, balances,
+            and product sales land in your own Stripe account, and Stripe&apos;s
+            processing fee is the only thing deducted.
           </Faq>
           <Faq q="Do I need an app-store download?">
             No. Braid Boss Pro runs in your phone&apos;s browser and installs to your

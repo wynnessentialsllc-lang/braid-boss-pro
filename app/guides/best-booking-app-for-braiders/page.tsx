@@ -167,15 +167,16 @@ export default function GuidePage() {
           <Card
             rank="#2 · Best built-in marketplace"
             name="StyleSeat"
-            price="$35/mo + $1 per new client + booking fees"
+            price="$35/mo + marketplace fees"
             pros={[
               "Built-in marketplace brings walk-in client discovery",
               "Strong brand recognition among hair clients",
+              "Card-on-file rate of 2.6% + 30¢ — lower than ours",
               "Public reviews built in",
             ]}
             cons={[
-              "$1 fee on every new client",
-              "Client booking fee (up to $7.99) tacked on top",
+              "30% of a marketplace client's first appointment ($50 cap)",
+              "$2.35 booking fee added to what your client pays",
               "Holds your payouts (no direct Stripe Connect ownership)",
               "Client list is locked behind the platform",
             ]}
@@ -186,34 +187,36 @@ export default function GuidePage() {
           <Card
             rank="#3 · Best for multi-service salons"
             name="Vagaro"
-            price="$30+/mo · scales per staff member"
+            price="$30/mo · +$10 per extra calendar"
             pros={[
-              "Mature, all-in-one salon platform",
+              "Mature, all-in-one salon platform — deep base plan at $23.99",
+              "Published card rate of 2.29%–2.6%, lower than ours",
+              "24/7 human phone support and free data migration",
               "Marketplace presence (Find Beauty Pros)",
-              "Strong if you offer hair + nails + skin + lashes together",
             ]}
             cons={[
-              "Per-staff pricing climbs fast on a multi-chair team",
+              "Per-calendar pricing climbs — 3 chairs is $50/mo, 7 is $90",
+              "Free card reader carries a 12-month commitment, $150 to exit",
               "Built around generic clinical appointments, not long braid installs",
               "Vagaro Pay processes payments — not direct Stripe ownership",
             ]}
-            verdict="Right pick for a multi-service salon owner who needs one back office for hair + nails + skin. Over-built and over-priced for a solo or small braid-focused chair."
+            verdict="The strongest all-round platform here, and the better buy if you run a multi-service shop or want a support line at 9pm. It just has no idea what a hair-included quote is."
             href="/compare/braid-boss-pro-vs-vagaro"
             cta="Read full comparison"
           />
           <Card
             rank="#4 · Best free tier"
             name="Square Appointments"
-            price="$0 free tier · $29 Plus · per-staff fees apply"
+            price="$0 free tier · $49 Plus · priced per location"
             pros={[
               "Free tier for solo stylists",
               "Strong retail + tap-to-pay hardware ecosystem",
               "Reliable payment processing",
             ]}
             cons={[
-              "Reminders, marketing, contracts are paid add-ons that erase the &quot;free&quot; advantage",
+              "Free plan charges 3.3% + 30¢ online, and text marketing is not available on it",
               "Built around quick clinical appointments, not 8-hour braid installs",
-              "Per-staff fees as you grow",
+              "Marketing and full team management start at $49/mo per location",
             ]}
             verdict="Solid if you already use Square for retail and need basic appointment booking with zero monthly fee. Once you need braider workflow features, add-on creep makes it pricier than Braid Boss Pro."
             href="/compare/braid-boss-pro-vs-square-appointments"
@@ -250,11 +253,11 @@ export default function GuidePage() {
           </div>
           <div>
             <p style={{ fontWeight: 800, color: C.ink, margin: "0 0 4px" }}>3. What&apos;s the true monthly cost?</p>
-            <p style={{ margin: 0 }}>Add up the add-ons. SMS reminders, marketing automation, contracts, retail — most platforms charge separately for each. Braid Boss Pro is $14.99 flat with everything included.</p>
+            <p style={{ margin: 0 }}>Add up the add-ons. Marketing automation, waivers, a branded website — most platforms charge separately for each, and the base price rarely covers what you actually need. Braid Boss Pro is $14.99 flat with everything included.</p>
           </div>
           <div>
             <p style={{ fontWeight: 800, color: C.ink, margin: "0 0 4px" }}>4. Does it scale with you?</p>
-            <p style={{ margin: 0 }}>If you add a chair, do you pay double? Vagaro and Square charge per staff. Braid Boss Pro doesn&apos;t — same flat price as your team grows.</p>
+            <p style={{ margin: 0 }}>If you add a chair, does the bill move? Vagaro charges per bookable calendar and Square prices per location. Braid Boss Pro doesn&apos;t — same flat price as your team grows.</p>
           </div>
         </div>
       </Section>

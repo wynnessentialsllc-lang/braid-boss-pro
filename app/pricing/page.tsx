@@ -190,6 +190,33 @@ export default function PricingPage() {
         background="#FBFAFD"
       >
         <PricingComparison />
+        {/* Square is the one that matters — it is the free option, and
+            "free" is what a braider weighs $14.99 against. The answer is
+            not that we are cheaper than Square's entry tier (we are not);
+            it is that Square's entry tier does not do the job, and the
+            tier that does costs more than we do. Stated once, plainly.
+            Figures mirror the /compare/...-vs-square-appointments table. */}
+        <p
+          style={{
+            marginTop: 18,
+            padding: "14px 18px",
+            background: "#FFFFFF",
+            border: `1px dashed ${C.brandBorder}`,
+            borderRadius: 16,
+            color: C.coffee,
+            fontSize: 13.5,
+            lineHeight: 1.6,
+            textAlign: "center",
+          }}
+        >
+          <strong style={{ color: C.brandPrimary }}>Free is not the same as cheaper.</strong>{" "}
+          Square&apos;s free plan charges 3.3% + 30¢ on online payments, and a
+          booking deposit is an online payment. We run on Stripe&apos;s
+          standard 2.9% + 30¢ — 72¢ less on a $180 deposit, every time.
+          Matching our rate means Square Plus at $49/month, three times this
+          price, with no free trial. Square&apos;s pricing is theirs to
+          change; check it before you decide.
+        </p>
         <p style={{ marginTop: 16, textAlign: "center", fontSize: 13.5, color: C.coffee }}>
           Want the detail?{" "}
           <a href="/compare/braid-boss-pro-vs-styleseat" style={{ color: C.brandPrimary, fontWeight: 700, textDecoration: "underline" }}>vs StyleSeat</a>
