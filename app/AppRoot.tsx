@@ -23584,7 +23584,7 @@ const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
             <strong style={{ color: C.espresso, wordBreak: "break-word" }}>{sent.email}</strong>.
             {" "}
             {sent.kind === "signup"
-              ? "Tap it to activate your 14-day free trial and you're in."
+              ? "Tap it to activate your 30-day free trial and you're in."
               : "Tap it to set a new password."}
           </p>
           <p style={{ fontSize: 12.5, lineHeight: 1.5, color: C.muted, margin: 0 }}>
@@ -23657,7 +23657,7 @@ const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
         </button>
         {tab === "signup" && (
           <p style={{ fontSize: 11.5, color: "#9F95A8", textAlign: "center", margin: "-2px 0 0", lineHeight: 1.45 }}>
-            We&apos;ll email you a link to confirm your account. Free for 14 days, then $14.99/mo · cancel anytime.
+            We&apos;ll email you a link to confirm your account. Free for 30 days, then $14.99/mo · cancel anytime.
           </p>
         )}
         {/* key={tab} forces this row to fully remount when the tab
@@ -34069,7 +34069,7 @@ const PlanToggle = ({
 // Account-screen subscription card. Two states:
 //   • Live subscription (trialing / active / past_due) → status + a
 //     "Manage subscription" button that opens the Stripe billing portal.
-//   • No subscription → "Start your 14-day free trial" CTA.
+//   • No subscription → "Start your 30-day free trial" CTA.
 // Grandfathered lifetime/founding members never reach this card — they
 // get the "Lifetime access active" card instead.
 // App Store compliance: inside the native iOS/Android shell we must not
@@ -34288,7 +34288,7 @@ const UpgradeSheet = ({
             without the "BUY NOW" energy. */}
         <div className="mt-4 grid grid-cols-2 gap-2">
           {[
-            { label: "14-day free trial", icon: <Sparkles size={13} /> },
+            { label: "30-day free trial", icon: <Sparkles size={13} /> },
             { label: "Then $14.99/month", icon: <Check size={13} /> },
             { label: "Every feature",     icon: <ArrowUpRight size={13} /> },
             { label: "Cancel anytime",    icon: <Heart size={13} /> },
@@ -42261,7 +42261,7 @@ const WelcomeOnboarding = ({
   /** Open Settings → Support Center, where the step-by-step guides live. */
   openGuides: () => void;
   /** Close the tour and take the braider to the subscription screen so
-   *  they can activate their 14-day free trial. */
+   *  they can activate their 30-day free trial. */
   onStartTrial?: () => void;
   /** Mark the tour seen and close it. */
   onFinish: () => void;
@@ -42347,7 +42347,7 @@ const WelcomeOnboarding = ({
       icon: Sparkles,
       eyebrow: "You're all set",
       title: `Start your ${SUBSCRIPTION_TRIAL_DAYS}-day free trial`,
-      body: "Unlock every feature free for 14 days — unlimited clients, reminders, marketing, your storefront, and more. No contracts, cancel anytime.",
+      body: "Unlock every feature free for 30 days — unlimited clients, reminders, marketing, your storefront, and more. No contracts, cancel anytime.",
     }] : []),
   ], [greeting, showTrial]);
 

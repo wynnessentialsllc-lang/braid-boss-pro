@@ -63,7 +63,7 @@ export default function FeatureSchema({ path, breadcrumbName, faqs, software }: 
           price: "14.99",
           priceCurrency: "USD",
           category: "Subscription",
-          description: "14-day free trial, then $14.99/month. Cancel anytime.",
+          description: "30-day free trial, then $14.99/month. Cancel anytime.",
         },
         featureList: software.featureList,
         audience: {

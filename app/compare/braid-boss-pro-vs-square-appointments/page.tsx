@@ -103,7 +103,7 @@ export default function VsSquarePage() {
 
       <CtaFooter
         title="Less than Square. Built around braid work."
-        body="$14.99/month, all features included. 14-day free trial. Cancel anytime."
+        body="$14.99/month, all features included. 30-day free trial. Cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See features", href: "/features" }}
       />

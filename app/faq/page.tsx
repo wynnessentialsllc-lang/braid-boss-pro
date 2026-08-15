@@ -11,12 +11,12 @@ import { C, SHADOWS } from "../components/marketing/tokens";
 export const metadata: Metadata = {
   title: "FAQ · Braid Boss Pro — booking app for braiders",
   description:
-    "Common questions about Braid Boss Pro — the booking + commerce app for braid stylists. 14-day free trial, Stripe Connect, deposits, storefront, PWA install on iPhone + Android.",
+    "Common questions about Braid Boss Pro — the booking + commerce app for braid stylists. 30-day free trial, Stripe Connect, deposits, storefront, PWA install on iPhone + Android.",
   alternates: { canonical: "/faq" },
   openGraph: {
     title: "FAQ · Braid Boss Pro",
     description:
-      "Common questions about Braid Boss Pro — booking, commerce, Stripe Connect, PWA install, 14-day free trial.",
+      "Common questions about Braid Boss Pro — booking, commerce, Stripe Connect, PWA install, 30-day free trial.",
     url: "/faq",
     siteName: "Braid Boss Pro",
     type: "website",
@@ -37,11 +37,11 @@ type Faq = { q: string; a: string };
 const FAQS_PRICING: Faq[] = [
   {
     q: "How much does Braid Boss Pro cost?",
-    a: "Braid Boss Pro is $14.99/month with a 14-day free trial — every feature unlocked from day one. There are no contracts, no setup fees, and you can cancel anytime from inside the app.",
+    a: "Braid Boss Pro is $14.99/month with a 30-day free trial — every feature unlocked from day one. There are no contracts, no setup fees, and you can cancel anytime from inside the app.",
   },
   {
     q: "What's included in the free trial?",
-    a: "Every feature — unlimited clients and appointments, booking links, deposits, contracts, retail storefront, reminders, marketing tools, analytics. No limits, no locked features. After 14 days you're billed $14.99/month unless you cancel.",
+    a: "Every feature — unlimited clients and appointments, booking links, deposits, contracts, retail storefront, reminders, marketing tools, analytics. No limits, no locked features. After 30 days you're billed $14.99/month unless you cancel.",
   },
   {
     q: "How do I cancel?",
@@ -92,7 +92,7 @@ const FAQS_PRODUCT: Faq[] = [
   },
   {
     q: "What features are included?",
-    a: "Every account gets: branded booking link (/@yourhandle), real-time calendar, deposit collection, Stripe Connect payments, contracts + e-sign, pricing calculator + saved quotes, client management, retail storefront with product variants + inventory, order tracking, email + SMS text reminders, mobile dashboard, and PWA install. Every feature is unlocked during the 14-day free trial.",
+    a: "Every account gets: branded booking link (/@yourhandle), real-time calendar, deposit collection, Stripe Connect payments, contracts + e-sign, pricing calculator + saved quotes, client management, retail storefront with product variants + inventory, order tracking, email + SMS text reminders, mobile dashboard, and PWA install. Every feature is unlocked during the 30-day free trial.",
   },
   {
     q: "Can I text my clients?",
@@ -179,7 +179,7 @@ export default function FaqPage() {
       </Section>
 
       <CtaFooter
-        title="14 days free. Then $14.99/month. Cancel anytime."
+        title="30 days free. Then $14.99/month. Cancel anytime."
         body="Every feature unlocked from day one. No contracts. The business operating system braiders actually run their chairs with."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See features", href: "/features" }}

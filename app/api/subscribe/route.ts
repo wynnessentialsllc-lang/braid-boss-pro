@@ -1,5 +1,5 @@
 // Create a Stripe Checkout Session for the Braid Boss Pro monthly
-// subscription — $14.99/mo with a 14-day free trial, charged to the
+// subscription — $14.99/mo with a 30-day free trial, charged to the
 // PLATFORM Stripe account (not a Connect account).
 //
 // Pattern matches /api/founding-checkout: no Stripe SDK, inline
@@ -7,18 +7,18 @@
 // REST API. The subscription is bound to the signed-in user via
 // client_reference_id so the webhook can stamp the right profile.
 //
-// The 14-day trial is configured with subscription_data[trial_period_days].
+// The 30-day trial is configured with subscription_data[trial_period_days].
 // A card IS collected up front (default payment_method_collection), so
 // the subscription auto-converts to a paid charge when the trial ends
 // unless the user cancels through the billing portal (/api/subscribe/portal).
 
 import { NextResponse } from "next/server";
+import { TRIAL_DAYS } from "../../lib/plan";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const STRIPE_API = "https://api.stripe.com/v1";
-const TRIAL_DAYS = 14;
 
 // Two billing intervals. Annual ($149/yr) is ~2 months free vs monthly
 // ($14.99 × 12 = $179.88 → save $30.88).
@@ -74,8 +74,8 @@ export async function POST(req: Request) {
 
   const priceBlurb =
     planKey === "annual"
-      ? "Full access to Braid Boss Pro. 14-day free trial, then $149/year. Cancel anytime."
-      : "Full access to Braid Boss Pro. 14-day free trial, then $14.99/month. Cancel anytime.";
+      ? "Full access to Braid Boss Pro. 30-day free trial, then $149/year. Cancel anytime."
+      : "Full access to Braid Boss Pro. 30-day free trial, then $14.99/month. Cancel anytime.";
 
   // Inline recurring price_data — no stored Stripe Product/Price, same
   // as the rest of the app's Stripe usage.

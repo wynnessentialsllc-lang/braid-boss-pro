@@ -40,7 +40,7 @@ export const metadata: Metadata = {
   // description, and canonical individually.
   title: "Braid Boss Pro — Booking & Business App Built for Braid Stylists",
   description:
-    "The all-in-one booking and business app built specifically for braid stylists: branded booking links, Stripe deposits, contracts, retail, and reminders. $14.99/mo, 14-day free trial.",
+    "The all-in-one booking and business app built specifically for braid stylists: branded booking links, Stripe deposits, contracts, retail, and reminders. $14.99/mo, 30-day free trial.",
   applicationName: "Braid Boss Pro",
   // NOTE: deliberately no `alternates.canonical` or `openGraph.url` here.
   // Pages without their own metadata (privacy, terms, support, admin…)
@@ -59,7 +59,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Braid Boss Pro — Built for Braid Stylists",
     description:
-      "Booking links, Stripe deposits, contracts, retail, and reminders — built specifically for braiders. $14.99/mo, 14-day free trial.",
+      "Booking links, Stripe deposits, contracts, retail, and reminders — built specifically for braiders. $14.99/mo, 30-day free trial.",
   },
   appleWebApp: {
     capable: true,
@@ -132,7 +132,7 @@ export default function RootLayout({
               <li>Automated SMS and email appointment reminders (opt-in only)</li>
             </ul>
             <p style={{ margin: "0 0 16px" }}>
-              <strong>Pricing:</strong> 14-day free trial, then $14.99/month or $149/year. Cancel anytime.
+              <strong>Pricing:</strong> 30-day free trial, then $14.99/month or $149/year. Cancel anytime.
             </p>
             <p style={{ margin: 0 }}>
               Learn more:{" "}

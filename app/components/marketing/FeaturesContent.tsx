@@ -339,7 +339,7 @@ export default function FeaturesContent({ directory }: { directory?: React.React
 
       <CtaFooter
         title="Run your braid business like a brand."
-        body="Start with a 14-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
+        body="Start with a 30-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "How it works", href: "/how-it-works" }}
       />

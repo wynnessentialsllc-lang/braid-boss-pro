@@ -11,9 +11,7 @@ import { ArrowRight, Check, Crown } from "lucide-react";
 import { C, FONT_DISPLAY, GRADIENTS, SHADOWS } from "./tokens";
 import { trackEvent } from "../../lib/track";
 
-const MONTHLY_PRICE = 14.99;
-const ANNUAL_PRICE = 149;
-const TRIAL_DAYS = 14;
+import { TRIAL_DAYS, MONTHLY_PRICE, ANNUAL_PRICE } from "../../lib/plan";
 // $14.99 × 12 − $149 = $30.88 saved; $149 ÷ 12 ≈ $12.42/mo effective.
 const ANNUAL_SAVINGS = (MONTHLY_PRICE * 12 - ANNUAL_PRICE).toFixed(2);
 const ANNUAL_PER_MONTH = (ANNUAL_PRICE / 12).toFixed(2);

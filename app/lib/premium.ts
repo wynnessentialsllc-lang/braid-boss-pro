@@ -18,6 +18,7 @@
 
 import { useEffect, useState } from "react";
 import { getSupabase } from "./supabase";
+import { TRIAL_DAYS } from "./plan";
 
 // PASTE YOUR STRIPE PAYMENT LINK HERE.
 // Create it in the Stripe Dashboard → Payment links → New:
@@ -30,12 +31,12 @@ export const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/3cI3co3S24hUdms5hv97G
 
 export const LIFETIME_PRICE_LABEL = "$9.99";
 
-// ---- Monthly subscription ($14.99/mo, 14-day free trial) ------------
+// ---- Monthly subscription ($14.99/mo, 30-day free trial) ------------
 // The current offer for NEW users. Existing lifetime/founding holders
 // are grandfathered and never see this.
 export type SubscriptionPlan = "monthly" | "annual";
 export const SUBSCRIPTION_PRICE_LABEL = "$14.99/mo";
-export const SUBSCRIPTION_TRIAL_DAYS = 14;
+export const SUBSCRIPTION_TRIAL_DAYS = TRIAL_DAYS;
 export const ANNUAL_PRICE_LABEL = "$149/yr";
 export const ANNUAL_SAVINGS_LABEL = "Save $30.88"; // vs $14.99 × 12 = $179.88
 

@@ -303,7 +303,7 @@ export const dedupeKeys = {
 // ---------------------------------------------------------------------
 
 const SUBJECTS: Record<LifecycleEmailType, string> = {
-  stylist_trial_started: "Your 14-day Braid Boss Pro trial has started",
+  stylist_trial_started: "Your 30-day Braid Boss Pro trial has started",
   stylist_trial_ending: "Your Braid Boss Pro trial is ending soon",
   stylist_subscription_confirmed: "You're officially a Braid Boss Pro",
   stylist_payment_failed: "We could not process your Braid Boss Pro payment",

@@ -23,7 +23,7 @@ const PATH = featurePath(SLUG);
 export const metadata: Metadata = {
   title: "Business Management Software for Braiders · Braid Boss Pro",
   description:
-    "All-in-one business management software for braiders — clients, policies, services, availability, branding, notifications, analytics, billing, and a settings hub in one mobile-first dashboard. 14-day free trial.",
+    "All-in-one business management software for braiders — clients, policies, services, availability, branding, notifications, analytics, billing, and a settings hub in one mobile-first dashboard. 30-day free trial.",
   alternates: { canonical: PATH },
   openGraph: {
     title: "Business Management Software for Braiders · Braid Boss Pro",
@@ -63,7 +63,7 @@ const FAQS: FaqEntry[] = [
   },
   {
     q: "How does billing for Braid Boss Pro work?",
-    a: "Braid Boss Pro is $14.99/month (or $149/year) after a 14-day free trial, with every feature unlocked. You manage your subscription from the settings hub through the Stripe billing portal and can cancel anytime.",
+    a: "Braid Boss Pro is $14.99/month (or $149/year) after a 30-day free trial, with every feature unlocked. You manage your subscription from the settings hub through the Stripe billing portal and can cancel anytime.",
   },
 ];
 
@@ -198,7 +198,7 @@ export default function BusinessManagementPage() {
 
       <CtaFooter
         title="One platform for your whole braid business."
-        body="Start a 14-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
+        body="Start a 30-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See pricing", href: "/pricing" }}
       />

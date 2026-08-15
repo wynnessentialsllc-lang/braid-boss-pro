@@ -126,7 +126,7 @@ const FAQS: FaqEntry[] = [
   },
   {
     q: "How much does Braid Boss Pro cost?",
-    a: "Braid Boss Pro is $14.99/month (or $149/year) after a 14-day free trial, with every feature unlocked. There are no contracts and you can cancel anytime.",
+    a: "Braid Boss Pro is $14.99/month (or $149/year) after a 30-day free trial, with every feature unlocked. There are no contracts and you can cancel anytime.",
   },
   {
     q: "Do I keep ownership of my clients and payments?",
@@ -347,7 +347,7 @@ export default function WhyBraidBossProPage() {
 
       <CtaFooter
         title="The all-in-one platform built for braiders."
-        body="Start a 14-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
+        body="Start a 30-day free trial — every feature unlocked. Then $14.99/month. No contracts, cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See pricing", href: "/pricing" }}
       />

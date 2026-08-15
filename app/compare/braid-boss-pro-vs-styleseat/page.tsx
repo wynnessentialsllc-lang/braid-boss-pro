@@ -104,7 +104,7 @@ export default function VsStyleSeatPage() {
 
       <CtaFooter
         title="Keep your clients. Keep your money."
-        body="The StyleSeat alternative built specifically for braiders. 14-day free trial, then $14.99/month flat."
+        body="The StyleSeat alternative built specifically for braiders. 30-day free trial, then $14.99/month flat."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See features", href: "/features" }}
       />

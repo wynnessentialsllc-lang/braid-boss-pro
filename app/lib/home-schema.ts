@@ -35,7 +35,7 @@ export const HOME_SCHEMA = {
       price: "14.99",
       priceCurrency: "USD",
       category: "Subscription",
-      description: "14-day free trial, then $14.99/month. Cancel anytime.",
+      description: "30-day free trial, then $14.99/month. Cancel anytime.",
     },
     {
       "@type": "Offer",
@@ -43,7 +43,7 @@ export const HOME_SCHEMA = {
       price: "149",
       priceCurrency: "USD",
       category: "Subscription",
-      description: "$149/year — save $30.88 vs monthly. 14-day free trial.",
+      description: "$149/year — save $30.88 vs monthly. 30-day free trial.",
     },
   ],
   featureList: [

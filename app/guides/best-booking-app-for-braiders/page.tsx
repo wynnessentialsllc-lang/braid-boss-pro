@@ -147,7 +147,7 @@ export default function GuidePage() {
           <Card
             rank="#1 · Best for braiders"
             name="Braid Boss Pro"
-            price="$14.99/mo · 14-day free trial"
+            price="$14.99/mo · 30-day free trial"
             pros={[
               "Built specifically for braid work — hair-included pricing, long-appointment deposits",
               "Branded /@handle booking link (Linktree-style)",
@@ -261,7 +261,7 @@ export default function GuidePage() {
 
       <CtaFooter
         title="The booking app built for the way braiders work."
-        body="14-day free trial. Then $14.99/month — every feature unlocked. Cancel anytime."
+        body="30-day free trial. Then $14.99/month — every feature unlocked. Cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "See features", href: "/features" }}
       />

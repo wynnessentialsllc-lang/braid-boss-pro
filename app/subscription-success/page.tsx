@@ -59,7 +59,7 @@ function SubscriptionSuccessInner() {
             Your free trial is on.
           </h1>
           <p style={{ fontSize: 14, lineHeight: 1.55, color: C.coffee, marginTop: 10 }}>
-            Every feature is unlocked. You won&apos;t be charged for 14 days — then
+            Every feature is unlocked. You won&apos;t be charged for 30 days — then
             it&apos;s just <strong>$14.99/month</strong>. You can cancel anytime from
             <strong> Settings → Subscription</strong>.
           </p>

@@ -83,7 +83,7 @@ export default function HowItWorksPage() {
             body={
               <>
                 Sign up with your email — the dashboard opens to a guided
-                walkthrough. Start with a 14-day free trial; every feature
+                walkthrough. Start with a 30-day free trial; every feature
                 unlocked from day one.
               </>
             }
@@ -304,7 +304,7 @@ export default function HowItWorksPage() {
       </Section>
 
       <CtaFooter
-        title="Ten minutes to live. Try it free for 14 days."
+        title="Ten minutes to live. Try it free for 30 days."
         body="Every feature unlocked from day one. Then $14.99/month. No contracts, cancel anytime."
         primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
         secondaryCta={{ label: "Browse features", href: "/features" }}
