@@ -89,7 +89,7 @@ export default function FeaturesContent({
               <em style={heroEm}>Contracts signed.</em>
             </>
           }
-          body="Square Appointments is free — and it will still let someone book a nine-hour install with nothing down and no policy signed. Braid Boss Pro takes the deposit at booking and gets your terms e-signed before the appointment. That's the part free booking doesn't do."
+          body="Square Appointments is free, and it will take a deposit. What it won't do is get your policy e-signed before a nine-hour install, or price a hair-included quote — and it bills separately for the reminders and contracts that make a deposit stick. Braid Boss Pro does all of it for $14.99 a month."
           proof={
             <>
               <strong style={{ color: C.brandPrimary }}>

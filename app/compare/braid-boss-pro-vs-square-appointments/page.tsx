@@ -103,13 +103,13 @@ export default function VsSquarePage() {
           }}
         >
           <strong style={{ color: C.brandPrimary }}>Add it up.</strong>{" "}
-          Square&apos;s free tier is genuinely free — but the things braiders
-          actually ask for are priced separately. Appointments Plus ($29/mo)
-          for no-show protection and a custom booking site, Square Marketing
-          ($15+/mo) for campaigns, then the SMS and Forms add-ons on top.
-          That is <strong>at least $44/month</strong> before per-staff
-          charges, against <strong>$14.99</strong> with everything switched
-          on from day one.
+          Square&apos;s free tier is genuinely free, and it will take a
+          deposit. What costs extra is everything that makes the deposit
+          stick: contracts through the Forms add-on, SMS reminders as a paid
+          add-on, and campaigns through Square Marketing at $15+/mo — then
+          $20–35/mo per additional stylist, and $29/mo for Plus if you want
+          a booking site that is not a square.site URL. Every one of those is
+          included here, in <strong>$14.99</strong>.
           <br />
           <br />
           Some of it you cannot buy on Square at any price: a pricing
