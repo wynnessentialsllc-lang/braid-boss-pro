@@ -167,15 +167,16 @@ export default function GuidePage() {
           <Card
             rank="#2 · Best built-in marketplace"
             name="StyleSeat"
-            price="$35/mo + $1 per new client + booking fees"
+            price="$35/mo + marketplace fees"
             pros={[
               "Built-in marketplace brings walk-in client discovery",
               "Strong brand recognition among hair clients",
+              "Card-on-file rate of 2.6% + 30¢ — lower than ours",
               "Public reviews built in",
             ]}
             cons={[
-              "$1 fee on every new client",
-              "Client booking fee (up to $7.99) tacked on top",
+              "30% of a marketplace client's first appointment ($50 cap)",
+              "$2.35 booking fee added to what your client pays",
               "Holds your payouts (no direct Stripe Connect ownership)",
               "Client list is locked behind the platform",
             ]}
