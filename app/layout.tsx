@@ -165,17 +165,23 @@ export default function RootLayout({
             }),
           }}
         />
-        {/* No-JavaScript fallback. The homepage (app/page.tsx) is a
-            client-rendered SPA that paints a loading splash until its
-            JS executes, so a crawler or reviewer that doesn't run
-            scripts would otherwise see no content. This <noscript>
-            block — rendered server-side into the initial HTML and
-            never shown when JS runs — gives those clients a plain,
-            self-contained description of the product, what it costs,
-            and links to the full marketing and legal pages. */}
+        {/* No-JavaScript fallback, kept as a safety net for the
+            client-rendered transactional routes (payment-success,
+            subscription-success, unsubscribe) which still render
+            nothing without JS.
+
+            It is no longer load-bearing for the marketing pages: the
+            homepage server-renders its full landing (see app/page.tsx),
+            as /features, /pricing, /how-it-works and /faq always did.
+
+            The heading here is a <div>, not an <h1>. This block sits in
+            the ROOT layout, so an <h1> here landed on every route — the
+            first <h1> in the document on all of them, identical
+            everywhere, ahead of each page's real hero heading. Demoting
+            it leaves exactly one <h1> per page: the page's own. */}
         <noscript>
           <div style={{ maxWidth: 720, margin: "0 auto", padding: "32px 20px", fontFamily: "system-ui, sans-serif", lineHeight: 1.6, color: "#2b211c" }}>
-            <h1 style={{ fontSize: 28, margin: "0 0 8px" }}>Braid Boss Pro</h1>
+            <div style={{ fontSize: 28, fontWeight: 700, margin: "0 0 8px" }}>Braid Boss Pro</div>
             <p style={{ fontSize: 18, margin: "0 0 16px" }}>
               The all-in-one booking and business app built specifically for braid stylists, operated by Wynn Essentials LLC.
             </p>
