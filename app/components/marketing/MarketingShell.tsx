@@ -432,6 +432,7 @@ export const MarketingHero = ({
   eyebrow,
   title,
   body,
+  proof,
   primaryCta,
   secondaryCta,
   signInHref,
@@ -439,6 +440,10 @@ export const MarketingHero = ({
   eyebrow: string;
   title: ReactNode;
   body: string;
+  // Optional block between the body and the CTAs — for the one concrete
+  // number that makes the argument. Sits above the fold on purpose, so
+  // it is read before the button rather than after the feature list.
+  proof?: ReactNode;
   primaryCta: { label: string; href: string };
   secondaryCta?: { label: string; href: string };
   // When set, renders an "Already have an account? Sign in" link under
@@ -512,6 +517,25 @@ export const MarketingHero = ({
       >
         {body}
       </p>
+      {proof && (
+        <div
+          style={{
+            marginTop: 22,
+            marginLeft: "auto",
+            marginRight: "auto",
+            maxWidth: 560,
+            padding: "14px 18px",
+            background: "#FBFAFD",
+            border: `1px dashed ${C.brandBorder}`,
+            borderRadius: 16,
+            color: C.coffee,
+            fontSize: 14.5,
+            lineHeight: 1.55,
+          }}
+        >
+          {proof}
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-center" style={{ gap: 10, marginTop: 26 }}>
         <a
           href={primaryCta.href}

@@ -140,7 +140,7 @@ export default function HomeRoute() {
   return (
     <>
       {schema}
-      {view === "app" ? <AppRoot /> : <FeaturesContent />}
+      {view === "app" ? <AppRoot /> : <FeaturesContent variant="home" />}
     </>
   );
 }

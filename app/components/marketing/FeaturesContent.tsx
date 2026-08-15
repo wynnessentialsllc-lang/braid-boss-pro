@@ -43,6 +43,7 @@ import {
   Section,
   CtaFooter,
 } from "./MarketingShell";
+import { C } from "./tokens";
 import { FounderStory } from "./FounderStory";
 import { FeatureCard, FeatureGrid } from "./FeatureCard";
 import {
@@ -52,36 +53,72 @@ import {
   ClientInfoShowcase,
 } from "./ShowcaseSections";
 
+// Gradient emphasis used inside hero titles.
+const heroEm = {
+  fontStyle: "italic" as const,
+  background: "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)",
+  WebkitBackgroundClip: "text" as const,
+  WebkitTextFillColor: "transparent" as const,
+  backgroundClip: "text" as const,
+};
+
 // `directory` is an optional slot rendered just above the closing CTA.
 // The /features hub passes in a grid that links to every dedicated SEO
 // feature page; the logged-out home landing (app/page.tsx) renders
 // FeaturesContent with no props, so its layout is unchanged.
-export default function FeaturesContent({ directory }: { directory?: React.ReactNode } = {}) {
+//
+// `variant` picks the hero. Both surfaces share every section below it,
+// but they are answering different questions:
+//   "features"  (/features) — "what do I get?" Leads with breadth.
+//   "home"      (/)         — "why pay when Square is free?" Leads with
+//                             deposits and signed contracts, because
+//                             those are what free booking does not do.
+// Keeping them distinct also stops / and /features shipping the same h1.
+export default function FeaturesContent({
+  directory,
+  variant = "features",
+}: { directory?: React.ReactNode; variant?: "home" | "features" } = {}) {
   return (
     <MarketingShell>
-      <MarketingHero
-        eyebrow="The business OS for braiders"
-        title={
-          <>
-            Built for braiders.{" "}
-            <em
-              style={{
-                fontStyle: "italic",
-                background: "linear-gradient(135deg, #7C3AED 0%, #FF4D6D 100%)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                backgroundClip: "text",
-              }}
-            >
-              Only braiders.
-            </em>
-          </>
-        }
-        body="Braid Boss Pro is a premium business operating system for braid stylists — branded booking links, deposits, contracts, retail storefronts, analytics, and creator-economy tools built around how braiders actually run their chairs. Not generic salon software."
-        primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
-        secondaryCta={{ label: "How it works", href: "/how-it-works" }}
-        signInHref="/?signin=1"
-      />
+      {variant === "home" ? (
+        <MarketingHero
+          eyebrow="Deposits and contracts, built in"
+          title={
+            <>
+              Deposits up front.{" "}
+              <em style={heroEm}>Contracts signed.</em>
+            </>
+          }
+          body="Square Appointments is free — and it will still let someone book a nine-hour install with nothing down and no policy signed. Braid Boss Pro takes the deposit at booking and gets your terms e-signed before the appointment. That's the part free booking doesn't do."
+          proof={
+            <>
+              <strong style={{ color: C.brandPrimary }}>
+                One prevented no-show pays for the year.
+              </strong>{" "}
+              A $180 knotless install that walks costs you $180. Braid Boss Pro
+              is $179.88 a year — $14.99 a month. Stop a single no-show and it
+              has already paid for itself.
+            </>
+          }
+          primaryCta={{ label: "Start collecting deposits", href: "/?signup=1" }}
+          secondaryCta={{ label: "How it works", href: "/how-it-works" }}
+          signInHref="/?signin=1"
+        />
+      ) : (
+        <MarketingHero
+          eyebrow="The business OS for braiders"
+          title={
+            <>
+              Built for braiders.{" "}
+              <em style={heroEm}>Only braiders.</em>
+            </>
+          }
+          body="Braid Boss Pro is a premium business operating system for braid stylists — branded booking links, deposits, contracts, retail storefronts, analytics, and creator-economy tools built around how braiders actually run their chairs. Not generic salon software."
+          primaryCta={{ label: "Start free trial", href: "/?signup=1" }}
+          secondaryCta={{ label: "How it works", href: "/how-it-works" }}
+          signInHref="/?signin=1"
+        />
+      )}
 
       {/* Booking & Scheduling */}
       <Section
