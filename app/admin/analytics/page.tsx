@@ -67,7 +67,16 @@ type Summary = {
   totals: {
     unique_users: number;
     unique_sessions: number;
+    // Added by migration 20260816000000. Optional so the dashboard
+    // renders against an un-migrated database instead of blanking out.
+    unique_visitors?: number;
+    new_visitors?: number;
   };
+  by_device?: Record<string, number>;
+  by_referrer_type?: Record<string, number>;
+  top_referrers?: Array<{ host: string; n: number }>;
+  top_sources?: Array<{ source: string; n: number }>;
+  top_pages?: Array<{ path: string; visitors: number; views: number }>;
 };
 
 // =====================================================================
@@ -259,6 +268,106 @@ const PaymentReadiness = ({
 };
 
 // =====================================================================
+// Audience — who the visitors are and where they came from
+// =====================================================================
+const REFERRER_LABELS: Record<string, string> = {
+  direct: "Direct / typed in",
+  search: "Search engines",
+  social: "Social",
+  ai: "AI assistants",
+  referral: "Other sites",
+  internal: "Internal navigation",
+  unknown: "Unknown",
+};
+
+const DEVICE_LABELS: Record<string, string> = {
+  phone: "Phone",
+  tablet: "Tablet",
+  desktop: "Desktop",
+  unknown: "Unknown",
+};
+
+const sortedEntries = (m: Record<string, number> | undefined): Array<[string, number]> =>
+  Object.entries(m || {}).sort((a, b) => b[1] - a[1]);
+
+const Audience = ({ data }: { data: Summary }) => {
+  const devices = sortedEntries(data.by_device);
+  const referrers = sortedEntries(data.by_referrer_type);
+  const hosts = data.top_referrers || [];
+  const sources = data.top_sources || [];
+  const pages = data.top_pages || [];
+  const anything =
+    devices.length || referrers.length || hosts.length || sources.length || pages.length;
+
+  return (
+    <PreviewStyleCard padding={18}>
+      <SectionEyebrow>Audience</SectionEyebrow>
+      <p style={{ margin: "4px 0 12px", fontSize: 11, color: C.muted }}>
+        Counted by unique visitor, not by event — one person refreshing a page ten times counts once.
+      </p>
+      {!anything ? (
+        <p style={{ margin: 0, fontSize: 12, color: C.muted }}>
+          No visitor context yet. Events recorded before the visitor-detail release
+          don&apos;t carry it; new visits will populate this within minutes.
+        </p>
+      ) : (
+        <>
+          {devices.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <p style={{ margin: "0 0 4px", fontSize: 11, fontWeight: 700, color: C.coffee }}>Devices</p>
+              {devices.map(([k, n]) => (
+                <MetricRow key={k} label={DEVICE_LABELS[k] || k} value={n.toLocaleString()} />
+              ))}
+            </div>
+          )}
+          {referrers.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <p style={{ margin: "0 0 4px", fontSize: 11, fontWeight: 700, color: C.coffee }}>How they arrived</p>
+              {referrers.map(([k, n]) => (
+                <MetricRow
+                  key={k}
+                  label={REFERRER_LABELS[k] || k}
+                  value={n.toLocaleString()}
+                  accent={k === "ai"}
+                />
+              ))}
+            </div>
+          )}
+          {hosts.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <p style={{ margin: "0 0 4px", fontSize: 11, fontWeight: 700, color: C.coffee }}>Top referring sites</p>
+              {hosts.map((r) => (
+                <MetricRow key={r.host} label={r.host} value={r.n.toLocaleString()} />
+              ))}
+            </div>
+          )}
+          {sources.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <p style={{ margin: "0 0 4px", fontSize: 11, fontWeight: 700, color: C.coffee }}>Campaign sources</p>
+              {sources.map((r) => (
+                <MetricRow key={r.source} label={r.source} value={r.n.toLocaleString()} />
+              ))}
+            </div>
+          )}
+          {pages.length > 0 && (
+            <div>
+              <p style={{ margin: "0 0 4px", fontSize: 11, fontWeight: 700, color: C.coffee }}>Top pages</p>
+              {pages.map((p) => (
+                <MetricRow
+                  key={p.path}
+                  label={p.path}
+                  value={`${p.visitors.toLocaleString()} · ${p.views.toLocaleString()} views`}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </PreviewStyleCard>
+  );
+};
+
+// =====================================================================
 // Recent events feed
 // =====================================================================
 const fmtTime = (iso: string): string => {
@@ -267,31 +376,113 @@ const fmtTime = (iso: string): string => {
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 };
 
+// Keys written by app/lib/analytics-context.ts (plus the owner id and
+// the slug already shown elsewhere on the row). They render as the
+// visitor line, so the detail line below shows only what's specific to
+// the event — whatever the call site put in the payload.
+const CONTEXT_KEYS = new Set([
+  "visitor_id", "session_id", "is_new_visitor", "is_new_session",
+  "device", "os", "browser", "installed_pwa", "viewport_w",
+  "language", "timezone", "local_hour",
+  "referrer_host", "referrer_type", "landing_path",
+  "utm_source", "utm_medium", "utm_campaign",
+  "owner_user_id", "slug",
+]);
+
+const asString = (m: Record<string, unknown>, k: string): string | null => {
+  const v = m?.[k];
+  return typeof v === "string" && v.trim() ? v : null;
+};
+
+/** Last 6 chars of an id — our ids end in the random half. */
+const shortId = (v: string | null): string | null =>
+  v ? v.slice(-6) : null;
+
+const visitorLine = (e: Summary["recent"][number]): string => {
+  const m = (e.metadata || {}) as Record<string, unknown>;
+  const bits: string[] = [e.event_category || "uncategorized"];
+
+  const visitor = shortId(asString(m, "visitor_id"));
+  const session = shortId(asString(m, "session_id") || e.session_id);
+  if (visitor) {
+    // Returning vs first-seen matters more than the raw id: it's the
+    // difference between one loyal client and ten new ones.
+    bits.push(`visitor ${visitor}${m.is_new_visitor === true ? " (new)" : " (returning)"}`);
+  } else if (session) {
+    bits.push(`session ${session}`);
+  } else if (e.user_id) {
+    bits.push(`user ${e.user_id.slice(0, 6)}`);
+  }
+
+  const device = asString(m, "device");
+  const browser = asString(m, "browser");
+  if (device) bits.push(browser ? `${device} · ${browser}` : device);
+
+  const host = asString(m, "referrer_host");
+  const type = asString(m, "referrer_type");
+  if (host) bits.push(`from ${host}`);
+  else if (type && type !== "internal") bits.push(type === "direct" ? "direct" : `from ${type}`);
+
+  const utm = asString(m, "utm_source");
+  if (utm) bits.push(`?ref=${utm}`);
+
+  return bits.join(" · ");
+};
+
+/** Everything the call site sent that isn't ambient visit context. */
+const detailLine = (e: Summary["recent"][number]): string | null => {
+  const m = (e.metadata || {}) as Record<string, unknown>;
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(m)) {
+    if (CONTEXT_KEYS.has(k)) continue;
+    if (v === null || v === "" || typeof v === "object") continue;
+    parts.push(`${k}: ${String(v).slice(0, 40)}`);
+    if (parts.length === 4) break;
+  }
+  return parts.length ? parts.join(" · ") : null;
+};
+
 const RecentFeed = ({ recent }: { recent: Summary["recent"] }) => (
   <PreviewStyleCard padding={18}>
     <SectionEyebrow>Recent events</SectionEyebrow>
     <p style={{ margin: "4px 0 12px", fontSize: 11, color: C.muted }}>
-      Last 100 events. User and session IDs only — no PII.
+      Last 100 events. Anonymous visitor and session IDs only — no PII.
     </p>
     {recent.length === 0 ? (
       <p style={{ margin: 0, fontSize: 12, color: C.muted }}>No events yet.</p>
     ) : (
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {recent.slice(0, 40).map((e) => (
-          <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <p style={{ margin: 0, fontSize: 12.5, fontWeight: 600, color: C.espresso, lineHeight: 1.3 }}>
-                {e.event_name}
-              </p>
-              <p style={{ margin: "1px 0 0", fontSize: 10.5, color: C.muted, lineHeight: 1.4 }}>
-                {e.event_category || "uncategorized"}
-                {e.user_id ? ` · user ${e.user_id.slice(0, 6)}` : ""}
-                {e.path ? ` · ${e.path}` : ""}
-              </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {recent.slice(0, 40).map((e) => {
+          const detail = detailLine(e);
+          return (
+            <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <p style={{ margin: 0, fontSize: 12.5, fontWeight: 600, color: C.espresso, lineHeight: 1.3 }}>
+                  {e.event_name}
+                </p>
+                <p style={{ margin: "1px 0 0", fontSize: 10.5, color: C.muted, lineHeight: 1.4 }}>
+                  {visitorLine(e)}
+                </p>
+                {detail && (
+                  <p style={{
+                    margin: "1px 0 0",
+                    fontSize: 10.5,
+                    color: C.coffee,
+                    lineHeight: 1.4,
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo",
+                    overflowWrap: "anywhere",
+                  }}>
+                    {detail}
+                  </p>
+                )}
+                {e.path && (
+                  <p style={{ margin: "1px 0 0", fontSize: 10, color: C.muted, lineHeight: 1.4 }}>{e.path}</p>
+                )}
+              </div>
+              <span style={{ fontSize: 10.5, color: C.muted, whiteSpace: "nowrap" }}>{fmtTime(e.created_at)}</span>
             </div>
-            <span style={{ fontSize: 10.5, color: C.muted, whiteSpace: "nowrap" }}>{fmtTime(e.created_at)}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     )}
   </PreviewStyleCard>
@@ -528,8 +719,18 @@ export default function AdminAnalyticsPage() {
             {/* Overview */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <OverviewTile label="Total events" value={data.total_events || 0} accent />
-              <OverviewTile label="Unique users" value={data.totals.unique_users || 0} />
-              <OverviewTile label="Unique sessions" value={data.totals.unique_sessions || 0} />
+              <OverviewTile
+                label="Unique visitors"
+                value={data.totals.unique_visitors ?? data.totals.unique_sessions ?? 0}
+                sub={
+                  data.totals.new_visitors != null
+                    ? `${data.totals.new_visitors.toLocaleString()} first-time`
+                    : "Anonymous browsers"
+                }
+                accent
+              />
+              <OverviewTile label="Visits" value={data.totals.unique_sessions || 0} sub="30-min sessions" />
+              <OverviewTile label="Signed-in users" value={data.totals.unique_users || 0} />
               <OverviewTile label="Stripe-ready accounts" value={data.stripe.charges_enabled || 0} />
             </div>
 
@@ -542,6 +743,7 @@ export default function AdminAnalyticsPage() {
               <MiniBarChart data={daySeries} height={80} highlightIndex="last" ariaLabel={`Daily events for the last ${windowDays} days`} />
             </PreviewStyleCard>
 
+            <Audience data={data} />
             <Funnel byName={data.by_name || {}} />
             <FeatureUsage byName={data.by_name || {}} />
             <PaymentReadiness stripe={data.stripe} byName={data.by_name || {}} />

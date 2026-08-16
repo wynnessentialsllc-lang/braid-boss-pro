@@ -1000,6 +1000,31 @@ export default function PublicBookingPage() {
     return () => { cancelled = true; };
   }, [link?.user_id]);
 
+  // Public page view, fired once per mount as soon as the link resolves
+  // to an owner. `booking_intelligence_summary` has always read
+  // `public_booking_viewed` as the top of the stylist's funnel, but
+  // nothing emitted it — so "page views" sat at zero while the service
+  // and slot rows below it filled in. The ref guard keeps React's
+  // double-invoked development effects from counting the visit twice.
+  const pageViewSentRef = useRef(false);
+  useEffect(() => {
+    const uid = link?.user_id;
+    if (!uid || pageViewSentRef.current) return;
+    pageViewSentRef.current = true;
+    void emitAnalyticsEvent({
+      ownerUserId: uid,
+      type: "public_booking_viewed",
+      source: "public",
+      payload: {
+        slug,
+        // Which link they arrived on: the branded /@handle-style slug or
+        // the legacy random one. Tells the stylist whether their branded
+        // link is the one actually circulating.
+        entry: urlSlug && urlSlug !== slug ? "branded" : "canonical",
+      },
+    });
+  }, [link?.user_id, slug, urlSlug]);
+
   // Categories load in parallel. The RPC only returns categories with
   // at least one active service, so we won't render ghost tabs.
   useEffect(() => {
@@ -1449,13 +1474,19 @@ export default function PublicBookingPage() {
       if (link?.user_id) {
         void emitAnalyticsEvent({
           ownerUserId: link.user_id,
-          type: "public_slot_viewed" as any,
+          type: "public_slot_viewed",
           source: "public",
           payload: {
             slug,
             serviceId: activeServiceId,
+            serviceName: serviceName || null,
             date: preferredDate,
             slotCount: result.slots.length,
+            // A day the visitor looked at but couldn't book is the most
+            // actionable signal on this page — it's demand the stylist's
+            // calendar turned away.
+            soldOut: result.slots.length === 0,
+            durationMinutes: activeDurationMinutes,
           },
         });
       }
@@ -3530,9 +3561,15 @@ export default function PublicBookingPage() {
                               if (link?.user_id) {
                                 void emitAnalyticsEvent({
                                   ownerUserId: link.user_id,
-                                  type: "public_service_viewed" as any,
+                                  type: "public_service_viewed",
                                   source: "public",
-                                  payload: { slug, serviceId: s.id, serviceName: s.name },
+                                  payload: {
+                                    slug,
+                                    serviceId: s.id,
+                                    serviceName: s.name,
+                                    requiresDeposit: !!s.deposit_required,
+                                    fromCategoryId: activeCategoryId || null,
+                                  },
                                 });
                               }
                               // Land the client on the selected service's
