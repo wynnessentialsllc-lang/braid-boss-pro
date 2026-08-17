@@ -1,4 +1,12 @@
-// Storefront URL rewrites.
+// URL rewrites: the installed PWA's entry point, and stylist storefronts.
+//
+// ── Installed app launches ────────────────────────────────────────────
+// The manifest's start_url is "/?app=1" (see app/manifest.ts). "/" has
+// to server-render the marketing landing for crawlers, so an installed
+// launch would otherwise paint the "Deposits up front" hero before the
+// app bundle hydrates. We rewrite that one request to /app, whose server
+// render is the splash. The address bar still reads "/?app=1", so the
+// PWA's scope and start_url are unaffected.
 //
 // Phase 1 spec: stylist storefront lives at /@handle, /@handle/shop,
 // and /@handle/products/<slug>. Next.js parses any folder name that
@@ -32,6 +40,16 @@ export function middleware(req: NextRequest) {
   // Decode in case a client sent %40 instead of @ (some link
   // shorteners / scanners do this).
   const pathname = decodeURIComponent(url.pathname);
+
+  // Installed-app launch → serve the splash document instead of the
+  // marketing landing. Only "/" is rewritten; every other in-app route
+  // already renders its own shell.
+  if (pathname === "/" && url.searchParams.get("app") === "1") {
+    const rewritten = new URL(url);
+    rewritten.pathname = "/app";
+    return NextResponse.rewrite(rewritten);
+  }
+
   if (!pathname.startsWith("/@")) return NextResponse.next();
 
   // Strip the leading "/@" and isolate the handle from any trailing

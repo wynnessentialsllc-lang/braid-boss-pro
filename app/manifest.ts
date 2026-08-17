@@ -18,7 +18,13 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "Braid Boss Pro",
     description:
       "Appointments, clients, payments, and reminders for braid stylists.",
-    start_url: "/",
+    // `?app=1` tells app/page.tsx this launch came from the installed
+    // app, so it renders the dashboard's splash immediately instead of
+    // the marketing landing while the Supabase session is restored.
+    // Without it a cold start sits on the "Deposits up front" hero for
+    // as long as the token refresh takes. `scope` stays "/" so every
+    // in-app route still opens inside the installed window.
+    start_url: "/?app=1",
     scope: "/",
     display: "standalone",
     orientation: "portrait",
