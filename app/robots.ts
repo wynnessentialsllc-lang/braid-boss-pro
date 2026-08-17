@@ -11,6 +11,10 @@ const BASE = (process.env.NEXT_PUBLIC_SITE_URL || "https://braidbosspro.app").re
 // pages (contracts, order tracking, appointment management) that are
 // private to one client even though they need no login.
 const PRIVATE_PATHS = [
+  // The installed PWA's entry point — an empty app shell with no links.
+  // It also carries a noindex tag (app/app/layout.tsx); nothing links
+  // here, so the disallow can't hide that tag from a crawler.
+  "/app",
   "/admin/",
   "/settings/",
   "/auth/",

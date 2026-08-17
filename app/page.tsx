@@ -29,46 +29,97 @@
 // page most worth indexing, and it was the only one with no body copy.
 //
 // Rendering marketing while undecided means a signed-in visitor could
-// see it flash before <AppRoot/> takes over. The synchronous signals
-// (URL intent, guest flag) are therefore read in a layout effect, which
-// commits before the browser paints, so those paths never flash. The
-// session lookup is genuinely async and can show one frame of marketing
-// on a cold start; that is the deliberate trade for having a homepage
-// that exists to search engines.
+// see it flash before <AppRoot/> takes over. The synchronous signals are
+// therefore read in a layout effect, which commits before the browser
+// paints, so those paths never flash.
+//
+// getSession() was originally the only signal that could recognise a
+// returning signed-in user, and awaiting it is what made a PWA cold
+// start sit on the marketing hero — "Deposits up front. Contracts
+// signed." — before the dashboard appeared. It is worst after the app
+// has been idle for a while, because by then the persisted access token
+// has expired and getSession() blocks on a network token refresh before
+// it resolves. On a phone waking up on cellular that is seconds of
+// looking at a sales pitch for software you already pay for.
+//
+// So three cheaper signals now settle it synchronously, before paint:
+// a launch from the installed app (?app=1 in the manifest start_url, or
+// display-mode: standalone for installs that predate it), and a
+// persisted Supabase session in localStorage. None of them prove the
+// session is still valid — that is <AppRoot/>'s job, and it shows its
+// own splash until getSession() answers — but all three prove this is
+// not a logged-out visitor who should be reading marketing.
+//
+// A crawler has no storage, no standalone display mode and no ?app=1,
+// so it still gets the full landing page server-rendered.
 
 import { useEffect, useLayoutEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { Sparkles } from "lucide-react";
 import FeaturesContent from "./components/marketing/FeaturesContent";
+import AppSplash from "./components/AppSplash";
 import { getSupabase } from "./lib/supabase";
 import { HOME_SCHEMA } from "./lib/home-schema";
-import { C } from "./components/marketing/tokens";
 
 // Must stay in sync with useAuth()'s GUEST_FLAG_KEY in ./AppRoot.
 const GUEST_FLAG_KEY = "bbp-guest-mode";
 
-// Minimal, self-contained cold-start splash. Deliberately imports
-// nothing from ./AppRoot so showing it never pulls the heavy chunk.
-const Splash = () => (
-  <div
-    className="flex items-center justify-center"
-    style={{ minHeight: "100dvh", background: C.paper }}
-  >
-    <div
-      className="animate-pulse flex items-center justify-center"
-      style={{ width: 56, height: 56, borderRadius: 999, background: C.brandPrimary }}
-    >
-      <Sparkles size={28} style={{ color: "#FFFFFF" }} />
-    </div>
-  </div>
-);
+// Must stay in sync with the `storageKey` passed to createClient() in
+// ./lib/supabase. supabase-js writes the persisted session here; its
+// mere presence means someone has signed in on this device.
+const AUTH_STORAGE_KEY = "bbp-auth";
+
+// True when localStorage holds a persisted Supabase session. Deliberately
+// does NOT check expiry: an expired access token with a live refresh
+// token is exactly the returning-user case this exists to catch, and
+// refreshing it is the slow step we're trying to get off the critical
+// path.
+const hasPersistedSession = (): boolean => {
+  try {
+    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return false;
+    // Shape has moved between supabase-js versions (v1 nested the
+    // session under `currentSession`), so accept any of them, and fall
+    // back to a substring test if the blob doesn't parse.
+    try {
+      const parsed = JSON.parse(raw);
+      return !!(
+        parsed?.access_token ||
+        parsed?.refresh_token ||
+        parsed?.currentSession?.access_token
+      );
+    } catch {
+      return raw.includes("access_token");
+    }
+  } catch {
+    // Storage blocked (private mode / partitioned iframe) — fall through
+    // to the async session check.
+    return false;
+  }
+};
+
+// True when running as an installed app rather than a browser tab.
+// matchMedia covers Android/desktop; navigator.standalone is the iOS
+// Safari equivalent, which is the install path most stylists use.
+const isStandaloneLaunch = (): boolean => {
+  try {
+    return (
+      window.matchMedia?.("(display-mode: standalone)")?.matches === true ||
+      (window.navigator as Navigator & { standalone?: boolean }).standalone === true
+    );
+  } catch {
+    return false;
+  }
+};
 
 // The heavy app. ssr:false keeps it out of the server render (it's a
 // client-only SPA) and, crucially, out of the marketing bundle — its
 // chunk is fetched only when <AppRoot/> is actually rendered below.
+// <AppSplash/> stands in meanwhile; it lives in its own module so this
+// route and /app show the same thing, and it imports nothing from
+// ./AppRoot so rendering it never pulls the heavy chunk.
 const AppRoot = dynamic(() => import("./AppRoot"), {
   ssr: false,
-  loading: () => <Splash />,
+  loading: () => <AppSplash />,
 });
 
 // useLayoutEffect commits before paint but does not run on the server,
@@ -84,16 +135,26 @@ export default function HomeRoute() {
   useIsomorphicLayoutEffect(() => {
     let cancelled = false;
 
-    // Synchronous signals first — the URL intent and the guest flag
-    // settle the decision without awaiting the session check.
+    // Synchronous signals first — anything that settles the decision
+    // without awaiting the session check.
     let immediate: "app" | null = null;
     try {
       const params = new URLSearchParams(window.location.search);
-      if (params.get("signup") === "1" || params.get("signin") === "1") immediate = "app";
+      // `app=1` is the installed PWA's start_url (see ./manifest.ts).
+      if (
+        params.get("signup") === "1" ||
+        params.get("signin") === "1" ||
+        params.get("app") === "1"
+      ) immediate = "app";
       else if (window.localStorage.getItem(GUEST_FLAG_KEY) === "1") immediate = "app";
     } catch {
-      /* malformed URL / storage blocked — fall through to session check */
+      /* malformed URL / storage blocked — fall through to the checks below */
     }
+
+    // Installs that predate the start_url change carry no ?app=1, and a
+    // returning user in a browser tab has no URL intent either. Both are
+    // still recognisable without a network call.
+    if (!immediate && (isStandaloneLaunch() || hasPersistedSession())) immediate = "app";
 
     if (immediate) {
       // Committed in a layout effect, so this lands before paint and a
