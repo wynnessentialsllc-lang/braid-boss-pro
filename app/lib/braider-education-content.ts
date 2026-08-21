@@ -560,16 +560,16 @@ export const EDUCATION_CATEGORIES: EducationCategory[] = [
     lessons: [
       {
         id: "edit-appointment-addons",
-        title: "How to add or change add-ons on a booked appointment",
+        title: "How to add a service or add-on to a booked appointment",
         readMinutes: 2,
         body: [
-          "Plans change after booking — a client decides she wants the hair included, or an extra bundle. Open the appointment from your calendar and find the Add-ons card: toggle on any extra your service offers, or tap \"Add custom add-on\" for a one-off (name, price, extra time).",
+          "Plans change after booking — she booked a touch-up and now wants a takedown too, or decides she wants the hair included. Open the appointment from your calendar and find the \"Add-ons & extra services\" card. It holds three things: toggles for any extra your service offers, an \"Add another service\" picker that stacks a second service from your catalog onto the same appointment at its own price and time, and \"Add a custom add-on\" for a one-off (name, price, extra time).",
           "Adding or removing an add-on updates the appointment's total price and duration automatically. You can still type over either field. The deposit already paid stays put, so the difference just becomes the balance due.",
           "Your client is emailed one tidy \"appointment updated\" note showing exactly what changed, and their appointment-details page updates to match — so nobody's guessing.",
         ],
         tryThisWeek:
-          "Open an upcoming appointment and practice adding, then removing, one add-on — watch the total and balance update live.",
-        relatedTool: "Calendar → Edit Appointment → Add-ons",
+          "Open an upcoming appointment and practice adding, then removing, a second service — watch the total, duration, and balance update live.",
+        relatedTool: "Calendar → Edit Appointment → Add-ons & extra services",
       },
       {
         id: "switch-service-option",
