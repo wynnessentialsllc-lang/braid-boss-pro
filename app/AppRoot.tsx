@@ -11280,6 +11280,14 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   const [customAddonName, setCustomAddonName] = useState("");
   const [customAddonPrice, setCustomAddonPrice] = useState("");
   const [customAddonHours, setCustomAddonHours] = useState("");
+  // "Add another service" draft. A touch-up that turns into a touch-up
+  // + takedown is one appointment, not two, so the second service rides
+  // the same add-on rails the booking page uses for extras — pricing,
+  // duration, deposit, the client's update email, the appointment
+  // details page, receipts, and the transactions ledger all understand
+  // add-ons already. Held until the Add button commits it so the total
+  // never moves just from browsing the list.
+  const [extraServiceId, setExtraServiceId] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -12652,6 +12660,64 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     setCustomAddonHours("");
   };
 
+  // ---- Extra services on one appointment --------------------------
+  // Services from the catalog that can be stacked onto this ticket.
+  // The appointment's own service is excluded: it IS the ticket, and
+  // offering it again just invites double-charging it.
+  const addableServices = useMemo(() => {
+    const list = (store.servicesApi?.services as Service[]) || [];
+    return list
+      .filter((s) => s?.is_active && s.id !== form.serviceId)
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }, [store.servicesApi?.services, form.serviceId]);
+
+  // Stack a second service onto the ticket at its catalog price and
+  // duration, so a takedown or travel charge doesn't have to be
+  // retyped from memory as a custom add-on.
+  //
+  // include_in_deposit is deliberately false: the deposit the client
+  // already paid stays exactly where it is and the addition becomes
+  // balance due — which is what "she added a takedown once she sat
+  // down" actually means. The stylist can still hand-edit the total
+  // and duration afterwards; this only moves them once, on the tap.
+  const addServiceAsAddon = () => {
+    const svc = addableServices.find((s) => s.id === extraServiceId);
+    if (!svc) return;
+    const price = Number(svc.base_price) || 0;
+    const durDelta = Number(svc.duration_hours) || 0;
+    setForm((prev: any) => {
+      const addons: any[] = Array.isArray(prev.addons) ? prev.addons : [];
+      const curTotal = parseMoney(prev.totalPrice);
+      const curDur = Number(prev.durationHours) || 0;
+      return {
+        ...prev,
+        addons: [
+          ...addons,
+          {
+            // uid() suffix, so the same service can be stacked twice
+            // (two takedowns in one sitting is a real ticket) and each
+            // row still removes independently — removeAddon matches on
+            // the exact id.
+            id: `svc-${svc.id}-${uid()}`,
+            name: svc.name,
+            price,
+            duration_hours_delta: durDelta,
+            include_in_deposit: false,
+            // Breadcrumbs back to the catalog row. Nothing reads these
+            // yet; they're what a future "revenue by service" report
+            // would need to credit this money to the right service
+            // instead of counting it as a nameless add-on.
+            service_id: svc.id,
+            from_service: true,
+          },
+        ],
+        totalPrice: sanitizeMoneyInput(roundCents(curTotal + price)),
+        durationHours: durationStr(curDur + durDelta),
+      };
+    });
+    setExtraServiceId("");
+  };
+
   // ---- Service options (variations) -------------------------------
   // The booking page's "Choose an option" picker maps to the service's
   // add_ons (variations) — each can carry its own price/duration/
@@ -13019,9 +13085,9 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             a custom add-on even with no service menu behind it. */}
         {isAppointment && (
           <Card className="p-3.5">
-            <p className="text-sm font-semibold mb-1" style={{ color: C.espresso }}>Add-ons</p>
+            <p className="text-sm font-semibold mb-1" style={{ color: C.espresso }}>Add-ons & extra services</p>
             <p className="text-[11px]" style={{ color: C.muted, lineHeight: 1.4 }}>
-              Optional extras for this appointment. Adding or removing one updates the total price and duration above — you can still edit those by hand.
+              Everything on this ticket besides the base service — a menu extra, another service from your catalog (takedown, travel, a wash), or a one-off. Each one updates the total price and duration above; you can still edit those by hand.
             </p>
 
             {/* Service menu extras as toggles. Checked = on this
@@ -13104,6 +13170,41 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                   </li>
                 ))}
               </ul>
+            )}
+
+            {/* Another service from the catalog, stacked onto this same
+                appointment. Priced and timed from the catalog row so a
+                takedown or travel charge doesn't have to be retyped —
+                that retyping was the only way to do this before, and
+                only if you remembered what you charge for it. */}
+            {addableServices.length > 0 && (
+              <div className="mt-3 rounded-xl p-3" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+                <p className="text-[12px] font-semibold mb-2" style={{ color: C.espresso }}>Add another service</p>
+                <Select
+                  value={extraServiceId}
+                  onChange={(ev: any) => setExtraServiceId(ev.target.value)}
+                  options={[
+                    { value: "", label: "— Pick a service —" },
+                    ...addableServices.map((s) => ({
+                      value: s.id,
+                      label: `${s.name} · ${fmtMoney(Number(s.base_price) || 0, business?.currency)} · ${s.duration_hours}h`,
+                    })),
+                  ]}
+                />
+                <p className="text-[11px] mt-1.5" style={{ color: C.muted, lineHeight: 1.4 }}>
+                  Added at its catalog price and time. The deposit already paid stays put — the difference becomes balance due.
+                </p>
+                <div className="mt-2">
+                  <Button
+                    variant="outline"
+                    icon={<Plus size={14} />}
+                    onClick={addServiceAsAddon}
+                    disabled={!extraServiceId}
+                  >
+                    Add service
+                  </Button>
+                </div>
+              </div>
             )}
 
             {/* One-off custom add-on. Commits on the Add button so the
