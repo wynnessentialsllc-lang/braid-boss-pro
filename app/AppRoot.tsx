@@ -198,6 +198,7 @@ import {
   computeDayStatus,
 } from "./lib/calendar";
 import { useIsNativePlatform, isNativePlatform } from "./lib/platform";
+import { findAppointmentConflicts } from "./lib/appointment-conflicts";
 import { tapToPaySupported, collectTapToPay, TAP_TO_PAY_ENABLED, TAP_TO_PAY_STAGE_LABEL, type TapToPayStatus } from "./lib/taptopay";
 import {
   type Service,
@@ -1385,6 +1386,14 @@ const fmtTime = (t: string): string => {
   return mins === 0
     ? `${hh} ${period}`
     : `${hh}:${String(mins).padStart(2, "0")} ${period}`;
+};
+// Minutes past midnight → a display clock time. Wraps past midnight so
+// an appointment that runs into the next day still reads sensibly.
+const minutesToClockLabel = (mins: number): string => {
+  const total = ((Math.round(mins) % 1440) + 1440) % 1440;
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return fmtTime(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
 };
 const fmtDuration = (ms: number): string => {
   const total = Math.floor(ms / 1000);
@@ -12718,6 +12727,30 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     setExtraServiceId("");
   };
 
+  // ---- Double-booking warning -------------------------------------
+  // The rules for what counts as a clash live in
+  // ./lib/appointment-conflicts (and are unit tested there); this only
+  // turns them into display strings. Warns, never blocks: some overlaps
+  // are on purpose.
+  //
+  // Not hand-memoized: a manual useMemo here is one the React Compiler
+  // reports it can't preserve, and the scan is a filter over one day's
+  // bookings — cheaper than the memo bookkeeping would be.
+  const conflicts = findAppointmentConflicts(
+    {
+      id: form.id,
+      date: form.date,
+      time: form.time,
+      durationHours: form.durationHours,
+      isAllDay: form.isAllDay,
+      status: form.status,
+    },
+    (Array.isArray(store?.appointments) ? store.appointments : []) as any[],
+  ).map((c) => ({
+    ...c,
+    range: `${minutesToClockLabel(c.startMinute)} – ${minutesToClockLabel(c.endMinute)}`,
+  }));
+
   // ---- Service options (variations) -------------------------------
   // The booking page's "Choose an option" picker maps to the service's
   // add_ons (variations) — each can carry its own price/duration/
@@ -13009,6 +13042,45 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
           )}
           {!form.isAllDay && (
             <Field label="Duration"><MoneyInput prefix="" suffix="hrs" placeholder="6.5" value={form.durationHours} onChange={(v) => setForm({ ...form, durationHours: v })} /></Field>
+          )}
+
+          {/* Double-booking warning. Sits directly under the fields that
+              cause it, spans both columns, and is informational — some
+              overlaps are on purpose, so there's nothing to dismiss and
+              nothing blocking Save. */}
+          {conflicts.length > 0 && (
+            <div
+              className="col-span-2 rounded-xl p-3 flex gap-2.5"
+              style={{
+                background: "rgba(251, 191, 36, 0.14)",
+                border: "1px solid rgba(251, 191, 36, 0.42)",
+              }}
+            >
+              <AlertTriangle size={16} style={{ color: C.warning, flex: "0 0 auto", marginTop: 1 }} aria-hidden />
+              <div className="min-w-0">
+                <p className="text-[12px] font-semibold" style={{ color: C.espresso, lineHeight: 1.35 }}>
+                  {conflicts.length === 1
+                    ? "This overlaps another booking"
+                    : `This overlaps ${conflicts.length} other bookings`}
+                </p>
+                <ul className="mt-1 space-y-0.5" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                  {conflicts.slice(0, 4).map((c) => (
+                    <li key={c.id || `${c.startMinute}-${c.label}`} className="text-[11px]" style={{ color: C.coffee, lineHeight: 1.4 }}>
+                      <span style={{ fontWeight: 600 }}>{c.label}</span>
+                      <span style={{ color: C.muted }}> · {c.range}</span>
+                    </li>
+                  ))}
+                  {conflicts.length > 4 && (
+                    <li className="text-[11px]" style={{ color: C.muted }}>
+                      + {conflicts.length - 4} more
+                    </li>
+                  )}
+                </ul>
+                <p className="text-[11px] mt-1" style={{ color: C.muted, lineHeight: 1.4 }}>
+                  Saving is fine if that&apos;s intentional — adjust the time or duration above if it isn&apos;t.
+                </p>
+              </div>
+            </div>
           )}
           {isAppointment && (
             <Field label="Status">
