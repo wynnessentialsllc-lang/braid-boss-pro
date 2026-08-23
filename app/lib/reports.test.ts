@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextMonthAppts, nextMonthSummary, yearHourlyRateBreakdown, hourlyRateBreakdown, computeDashboardRevenue, type AppointmentLike } from "./reports";
+import { nextMonthAppts, nextMonthSummary, yearHourlyRateBreakdown, hourlyRateBreakdown, computeDashboardRevenue, ticketBalance, isTicketPaidInFull, type AppointmentLike } from "./reports";
 
 // Reference date sits in June so "next month" is July 2026.
 const REF = "2026-06-25";
@@ -139,5 +139,31 @@ describe("yearHourlyRateBreakdown", () => {
     expect(card.yearHourlyRate).toBe(sheet.rate);
     expect(card.yearHoursWorked).toBe(sheet.hours);
     expect(card.yearRateEarnings).toBe(sheet.earned);
+  });
+});
+
+describe("ticketBalance", () => {
+  it("owes nothing once the balance is marked paid, even with the deposit left at 0", () => {
+    // "Mark balance paid (manual)" sets balance_paid instead of
+    // collapsing the deposit into the total, so the deposit-vs-balance
+    // split survives. The schedule card used to read `$250.00 due`
+    // straight next to a PAID pill because it missed the flag.
+    const a = appt({ totalPrice: 250, depositPaid: 0, balance_paid: true });
+    expect(isTicketPaidInFull(a)).toBe(true);
+    expect(ticketBalance(a)).toBe(0);
+  });
+
+  it("keeps the real balance once the flag is cleared by a reset", () => {
+    const a = appt({ totalPrice: 250, depositPaid: 0, balance_paid: false });
+    expect(isTicketPaidInFull(a)).toBe(false);
+    expect(ticketBalance(a)).toBe(250);
+  });
+
+  it("still nets the deposit off an unpaid ticket", () => {
+    expect(ticketBalance(appt({ totalPrice: 250, depositPaid: 50 }))).toBe(200);
+  });
+
+  it("nets the discount before the deposit", () => {
+    expect(ticketBalance(appt({ totalPrice: 250, discountAmount: 50, depositPaid: 50 }))).toBe(150);
   });
 });

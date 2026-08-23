@@ -165,7 +165,10 @@ export const colorForAppointment = (
   const deposit = Number(appt?.depositPaid) || 0;
   const discount = Number(appt?.discountAmount) || 0;
   const net = Math.max(0, totalPrice - discount);
-  const balance = Math.max(0, net - deposit);
+  // A ticket marked paid-in-full owes nothing, even though depositPaid
+  // still holds only the original deposit.
+  const paidInFull = appt?.balance_paid === true || appt?.balancePaid === true;
+  const balance = paidInFull ? 0 : Math.max(0, net - deposit);
   const status = (appt?.status || "scheduled") as keyof typeof PALETTE;
 
   let key: keyof typeof PALETTE = "neutral";

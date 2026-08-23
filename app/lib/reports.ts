@@ -33,6 +33,12 @@ export type AppointmentLike = {
   cancelled_at?: string | null;
   canceledAt?: string | null;
   canceled_at?: string | null;
+  // Paid-in-full marker. "Mark balance paid" and the Stripe balance
+  // webhook set this INSTEAD of collapsing the deposit into the total,
+  // so the deposit-vs-balance split survives on the record. Anything
+  // that reports "still owed" has to honour it.
+  balance_paid?: boolean | null;
+  balancePaid?: boolean | null;
 };
 
 const num = (v: unknown): number => {
@@ -70,7 +76,16 @@ export const ticketTotal = (a: AppointmentLike): number => {
   return Math.max(0, num(a.totalPrice) - num(a.discountAmount));
 };
 
+// True when the ticket has been settled in full, even though
+// depositPaid still holds only the original deposit.
+export const isTicketPaidInFull = (a: AppointmentLike): boolean =>
+  !!a && (a.balance_paid === true || a.balancePaid === true);
+
 export const ticketBalance = (a: AppointmentLike): number => {
+  // Paid in full → nothing owed. Without this a manually-collected
+  // balance keeps reading as due (the deposit field is deliberately
+  // left at the real deposit), so a paid booking shows "$X due".
+  if (isTicketPaidInFull(a)) return 0;
   return Math.max(0, ticketTotal(a) - num(a.depositPaid));
 };
 

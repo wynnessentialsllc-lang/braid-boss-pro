@@ -311,6 +311,7 @@ import {
   type HourlyRateScope,
   weekDepositBuckets,
   getDepositCollectedAmount,
+  isTicketPaidInFull,
   type WeekDepositBuckets,
   monthExpectedAppts,
   monthEarnedAppts,
@@ -10030,7 +10031,10 @@ const DayCalendarView = ({
           const discount = Number(a?.discountAmount) || 0;
           const net = Math.max(0, total - discount);
           const deposit = getDepositCollectedAmount(a);
-          const balance = Math.max(0, net - deposit);
+          // Paid in full → nothing due. The deposit field stays at the
+          // real deposit when a balance is collected, so without this
+          // the card read "$250.00 due" right next to a PAID pill.
+          const balance = isTicketPaidInFull(a) ? 0 : Math.max(0, net - deposit);
           const ps = paymentStatusOf(a, today);
           const timeRange = `${minutesToLabel(p.startMin)} – ${minutesToLabel(p.endMin)}`;
           const titleLine = isBlockedBlock ? (a.eventTitle || "Unavailable") : isPersonalBlock ? (a.eventTitle || "Personal event") : (a.clientName || "Open slot");
@@ -11328,6 +11332,12 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         paymentDate: a?.paymentDate || "",
         paymentMethod: a?.paymentMethod || "",
         paymentNotes: a?.paymentNotes || "",
+        // Paid-in-full marker set by "Mark balance paid" / Boss Checkout
+        // / the Stripe balance webhook. Seeded so the Payment card
+        // reflects the real state when the sheet is reopened — without
+        // it a settled appointment read as still owing and the "Reset
+        // payment" button never appeared, leaving a mis-tap stuck.
+        balance_paid: a?.balance_paid === true || a?.balancePaid === true,
         // Discount snapshot — accept either camelCase (local) or
         // snake_case (cloud row) so both prefill cleanly. `discounts` is
         // the canonical list (multiple discounts stack); the legacy
@@ -11629,7 +11639,14 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   // available + owed, so a later total/deposit change can never over-
   // apply. handleSave persists THIS value (not the raw form field).
   const creditApplied = Math.max(0, Math.min(Number(form.creditApplied) || 0, maxCreditApplicable));
-  const balanceDue = Math.max(0, roundCents(balanceBeforeCredit - creditApplied));
+  // Mirrors normalizeAppointment: a ticket flagged paid-in-full owes
+  // nothing even though depositPaid still holds only the real deposit.
+  // This is what flips the Payment card over to "Reset payment" instead
+  // of offering "Mark balance paid" a second time.
+  const balancePaidInFull = form.balance_paid === true || form.balancePaid === true;
+  const balanceDue = balancePaidInFull && netTotal > 0
+    ? 0
+    : Math.max(0, roundCents(balanceBeforeCredit - creditApplied));
 
   // When picking an existing client, auto-fill their contact info
   // (phone/email) only — never overwriting anything already typed.
@@ -13580,8 +13597,11 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
               <DollarSign size={16} style={{ color: C.gold }} />
               <span className="font-semibold text-sm" style={{ color: C.espresso }}>Payment</span>
             </div>
-            <Pill tone={PAYMENT_STATUS_TONE[paymentStatusOf(form, todayISO())]}>
-              {PAYMENT_STATUS_LABEL[paymentStatusOf(form, todayISO())]}
+            {/* Derive from the same balanceDue the card below uses, so
+                the pill can never say PAID while the sheet still offers
+                "Mark balance paid" (or vice-versa after a reset). */}
+            <Pill tone={PAYMENT_STATUS_TONE[paymentStatusOf({ ...form, balanceDue }, todayISO())]}>
+              {PAYMENT_STATUS_LABEL[paymentStatusOf({ ...form, balanceDue }, todayISO())]}
             </Pill>
           </div>
           {balanceDue > 0 ? (
@@ -13677,6 +13697,12 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                       ...form,
                       depositPaid: 0,
                       balanceDue: net,
+                      // Clearing the paid-in-full flag is what actually
+                      // reverses the payment — normalizeAppointment
+                      // trusts it over the numbers, so leaving it set
+                      // would flip the record right back to paid.
+                      balance_paid: false,
+                      balancePaid: false,
                       paymentStatus: "pending",
                       paymentDate: "",
                       paymentMethod: "",
@@ -13697,10 +13723,22 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             <Button variant="outline" icon={<RefreshCw size={14} />} fullWidth
               onClick={async () => {
                 const net = Math.max(0, (Number(form.totalPrice) || 0) - (Number(form.discountAmount) || 0));
+                // Undoing the payment must not also erase a deposit the
+                // client really put down — that's a separate payment.
+                // Only a "deposit" that already covers the whole ticket
+                // was itself the full payment, so that one resets to 0.
+                const dep = Math.max(0, Number(form.depositPaid) || 0);
+                const keptDeposit = dep > 0 && dep < net ? roundCents(dep) : 0;
                 setForm({
                   ...form,
-                  depositPaid: 0,
-                  balanceDue: net,
+                  depositPaid: keptDeposit,
+                  balanceDue: roundCents(Math.max(0, net - keptDeposit)),
+                  // Clearing the paid-in-full flag is what actually
+                  // reverses the payment — normalizeAppointment trusts
+                  // it over the numbers, so leaving it set would flip
+                  // the record right back to paid on save.
+                  balance_paid: false,
+                  balancePaid: false,
                   paymentStatus: "pending",
                   paymentDate: "",
                   paymentMethod: "",
