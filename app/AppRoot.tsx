@@ -595,7 +595,12 @@ import {
   WEB_PUSH_PUBLIC_KEY_CONFIGURED,
   type PushCapability,
 } from "./lib/push";
-import { detectBrowserTimeZone } from "./lib/timezone";
+import {
+  detectBrowserTimeZone,
+  isValidTimeZone,
+  listTimeZones,
+  formatTimeZoneLabel,
+} from "./lib/timezone";
 import {
   Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon, MapPin, Gift,
   Plus, X, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Search, Copy, Check, Trash2, Edit3, ExternalLink,
@@ -24445,6 +24450,127 @@ const PUSH_CATEGORIES: { key: string; label: string; hint: string; types: string
   },
 ];
 
+// Reminder timezone picker.
+//
+// The server-side rules sweep (app/api/notifications/run-rules) reads
+// profiles.timezone to place a stored wall-clock booking ("2 PM") on the real
+// clock. It has no other way to know: a UTC server would read that booking as
+// 2 PM UTC and fire "starts soon" hours early, so a stylist with no timezone
+// is skipped entirely and simply gets no off-device reminders.
+//
+// Auto-detect seeds the value, but this picker is the authority — a stylist
+// who travels, or whose browser reports the wrong zone, can set the one their
+// salon actually runs on. Saving here is deliberate, so the seed never
+// overwrites it afterwards.
+const ReminderTimezoneSection = ({ userId }: { userId: string }) => {
+  const [saved, setSaved] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const detected = useMemo(() => detectBrowserTimeZone(), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data, error } = await getSupabase()
+          .from("profiles")
+          .select("timezone")
+          .eq("id", userId)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error) setStatus(`Couldn't load: ${error.message}`);
+        else setSaved(((data as any)?.timezone as string) || null);
+      } catch (err) {
+        if (!cancelled) setStatus(`Couldn't load: ${(err as Error).message}`);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  // Always offer the detected zone and whatever is already stored, whatever
+  // the runtime can enumerate, so the current setting is never unselectable.
+  const options = useMemo(
+    () => listTimeZones([detected, saved]).map((tz) => ({
+      value: tz,
+      label: formatTimeZoneLabel(tz),
+    })),
+    [detected, saved],
+  );
+
+  const save = async (tz: string) => {
+    if (!isValidTimeZone(tz)) return;
+    setBusy(true); setStatus(null);
+    try {
+      const { error } = await getSupabase()
+        .from("profiles")
+        .update({ timezone: tz })
+        .eq("id", userId);
+      // Surface the real reason. A silently-failed write here means the
+      // stylist believes reminders are configured while the sweep keeps
+      // skipping them — the exact failure this whole feature exists to avoid.
+      if (error) setStatus(`Couldn't save: ${error.message}`);
+      else { setSaved(tz); setStatus("Saved"); setTimeout(() => setStatus(null), 2500); }
+    } catch (err) {
+      setStatus(`Couldn't save: ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const needsSetup = !loading && !isValidTimeZone(saved);
+
+  return (
+    <div className="mt-4 pt-3" style={{ borderTop: `1px solid ${C.hairline}` }}>
+      <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+        Reminder timezone
+      </p>
+      <p className="text-[11px] mb-2" style={{ color: C.muted }}>
+        Reminders are scheduled against this timezone, so it should match the
+        clock your appointment times are booked in.
+      </p>
+      {loading ? (
+        <p className="text-[11px]" style={{ color: C.muted }}>Loading…</p>
+      ) : (
+        <>
+          <Select
+            value={isValidTimeZone(saved) ? (saved as string) : (detected || "")}
+            onChange={(e) => void save(e.target.value)}
+            options={
+              isValidTimeZone(saved) || detected
+                ? options
+                : [{ value: "", label: "Select a timezone…" }, ...options]
+            }
+          />
+          {needsSetup && (
+            <p className="text-[11px] mt-2" style={{ color: C.warning }}>
+              Not set yet — reminders won&apos;t send until you choose one.
+            </p>
+          )}
+          {detected && isValidTimeZone(saved) && saved !== detected && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void save(detected)}
+              className="text-[11px] mt-2 underline"
+              style={{ color: C.gold }}
+            >
+              This device is in {formatTimeZoneLabel(detected)} — use that instead
+            </button>
+          )}
+          {status && (
+            <p className="text-[11px] mt-2" style={{ color: status.startsWith("Couldn't") ? C.danger : C.success }}>
+              {status}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 const ServerPushTogglesSection = ({ userId }: { userId: string }) => {
   const [disabled, setDisabled] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -25291,6 +25417,9 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
                     </div>
                   ))}
                 </div>
+                {mode === "authed" && userId && (
+                  <ReminderTimezoneSection userId={userId} />
+                )}
                 {mode === "authed" && userId && (
                   <ServerPushTogglesSection userId={userId} />
                 )}
@@ -44195,10 +44324,16 @@ export default function App() {
         // tell a failed write from a browser that reports no zone. Still
         // best-effort: logged, never thrown, never blocking the app.
         if (readErr) console.warn("[bbp] timezone read failed:", readErr.message);
-        // On a read error we don't know the stored value, so still attempt
-        // the write — it's idempotent, and trying is what self-heals once a
-        // transient failure clears.
-        else if ((data as any)?.timezone === tz) return;
+        // SEED ONLY — never overwrite. Auto-detect exists so a stylist who
+        // never visits Settings still gets off-device reminders instead of
+        // silently getting none. But once a real zone is stored it is the
+        // stylist's, set either by this seed or deliberately in Settings, and
+        // a phone that travels must not quietly re-point their reminders at
+        // wherever they happen to be standing. Only an empty or junk value is
+        // filled in. On a read error we don't know the stored value, so we
+        // still attempt the write — it's idempotent, and trying is what
+        // self-heals once a transient failure clears.
+        else if (isValidTimeZone((data as any)?.timezone)) return;
         const { error: writeErr } = await supabase
           .from("profiles")
           .update({ timezone: tz })
