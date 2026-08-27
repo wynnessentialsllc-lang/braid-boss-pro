@@ -105,3 +105,56 @@ export const detectBrowserTimeZone = (): string | null => {
     return null;
   }
 };
+
+// Zones offered when the runtime can't enumerate them itself. Deliberately
+// the US zones plus UTC rather than a token world list: an incomplete
+// "everywhere" list reads as a bug to anyone it omits, whereas an explicitly
+// short list plus whatever auto-detect found is honest. `listTimeZones`
+// always folds the detected and currently-saved zones in, so a stylist
+// outside these is never stranded on an old browser.
+const FALLBACK_TIME_ZONES = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Phoenix",
+  "America/Los_Angeles",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+  "UTC",
+];
+
+// Every zone the picker should offer, sorted. Prefers the runtime's own
+// catalogue (Intl.supportedValuesOf, ~400 zones, iOS 15.4+) and falls back to
+// the short list above. `include` pins values that must appear whatever the
+// source — the detected zone and the one already saved — so the picker can
+// never silently drop the stylist's current setting.
+export const listTimeZones = (include: (string | null | undefined)[] = []): string[] => {
+  let base: string[] = [];
+  try {
+    const supported = (Intl as unknown as {
+      supportedValuesOf?: (k: string) => string[];
+    }).supportedValuesOf;
+    if (typeof supported === "function") base = supported("timeZone") || [];
+  } catch { /* fall through to the short list */ }
+  if (base.length === 0) base = [...FALLBACK_TIME_ZONES];
+
+  const out = new Set(base);
+  for (const tz of include) {
+    if (isValidTimeZone(tz)) out.add(tz);
+  }
+  return Array.from(out).sort((a, b) => a.localeCompare(b));
+};
+
+// Human label for a zone, e.g. "America/Los_Angeles (UTC-7)". The offset is
+// the one in effect NOW, so it tracks daylight saving rather than claiming a
+// standard-time offset the stylist isn't currently on.
+export const formatTimeZoneLabel = (timeZone: string, at: Date = new Date()): string => {
+  if (!isValidTimeZone(timeZone)) return String(timeZone || "");
+  const offsetMin = Math.round(tzOffsetMs(timeZone, at) / 60000);
+  const sign = offsetMin < 0 ? "-" : "+";
+  const abs = Math.abs(offsetMin);
+  const hh = Math.floor(abs / 60);
+  const mm = abs % 60;
+  const offset = mm === 0 ? `UTC${sign}${hh}` : `UTC${sign}${hh}:${String(mm).padStart(2, "0")}`;
+  return `${timeZone.replace(/_/g, " ")} (${offset})`;
+};

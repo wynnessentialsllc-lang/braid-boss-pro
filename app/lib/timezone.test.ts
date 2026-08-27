@@ -4,6 +4,8 @@ import {
   isValidTimeZone,
   todayIsoInTz,
   nowMsForTz,
+  listTimeZones,
+  formatTimeZoneLabel,
 } from "./timezone";
 
 const HOUR = 3600_000;
@@ -90,5 +92,59 @@ describe("nowMsForTz", () => {
 
   it("is a no-op for a UTC stylist", () => {
     expect(nowMsForTz("UTC", SUMMER)).toBe(SUMMER.getTime());
+  });
+});
+
+describe("listTimeZones", () => {
+  it("returns a sorted, de-duplicated list", () => {
+    const list = listTimeZones();
+    expect(list.length).toBeGreaterThan(0);
+    expect(list).toEqual([...list].sort((a, b) => a.localeCompare(b)));
+    expect(new Set(list).size).toBe(list.length);
+  });
+
+  it("covers the US zones a stylist is most likely to need", () => {
+    const list = listTimeZones();
+    for (const tz of [
+      "America/New_York",
+      "America/Chicago",
+      "America/Denver",
+      "America/Los_Angeles",
+    ]) {
+      expect(list).toContain(tz);
+    }
+  });
+
+  it("folds in pinned zones so a saved setting can never be dropped", () => {
+    // The guarantee that matters: whatever the runtime does or doesn't
+    // enumerate, the stylist's current value stays selectable.
+    const list = listTimeZones(["Asia/Kolkata", "Europe/Berlin"]);
+    expect(list).toContain("Asia/Kolkata");
+    expect(list).toContain("Europe/Berlin");
+  });
+
+  it("ignores null, undefined, and invalid pins", () => {
+    const list = listTimeZones([null, undefined, "", "Not/AZone"]);
+    expect(list).not.toContain("Not/AZone");
+    expect(list.every((tz) => typeof tz === "string" && tz.length > 0)).toBe(true);
+  });
+});
+
+describe("formatTimeZoneLabel", () => {
+  it("shows the offset in effect at that moment, not standard time", () => {
+    expect(formatTimeZoneLabel("America/New_York", SUMMER)).toBe("America/New York (UTC-4)");
+    expect(formatTimeZoneLabel("America/New_York", WINTER)).toBe("America/New York (UTC-5)");
+  });
+
+  it("renders half-hour offsets", () => {
+    expect(formatTimeZoneLabel("Asia/Kolkata", SUMMER)).toBe("Asia/Kolkata (UTC+5:30)");
+  });
+
+  it("renders UTC without a signed offset suffix beyond +0", () => {
+    expect(formatTimeZoneLabel("UTC", SUMMER)).toBe("UTC (UTC+0)");
+  });
+
+  it("passes a bad zone through instead of throwing", () => {
+    expect(formatTimeZoneLabel("Not/AZone", SUMMER)).toBe("Not/AZone");
   });
 });
