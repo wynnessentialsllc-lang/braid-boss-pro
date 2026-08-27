@@ -595,6 +595,7 @@ import {
   WEB_PUSH_PUBLIC_KEY_CONFIGURED,
   type PushCapability,
 } from "./lib/push";
+import { detectBrowserTimeZone } from "./lib/timezone";
 import {
   Home, Calculator as CalcIcon, Calendar, Users, TrendingUp, Settings as SettingsIcon, MapPin, Gift,
   Plus, X, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Search, Copy, Check, Trash2, Edit3, ExternalLink,
@@ -44161,6 +44162,37 @@ export default function App() {
   // this device (PWA web fallback) — the rules still surface in the
   // bell via buildNotifications. iOS native push will plug into the
   // same pipeline once we wrap with Capacitor.
+  // Record the stylist's IANA timezone on their profile.
+  //
+  // This is what opts a user into OFF-DEVICE reminders. The rule generators
+  // build appointment start times in the process's local timezone, which is
+  // this phone in the browser but UTC on the server — so the server sweep
+  // (app/api/notifications/run-rules) cannot place a booking in real time
+  // until it knows the stylist's zone, and deliberately skips anyone whose
+  // timezone is NULL rather than guessing UTC and firing hours early.
+  //
+  // Best-effort and idempotent: reads first and only writes on an actual
+  // change, so this costs one cheap select per session for a settled user.
+  useEffect(() => {
+    if (auth.mode !== "authed" || !auth.userId) return;
+    let cancelled = false;
+    void (async () => {
+      const tz = detectBrowserTimeZone();
+      if (!tz) return;
+      try {
+        const supabase = getSupabase();
+        const { data } = await supabase
+          .from("profiles")
+          .select("timezone")
+          .eq("id", auth.userId)
+          .maybeSingle();
+        if (cancelled || (data as any)?.timezone === tz) return;
+        await supabase.from("profiles").update({ timezone: tz }).eq("id", auth.userId);
+      } catch { /* never block the app on a timezone write */ }
+    })();
+    return () => { cancelled = true; };
+  }, [auth.mode, auth.userId]);
+
   const schedulerRunningRef = useRef(false);
   useEffect(() => {
     if (auth.mode !== "authed" || !auth.userId) return;

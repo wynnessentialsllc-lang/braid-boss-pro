@@ -152,6 +152,36 @@ const persistSubscription = async (
     .from("push_subscriptions")
     .upsert(row, { onConflict });
   if (error) throw error;
+
+  // Drop this user's OTHER rows on the same transport.
+  //
+  // iOS treats every "Add to Home Screen" as a separate web app with its
+  // own push registration, so re-adding the icon (or ITP clearing the old
+  // instance's storage) mints a brand-new endpoint and orphans the old
+  // one. Apple keeps returning 201 for that dead endpoint instead of the
+  // 410 that send-push prunes on, so it lingers forever — the server
+  // reports a successful send while the notification goes nowhere. That
+  // is exactly how push looked "fine" server-side for two weeks while no
+  // banner ever reached the phone.
+  //
+  // A device only ever holds one live registration per transport, so any
+  // row that isn't the one we just wrote is dead by definition. Deleting
+  // it here keeps the send fan-out honest.
+  //
+  // Best-effort: a prune failure must never block enabling notifications,
+  // and RLS already scopes the delete to this user's own rows.
+  try {
+    const stale = supabase
+      .from("push_subscriptions")
+      .delete()
+      .eq("user_id", userId)
+      .eq("platform", payload.platform);
+    // `neq` on a NULL column never matches, so each branch only ever
+    // touches rows of its own transport (web rows carry an endpoint,
+    // native rows a device_token).
+    if (payload.endpoint) await stale.neq("endpoint", payload.endpoint);
+    else if (payload.deviceToken) await stale.neq("device_token", payload.deviceToken);
+  } catch { /* stale rows are cosmetic — never fail the subscribe */ }
 };
 
 // Native iOS subscribe: APNs registration via Capacitor. Listens once
