@@ -3,7 +3,7 @@
 // Version: bump this string whenever the SW logic changes so the
 // browser detects a byte-different /sw.js, installs the new worker,
 // and skipWaiting + clients.claim cycle it onto every open tab.
-const SW_VERSION = "bbp-sw-1.1.0";
+const SW_VERSION = "bbp-sw-1.2.0";
 
 // Scope: Web Push delivery + click → focus/openWindow. Native push
 // (iOS via Capacitor) is handled inside the app shell; this file is
@@ -54,8 +54,12 @@ self.addEventListener("push", (event) => {
   const title = data.title || "Braid Boss Pro";
   const options = {
     body: data.body || "",
-    icon: data.icon || "/icon.png",
-    badge: data.badge || "/icon.png",
+    // /icon.png has never existed — public/ ships icons/icon-192.png and
+    // icons/icon-512.png — so both fields 404'd on every push. iOS hides
+    // this by using the installed web app's manifest icon, but Android
+    // and desktop Chrome render the notification with no artwork.
+    icon: data.icon || "/icons/icon-192.png",
+    badge: data.badge || "/icons/icon-192.png",
     data: data.data || { url: "/" },
     tag: data.tag,
   };
