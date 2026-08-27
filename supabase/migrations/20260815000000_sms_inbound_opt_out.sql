@@ -8,11 +8,46 @@
 -- table has RLS on with no end-user policies, so only these definer
 -- functions (and the service role) ever touch it.
 --
--- Phone is normalized to digits-only via the existing
--- public.sms_normalize_phone so "(310) 555-1234", "+13105551234" and
--- "3105551234" all collapse to one opt-out row. Because the platform
--- sends from one shared Twilio number, a STOP is global to that number;
--- user_id is informational only.
+-- Phone is normalized via public.sms_normalize_phone so "(310) 555-1234",
+-- "+13105551234" and "3105551234" all collapse to one opt-out row.
+--
+-- That claim did NOT hold before this migration: the normalizer only
+-- stripped non-digits, so Twilio's E.164 "From" (+13105551234 -> the 11
+-- digits "13105551234") and a client phone stored as "(310) 555-1234"
+-- (-> "3105551234") produced DIFFERENT keys. Every send path gates on
+--
+--   not exists (select 1 from sms_opt_outs o
+--               where o.phone = sms_normalize_phone(client_phone))
+--
+-- so an opt-out recorded from an inbound STOP would never have matched
+-- the stored client number, and the client would have kept receiving
+-- messages. This migration therefore also makes the normalizer canonical
+-- for NANP numbers (an 11-digit result beginning with 1 loses the country
+-- code), so both sides of that comparison agree.
+--
+-- Safe to change in place: the normalizer is used for opt-out matching
+-- and length validation only — never to build the outbound recipient
+-- number — and sms_opt_outs is empty, so no existing key is orphaned.
+--
+-- Because the platform sends from one shared Twilio number, a STOP is
+-- global to that number; user_id is informational only.
+
+-- =================================================================
+-- sms_normalize_phone — canonical matching key. Digits only, with the
+-- NANP country code dropped so "+1 310 555 1234" and "(310) 555-1234"
+-- are the same number. Non-NANP / short input is left as its digits.
+-- =================================================================
+create or replace function public.sms_normalize_phone(raw text)
+returns text
+language sql
+immutable
+as $function$
+  select case
+           when length(d) = 11 and left(d, 1) = '1' then right(d, 10)
+           else d
+         end
+  from (select regexp_replace(coalesce(raw, ''), '\D', '', 'g') as d) t;
+$function$;
 
 -- =================================================================
 -- sms_record_opt_out — idempotent. Inserts (or refreshes the source/
