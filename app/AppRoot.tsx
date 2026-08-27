@@ -44181,14 +44181,32 @@ export default function App() {
       if (!tz) return;
       try {
         const supabase = getSupabase();
-        const { data } = await supabase
+        const { data, error: readErr } = await supabase
           .from("profiles")
           .select("timezone")
           .eq("id", auth.userId)
           .maybeSingle();
-        if (cancelled || (data as any)?.timezone === tz) return;
-        await supabase.from("profiles").update({ timezone: tz }).eq("id", auth.userId);
-      } catch { /* never block the app on a timezone write */ }
+        if (cancelled) return;
+        // Surface failures instead of swallowing them. This write is the
+        // ONLY thing that opts a stylist into off-device reminders, and its
+        // first version ignored both error channels — so when PostgREST
+        // could not see the freshly-added timezone column, it no-opped in
+        // total silence and the sweep kept skipping the user with no way to
+        // tell a failed write from a browser that reports no zone. Still
+        // best-effort: logged, never thrown, never blocking the app.
+        if (readErr) console.warn("[bbp] timezone read failed:", readErr.message);
+        // On a read error we don't know the stored value, so still attempt
+        // the write — it's idempotent, and trying is what self-heals once a
+        // transient failure clears.
+        else if ((data as any)?.timezone === tz) return;
+        const { error: writeErr } = await supabase
+          .from("profiles")
+          .update({ timezone: tz })
+          .eq("id", auth.userId);
+        if (writeErr) console.warn("[bbp] timezone write failed:", writeErr.message);
+      } catch (err) {
+        console.warn("[bbp] timezone sync threw:", err);
+      }
     })();
     return () => { cancelled = true; };
   }, [auth.mode, auth.userId]);
