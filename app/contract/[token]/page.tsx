@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { getSupabase } from "../../lib/supabase";
+import { findAddresses, mapsDirectionsUrl, splitByAddresses } from "../../lib/address-link";
 
 const C = {
   espresso: "#15111A", coffee: "#3D3447", cream: "#FFFFFF",
@@ -48,6 +49,140 @@ const fmtDate = (iso: string | null): string => {
   if (!y || !m || !d) return iso;
   const dt = new Date(y, m - 1, d);
   return dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+};
+
+const directionsHref = (address: string): string =>
+  mapsDirectionsUrl(address, typeof navigator !== "undefined" ? navigator.userAgent : null);
+
+/**
+ * The agreement body, with any address the stylist wrote in it turned
+ * into a tap-for-directions link. Non-address text renders verbatim, so
+ * the signed document still reads exactly as it was signed.
+ */
+const ContractBody = ({ text }: { text: string }) => (
+  <>
+    {splitByAddresses(text).map((seg, i) =>
+      seg.type === "address" ? (
+        <a
+          key={i}
+          href={directionsHref(seg.value)}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            color: C.goldDeep,
+            fontWeight: 600,
+            textDecoration: "underline",
+            textDecorationStyle: "dotted",
+            textUnderlineOffset: 3,
+            WebkitUserSelect: "text",
+            userSelect: "text",
+          }}
+        >
+          {seg.value}
+        </a>
+      ) : (
+        <span key={i}>{seg.value}</span>
+      ),
+    )}
+  </>
+);
+
+/**
+ * A dedicated "where" card above the agreement. The address itself stays
+ * selectable text (long-pressing a link on mobile offers "copy link",
+ * not the address), with an explicit copy button next to directions.
+ */
+const DirectionsCard = ({ address }: { address: string }) => {
+  const [copied, setCopied] = useState(false);
+  const href = directionsHref(address);
+  if (!href) return null;
+
+  const copy = async () => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(address);
+      } else if (typeof document !== "undefined") {
+        const el = document.createElement("textarea");
+        el.value = address;
+        el.setAttribute("readonly", "");
+        el.style.position = "fixed";
+        el.style.opacity = "0";
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand("copy");
+        document.body.removeChild(el);
+      }
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      /* clipboard blocked — the address is selectable above either way */
+    }
+  };
+
+  return (
+    <div
+      style={{
+        marginTop: 18,
+        padding: 16,
+        borderRadius: 16,
+        background: C.paper,
+        border: `1px solid ${C.hairline}`,
+      }}
+    >
+      <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: C.coffee }}>
+        Where
+      </p>
+      <p
+        style={{
+          fontSize: 15,
+          color: C.espresso,
+          marginTop: 6,
+          lineHeight: 1.45,
+          WebkitUserSelect: "text",
+          userSelect: "text",
+        }}
+      >
+        {address}
+      </p>
+      <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            flex: "1 1 140px",
+            textAlign: "center",
+            padding: "11px 14px",
+            borderRadius: 999,
+            background: C.gold,
+            color: C.cream,
+            fontSize: 13,
+            fontWeight: 700,
+            textDecoration: "none",
+          }}
+        >
+          Get directions
+        </a>
+        <button
+          type="button"
+          onClick={() => { void copy(); }}
+          style={{
+            flex: "1 1 110px",
+            padding: "11px 14px",
+            borderRadius: 999,
+            background: "transparent",
+            color: C.coffee,
+            border: `1px solid ${C.hairline}`,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          {copied ? "Copied" : "Copy address"}
+        </button>
+      </div>
+    </div>
+  );
 };
 
 export default function ContractSigningPage() {
@@ -158,6 +293,13 @@ export default function ContractSigningPage() {
     contract?.status === "voided" ||
     contract?.status === "expired";
 
+  // The service address lives inside the free-text agreement body, so we
+  // pull the first one out to headline it with a directions link.
+  const serviceAddress = useMemo(
+    () => findAddresses(contract?.body_snapshot || "")[0]?.value || "",
+    [contract?.body_snapshot],
+  );
+
   const apptLine = contract ? [
     contract.service_name,
     contract.preferred_date ? fmtDate(contract.preferred_date) : null,
@@ -251,6 +393,12 @@ export default function ContractSigningPage() {
           </div>
         )}
 
+        {/* The address is the thing clients come back for after signing —
+            surface it above the agreement with a one-tap directions link. */}
+        {!loading && contract && terminalState && serviceAddress && (
+          <DirectionsCard address={serviceAddress} />
+        )}
+
         {/* After signing, keep the full agreement readable so the client
             can always return to it — e.g. to retrieve the service address
             saved in the contract body. Read-only: no fields, no actions. */}
@@ -269,9 +417,11 @@ export default function ContractSigningPage() {
                 lineHeight: 1.55,
                 fontSize: 14,
                 color: C.coffee,
+                WebkitUserSelect: "text",
+                userSelect: "text",
               }}
             >
-              {contract.body_snapshot}
+              <ContractBody text={contract.body_snapshot} />
             </div>
             {contract.signed_date && (
               <p style={{ fontSize: 12, color: C.muted, marginTop: 10, textAlign: "center" }}>
@@ -301,6 +451,8 @@ export default function ContractSigningPage() {
               </div>
             )}
 
+            {serviceAddress && <DirectionsCard address={serviceAddress} />}
+
             <div
               style={{
                 marginTop: 18,
@@ -312,9 +464,11 @@ export default function ContractSigningPage() {
                 lineHeight: 1.55,
                 fontSize: 14,
                 color: C.coffee,
+                WebkitUserSelect: "text",
+                userSelect: "text",
               }}
             >
-              {contract.body_snapshot}
+              <ContractBody text={contract.body_snapshot} />
             </div>
 
             <label
