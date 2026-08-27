@@ -83,8 +83,13 @@ end $$;
 
 -- ── public_list_products — expose is_digital for the storefront grid ──
 -- so a digital listing can badge itself and skip shipping messaging.
--- Return shape changes, so drop + recreate. Mirrors the variants-phase1
--- definition with is_digital appended.
+-- Return shape changes, so drop + recreate.
+--
+-- Mirrors the CURRENT live definition (public_list_products_alpha_sort)
+-- with is_digital appended — NOT the older variants-phase1 one. The
+-- earlier draft of this migration copied the variants-phase1 body, which
+-- would have silently reverted the storefront back to
+-- "is_featured, sort_order, created_at" ordering. Keep the alpha sort.
 drop function if exists public.public_list_products(text);
 create or replace function public.public_list_products(slug_in text)
 returns table (
@@ -112,7 +117,7 @@ begin
       coalesce(p.is_digital, false)
     from public.products p
     where p.user_id = resolved.user_id and p.active = true
-    order by p.is_featured desc, p.sort_order asc, p.created_at desc;
+    order by p.is_featured desc, lower(p.title) asc;
 end $$;
 
 revoke all on function public.public_list_products(text) from public;

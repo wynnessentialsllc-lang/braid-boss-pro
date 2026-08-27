@@ -113,17 +113,28 @@ begin
       select
         lower(trim(coalesce(a.client_email, ''))) as email,
         coalesce(nullif(s.name, ''), nullif(a.style, ''), 'Service') as item_name,
+        -- Mirrors calculateCollectedAmount() in the app, so the emailed
+        -- figure agrees with the dashboard. There is no
+        -- appointments.amount_paid column (an earlier draft of this
+        -- migration referenced one, which would have made this function
+        -- raise on every hourly run): deposit_paid IS the collected
+        -- amount, and it doubles as the full total once the balance is
+        -- settled. Paid-in-full is therefore tested FIRST, otherwise a
+        -- settled ticket whose deposit_paid still holds only the deposit
+        -- would report just that deposit.
+        --
+        -- Store credit is excluded from "collected" in the app, but
+        -- credit_applied is not a promoted column (it lives in the jsonb
+        -- blob), so it cannot be netted out here. A day that redeemed
+        -- store credit reads slightly high.
         case
-          when greatest(coalesce(a.deposit_paid, 0), coalesce(a.amount_paid, 0)) > 0
-            then round((case
-                          when greatest(0, coalesce(a.total_price, 0) - coalesce(a.discount_amount, 0)) > 0
-                            then least(greatest(coalesce(a.deposit_paid, 0), coalesce(a.amount_paid, 0)),
-                                       greatest(0, coalesce(a.total_price, 0) - coalesce(a.discount_amount, 0)))
-                          else greatest(coalesce(a.deposit_paid, 0), coalesce(a.amount_paid, 0))
-                        end)::numeric, 2)
-          when (coalesce(a.payment_status, '') = 'paid' or lower(coalesce(a.status, '')) = 'completed')
+          when (coalesce(a.balance_paid, false)
+                or coalesce(a.payment_status, '') = 'paid'
+                or coalesce(a.balance_due, -1) = 0)
                and greatest(0, coalesce(a.total_price, 0) - coalesce(a.discount_amount, 0)) > 0
             then round(greatest(0, coalesce(a.total_price, 0) - coalesce(a.discount_amount, 0))::numeric, 2)
+          when coalesce(a.deposit_paid, 0) > 0
+            then round(coalesce(a.deposit_paid, 0)::numeric, 2)
           else 0
         end as collected
       from public.appointments a
