@@ -1241,6 +1241,11 @@ const renderAppointmentUpdated = (p: Record<string, any>) => {
   const hairColor = String(p.hairColor ?? "").trim();
   const curlPattern = String(p.curlPattern ?? "").trim();
   const hasPrice = p.totalPrice != null && Number.isFinite(Number(p.totalPrice)) && Number(p.totalPrice) > 0;
+  // Deposit already collected on this booking, carried to the new slot.
+  const hasDeposit = p.depositPaid != null && Number.isFinite(Number(p.depositPaid)) && Number(p.depositPaid) > 0;
+  // Balance is shown whenever we know it — including $0, so a client who
+  // has paid in full sees that plainly instead of being left guessing.
+  const hasBalance = hasDeposit && p.remainingBalance != null && Number.isFinite(Number(p.remainingBalance));
 
   // "What changed" — only the categories that actually moved.
   const liStyle = `font-size:14px;line-height:22px;margin:0 0 8px;color:${C.coffee};`;
@@ -1277,6 +1282,11 @@ const renderAppointmentUpdated = (p: Record<string, any>) => {
   if (newWhen)          detailRows.push(trow("When", escape(newWhen)));
   if (addonNames.length) detailRows.push(trow("Add-ons", addonNames.map((a) => escape(a)).join(", ")));
   if (hasPrice)         detailRows.push(trow("Total", escape(money(p.totalPrice))));
+  // A deposit already paid follows the booking to its new date. Showing
+  // only the total made a rescheduled appointment read as if the deposit
+  // had been lost — the exact opposite of what the copy below promises.
+  if (hasDeposit)       detailRows.push(trow("Deposit paid", escape(money(p.depositPaid))));
+  if (hasBalance)       detailRows.push(trow("Balance due", escape(money(p.remainingBalance))));
   const detailsTable = detailRows.length
     ? `<p style="font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:${C.goldDeep};margin:18px 0 6px;font-weight:700;">Your appointment</p><table style="width:100%;border-collapse:collapse;border-top:1px solid ${C.hairline};border-bottom:1px solid ${C.hairline};">${detailRows.join("")}</table>`
     : "";
@@ -1291,7 +1301,7 @@ const renderAppointmentUpdated = (p: Record<string, any>) => {
     ${changedList}
     ${detailsTable}
     ${portalButton(p)}
-    <p style="font-size:13px;color:${C.muted};line-height:20px;margin:14px 0;">No action needed — your booking and any deposit carry over. If something doesn't look right, reply to this email and your stylist will help.</p>
+    <p style="font-size:13px;color:${C.muted};line-height:20px;margin:14px 0;">No action needed — your booking${hasDeposit ? ` and the ${escape(money(p.depositPaid))} deposit you already paid` : " and any deposit"} carry over to the new date. If something doesn't look right, reply to this email and your stylist will help.</p>
     ${cancelUrl ? `<hr style="border:none;border-top:1px solid ${C.hairline};margin:18px 0;" /><p style="margin:0 0 8px;font-size:13px;font-weight:600;color:${C.espresso};">Need to cancel?</p><p style="margin:0 0 10px;font-size:12px;line-height:18px;color:${C.coffee};">You can cancel from the link below. Your deposit is handled per your stylist's policy.</p><p style="margin:0;"><a href="${escape(cancelUrl)}" style="display:inline-block;background:transparent;color:${C.espresso};text-decoration:none;padding:10px 20px;border-radius:999px;font-weight:600;font-size:12px;letter-spacing:0.04em;border:1.5px solid ${C.espresso};">Cancel appointment</a></p>` : ""}
   `);
   return { subject, html };
