@@ -110,6 +110,7 @@ import {
 import { formatAppointmentDateShort } from "./lib/utils/formatAppointmentDate";
 import FeaturesContent from "./components/marketing/FeaturesContent";
 import AuthScreen from "./components/AuthScreen";
+import { depositCarryover, moveAppointment, scheduleChanged } from "./lib/reschedule";
 import { ProductImageUploader } from "./components/ProductImageUploader";
 import { ProductFileUploader } from "./components/ProductFileUploader";
 import {
@@ -12100,6 +12101,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             .rpc("public_get_studio_name", { user_id_in: store.userId });
           if (typeof studio === "string" && studio.trim()) studioName = studio.trim();
         } catch { /* studio name best-effort */ }
+        // A deposit already paid carries over to the new date/time, so
+        // the email quotes what's actually left rather than the full
+        // ticket (which read as though the deposit had been lost).
+        const carriedDeposit = depositCarryover(saved);
         const currentAddonNames = (newAddons as any[])
           .map((a: any) => String(a?.name ?? "").trim())
           .filter(Boolean);
@@ -12137,6 +12142,8 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             preferredDate: newDate || null,
             preferredTime: newTime || null,
             totalPrice: Number.isFinite(newPrice) ? newPrice : null,
+            depositPaid: carriedDeposit.depositPaid || null,
+            remainingBalance: carriedDeposit.remainingBalance,
             currency: business?.currency || "USD",
             // Edited add-ons aren't synced to booking_requests, so pass
             // the current names explicitly rather than relying on the
@@ -12522,9 +12529,37 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     if (!form.id || rescheduleBusy) return;
     if (!rescheduleDate || !rescheduleTime) return;
     setRescheduleBusy(true);
-    const next = { ...form, date: rescheduleDate, time: rescheduleTime };
+    const moved = scheduleChanged(form, { date: rescheduleDate, time: rescheduleTime });
+    // The deposit belongs to the booking, not the slot — moveAppointment
+    // carries it (and how/when it was paid) across and recomputes only
+    // the balance.
+    const next = moveAppointment(form, { date: rescheduleDate, time: rescheduleTime });
     setForm(next);
     const saved = await upsertAppointment(next);
+    if (saved && moved) {
+      // Everything the CLIENT sees — the portal's "View appointment
+      // details", the cancel/reschedule links, the reminder cron — reads
+      // the linked booking_request, not the appointments row. Without
+      // this sync a moved appointment still showed the client the old
+      // slot, and its deposit read as belonging to a booking that no
+      // longer existed. Best-effort: never block the move on it.
+      try {
+        await getSupabase().rpc("sync_booking_request_after_edit", {
+          appointment_id_in: saved.id,
+          new_date: rescheduleDate,
+          new_time: rescheduleTime,
+        });
+      } catch { /* portal sync is best-effort */ }
+      // Re-arm the reminders against the new date so the client isn't
+      // reminded about the slot they just moved off.
+      try {
+        await scheduleRemindersForAppointment({
+          ...saved,
+          clientPhone: form.clientPhone,
+          clientEmail: form.clientEmail,
+        });
+      } catch { /* reminders are best-effort */ }
+    }
     setRescheduleBusy(false);
     if (saved) {
       setShowQuickReschedule(false);
