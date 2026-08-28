@@ -23762,6 +23762,13 @@ const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
           setTab("signin");
           return;
         }
+        // Funnel step 1. `confirmation_required` separates "in the app
+        // now" from "has to go find an email first" — the second is a
+        // known drop-off point and worth being able to see.
+        trackEvent("signup_completed", {
+          category: "activation",
+          metadata: { confirmation_required: !data?.session, surface: "auth_screen" },
+        });
         // If email confirmation is turned off, signUp returns a live
         // session and the braider is already in — the auth listener takes
         // over and this gate unmounts. Nothing to show.
@@ -24189,12 +24196,16 @@ const AuthSheet = ({ open, initialMode, onClose, onAuthed }: {
         onAuthed?.();
         onClose();
       } else if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
           options: { emailRedirectTo: getAuthRedirectUrl() },
         });
         if (error) throw error;
+        trackEvent("signup_completed", {
+          category: "activation",
+          metadata: { confirmation_required: !data?.session, surface: "auth_sheet" },
+        });
         // Some Supabase configs auto-sign-in on signup; if so the
         // listener will flip mode → authed and the sheet closes
         // naturally via onClose. If email confirmation is required
@@ -44255,6 +44266,13 @@ export default function App() {
   }, [approvalsApi?.requests, rawStore?.appointments]);
   const [upgradeFor, setUpgradeFor] = useState<GatedFeature | null>(null);
   const requestUpgrade = useCallback((feature: GatedFeature) => {
+    // Funnel step 2: the braider has actually been ASKED to subscribe.
+    // Until this fires, nobody has seen the offer — which is the whole
+    // reason it's worth recording separately from signup.
+    trackEvent("upgrade_sheet_shown", {
+      category: "activation",
+      metadata: { feature },
+    });
     setUpgradeFor(feature);
   }, []);
   const closeUpgrade = useCallback(() => setUpgradeFor(null), []);
