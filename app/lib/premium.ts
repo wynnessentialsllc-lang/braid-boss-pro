@@ -19,6 +19,7 @@
 import { useEffect, useState } from "react";
 import { getSupabase } from "./supabase";
 import { TRIAL_DAYS } from "./plan";
+import { trackEvent } from "./track";
 
 // PASTE YOUR STRIPE PAYMENT LINK HERE.
 // Create it in the Stripe Dashboard → Payment links → New:
@@ -58,8 +59,22 @@ export const startSubscription = async (
     });
     const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
     if (!res.ok || !data.url) {
+      trackEvent("subscribe_checkout_failed", {
+        category: "activation",
+        metadata: { plan, reason: data.error || `http_${res.status}` },
+      });
       return { ok: false, error: data.error || `checkout_failed_${res.status}` };
     }
+    // Funnel step 3: they tapped subscribe and we have a Stripe URL, so
+    // they're being handed off to checkout. This is the last thing this
+    // app sees — whether the trial actually STARTS is recorded by the
+    // webhook on profiles.subscription_status, which is the authoritative
+    // count. The gap between this event and a 'trialing' profile is the
+    // Stripe-checkout drop-off.
+    trackEvent("subscribe_checkout_started", {
+      category: "activation",
+      metadata: { plan },
+    });
     const cap = (window as any).Capacitor;
     if (cap?.isNativePlatform?.()) {
       try {
