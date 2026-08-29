@@ -5,6 +5,11 @@ import {
   isInServiceArea,
   validateMobileServiceConfig,
   normalizeZip,
+  normalizeState,
+  composeAddress,
+  hasEnoughAddress,
+  describeMissingAddress,
+  isZipInputValid,
   type MobileServiceConfig,
 } from "./mobile-service";
 
@@ -162,5 +167,90 @@ describe("normalizeZip", () => {
   it("returns '' when no zip is found", () => {
     expect(normalizeZip("Los Angeles")).toBe("");
     expect(normalizeZip(null)).toBe("");
+  });
+});
+
+describe("normalizeState", () => {
+  it("uppercases a 2-letter code", () => {
+    expect(normalizeState("ca")).toBe("CA");
+    expect(normalizeState(" tx ")).toBe("TX");
+  });
+
+  it("passes longer names through trimmed", () => {
+    expect(normalizeState(" California ")).toBe("California");
+    expect(normalizeState(null)).toBe("");
+  });
+});
+
+describe("composeAddress", () => {
+  it("joins all four parts in postal order", () => {
+    expect(composeAddress({
+      street: "318 E Fairview Blvd", city: "Inglewood", state: "ca", zip: "90302",
+    })).toBe("318 E Fairview Blvd, Inglewood, CA 90302");
+  });
+
+  it("keeps state and zip in one segment", () => {
+    expect(composeAddress({ street: "1 Main St", city: "Dallas", state: "TX", zip: "" }))
+      .toBe("1 Main St, Dallas, TX");
+    expect(composeAddress({ street: "1 Main St", city: "Dallas", state: "", zip: "75201" }))
+      .toBe("1 Main St, Dallas, 75201");
+  });
+
+  it("drops blank parts instead of leaving empty commas", () => {
+    expect(composeAddress({ street: "1 Main St", city: "", state: "", zip: "90302" }))
+      .toBe("1 Main St, 90302");
+    expect(composeAddress({ street: "  1 Main St  " })).toBe("1 Main St");
+    expect(composeAddress({})).toBe("");
+  });
+
+  it("normalizes a zip+4 down to five digits", () => {
+    expect(composeAddress({ street: "1 Main St", zip: "90302-1234" }))
+      .toBe("1 Main St, 90302");
+  });
+});
+
+describe("hasEnoughAddress", () => {
+  it("needs a street plus a city or zip", () => {
+    expect(hasEnoughAddress({ street: "318 E Fairview Blvd", city: "Inglewood" })).toBe(true);
+    expect(hasEnoughAddress({ street: "318 E Fairview Blvd", zip: "90302" })).toBe(true);
+  });
+
+  it("rejects the bare-street case that geocodes to the wrong town", () => {
+    expect(hasEnoughAddress({ street: "318 E Fairview Blvd" })).toBe(false);
+  });
+
+  it("rejects a too-short or missing street", () => {
+    expect(hasEnoughAddress({ street: "1 M", city: "Inglewood" })).toBe(false);
+    expect(hasEnoughAddress({ city: "Inglewood", zip: "90302" })).toBe(false);
+  });
+
+  it("ignores a zip that isn't five digits", () => {
+    expect(hasEnoughAddress({ street: "318 E Fairview Blvd", zip: "903" })).toBe(false);
+  });
+});
+
+describe("describeMissingAddress", () => {
+  it("names the missing piece", () => {
+    expect(describeMissingAddress({})).toBe("Enter your street address.");
+    expect(describeMissingAddress({ street: "318 E Fairview Blvd" }))
+      .toBe("Add your city or ZIP so we can check the travel distance.");
+  });
+
+  it("returns null once the address is usable", () => {
+    expect(describeMissingAddress({ street: "318 E Fairview Blvd", zip: "90302" })).toBeNull();
+  });
+});
+
+describe("isZipInputValid", () => {
+  it("accepts blank and full zips", () => {
+    expect(isZipInputValid("")).toBe(true);
+    expect(isZipInputValid(null)).toBe(true);
+    expect(isZipInputValid("90302")).toBe(true);
+    expect(isZipInputValid("90302-1234")).toBe(true);
+  });
+
+  it("rejects a half-typed zip", () => {
+    expect(isZipInputValid("903")).toBe(false);
+    expect(isZipInputValid("9030a")).toBe(false);
   });
 });

@@ -1,6 +1,7 @@
 // POST /api/mobile-quote — public booking-page quote for a mobile
-// service. Takes { slug, service_id, address }, geocodes the address
-// via Mapbox, computes the distance from the stylist's home base, and
+// service. Takes { slug, service_id, address, city, state, zip } where
+// `address` is the street line, geocodes the composed address via
+// Mapbox, computes the distance from the stylist's home base, and
 // returns { in_area, distance_miles, travel_fee, blocked_reason }.
 //
 // Anonymous endpoint. Rate-limited per IP and per slug because each
@@ -15,8 +16,12 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   calculateTravelFee,
+  composeAddress,
   haversineMiles,
+  hasEnoughAddress,
   isInServiceArea,
+  normalizeState,
+  normalizeZip,
   MOBILE_FEE_MODELS,
   type MobileFeeModel,
 } from "../../lib/mobile-service";
@@ -38,7 +43,14 @@ const env = (k: string): string => {
 type Body = {
   slug?: string;
   service_id?: string;
+  // `address` is the street line. City / state / zip come as their own
+  // fields from the booking page. Older callers that still send one
+  // combined string in `address` keep working — the parts are optional
+  // and compose back to the same line.
   address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
 };
 
 export async function POST(req: Request) {
@@ -51,10 +63,27 @@ export async function POST(req: Request) {
 
   const slug = (body.slug || "").trim();
   const serviceId = (body.service_id || "").trim();
-  const address = (body.address || "").trim();
+  const street = (body.address || "").trim();
+  const city = (body.city || "").trim();
+  const state = normalizeState(body.state);
+  const zip = normalizeZip(body.zip);
   if (!slug) return fail(400, "Missing booking link.");
   if (!serviceId) return fail(400, "Missing service.");
-  if (!address) return fail(400, "Please enter an address.");
+  if (!street) return fail(400, "Please enter an address.");
+  if (street.length > 200 || city.length > 100 || state.length > 40) {
+    return fail(400, "That address doesn't look right — please double-check it.");
+  }
+
+  // A street on its own is the input that quietly geocodes to a
+  // same-named street in another town, so require a city or a zip
+  // before we spend a Mapbox call on it. A combined single-line
+  // address (legacy callers) satisfies this via its own embedded zip.
+  const legacySingleLine = !city && !zip && /\b\d{5}\b/.test(street);
+  if (!legacySingleLine && !hasEnoughAddress({ street, city, state, zip })) {
+    return fail(400, "Please include your city or ZIP code.");
+  }
+
+  const address = legacySingleLine ? street : composeAddress({ street, city, state, zip });
   if (address.length < 5 || address.length > 300) {
     return fail(400, "That address doesn't look right — please double-check it.");
   }
@@ -119,7 +148,10 @@ export async function POST(req: Request) {
         blocked_zips: Array.isArray(row.blocked_zips) ? row.blocked_zips : [],
       };
     }
-  } catch {
+  } catch (e: any) {
+    // Log the underlying Postgres error. A missing grant surfaces here
+    // as 42501 and is otherwise invisible behind the generic 502.
+    console.error("[mobile-quote] public_get_mobile_config failed:", e?.code || "", e?.message || e);
     return fail(502, "Couldn't look up this booking link.");
   }
   if (!cfgRow) return fail(404, "Booking link not found.");
@@ -143,7 +175,8 @@ export async function POST(req: Request) {
       .maybeSingle();
     if (error) throw error;
     svc = data;
-  } catch {
+  } catch (e: any) {
+    console.error("[mobile-quote] service lookup failed:", e?.code || "", e?.message || e);
     return fail(502, "Couldn't look up this service.");
   }
   if (!svc || svc.is_active === false) return fail(404, "Service not found.");
@@ -156,18 +189,24 @@ export async function POST(req: Request) {
   // to lock onto a street name when the client typed "1234 Knowlton
   // St" without their city. Plus pass the base coords as a proximity
   // bias so nearby hits win over identically-named streets elsewhere.
-  let ctxCity: string | null = null;
-  let ctxState: string | null = null;
-  try {
-    const { data: linkRow } = await admin
-      .from("booking_links")
-      .select("business_city, business_state")
-      .eq("user_id", cfgRow.user_id)
-      .maybeSingle();
-    ctxCity = linkRow?.business_city ?? null;
-    ctxState = linkRow?.business_state ?? null;
-  } catch {
-    /* fall through — proceed without city/state context */
+  //
+  // The client's own city/state win when they typed them — falling back
+  // to the stylist's would silently drag an out-of-town address back
+  // toward the studio and under-quote the trip.
+  let ctxCity: string | null = city || null;
+  let ctxState: string | null = state || null;
+  if (!ctxCity || !ctxState) {
+    try {
+      const { data: linkRow } = await admin
+        .from("booking_links")
+        .select("business_city, business_state")
+        .eq("user_id", cfgRow.user_id)
+        .maybeSingle();
+      ctxCity = ctxCity || (linkRow?.business_city ?? null);
+      ctxState = ctxState || (linkRow?.business_state ?? null);
+    } catch {
+      /* fall through — proceed without city/state context */
+    }
   }
 
   // Geocode + distance. A null geocode (Mapbox couldn't resolve the
@@ -179,7 +218,8 @@ export async function POST(req: Request) {
       state: ctxState,
       proximity: { lat: cfgRow.base_lat, lng: cfgRow.base_lng },
     });
-  } catch {
+  } catch (e: any) {
+    console.error("[mobile-quote] geocode failed:", e?.message || e);
     return fail(502, "Couldn't look up that address. Please try again.");
   }
   if (!hit) return fail(422, "We couldn't find that address — try adding a city / zip.");

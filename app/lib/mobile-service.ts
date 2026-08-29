@@ -174,3 +174,79 @@ export const normalizeZip = (raw: string | null | undefined): string => {
   const m = s.match(/\b(\d{5})(?:-?\d{4})?\b/);
   return m ? m[1] : "";
 };
+
+// ---- Client address parts -------------------------------------------
+//
+// The booking page collects the client's address as four fields —
+// street, city, state, zip — instead of one free-text line. A single
+// line let people submit "318 e Fairview, Inglewood" with no zip,
+// which Mapbox happily resolves to the wrong Fairview in another
+// state, quoting a travel fee for a trip the stylist never agreed to.
+// Splitting the fields makes the missing piece obvious and lets us
+// gate the quote until there's enough to geocode unambiguously.
+
+export type AddressParts = {
+  street?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+};
+
+/** Uppercase a 2-letter state code; pass longer names through trimmed. */
+export const normalizeState = (raw: string | null | undefined): string => {
+  const s = (raw || "").trim();
+  return s.length === 2 ? s.toUpperCase() : s;
+};
+
+/**
+ * Join address parts into a single geocodable line:
+ * "318 E Fairview Blvd, Inglewood, CA 90302".
+ *
+ * State and zip share a segment (", CA 90302") because that's the
+ * postal convention Mapbox parses best. Blank parts drop out, so a
+ * street-plus-zip entry still composes cleanly.
+ */
+export const composeAddress = (parts: AddressParts): string => {
+  const street = (parts.street || "").trim();
+  const city = (parts.city || "").trim();
+  const state = normalizeState(parts.state);
+  const zip = normalizeZip(parts.zip);
+
+  const segments: string[] = [];
+  if (street) segments.push(street);
+  if (city) segments.push(city);
+  const tail = [state, zip].filter(Boolean).join(" ");
+  if (tail) segments.push(tail);
+  return segments.join(", ");
+};
+
+/**
+ * Is there enough here to ask Mapbox for a trustworthy point? Street is
+ * always required. Beyond that we need a city or a zip — a bare street
+ * name is the exact input that geocodes to the wrong town.
+ */
+export const hasEnoughAddress = (parts: AddressParts): boolean => {
+  const street = (parts.street || "").trim();
+  if (street.length < 4) return false;
+  return !!(parts.city || "").trim() || !!normalizeZip(parts.zip);
+};
+
+/**
+ * Which field is the client missing? Drives the inline hint under the
+ * address block so "nothing happened" never reads as a broken page.
+ */
+export const describeMissingAddress = (parts: AddressParts): string | null => {
+  const street = (parts.street || "").trim();
+  if (street.length < 4) return "Enter your street address.";
+  if (!(parts.city || "").trim() && !normalizeZip(parts.zip)) {
+    return "Add your city or ZIP so we can check the travel distance.";
+  }
+  return null;
+};
+
+/** A typed zip is either blank or a real 5-digit code — never half of one. */
+export const isZipInputValid = (raw: string | null | undefined): boolean => {
+  const s = (raw || "").trim();
+  if (!s) return true;
+  return /^\d{5}(-\d{4})?$/.test(s);
+};

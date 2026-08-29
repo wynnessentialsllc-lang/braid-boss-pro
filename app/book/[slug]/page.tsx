@@ -9,6 +9,13 @@ import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LA
 import { emitAnalyticsEvent } from "../../lib/analytics-events";
 import { SMS_ENABLED } from "../../lib/features";
 import {
+  composeAddress,
+  describeMissingAddress,
+  hasEnoughAddress,
+  isZipInputValid,
+  normalizeZip,
+} from "../../lib/mobile-service";
+import {
   type PublicNoShowFee,
   fetchPublicNoShowFee,
   recordNoShowConsent,
@@ -711,6 +718,9 @@ export default function PublicBookingPage() {
   // the stylist offers on-site. Only relevant when the selected service
   // has mobile_service = true; otherwise these stay empty.
   const [clientAddress, setClientAddress] = useState("");
+  const [clientCity, setClientCity] = useState("");
+  const [clientState, setClientState] = useState("");
+  const [clientZip, setClientZip] = useState("");
   const [mobileAccessNotes, setMobileAccessNotes] = useState("");
   const [mobileQuoteLoading, setMobileQuoteLoading] = useState(false);
   const [mobileQuoteError, setMobileQuoteError] = useState<string | null>(null);
@@ -1355,6 +1365,9 @@ export default function PublicBookingPage() {
     setSelectedExtraIds([]);
     // Mobile state belongs to a specific service — clear it on switch.
     setClientAddress("");
+    setClientCity("");
+    setClientState("");
+    setClientZip("");
     setMobileAccessNotes("");
     setMobileQuote(null);
     setMobileQuoteError(null);
@@ -1369,8 +1382,16 @@ export default function PublicBookingPage() {
       setMobileQuoteError(null);
       return;
     }
-    const addr = clientAddress.trim();
-    if (addr.length < 5 || !selectedCatalogService?.id) {
+    const parts = {
+      street: clientAddress.trim(),
+      city: clientCity.trim(),
+      state: clientState.trim(),
+      zip: clientZip.trim(),
+    };
+    // Hold the quote until there's a street plus a city or ZIP. Firing
+    // on a bare street burns a Mapbox call and, worse, can resolve to
+    // the same street name in another town and quote that trip.
+    if (!hasEnoughAddress(parts) || !isZipInputValid(parts.zip) || !selectedCatalogService?.id) {
       setMobileQuote(null);
       setMobileQuoteError(null);
       return;
@@ -1386,7 +1407,10 @@ export default function PublicBookingPage() {
           body: JSON.stringify({
             slug,
             service_id: selectedCatalogService.id,
-            address: addr,
+            address: parts.street,
+            city: parts.city,
+            state: parts.state,
+            zip: parts.zip,
           }),
         });
         const body = await res.json().catch(() => ({}));
@@ -1407,7 +1431,8 @@ export default function PublicBookingPage() {
       }
     }, 600);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [isMobileService, clientAddress, selectedCatalogService?.id, slug]);
+  }, [isMobileService, clientAddress, clientCity, clientState, clientZip,
+      selectedCatalogService?.id, slug]);
 
   // Phase B7 — derived duration. When a catalog service is picked we
   // use its real duration; otherwise default to 60 minutes so the
@@ -1595,6 +1620,17 @@ export default function PublicBookingPage() {
       if (isMobileService) {
         if (!clientAddress.trim()) {
           setSubmitError("Please enter your address so your stylist can travel to you.");
+          return;
+        }
+        if (!isZipInputValid(clientZip)) {
+          setSubmitError("That ZIP code doesn't look right — it should be 5 digits.");
+          return;
+        }
+        const missingAddress = describeMissingAddress({
+          street: clientAddress, city: clientCity, state: clientState, zip: clientZip,
+        });
+        if (missingAddress) {
+          setSubmitError(missingAddress);
           return;
         }
         if (mobileQuoteLoading) {
@@ -1859,8 +1895,10 @@ export default function PublicBookingPage() {
           try {
             await supabase.rpc("public_attach_booking_travel_details", {
               request_id_in: newRequestId,
-              address_in: mobileQuote.address || clientAddress.trim(),
-              zip_in: mobileQuote.zip || null,
+              address_in: mobileQuote.address || composeAddress({
+                street: clientAddress, city: clientCity, state: clientState, zip: clientZip,
+              }),
+              zip_in: mobileQuote.zip || normalizeZip(clientZip) || null,
               lat_in: mobileQuote.lat ?? null,
               lng_in: mobileQuote.lng ?? null,
               distance_miles_in: mobileQuote.distance_miles ?? null,
@@ -4488,15 +4526,74 @@ export default function PublicBookingPage() {
                     )}
                   </div>
                 )}
-                <Field label="Your address">
+                <Field label="Street address">
                   <input
                     value={clientAddress}
                     onChange={e => setClientAddress(e.target.value)}
-                    placeholder="1234 Main St, Dallas, TX 75201"
+                    placeholder="1234 Main St, Apt 2B"
                     style={{ ...inputStyle, padding: 12 }}
                     autoComplete="street-address"
                   />
                 </Field>
+                {/* City / state / zip get their own inputs so nobody can
+                    submit a street with no town — that's the entry that
+                    geocodes to the wrong Main St two states over. On a
+                    phone the three sit in one row: city takes the slack,
+                    state and zip stay narrow and fixed. */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) 72px 96px",
+                  gap: 8,
+                }}>
+                  <Field label="City">
+                    <input
+                      value={clientCity}
+                      onChange={e => setClientCity(e.target.value)}
+                      placeholder="Inglewood"
+                      style={{ ...inputStyle, padding: 12 }}
+                      autoComplete="address-level2"
+                    />
+                  </Field>
+                  <Field label="State">
+                    <input
+                      value={clientState}
+                      onChange={e => setClientState(e.target.value.replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase())}
+                      placeholder="CA"
+                      maxLength={2}
+                      style={{ ...inputStyle, padding: 12, textTransform: "uppercase" }}
+                      autoComplete="address-level1"
+                    />
+                  </Field>
+                  <Field label="ZIP">
+                    <input
+                      value={clientZip}
+                      onChange={e => setClientZip(e.target.value.replace(/[^0-9-]/g, "").slice(0, 10))}
+                      placeholder="90302"
+                      inputMode="numeric"
+                      style={{ ...inputStyle, padding: 12 }}
+                      autoComplete="postal-code"
+                    />
+                  </Field>
+                </div>
+                {/* Say what's still missing. Without this the quote block
+                    just stays blank and reads as a broken page. */}
+                {!mobileQuoteLoading && !isZipInputValid(clientZip) && (
+                  <p style={{ margin: 0, fontSize: 12, color: C.danger }}>
+                    ZIP codes are 5 digits.
+                  </p>
+                )}
+                {/* Wait for a real street before nudging, so the hint
+                    doesn't flash on the first keystroke. */}
+                {!mobileQuoteLoading && isZipInputValid(clientZip) && clientAddress.trim().length >= 4
+                  && describeMissingAddress({
+                    street: clientAddress, city: clientCity, state: clientState, zip: clientZip,
+                  }) && (
+                  <p style={{ margin: 0, fontSize: 12, color: C.muted }}>
+                    {describeMissingAddress({
+                      street: clientAddress, city: clientCity, state: clientState, zip: clientZip,
+                    })}
+                  </p>
+                )}
                 {mobileQuoteLoading && (
                   <p style={{ margin: 0, fontSize: 12, color: C.muted }}>Checking your area…</p>
                 )}
