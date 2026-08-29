@@ -217,7 +217,8 @@ export async function POST(req: Request) {
       matchCount: Number(r.match_count) || 0,
       matchedStyles: Array.isArray(r.matched_styles) ? r.matched_styles : [],
     })).filter(m => m.slug);
-  } catch {
+  } catch (e: any) {
+    console.error("[find-braider] public_match_braiders failed:", e?.code || "", e?.message || e);
     return fail(502, "Found your style, but couldn't load matches. Please try again.");
   }
 

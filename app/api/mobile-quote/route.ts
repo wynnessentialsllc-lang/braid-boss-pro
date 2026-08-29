@@ -119,7 +119,10 @@ export async function POST(req: Request) {
         blocked_zips: Array.isArray(row.blocked_zips) ? row.blocked_zips : [],
       };
     }
-  } catch {
+  } catch (e: any) {
+    // Log the underlying Postgres error. A missing grant surfaces here
+    // as 42501 and is otherwise invisible behind the generic 502.
+    console.error("[mobile-quote] public_get_mobile_config failed:", e?.code || "", e?.message || e);
     return fail(502, "Couldn't look up this booking link.");
   }
   if (!cfgRow) return fail(404, "Booking link not found.");
@@ -143,7 +146,8 @@ export async function POST(req: Request) {
       .maybeSingle();
     if (error) throw error;
     svc = data;
-  } catch {
+  } catch (e: any) {
+    console.error("[mobile-quote] service lookup failed:", e?.code || "", e?.message || e);
     return fail(502, "Couldn't look up this service.");
   }
   if (!svc || svc.is_active === false) return fail(404, "Service not found.");
@@ -179,7 +183,8 @@ export async function POST(req: Request) {
       state: ctxState,
       proximity: { lat: cfgRow.base_lat, lng: cfgRow.base_lng },
     });
-  } catch {
+  } catch (e: any) {
+    console.error("[mobile-quote] geocode failed:", e?.message || e);
     return fail(502, "Couldn't look up that address. Please try again.");
   }
   if (!hit) return fail(422, "We couldn't find that address — try adding a city / zip.");
