@@ -8158,10 +8158,10 @@ const MobileServiceSection = ({
                 <label className={fieldLabel} style={{ color: C.coffee }}>Travel fee model</label>
                 <div className="grid grid-cols-2 gap-2">
                   {([
-                    { key: "flat",     label: "Flat fee",     desc: "One price per trip" },
-                    { key: "per_mile", label: "Per mile",     desc: "$ × miles from base" },
+                    { key: "flat",     label: "Flat fee",     desc: "One price per booking" },
+                    { key: "per_mile", label: "Per mile",     desc: "$ × one-way miles" },
                     { key: "hybrid",   label: "Free + per mi", desc: "Free within X mi, then $/mi" },
-                    { key: "tiered",   label: "Tiered",       desc: "Bands by distance" },
+                    { key: "tiered",   label: "Tiered",       desc: "Bands by one-way distance" },
                   ] as const).map(opt => {
                     const on = model === opt.key;
                     return (
@@ -8185,6 +8185,17 @@ const MobileServiceSection = ({
                     );
                   })}
                 </div>
+                {/* "Per trip" reads as though it might cover the drive
+                    home. It doesn't: the fee is added once, and the
+                    mileage models bill the one-way distance. Say so
+                    here so the return drive gets priced on purpose. */}
+                <p className="text-[11px] mt-2" style={{ color: C.muted, lineHeight: 1.5 }}>
+                  {model === "flat"
+                    ? "Added once per booking, whatever the distance."
+                    : "Distance is measured one way, in a straight line from your travel base,"
+                      + " and the fee is added once per booking. To cover the drive home too,"
+                      + " set your rate for the round trip."}
+                </p>
               </div>
 
               {model === "flat" && (
@@ -8215,7 +8226,7 @@ const MobileServiceSection = ({
                       style={inputStyle}
                       ariaLabel="Per-mile rate"
                     />
-                    <span className="text-[12px]" style={{ color: C.muted }}>per mile</span>
+                    <span className="text-[12px]" style={{ color: C.muted }}>per one-way mile</span>
                   </div>
                 </div>
               )}
@@ -8223,7 +8234,7 @@ const MobileServiceSection = ({
               {model === "hybrid" && (
                 <div className="mb-3 grid grid-cols-2 gap-3">
                   <div>
-                    <label className={fieldLabel} style={{ color: C.coffee }}>Free within</label>
+                    <label className={fieldLabel} style={{ color: C.coffee }}>Free within (one way)</label>
                     <div className="flex items-center gap-2">
                       <NumberField
                         value={Number(form.mobile_hybrid_free_miles) || 0}
@@ -8236,7 +8247,7 @@ const MobileServiceSection = ({
                     </div>
                   </div>
                   <div>
-                    <label className={fieldLabel} style={{ color: C.coffee }}>Then per mile</label>
+                    <label className={fieldLabel} style={{ color: C.coffee }}>Then per one-way mile</label>
                     <div className="flex items-center gap-2">
                       <span className="text-[13px] font-semibold" style={{ color: C.muted }}>$</span>
                       <NumberField
@@ -8253,9 +8264,9 @@ const MobileServiceSection = ({
 
               {model === "tiered" && (
                 <div className="mb-3">
-                  <label className={fieldLabel} style={{ color: C.coffee }}>Distance bands</label>
+                  <label className={fieldLabel} style={{ color: C.coffee }}>Distance bands (one way)</label>
                   <p className="text-[11px] mb-2" style={{ color: C.muted }}>
-                    Smallest band that fits the trip wins. Example: "5 mi → $25", "10 mi → $40".
+                    Smallest band that fits the one-way distance wins. Example: "5 mi → $25", "10 mi → $40".
                   </p>
                   <div className="space-y-2">
                     {bands.map((b, i) => (
