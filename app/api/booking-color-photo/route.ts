@@ -10,6 +10,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { rateLimit, clientIp } from "../../lib/rate-limit";
+import {
+  claimPublicAiCall,
+  releasePublicAiCall,
+  capReachedMessage,
+  secondsUntilCapReset,
+} from "../../lib/public-ai-cap";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -87,6 +93,17 @@ export async function POST(req: Request) {
   }
   if (!userId) return fail(404, "Booking link not found.");
 
+  // Daily ceiling. No model call here, but this is still an anonymous
+  // way to push ~7 MB at a time into the platform's storage bill, and
+  // the per-minute gate above resets on every cold start.
+  const claim = await claimPublicAiCall(admin, "booking-color-photo", slug);
+  if (!claim.ok) {
+    return NextResponse.json(
+      { error: capReachedMessage("booking-color-photo"), reason: "daily_cap" },
+      { status: 429, headers: { "retry-after": String(secondsUntilCapReset()) } },
+    );
+  }
+
   const data = body.image_base64.includes(",")
     ? body.image_base64.slice(body.image_base64.indexOf(",") + 1)
     : body.image_base64;
@@ -102,6 +119,8 @@ export async function POST(req: Request) {
       .upload(path, buffer, { contentType: media, upsert: false });
     if (upErr) throw upErr;
   } catch {
+    // Nothing was stored — give the slot back.
+    await releasePublicAiCall(admin, "booking-color-photo", slug);
     return fail(502, "Couldn't upload the photo. Please try again.");
   }
 

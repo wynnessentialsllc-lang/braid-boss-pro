@@ -30,6 +30,12 @@ import {
   type BusinessHoursRow,
 } from "../../lib/concierge";
 import { rateLimit, clientIp } from "../../lib/rate-limit";
+import {
+  claimPublicAiCall,
+  releasePublicAiCall,
+  capReachedMessage,
+  secondsUntilCapReset,
+} from "../../lib/public-ai-cap";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +47,14 @@ const tooMany = (retryAfter: number) =>
   NextResponse.json(
     { error: "Too many messages — please wait a moment and try again." },
     { status: 429, headers: { "retry-after": String(retryAfter) } },
+  );
+
+// The daily ceiling, as distinct from the per-minute speed bump above:
+// this one doesn't clear until the counters roll at UTC midnight.
+const capped = () =>
+  NextResponse.json(
+    { error: capReachedMessage("booking-concierge"), reason: "daily_cap" },
+    { status: 429, headers: { "retry-after": String(secondsUntilCapReset()) } },
   );
 
 const env = (k: string): string => {
@@ -113,6 +127,15 @@ export async function POST(req: Request) {
   }
   if (!userId) return fail(404, "Booking link not found.");
 
+  // Daily ceiling. Claimed AFTER the slug resolves, so a caller hammering
+  // made-up slugs can't burn a real stylist's budget, and BEFORE the
+  // Sonnet call — one claim per turn, which is what actually costs.
+  const claim = await claimPublicAiCall(admin, "booking-concierge", slug);
+  if (!claim.ok) return capped();
+  // Every early return past this point has to hand the slot back, or a
+  // run of failures would silently eat the day's budget.
+  const release = () => releasePublicAiCall(admin, "booking-concierge", slug);
+
   // Fetch the ACTIVE catalog — the only services the model may reference.
   let services: ConciergeServiceLite[] = [];
   try {
@@ -130,6 +153,7 @@ export async function POST(req: Request) {
       description: s.description ?? null,
     }));
   } catch {
+    await release();
     return fail(502, "Couldn't load the stylist's services.");
   }
 
@@ -231,6 +255,7 @@ export async function POST(req: Request) {
     );
     const parsed = toolUse ? parseConciergeReply(toolUse.input, services) : null;
     if (!parsed) {
+      await release();
       return fail(502, "Couldn't get a reply just now. Please try again or book below.");
     }
     return NextResponse.json({
@@ -240,6 +265,7 @@ export async function POST(req: Request) {
       readyToBook: parsed.readyToBook,
     });
   } catch (e: any) {
+    await release();
     if (e instanceof Anthropic.APIError && e.status === 429) {
       return fail(429, "We're a little busy — please try again in a moment.");
     }
