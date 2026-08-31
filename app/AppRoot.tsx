@@ -347,6 +347,8 @@ import {
   buildExpenseInsights,
   expenseAmount,
   expensesForPeriod,
+  recurringDueDateISO,
+  occurrenceInMonthISO,
   type ExpenseLike,
   type RecurringInterval,
   type ReportingPeriod,
@@ -28003,7 +28005,13 @@ const ExpenseListItem = ({ e, currency, onClick }: {
     <div className="flex-1 min-w-0">
       <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{e.title || e.category || "Expense"}</p>
       <p className="text-[11px]" style={{ color: C.muted }}>
-        {[e.category, e.expenseDate ? fmtDate(e.expenseDate) : null].filter(Boolean).join(" · ") || "—"}
+        {/* A recurring row is charged again every month, so showing the
+            date it was first entered makes a live subscription read as
+            months overdue. Derive this month's date instead. */}
+        {[e.category, (() => {
+          const d = occurrenceInMonthISO(e);
+          return d ? fmtDate(d) : null;
+        })()].filter(Boolean).join(" · ") || "—"}
       </p>
     </div>
     <span className="text-[13px] font-semibold tabular-nums ml-2" style={{ color: C.danger }}>
@@ -28051,9 +28059,15 @@ const ExpensesScreen = ({ store, onBack, initialView = "overview", initialCatego
   const totals = useMemo(() => computeExpenseTotals(expenses), [expenses]);
   const groups = useMemo(() => groupExpensesForList(expenses), [expenses]);
   const insights = useMemo(() => buildExpenseInsights(expenses, monthRevenue), [expenses, monthRevenue]);
+  // Order by the derived due date, not the stored one -- sorting on a
+  // stale anchor would scatter the list once the displayed dates roll
+  // forward. Soonest charge first, so the top of the list is what's
+  // about to leave the account.
   const subscriptions = useMemo(
     () => (expenses || []).filter(e => e.isRecurring)
-      .sort((a, b) => (a.nextBillingDate || "").localeCompare(b.nextBillingDate || "")),
+      .map(e => ({ e, due: recurringDueDateISO(e) || "" }))
+      .sort((a, b) => a.due.localeCompare(b.due))
+      .map(x => x.e),
     [expenses],
   );
 
@@ -28430,7 +28444,10 @@ const ExpensesScreen = ({ store, onBack, initialView = "overview", initialCatego
                       <div className="min-w-0 flex-1">
                         <p className="text-[13px] font-semibold truncate" style={{ color: C.espresso }}>{e.title || e.category || "Recurring expense"}</p>
                         <p className="text-[11px]" style={{ color: C.muted }}>
-                          {e.recurringInterval || "monthly"}{e.nextBillingDate ? ` · next ${fmtDate(e.nextBillingDate)}` : ""}
+                          {e.recurringInterval || "monthly"}{(() => {
+                            const due = recurringDueDateISO(e);
+                            return due ? ` · next ${fmtDate(due)}` : "";
+                          })()}
                         </p>
                       </div>
                       <span className="text-[12px] font-semibold tabular-nums ml-3" style={{ color: C.coffee }}>

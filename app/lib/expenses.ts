@@ -335,3 +335,119 @@ export const buildExpenseInsights = (
   }
   return out;
 };
+
+// ---- Recurring occurrence dates --------------------------------------
+//
+// A recurring expense stores two dates and advances neither: the
+// expenseDate it was entered on, and an optional nextBillingDate the
+// stylist typed once. Months pass, nothing moves them, and the screen
+// fills with charges that read as months past due -- "monthly · next
+// Wed, May 6" in August -- even though the burn total behind them is
+// correct (computeExpenseTotals counts the monthly equivalent every
+// month regardless of these dates).
+//
+// Rather than write the dates forward in the database on a schedule --
+// which needs a cron, and rewrites the stylist's own record of when a
+// subscription started -- the due date is DERIVED from the anchor at
+// render time. It is always right, needs no upkeep, and the original
+// anchor stays untouched.
+
+const parseISO = (iso: string | null | undefined): { y: number; m: number; d: number } | null => {
+  const s = (iso || "").trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return { y, m: mo - 1, d };
+};
+
+const daysInMonth = (y: number, m: number): number => new Date(y, m + 1, 0).getDate();
+
+/**
+ * Build an ISO date in month (y, m) on the anchor's day-of-month,
+ * clamped to the month's length. A subscription anchored on the 31st
+ * bills on the 28th/30th in shorter months rather than rolling into
+ * the next one.
+ */
+const onDayOfMonth = (y: number, m: number, day: number): string => {
+  const d = Math.min(day, daysInMonth(y, m));
+  return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+};
+
+/** The anchor a recurring expense's schedule hangs off. */
+export const recurringAnchorISO = (e: ExpenseLike): string | null =>
+  (e?.nextBillingDate || "").trim() || (e?.expenseDate || "").trim() || null;
+
+/**
+ * The first occurrence on or after `reference`. An anchor already in
+ * the future is returned untouched, so a genuinely upcoming billing
+ * date the stylist typed is never overwritten by our arithmetic.
+ */
+export const nextOccurrenceISO = (
+  anchorISO: string | null | undefined,
+  interval: string | null | undefined,
+  reference: string = todayISO(),
+): string | null => {
+  const a = parseISO(anchorISO);
+  const ref = parseISO(reference);
+  if (!a || !ref) return anchorISO ? String(anchorISO) : null;
+  const anchor = `${a.y}-${String(a.m + 1).padStart(2, "0")}-${String(a.d).padStart(2, "0")}`;
+  if (anchor >= reference) return anchor;
+
+  if (interval === "weekly") {
+    // Step in whole weeks so the weekday the stylist picked is kept.
+    const start = new Date(a.y, a.m, a.d);
+    const refD = new Date(ref.y, ref.m, ref.d);
+    const dayMs = 86_400_000;
+    const weeks = Math.ceil((refD.getTime() - start.getTime()) / (7 * dayMs));
+    start.setDate(start.getDate() + weeks * 7);
+    return localDateISO(start);
+  }
+
+  if (interval === "yearly") {
+    let y = ref.y;
+    if (onDayOfMonth(y, a.m, a.d) < reference) y += 1;
+    return onDayOfMonth(y, a.m, a.d);
+  }
+
+  // Monthly (the default). Land on the reference month first, then step
+  // one month if this month's date has already gone by.
+  let y = ref.y, m = ref.m;
+  if (onDayOfMonth(y, m, a.d) < reference) {
+    m += 1;
+    if (m > 11) { m = 0; y += 1; }
+  }
+  return onDayOfMonth(y, m, a.d);
+};
+
+/** Next due date for a recurring expense; null for one-off rows. */
+export const recurringDueDateISO = (
+  e: ExpenseLike,
+  reference: string = todayISO(),
+): string | null => {
+  if (!e?.isRecurring) return null;
+  return nextOccurrenceISO(recurringAnchorISO(e), e.recurringInterval, reference);
+};
+
+/**
+ * The date a recurring expense lands on within `reference`'s own month
+ * -- what the "This month" list should show, since that list is about
+ * the month being viewed rather than what's coming next.
+ *
+ * Weekly items hit several times a month and yearly items usually not
+ * at all, so both return null and the row simply shows no date instead
+ * of a misleading one.
+ */
+export const occurrenceInMonthISO = (
+  e: ExpenseLike,
+  reference: string = todayISO(),
+): string | null => {
+  if (!e?.isRecurring) return (e?.expenseDate || "").trim() || null;
+  const interval = e.recurringInterval || "monthly";
+  const a = parseISO(recurringAnchorISO(e));
+  const ref = parseISO(reference);
+  if (!a || !ref) return (e?.expenseDate || "").trim() || null;
+  if (interval === "monthly") return onDayOfMonth(ref.y, ref.m, a.d);
+  if (interval === "yearly" && a.m === ref.m) return onDayOfMonth(ref.y, a.m, a.d);
+  return null;
+};

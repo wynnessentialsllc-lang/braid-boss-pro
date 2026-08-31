@@ -5,6 +5,9 @@ import {
   estimateProfit,
   expensesForPeriod,
   monthlyEquivalent,
+  nextOccurrenceISO,
+  recurringDueDateISO,
+  occurrenceInMonthISO,
   type ExpenseLike,
 } from "./expenses";
 
@@ -118,5 +121,106 @@ describe("groupExpensesForList", () => {
     expect(month?.items).toHaveLength(1);
     expect(month?.total).toBe(20);
     expect(groups.find(g => g.key === "older")).toBeUndefined();
+  });
+});
+
+describe("nextOccurrenceISO", () => {
+  it("rolls a stale monthly anchor forward to the coming month", () => {
+    // The reported case: anchored in May, viewed at the end of August.
+    expect(nextOccurrenceISO("2026-05-06", "monthly", "2026-08-31")).toBe("2026-09-06");
+  });
+
+  it("stays in the reference month when the day hasn't passed yet", () => {
+    expect(nextOccurrenceISO("2026-05-15", "monthly", "2026-08-03")).toBe("2026-08-15");
+    expect(nextOccurrenceISO("2026-05-15", "monthly", "2026-08-15")).toBe("2026-08-15");
+  });
+
+  it("leaves a genuinely future anchor alone", () => {
+    expect(nextOccurrenceISO("2026-12-01", "monthly", "2026-08-31")).toBe("2026-12-01");
+  });
+
+  it("clamps a 31st anchor into shorter months instead of overflowing", () => {
+    expect(nextOccurrenceISO("2026-01-31", "monthly", "2026-02-01")).toBe("2026-02-28");
+    expect(nextOccurrenceISO("2026-01-31", "monthly", "2026-04-01")).toBe("2026-04-30");
+  });
+
+  it("rolls across a year boundary", () => {
+    expect(nextOccurrenceISO("2026-03-10", "monthly", "2026-12-20")).toBe("2027-01-10");
+  });
+
+  it("keeps the weekday for weekly intervals", () => {
+    // 2026-05-06 is a Wednesday; every result should also be Wednesday.
+    const got = nextOccurrenceISO("2026-05-06", "weekly", "2026-08-31");
+    expect(got).toBe("2026-09-02");
+    expect(new Date(got + "T00:00:00").getDay()).toBe(3);
+  });
+
+  it("moves yearly items to the next anniversary", () => {
+    expect(nextOccurrenceISO("2025-05-06", "yearly", "2026-08-31")).toBe("2027-05-06");
+    expect(nextOccurrenceISO("2025-11-06", "yearly", "2026-08-31")).toBe("2026-11-06");
+  });
+
+  it("passes through junk rather than inventing a date", () => {
+    expect(nextOccurrenceISO(null, "monthly", "2026-08-31")).toBeNull();
+    expect(nextOccurrenceISO("not-a-date", "monthly", "2026-08-31")).toBe("not-a-date");
+  });
+});
+
+describe("recurringDueDateISO", () => {
+  it("prefers the typed billing date as the anchor", () => {
+    expect(recurringDueDateISO(
+      { isRecurring: true, recurringInterval: "monthly", expenseDate: "2026-01-02", nextBillingDate: "2026-05-06" },
+      "2026-08-31",
+    )).toBe("2026-09-06");
+  });
+
+  it("falls back to the expense date when no billing date was set", () => {
+    expect(recurringDueDateISO(
+      { isRecurring: true, recurringInterval: "monthly", expenseDate: "2026-05-06" },
+      "2026-08-31",
+    )).toBe("2026-09-06");
+  });
+
+  it("returns null for one-off expenses", () => {
+    expect(recurringDueDateISO({ isRecurring: false, expenseDate: "2026-05-06" }, "2026-08-31")).toBeNull();
+  });
+});
+
+describe("occurrenceInMonthISO", () => {
+  it("maps a monthly recurring row onto the month being viewed", () => {
+    expect(occurrenceInMonthISO(
+      { isRecurring: true, recurringInterval: "monthly", expenseDate: "2026-05-06" },
+      "2026-08-31",
+    )).toBe("2026-08-06");
+  });
+
+  it("clamps into short months", () => {
+    expect(occurrenceInMonthISO(
+      { isRecurring: true, recurringInterval: "monthly", expenseDate: "2026-01-31" },
+      "2026-02-10",
+    )).toBe("2026-02-28");
+  });
+
+  it("gives no date for weekly rows, which hit many times a month", () => {
+    expect(occurrenceInMonthISO(
+      { isRecurring: true, recurringInterval: "weekly", expenseDate: "2026-05-06" },
+      "2026-08-31",
+    )).toBeNull();
+  });
+
+  it("shows a yearly row only in its anniversary month", () => {
+    expect(occurrenceInMonthISO(
+      { isRecurring: true, recurringInterval: "yearly", expenseDate: "2025-08-06" },
+      "2026-08-31",
+    )).toBe("2026-08-06");
+    expect(occurrenceInMonthISO(
+      { isRecurring: true, recurringInterval: "yearly", expenseDate: "2025-05-06" },
+      "2026-08-31",
+    )).toBeNull();
+  });
+
+  it("leaves one-off expenses on their real date", () => {
+    expect(occurrenceInMonthISO({ isRecurring: false, expenseDate: "2026-08-12" }, "2026-08-31"))
+      .toBe("2026-08-12");
   });
 });
