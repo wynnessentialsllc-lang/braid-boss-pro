@@ -86,6 +86,8 @@ import {
 } from "./lib/loyalty";
 import {
   SMS_PACKS, SMS_LOW_BALANCE, loadSmsBalance, buySmsCredits,
+  loadAutoRecharge, saveAutoRecharge, startAutoRechargeCardSetup,
+  DEFAULT_AUTORECHARGE, type AutoRechargeSettings,
   fetchSmsLedger, type SmsLedgerEntry,
 } from "./lib/sms-credits";
 import {
@@ -39427,6 +39429,8 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
   const [busyPack, setBusyPack] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [openEntry, setOpenEntry] = useState<SmsLedgerEntry | null>(null);
+  const [auto, setAuto] = useState<AutoRechargeSettings>(DEFAULT_AUTORECHARGE);
+  const [autoBusy, setAutoBusy] = useState(false);
 
   useEffect(() => {
     if (!userId) { setLoading(false); return; }
@@ -39440,6 +39444,20 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
         if (!cancelled) { setBalance(b); setLedger(l); }
       } catch { /* shows 0 */ }
       finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  // Separate from the balance load so a missing/blocked settings row
+  // can never stop the balance and ledger from rendering.
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const a = await loadAutoRecharge(userId);
+        if (!cancelled) setAuto(a);
+      } catch { /* leaves the default (off) */ }
     })();
     return () => { cancelled = true; };
   }, [userId]);
@@ -39461,6 +39479,36 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
       setErr(e?.message || "Couldn't start checkout.");
       setBusyPack(null);
     }
+  };
+
+  const toggleAutoRecharge = async (next: boolean) => {
+    setErr(null);
+    // No card on file yet — send them to save one first. The server
+    // refuses to arm the toggle without it, so this is the only path
+    // that leads anywhere.
+    if (next && !auto.hasCard) {
+      setAutoBusy(true);
+      try {
+        await startAutoRechargeCardSetup();  // redirects to Stripe
+      } catch (e: any) {
+        setErr(e?.message || "Couldn't open the card form.");
+        setAutoBusy(false);
+      }
+      return;
+    }
+    setAutoBusy(true);
+    const prev = auto;
+    setAuto({ ...auto, enabled: next });  // optimistic
+    const res = await saveAutoRecharge({ enabled: next });
+    if (!res.ok) {
+      setAuto(prev);
+      setErr(
+        res.reason === "no_card_on_file"
+          ? "Add a card before turning on auto-recharge."
+          : "Couldn't save that setting.",
+      );
+    }
+    setAutoBusy(false);
   };
 
   return (
@@ -39495,6 +39543,46 @@ const SmsCreditsScreen = ({ store, onBack }: { store: any; onBack: () => void })
             </p>
           </Card>
         )}
+
+        {/* Auto-recharge. The point of this feature is that the
+            balance never reaches zero unnoticed, so it sits above the
+            packs rather than buried below them. */}
+        <Card className="p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold" style={{ color: C.espresso }}>Auto-recharge</p>
+              <p className="text-[11px] mt-0.5" style={{ color: C.muted, lineHeight: 1.5 }}>
+                {auto.enabled
+                  ? `On — we'll buy the ${auto.packId} pack when you drop below ${auto.threshold} credits.`
+                  : "Top up automatically so reminders never stop for an empty balance."}
+              </p>
+              {auto.hasCard && (
+                <p className="text-[11px] mt-1" style={{ color: C.muted }}>
+                  {auto.cardBrand ? `${auto.cardBrand} ` : "Card "}
+                  ····{auto.cardLast4 || "????"}
+                  {" · "}
+                  <button
+                    type="button"
+                    onClick={() => { void startAutoRechargeCardSetup().catch(e => setErr(e?.message || "Couldn't open the card form.")); }}
+                    style={{ background: "transparent", border: "none", padding: 0, color: C.coffee, textDecoration: "underline" }}
+                  >
+                    change
+                  </button>
+                </p>
+              )}
+              {auto.lastError && (
+                <p className="text-[11px] mt-1" style={{ color: C.danger, lineHeight: 1.5 }}>
+                  Last attempt failed — check the card on file.
+                </p>
+              )}
+            </div>
+            <Toggle
+              checked={auto.enabled}
+              disabled={autoBusy}
+              onChange={(v) => void toggleAutoRecharge(v)}
+            />
+          </div>
+        </Card>
 
         <p className="text-[10px] font-bold uppercase tracking-widest px-1" style={{ color: C.muted, letterSpacing: "0.14em" }}>
           Buy credits

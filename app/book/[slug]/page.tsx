@@ -8,6 +8,7 @@ import BookingConcierge from "../../components/booking/BookingConcierge";
 import { submitPublicWaitlistRequest, type WaitlistFlexibility, WAITLIST_FLEX_LABEL } from "../../lib/waitlist";
 import { emitAnalyticsEvent } from "../../lib/analytics-events";
 import { SMS_ENABLED } from "../../lib/features";
+import { configuredBookingFeeCents, formatFee } from "../../lib/booking-fee";
 import {
   composeAddress,
   describeMissingAddress,
@@ -5361,7 +5362,18 @@ export default function PublicBookingPage() {
               <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.2 }}>
                 <span style={{ fontSize: 16, fontWeight: 800 }}>${hasPrice ? price!.toFixed(0) : "0"}</span>
                 <span style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>
-                  {deposit > 0 ? `$${deposit.toFixed(0)} deposit due today` : "No deposit due today"}
+                  {/* The fee is charged at checkout, so it has to be
+                      named here -- a client should never meet a line
+                      item on the Stripe page they hadn't been told
+                      about. Only shown when something is actually
+                      collected online, matching bookingCharge(). */}
+                  {deposit > 0
+                    ? `$${deposit.toFixed(0)} deposit due today${
+                        configuredBookingFeeCents() > 0
+                          ? ` + ${formatFee(configuredBookingFeeCents())} booking fee`
+                          : ""
+                      }`
+                    : "No deposit due today"}
                 </span>
               </span>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: accent, fontSize: 14, fontWeight: 700 }}>

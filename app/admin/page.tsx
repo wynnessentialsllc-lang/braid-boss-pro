@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { getSupabase } from "../lib/supabase";
+import { smsLiabilityUsd } from "../lib/sms-packs";
 import {
   PreviewStyleCard,
   SectionEyebrow,
@@ -57,6 +58,8 @@ type Snapshot = {
     platform_fee: number;
     sms_revenue: number;
     sms_credits_sold: number;
+    sms_credits_outstanding: number;
+    sms_accounts_holding_credits: number;
   };
   subscriptions: {
     total_braiders: number;
@@ -354,6 +357,13 @@ export default function AdminCommandCenter() {
               <MetricRow label="Storefront platform fee" value={usd(rev.platform_fee)} />
               <MetricRow label="SMS credit revenue" value={usd(rev.sms_revenue)} />
               <MetricRow label="SMS credits sold" value={num(rev.sms_credits_sold)} />
+              {/* Prepaid credits are collected up front and delivered
+                  later, so revenue alone overstates the position. This
+                  is what is still owed in sending. */}
+              <MetricRow
+                label="Unredeemed credits (owed)"
+                value={`${num(rev.sms_credits_outstanding)} · ${usd(smsLiabilityUsd(rev.sms_credits_outstanding))}`}
+              />
               <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.hairline}` }}>
                 <MetricRow label="Deposits taken at booking" value={usd(rev.deposits_at_booking)} />
                 <MetricRow label="No-show fees charged" value={num(bk.no_show_fee_charges)} />

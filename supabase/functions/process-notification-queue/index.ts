@@ -2286,6 +2286,46 @@ const renderDailySalesSummary = (p: Record<string, any>) => {
   return { subject, html };
 };
 
+// ---- sms_credits_low / sms_credits_empty ---------------------------
+// The stylist only ever learned about an empty balance by opening
+// Settings and looking, while their clients quietly stopped getting
+// reminders. This is both the warning and the buy prompt, so the CTA
+// goes straight to the credits screen.
+const renderSmsCreditAlert = (p: Record<string, any>, blocked: boolean) => {
+  const balance = Number(p.balance) || 0;
+  const dashUrl = (Deno.env.get("NEXT_PUBLIC_SITE_URL") || "https://braidbosspro.app").replace(/\/$/, "");
+  const subject = blocked
+    ? "Your text didn't send — you're out of SMS credits"
+    : `Only ${balance} SMS credit${balance === 1 ? "" : "s"} left`;
+
+  const lead = blocked
+    ? "A client text just failed to send because your SMS credit balance is empty."
+    : `You have <strong>${balance}</strong> text${balance === 1 ? "" : "s"} left.`;
+
+  const html = wrapHtml(subject, `
+    <p style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:${blocked ? C.coralDeep : C.goldDeep};margin:0 0 10px;font-weight:700;">SMS credits</p>
+    <h1 style="font-size:22px;line-height:1.25;margin:0 0 10px;color:${C.espresso};">${escape(blocked ? "You're out of SMS credits" : "Your SMS credits are running low")}</h1>
+    <p style="font-size:15px;color:${C.espresso};line-height:22px;margin:0 0 14px;">${lead}</p>
+
+    <div style="background:${C.tint};border:1px solid ${C.hairline};border-radius:14px;padding:16px 18px;margin:0 0 16px;">
+      <p style="margin:0 0 4px;font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:${C.muted};font-weight:700;">Balance</p>
+      <p style="margin:0;font-size:32px;font-weight:700;font-family:Georgia,serif;color:${blocked ? C.coralDeep : C.purpleDeep};line-height:1;">${balance}</p>
+    </div>
+
+    <p style="font-size:14px;color:${C.espresso};line-height:21px;margin:0 0 6px;">
+      ${blocked
+        ? "Text reminders and confirmations won't send until you top up."
+        : "Top up so appointment reminders and confirmations keep going out."}
+    </p>
+    <p style="font-size:13px;color:${C.muted};line-height:20px;margin:0 0 4px;">
+      Your email notifications are unaffected — those keep sending either way.
+    </p>
+
+    ${ctaButton("Top up SMS credits", dashUrl)}
+  `);
+  return { subject, html };
+};
+
 const renderGeneric = (row: ClaimedRow) => {
   const subject = row.subject || "Notification from Braid Boss Pro";
   const html = wrapHtml(subject, `
@@ -2602,6 +2642,10 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderClassReminderOwner(row.payload || {});
     case "class_waitlist_join_owner":
       return renderClassWaitlistJoinOwner(row.payload || {});
+    case "sms_credits_low":
+      return renderSmsCreditAlert(row.payload || {}, false);
+    case "sms_credits_empty":
+      return renderSmsCreditAlert(row.payload || {}, true);
     case "daily_sales_summary":
       return renderDailySalesSummary(row.payload || {});
     default:
@@ -2788,6 +2832,78 @@ const sendViaTwilio = async (
 // =====================================================================
 // Helpers
 // =====================================================================
+
+// Below this balance the stylist gets a heads-up. Mirrors
+// SMS_LOW_BALANCE in app/lib/sms-credits.ts, which drives the same
+// warning inside the SMS credits screen.
+const SMS_LOW_BALANCE = 20;
+
+// One alert per stylist per day per kind. Without this, a queue
+// holding fifty texts for an empty balance would fire fifty identical
+// emails the moment it drains -- turning a helpful nudge into a reason
+// to mute us. queue_notification already enforces dedupe_key
+// uniqueness, so the key IS the throttle.
+const creditAlertDedupe = (kind: string, userId: string): string =>
+  `${kind}:${userId}:${new Date().toISOString().slice(0, 10)}`;
+
+/**
+ * Tell the stylist a text could not send because the balance ran out.
+ * Best-effort: an alert that fails must never mask the send failure
+ * that prompted it.
+ */
+const notifyOutOfCredits = async (
+  admin: ReturnType<typeof createClient>,
+  row: ClaimedRow,
+  consumeRes: unknown,
+): Promise<void> => {
+  try {
+    const needed = Number((consumeRes as any)?.needed) || 1;
+    const balance = Number((consumeRes as any)?.balance) || 0;
+    await admin.rpc("queue_stylist_email_alert", {
+      user_id_in: row.user_id,
+      notification_type_in: "sms_credits_empty",
+      subject_in: "Your text didn't send — you're out of SMS credits",
+      body_in:
+        "A client text couldn't be delivered because your SMS credit balance is empty. "
+        + "Top up to start sending again. Emails are still going out as normal.",
+      payload_in: { balance, needed, blocked: true },
+      dedupe_key_in: creditAlertDedupe("sms_empty", row.user_id),
+    });
+  } catch {
+    /* alerting is best-effort — never mask the underlying failure */
+  }
+};
+
+/**
+ * Warn once when a send drops the balance into the low band. Fires on
+ * the crossing rather than on every send below it, so a stylist
+ * running near empty isn't nagged on each text.
+ */
+const notifyLowCredits = async (
+  admin: ReturnType<typeof createClient>,
+  row: ClaimedRow,
+  balanceAfter: number,
+  charged: number,
+): Promise<void> => {
+  const balanceBefore = balanceAfter + charged;
+  if (balanceAfter > SMS_LOW_BALANCE || balanceBefore <= SMS_LOW_BALANCE) return;
+  if (balanceAfter <= 0) return; // the empty alert covers this
+  try {
+    await admin.rpc("queue_stylist_email_alert", {
+      user_id_in: row.user_id,
+      notification_type_in: "sms_credits_low",
+      subject_in: `Only ${balanceAfter} SMS credit${balanceAfter === 1 ? "" : "s"} left`,
+      body_in:
+        `You have ${balanceAfter} text${balanceAfter === 1 ? "" : "s"} remaining. `
+        + "Top up so appointment reminders and confirmations keep going out.",
+      payload_in: { balance: balanceAfter, blocked: false },
+      dedupe_key_in: creditAlertDedupe("sms_low", row.user_id),
+    });
+  } catch {
+    /* best-effort */
+  }
+};
+
 const failTerminal = async (
   admin: ReturnType<typeof createClient>,
   id: string,
@@ -3192,15 +3308,28 @@ serve(async (req) => {
           !consumeErr && consumeRes && (consumeRes as any).ok === true;
         if (!consumed) {
           await failTerminal(admin, row.id, "no_sms_credits");
+          // Tell the stylist. Until now this failed in silence: their
+          // client simply never got the text and nothing surfaced it.
+          await notifyOutOfCredits(admin, row, consumeRes);
           failed++;
           return;
         }
+        // A long or emoji-bearing message costs several segments, so
+        // refund whatever was actually charged rather than a flat 1.
+        const chargedCredits = Number((consumeRes as any)?.charged) || 1;
+        await notifyLowCredits(
+          admin,
+          row,
+          Number((consumeRes as any)?.balance) || 0,
+          chargedCredits,
+        );
         result = await sendViaTwilio(row);
         provider = "twilio";
         if (!result.ok) {
           try {
-            await admin.rpc("refund_sms_credit", {
+            await admin.rpc("refund_credits", {
               user_id_in: row.user_id,
+              amount_in: chargedCredits,
               note_in: "twilio_send_failed",
             });
           } catch {

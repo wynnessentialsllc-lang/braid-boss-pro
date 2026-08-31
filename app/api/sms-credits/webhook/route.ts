@@ -121,6 +121,51 @@ export async function POST(req: Request) {
   const meta = session?.metadata || {};
   const sessionId: string | undefined = session?.id;
 
+  // Auto-recharge card setup — a `setup` mode session, so there is no
+  // payment to record. Pull the payment method Stripe just saved and
+  // store it against the stylist. Doing this server-side from the
+  // webhook (rather than trusting anything the browser returns with)
+  // is what stops a client nominating someone else's card.
+  if (meta?.purpose === "sms_autorecharge_setup") {
+    const targetUser = typeof meta?.user_id === "string" ? meta.user_id : null;
+    const setupIntentId =
+      typeof session?.setup_intent === "string" ? session.setup_intent : null;
+    if (!targetUser || !setupIntentId) {
+      return NextResponse.json({ received: true, ignored: "setup_missing_refs" }, { status: 200 });
+    }
+    let stripeKey: string;
+    try {
+      stripeKey = env("STRIPE_SECRET_KEY");
+    } catch {
+      return NextResponse.json({ error: "stripe not configured" }, { status: 500 });
+    }
+    const auth = { Authorization: `Bearer ${stripeKey}` };
+    const si = await fetch(`https://api.stripe.com/v1/setup_intents/${setupIntentId}`, { headers: auth })
+      .then(r => r.json()).catch(() => null) as any;
+    const paymentMethodId: string | null =
+      typeof si?.payment_method === "string" ? si.payment_method : null;
+    const customerId: string | null =
+      (typeof session?.customer === "string" ? session.customer : null)
+      || (typeof si?.customer === "string" ? si.customer : null);
+    if (!paymentMethodId || !customerId) {
+      return NextResponse.json({ received: true, ignored: "setup_incomplete" }, { status: 200 });
+    }
+    // Brand/last4 are cosmetic — the toggle shows which card is armed.
+    const pm = await fetch(`https://api.stripe.com/v1/payment_methods/${paymentMethodId}`, { headers: auth })
+      .then(r => r.json()).catch(() => null) as any;
+    const { error: attachErr } = await admin.rpc("attach_sms_autorecharge_card", {
+      user_id_in: targetUser,
+      customer_in: customerId,
+      payment_method_in: paymentMethodId,
+      brand_in: pm?.card?.brand || null,
+      last4_in: pm?.card?.last4 || null,
+    });
+    if (attachErr) {
+      return NextResponse.json({ error: attachErr.message }, { status: 500 });
+    }
+    return NextResponse.json({ received: true, autorecharge_card: "saved" }, { status: 200 });
+  }
+
   // Ignore events that aren't ours — the dedupe table is shared
   // across webhook endpoints.
   if (meta?.purpose !== "sms_credits") {

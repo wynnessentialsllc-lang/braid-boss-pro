@@ -18,6 +18,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
+import { chargeAiCredits, refundAiCredits, outOfCreditsMessage } from "../../lib/ai-credits";
 import {
   buildNudgeSystem,
   buildWinbackSystem,
@@ -152,6 +153,14 @@ export async function POST(req: Request) {
     userText = "Draft the win-back campaign.";
   }
 
+  const charge = await chargeAiCredits(admin, userId, "rebooking-ai");
+  if (!charge.ok) {
+    if (charge.reason === "insufficient_credits") {
+      return fail(402, outOfCreditsMessage(charge.needed, charge.balance));
+    }
+    return fail(502, "Couldn't start that. Please try again.");
+  }
+
   try {
     const client = new Anthropic({ apiKey: anthropicKey });
     const msg = await client.messages.create({
@@ -169,9 +178,13 @@ export async function POST(req: Request) {
 
     const result =
       kind === "nudge" ? parseNudge(input, channel) : parseWinback(input);
-    if (!result) return fail(502, "Couldn't generate that — please try again.");
-    return NextResponse.json({ ok: true, kind, result });
+    if (!result) {
+      await refundAiCredits(admin, userId, "rebooking-ai", charge.charged);
+      return fail(502, "Couldn't generate that — please try again.");
+    }
+    return NextResponse.json({ ok: true, kind, result, credits_balance: charge.balance });
   } catch (e: any) {
+    await refundAiCredits(admin, userId, "rebooking-ai", charge.charged);
     if (e instanceof Anthropic.APIError && e.status === 429) {
       return fail(429, "We're a little busy — please try again in a moment.");
     }
