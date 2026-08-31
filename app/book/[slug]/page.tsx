@@ -4468,17 +4468,17 @@ export default function PublicBookingPage() {
                         </p>
                         {feeModel === "flat" && (
                           <p style={{ margin: "4px 0 0", fontSize: 13, color: C.espresso, lineHeight: 1.5 }}>
-                            <strong>{fmt(Number(svc.mobile_flat_fee))}</strong> per trip
+                            <strong>{fmt(Number(svc.mobile_flat_fee))}</strong> per booking
                           </p>
                         )}
                         {feeModel === "per_mile" && (
                           <p style={{ margin: "4px 0 0", fontSize: 13, color: C.espresso, lineHeight: 1.5 }}>
-                            <strong>{fmt(Number(svc.mobile_per_mile_fee))}</strong> per mile from the stylist's base
+                            <strong>{fmt(Number(svc.mobile_per_mile_fee))}</strong> per mile, one way from the stylist's base
                           </p>
                         )}
                         {feeModel === "hybrid" && (
                           <p style={{ margin: "4px 0 0", fontSize: 13, color: C.espresso, lineHeight: 1.5 }}>
-                            Free within <strong>{fmtMiles(Number(svc.mobile_hybrid_free_miles))}</strong>,
+                            Free within <strong>{fmtMiles(Number(svc.mobile_hybrid_free_miles))}</strong> one way,
                             then <strong>{fmt(Number(svc.mobile_per_mile_fee))}</strong> per mile after
                           </p>
                         )}
@@ -4498,6 +4498,12 @@ export default function PublicBookingPage() {
                             ))}
                           </ul>
                         )}
+                        <p style={{ margin: "6px 0 0", fontSize: 11, color: C.muted, lineHeight: 1.5 }}>
+                          {feeModel === "flat"
+                            ? "Added once to your total, whatever the distance."
+                            : "Based on the one-way distance from your stylist's base,"
+                              + " and added once to your total."}
+                        </p>
                       </div>
                     )}
                     {minPrice != null && minPrice > 0 && (
@@ -4611,7 +4617,7 @@ export default function PublicBookingPage() {
                           ✓ In your stylist's service area
                         </p>
                         <p style={{ margin: "4px 0 0", fontSize: 12, color: C.coffee, lineHeight: 1.5 }}>
-                          {mobileQuote.distance_miles.toFixed(1)} miles from base
+                          {mobileQuote.distance_miles.toFixed(1)} miles away (one way)
                           {" · "}
                           {Number(mobileQuote.travel_fee) > 0
                             ? `Travel fee: +$${Number(mobileQuote.travel_fee || 0).toFixed(2)}`
