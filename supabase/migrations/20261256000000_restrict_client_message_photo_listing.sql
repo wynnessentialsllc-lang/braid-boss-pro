@@ -1,0 +1,43 @@
+-- Stop anonymous enumeration of the client-message photo bucket.
+--
+-- client_message_photos_public_read grants SELECT on storage.objects to
+-- the `public` role with the whole predicate being:
+--
+--     bucket_id = 'client-message-photos'
+--
+-- No path restriction, no ownership test. `anon` holds SELECT on
+-- storage.objects, so that policy lets any unauthenticated caller LIST
+-- every object in the bucket -- which hands them every object path, and
+-- the bucket is public:true, so every path is a readable URL.
+--
+-- These are the photos exchanged in the private thread between a
+-- stylist and her client: hair, scalp, sometimes the client's face.
+-- Enumerable by anyone, platform-wide.
+--
+-- Nothing is exposed *today* -- the bucket currently holds zero objects,
+-- so there is nothing to enumerate yet. That is timing, not safety. The
+-- messaging feature is shipped; the first photo a client sends is the
+-- one that opens this. Fixing it while the bucket is empty means there
+-- is no window at all.
+--
+-- ---- Why dropping the policy is the whole fix ----
+--
+-- The policy is not what makes the photos viewable. A public bucket is
+-- served from /storage/v1/object/public/<bucket>/<path>, which does not
+-- consult RLS at all -- that is the path both call sites already use
+-- (getPublicUrl in app/lib/messages.ts and app/api/client-message-photo).
+-- Nothing anywhere calls .list() on this bucket. So the policy grants
+-- exactly one capability, enumeration, and enumeration is the attack.
+--
+-- What is left afterwards is capability-URL access: object paths end in
+-- crypto.randomUUID() (122 bits), so a path cannot be guessed, only
+-- shared. That is precisely the model style-request-photos already runs
+-- -- public bucket, no list policy -- and that one is demonstrably
+-- holding: it has 5 objects in it and anon enumerates 0.
+--
+-- Writes are untouched. client_message_photos_owner_insert/update/delete
+-- stay as they are, each pinned to (storage.foldername(name))[1] =
+-- auth.uid(), and the anonymous client-portal upload continues to go
+-- through the service role in app/api/client-message-photo.
+
+drop policy if exists client_message_photos_public_read on storage.objects;
