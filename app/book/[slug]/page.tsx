@@ -1803,10 +1803,20 @@ export default function PublicBookingPage() {
         // doesn't sit unseen in the Approvals queue.
         if (!needsDeposit) {
           try {
-            const base = typeof window !== "undefined" ? window.location.origin : null;
+            // No base URL is passed, deliberately. This call is anonymous
+            // and the base URL is interpolated into the client's
+            // confirmation email right beside a real portal token, so a
+            // caller who could choose it could put a phishing link
+            // carrying a genuine token into mail sent from our own
+            // domain. Migration 20261257 puts that argument out of anon's
+            // reach; the server resolves the base itself.
+            //
+            // Safe across the deploy either way: before that migration
+            // PostgREST resolves this to the 2-arg form via its NULL
+            // default, after it resolves to the 1-arg wrapper. Both take
+            // the same server-side fallback chain.
             await supabase.rpc("enqueue_public_booking_emails", {
               request_id_in: newRequestId,
-              app_base_url_in: base,
             });
           } catch {
             // Stylist can always resend signing links manually from

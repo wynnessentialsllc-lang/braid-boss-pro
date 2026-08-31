@@ -6,6 +6,7 @@ import {
   releasePublicAiCall,
   secondsUntilCapReset,
   capReachedMessage,
+  notifyCapReached,
 } from "./public-ai-cap";
 
 // Minimal stand-in for the admin client — only .rpc is exercised.
@@ -137,5 +138,56 @@ describe("capReachedMessage", () => {
       // Each one has to leave the client a way to still get booked.
       expect(msg.length).toBeGreaterThan(20);
     }
+  });
+});
+
+describe("notifyCapReached", () => {
+  const slugCap = { ok: false, reason: "slug_daily_cap", cap: 25 } as const;
+  const globalCap = { ok: false, reason: "global_daily_cap", cap: 400 } as const;
+
+  it("emails the affected stylist when her own link is over budget", async () => {
+    const admin = fakeAdmin(async () => ({ data: { ok: true }, error: null }));
+    await notifyCapReached(admin, "style-consult", slugCap, "user-1");
+    const [fn, args] = admin.rpc.mock.calls[0];
+    expect(fn).toBe("queue_stylist_email_alert");
+    expect(args.user_id_in).toBe("user-1");
+    // Copy has to name the feature in words a stylist recognises, not a
+    // route slug, and say what her clients are seeing.
+    expect(args.subject_in).toContain("Style consultations");
+    expect(args.body_in).toContain("25");
+    expect(args.body_in).not.toContain("style-consult");
+  });
+
+  it("dedupes to one alert per stylist per feature per UTC day", async () => {
+    const admin = fakeAdmin(async () => ({ data: { ok: true }, error: null }));
+    await notifyCapReached(admin, "booking-concierge", slugCap, "user-1");
+    const key = admin.rpc.mock.calls[0][1].dedupe_key_in;
+    expect(key).toMatch(/^ai_daily_cap:booking-concierge:user-1:\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("does NOT blame the stylist for a platform-wide ceiling", async () => {
+    // A global cap is our budget, not her problem — it must never reach
+    // her inbox.
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const admin = fakeAdmin(async () => ({ data: null, error: null }));
+    await notifyCapReached(admin, "style-consult", globalCap, "user-1");
+    expect(admin.rpc).not.toHaveBeenCalled();
+    expect(err.mock.calls[0][0]).toContain("PUBLIC_AI_CAP_STYLE_CONSULT_GLOBAL");
+    err.mockRestore();
+  });
+
+  it("does nothing when the slug never resolved to a stylist", async () => {
+    const admin = fakeAdmin(async () => ({ data: null, error: null }));
+    await notifyCapReached(admin, "style-consult", slugCap, null);
+    expect(admin.rpc).not.toHaveBeenCalled();
+  });
+
+  it("swallows a failed alert rather than breaking the capped response", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const admin = fakeAdmin(async () => { throw new Error("down"); });
+    await expect(
+      notifyCapReached(admin, "style-consult", slugCap, "user-1"),
+    ).resolves.toBeUndefined();
+    err.mockRestore();
   });
 });

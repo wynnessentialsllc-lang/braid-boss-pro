@@ -58,6 +58,13 @@ export const PUBLIC_AI_CAPS = {
 
 export type PublicAiFeature = keyof typeof PUBLIC_AI_CAPS;
 
+/** Human names for the alert copy — a stylist doesn't know route slugs. */
+const FEATURE_LABEL: Record<PublicAiFeature, string> = {
+  "style-consult": "Style consultations",
+  "booking-concierge": "The booking assistant",
+  "booking-color-photo": "Hair-color photo uploads",
+};
+
 export type PublicAiClaim =
   | { ok: true }
   | { ok: false; reason: "slug_daily_cap" | "global_daily_cap"; cap: number };
@@ -149,3 +156,60 @@ export const capReachedMessage = (feature: PublicAiFeature): string =>
     : feature === "style-consult"
       ? "Style consultations have hit their limit for today. Please send your request to the stylist instead — she'll still see it."
       : "Photo uploads have hit their limit for today. Please describe the color you want in the notes instead.";
+
+/**
+ * Tell someone a ceiling was reached.
+ *
+ * A cap that silently turns clients away is worse than no cap: the
+ * stylist finds out when a client mentions the booking assistant stopped
+ * answering, if ever. Who to tell depends on which ceiling bit:
+ *
+ *  - per-slug — that stylist's own link is over budget. It is her
+ *    clients being turned away and it is her booking page that looks
+ *    broken, so she is told, and told what to do about it.
+ *  - global — a platform ceiling. Not her fault and not hers to fix, so
+ *    it goes to the server log instead of blaming her for our budget.
+ *
+ * Deduped to one message per stylist per feature per UTC day, matching
+ * the window the counters themselves reset on — the alert fires when the
+ * cap is first hit, not once for every request after it.
+ *
+ * Best-effort throughout: a failed alert must never turn a capped
+ * request into a broken one.
+ */
+export const notifyCapReached = async (
+  admin: SupabaseClient,
+  feature: PublicAiFeature,
+  claim: Extract<PublicAiClaim, { ok: false }>,
+  userId: string | null,
+): Promise<void> => {
+  if (claim.reason === "global_daily_cap") {
+    console.error(
+      `[public-ai-cap] GLOBAL daily cap reached for ${feature} (cap ${claim.cap}) — `
+      + `requests are being turned away platform-wide. Raise `
+      + `PUBLIC_AI_CAP_${feature.toUpperCase().replace(/-/g, "_")}_GLOBAL if this is real traffic.`,
+    );
+    return;
+  }
+  if (!userId) return;
+  const label = FEATURE_LABEL[feature];
+  const day = new Date().toISOString().slice(0, 10);
+  try {
+    await admin.rpc("queue_stylist_email_alert", {
+      user_id_in: userId,
+      notification_type_in: "ai_daily_cap_reached",
+      subject_in: `${label} hit today's limit on your booking page`,
+      body_in:
+        `${label} reached its daily limit of ${claim.cap} on your booking link, `
+        + `so any client using it for the rest of today is being asked to send `
+        + `their request to you directly instead. It resets overnight.\n\n`
+        + `If your page is genuinely that busy, reply and we'll raise the limit. `
+        + `If it isn't, the link may be getting hit by something automated — `
+        + `worth a look.`,
+      payload_in: { feature, cap: claim.cap, day },
+      dedupe_key_in: `ai_daily_cap:${feature}:${userId}:${day}`,
+    });
+  } catch (e: any) {
+    console.error(`[public-ai-cap] cap alert failed for ${feature}:`, e?.message || e);
+  }
+};

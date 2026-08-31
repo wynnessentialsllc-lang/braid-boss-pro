@@ -35,6 +35,7 @@ import {
   releasePublicAiCall,
   capReachedMessage,
   secondsUntilCapReset,
+  notifyCapReached,
 } from "../../lib/public-ai-cap";
 
 export const runtime = "nodejs";
@@ -131,7 +132,10 @@ export async function POST(req: Request) {
   // made-up slugs can't burn a real stylist's budget, and BEFORE the
   // Sonnet call — one claim per turn, which is what actually costs.
   const claim = await claimPublicAiCall(admin, "booking-concierge", slug);
-  if (!claim.ok) return capped();
+  if (!claim.ok) {
+    await notifyCapReached(admin, "booking-concierge", claim, userId);
+    return capped();
+  }
   // Every early return past this point has to hand the slot back, or a
   // run of failures would silently eat the day's budget.
   const release = () => releasePublicAiCall(admin, "booking-concierge", slug);

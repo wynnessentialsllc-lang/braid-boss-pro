@@ -28,6 +28,7 @@ import {
   releasePublicAiCall,
   capReachedMessage,
   secondsUntilCapReset,
+  notifyCapReached,
 } from "../../lib/public-ai-cap";
 
 export const runtime = "nodejs";
@@ -141,7 +142,12 @@ export async function POST(req: Request) {
   // made-up slugs can't burn a real stylist's budget, and BEFORE the
   // storage upload and the Opus call — the two things that cost money.
   const claim = await claimPublicAiCall(admin, "style-consult", slug);
-  if (!claim.ok) return capped();
+  if (!claim.ok) {
+    // Fire-and-forget: the stylist hears that her page is turning
+    // clients away, rather than finding out from a client.
+    await notifyCapReached(admin, "style-consult", claim, userId);
+    return capped();
+  }
   // From here on every early return has to hand the slot back, or a run
   // of failures would silently eat the day's budget.
   const release = () => releasePublicAiCall(admin, "style-consult", slug);

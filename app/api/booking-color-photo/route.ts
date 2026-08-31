@@ -15,6 +15,7 @@ import {
   releasePublicAiCall,
   capReachedMessage,
   secondsUntilCapReset,
+  notifyCapReached,
 } from "../../lib/public-ai-cap";
 
 export const runtime = "nodejs";
@@ -98,6 +99,7 @@ export async function POST(req: Request) {
   // the per-minute gate above resets on every cold start.
   const claim = await claimPublicAiCall(admin, "booking-color-photo", slug);
   if (!claim.ok) {
+    await notifyCapReached(admin, "booking-color-photo", claim, userId);
     return NextResponse.json(
       { error: capReachedMessage("booking-color-photo"), reason: "daily_cap" },
       { status: 429, headers: { "retry-after": String(secondsUntilCapReset()) } },
