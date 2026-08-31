@@ -10,6 +10,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
+import { chargeAiCredits, refundAiCredits, outOfCreditsMessage } from "../../lib/ai-credits";
 import {
   cleanSnapshot,
   buildCoachSystem,
@@ -92,6 +93,17 @@ export async function POST(req: Request) {
 
   const snapshot = cleanSnapshot(body.snapshot);
 
+  // Reserve credits before spending Anthropic tokens. Charging up
+  // front is what stops a burst of concurrent briefings from each
+  // seeing a sufficient balance and collectively overdrawing it.
+  const charge = await chargeAiCredits(admin, userId, "business-coach");
+  if (!charge.ok) {
+    if (charge.reason === "insufficient_credits") {
+      return fail(402, outOfCreditsMessage(charge.needed, charge.balance));
+    }
+    return fail(502, "Couldn't start your briefing. Please try again.");
+  }
+
   try {
     const client = new Anthropic({ apiKey: anthropicKey });
     const msg = await client.messages.create({
@@ -106,9 +118,14 @@ export async function POST(req: Request) {
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
     );
     const briefing = parseCoachBriefing(toolUse?.input ?? null);
-    if (!briefing) return fail(502, "Couldn't generate your briefing — please try again.");
-    return NextResponse.json({ ok: true, briefing });
+    if (!briefing) {
+      // Charged but produced nothing usable — give the credits back.
+      await refundAiCredits(admin, userId, "business-coach", charge.charged);
+      return fail(502, "Couldn't generate your briefing — please try again.");
+    }
+    return NextResponse.json({ ok: true, briefing, credits_balance: charge.balance });
   } catch (e: any) {
+    await refundAiCredits(admin, userId, "business-coach", charge.charged);
     if (e instanceof Anthropic.APIError && e.status === 429) {
       return fail(429, "We're a little busy — please try again in a moment.");
     }
