@@ -148,8 +148,60 @@ const TWILIO_STATUS_CALLBACK_URL =
     ? `https://${new URL(SUPABASE_URL).hostname.split(".")[0]}.functions.supabase.co/twilio-status`
     : "");
 
-const BATCH_LIMIT = 25;
+// How many rows one tick claims. The cron fires every minute, so this
+// is also the per-minute ceiling on delivery: at 25 a burst of
+// reminders -- and reminders ARE bursty, since every 24h notice for
+// tomorrow schedules into the same window -- drains far slower than it
+// arrives. A thousand stylists with five appointments each queue 5,000
+// rows that would take over three hours to clear at the old rate, so
+// the reminders land late long before anything actually breaks.
+const BATCH_LIMIT = 100;
+
+// ...but the batch is NOT dispatched all at once. Every row makes an
+// outbound call to Resend or Twilio, and both rate-limit per account:
+// 100 simultaneous requests would earn 429s, which the row-level error
+// handling would then record as delivery failures. This caps how many
+// are in flight at a time, so the batch size controls throughput while
+// this controls burst pressure on the providers. Raising BATCH_LIMIT
+// further is safe; raising this is what needs care.
+const DISPATCH_CONCURRENCY = 20;
+
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
+
+/**
+ * Run `task` over every item with at most `limit` in flight.
+ *
+ * Promise.all over the whole batch is the obvious shape and the wrong
+ * one here: it converts a bigger batch directly into a bigger
+ * simultaneous burst against the providers. Workers pull from a shared
+ * cursor instead, so a slow send occupies one slot rather than
+ * stalling a fixed-size generation of parallel work.
+ */
+const mapWithConcurrency = async <T>(
+  items: T[],
+  limit: number,
+  task: (item: T) => Promise<void>,
+): Promise<void> => {
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      for (;;) {
+        const i = cursor++;
+        if (i >= items.length) return;
+        // task() contains its own try/catch per row; this is a
+        // belt-and-braces guard so one unexpected throw can't kill a
+        // worker and strand the rest of the batch.
+        try {
+          await task(items[i]);
+        } catch (e) {
+          console.error("[process-notification-queue] worker error:", e);
+        }
+      }
+    },
+  );
+  await Promise.all(workers);
+};
 
 // =====================================================================
 // Types — must mirror the column shape returned by
@@ -3257,8 +3309,10 @@ serve(async (req) => {
   let failed = 0;
   let skipped = 0;
 
-  // 2. Per-row dispatch. Errors are contained to the row.
-  await Promise.all(rows.map(async (row) => {
+  // 2. Per-row dispatch, bounded so a large batch doesn't hit the
+  //    providers as one simultaneous burst. Errors stay contained to
+  //    the row.
+  await mapWithConcurrency(rows, DISPATCH_CONCURRENCY, async (row) => {
     try {
       if (row.channel !== "email" && row.channel !== "sms") {
         await failTerminal(admin, row.id, `unsupported_channel:${row.channel}`);
@@ -3409,7 +3463,7 @@ serve(async (req) => {
       } catch { /* swallow — next tick will retry */ }
       failed++;
     }
-  }));
+  });
 
   return json(200, {
     processed: rows.length,
