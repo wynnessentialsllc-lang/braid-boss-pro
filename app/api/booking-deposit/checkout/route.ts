@@ -23,6 +23,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { bookingCharge, BOOKING_FEE_LABEL } from "../../../lib/booking-fee";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -172,7 +173,16 @@ export async function POST(req: Request) {
     if (!Number.isFinite(raw) || raw < 0 || raw > 10_000) return 0;
     return Math.floor(raw);
   })();
-  const applicationFeeCents = feeBps > 0 ? Math.floor((cents * feeBps) / 10_000) : 0;
+  const percentFeeCents = feeBps > 0 ? Math.floor((cents * feeBps) / 10_000) : 0;
+
+  // Client-paid booking fee. Added as its own line item so the client
+  // sees and agrees to it, and added to the application fee so the
+  // whole amount routes to the platform. Because this is a direct
+  // charge on the stylist's connected account, that combination leaves
+  // her payout at exactly the deposit she set -- the fee is additive
+  // to the client, not deducted from her.
+  const charge = bookingCharge(cents);
+  const applicationFeeCents = percentFeeCents + charge.feeCents;
 
   const form = new URLSearchParams();
   form.set("mode", "payment");
@@ -181,6 +191,17 @@ export async function POST(req: Request) {
   form.set("line_items[0][price_data][currency]", "usd");
   form.set("line_items[0][price_data][unit_amount]", String(cents));
   form.set("line_items[0][price_data][product_data][name]", productName);
+  if (charge.feeCents > 0) {
+    form.set("line_items[1][quantity]", "1");
+    form.set("line_items[1][price_data][currency]", "usd");
+    form.set("line_items[1][price_data][unit_amount]", String(charge.feeCents));
+    form.set("line_items[1][price_data][product_data][name]", BOOKING_FEE_LABEL);
+    // Reconciliation: the deposit webhook credits the stylist from
+    // metadata[deposit_amount], so the fee must be separately legible
+    // or the two figures look like they disagree.
+    form.set("metadata[booking_fee_cents]", String(charge.feeCents));
+    form.set("payment_intent_data[metadata][booking_fee_cents]", String(charge.feeCents));
+  }
   form.set(
     "success_url",
     `${baseUrl}/booking/success?request_id=${encodeURIComponent(row.id)}&session_id={CHECKOUT_SESSION_ID}`,
