@@ -241,6 +241,13 @@ import {
   type CampaignRecipient,
 } from "./lib/marketing-campaigns";
 import {
+  CAMPAIGN_GROUP_PREFIX,
+  campaignGroupKey,
+  groupCampaignRows,
+  summarizeRecipients,
+  type CampaignRecipientRef,
+} from "./lib/campaign-notifications";
+import {
   type ServiceCategory,
   useServiceCategories,
 } from "./lib/service-categories";
@@ -21549,6 +21556,7 @@ export type NotificationTarget =
   | { kind: "clientsTab" }
   | { kind: "booking_approval"; requestId: string }
   | { kind: "email_log"; queueId: string }
+  | { kind: "campaign_recipients"; groupId: string }
   | { kind: "contract_view"; contractId: string };
 
 type NotifItem = {
@@ -21561,6 +21569,13 @@ type NotifItem = {
   body: string;
   meta?: string;
   target?: NotificationTarget;
+  // Set on a single campaign-email row — the raw material for grouping.
+  campaign?: CampaignRecipientRef;
+  // Set on a collapsed campaign row: the notification ids it stands in
+  // for (so dismiss/read act on the whole send) and every recipient it
+  // covers (so the detail sheet needs no fetch).
+  groupIds?: string[];
+  recipients?: CampaignRecipientRef[];
 };
 
 // Builder for typed internal notifications. Lets feature code create
@@ -21571,6 +21586,32 @@ const createInternalNotification = (input: Omit<NotifItem, "icon"> & { icon?: Re
   ...input,
   icon: input.icon ?? <Bell size={16} style={{ color: C.coffee }} />,
 });
+
+// ---- Campaign send collapsing -----------------------------------------
+// Wraps the pure grouping in lib/campaign-notifications with the bell's
+// presentation: one row per send, titled with the count and bodied with
+// the recipient names, tapping through to the full list.
+const groupCampaignNotifications = (items: NotifItem[]): NotifItem[] =>
+  groupCampaignRows(items).map(entry => {
+    if (entry.kind === "single") return entry.item;
+    const recipients = entry.members.map(m => m.campaign as CampaignRecipientRef);
+    const groupId = CAMPAIGN_GROUP_PREFIX + entry.key;
+    return {
+      id: groupId,
+      category: "communication_status" as NotifCategory,
+      kind: "campaign_sent_group",
+      tone: "neutral" as const,
+      icon: <Mail size={16} style={{ color: C.muted }} />,
+      title: `Campaign sent to ${entry.members.length} client${entry.members.length === 1 ? "" : "s"}`,
+      body: summarizeRecipients(recipients.map(r => r.name)),
+      // Every row in a send is queued in the same instant, so the
+      // newest member's timestamp is the send's timestamp.
+      meta: entry.members[0].meta,
+      target: { kind: "campaign_recipients", groupId } as const,
+      groupIds: entry.members.map(m => m.id),
+      recipients,
+    };
+  });
 
 // Convenience for logging an outbound client communication. The Comm
 // sheets call this; nothing here ends up in the bell.
@@ -21922,7 +21963,10 @@ const useNotifications = (store: any) => {
           .eq("user_id", userId)
           .eq("dismissed", false)
           .order("created_at", { ascending: false })
-          .limit(80);
+          // A single campaign send can be dozens of rows. They collapse
+          // into one card, but they still have to be fetched to do it —
+          // a tighter window let one blast crowd out everything else.
+          .limit(200);
         if (cancelled) return;
         const items: NotifItem[] = ((data || []) as any[]).map((r) => {
           const d = (r.data && typeof r.data === "object") ? r.data : {};
@@ -22011,8 +22055,8 @@ const useNotifications = (store: any) => {
           }
           // Default: email-sent (info-only); tap opens the email
           // detail sheet via the queueId stamped in data.
-          const queueId = d.queueId || null;
-          return {
+          const queueId = d.queueId ? String(d.queueId) : null;
+          const item: NotifItem = {
             id: String(r.id),
             category: "communication_status" as NotifCategory,
             kind: "client_email_sent",
@@ -22022,9 +22066,25 @@ const useNotifications = (store: any) => {
             body: String(r.body || ""),
             meta: r.created_at ? fmtRelative(r.created_at) : undefined,
             target: queueId
-              ? ({ kind: "email_log", queueId: String(queueId) } as const)
+              ? ({ kind: "email_log", queueId } as const)
               : undefined,
           };
+          // Campaign sends fan out one row per recipient. Tag them so
+          // groupCampaignNotifications can fold the whole send into a
+          // single bell entry.
+          if (String(d.notificationType || "") === "marketing_campaign") {
+            const campaignId = d.campaignId ? String(d.campaignId) : "";
+            const subject = d.subject ? String(d.subject) : null;
+            const email = d.recipientEmail ? String(d.recipientEmail) : null;
+            item.campaign = {
+              key: campaignGroupKey(campaignId, subject, r.created_at),
+              name: String(d.recipientName || "").trim() || email || "A client",
+              email,
+              queueId,
+              subject,
+            };
+          }
+          return item;
         });
         setPersistedItems(items);
 
@@ -22073,7 +22133,7 @@ const useNotifications = (store: any) => {
   );
   const items = useMemo(() => {
     const dismissedSet = new Set(dismissed);
-    return allItems.filter(n => {
+    const visible = allItems.filter(n => {
       if (dismissedSet.has(n.id)) return false;
       const wake = snoozed[n.id];
       // Hidden only while the snooze is still in the future; once it
@@ -22081,7 +22141,19 @@ const useNotifications = (store: any) => {
       if (wake && new Date(wake).getTime() > nowTick) return false;
       return true;
     });
+    // Collapse last, on what's actually visible, so a recipient row
+    // dismissed on another device just shrinks the group instead of
+    // leaving a stale count behind.
+    return groupCampaignNotifications(visible);
   }, [allItems, dismissed, snoozed, nowTick]);
+
+  // A collapsed campaign row stands in for every recipient row it
+  // covers, so dismiss/read have to act on all of them — otherwise the
+  // group reappears the moment the list re-renders.
+  const expandIds = useCallback((id: string): string[] => {
+    const item = items.find(n => n.id === id);
+    return item?.groupIds?.length ? [id, ...item.groupIds] : [id];
+  }, [items]);
   // Badge counts EVERY unread notification, including communication
   // rows (emails sent on the stylist's behalf, failed reminders, etc.).
   // The bell is opened via markAllRead, so the count is effectively
@@ -22149,9 +22221,10 @@ const useNotifications = (store: any) => {
   }, [store?.userId]);
 
   const dismiss = useCallback((id: string) => {
-    persist(DISMISSED_NOTIF_KEY, Array.from(new Set([...dismissed, id])), setDismissed);
-    void cloudDismiss([id]);
-  }, [dismissed, cloudDismiss]);
+    const ids = expandIds(id);
+    persist(DISMISSED_NOTIF_KEY, Array.from(new Set([...dismissed, ...ids])), setDismissed);
+    void cloudDismiss(ids);
+  }, [dismissed, cloudDismiss, expandIds]);
 
   // "Remind me later" — hide the item for SNOOZE_HOURS, then let it
   // resurface (still unread). Local-only; a snooze is short-lived and
@@ -22170,23 +22243,24 @@ const useNotifications = (store: any) => {
 
   const clearAll = useCallback(() => {
     if (items.length === 0) return;
-    const ids = items.map(n => n.id);
+    const ids = items.flatMap(n => [n.id, ...(n.groupIds || [])]);
     persist(DISMISSED_NOTIF_KEY, Array.from(new Set([...dismissed, ...ids])), setDismissed);
     void cloudDismiss(ids);
   }, [items, dismissed, cloudDismiss]);
 
   const markAllRead = useCallback(() => {
     if (items.length === 0) return;
-    const ids = items.map(n => n.id);
+    const ids = items.flatMap(n => [n.id, ...(n.groupIds || [])]);
     persist(READ_NOTIF_KEY, Array.from(new Set([...read, ...ids])), setRead);
   }, [items, read]);
 
   // Single-id read marker. Used when a notification is tapped so the
   // bell badge drops one count immediately.
   const markRead = useCallback((id: string) => {
-    if (read.includes(id)) return;
-    persist(READ_NOTIF_KEY, Array.from(new Set([...read, id])), setRead);
-  }, [read]);
+    const ids = expandIds(id);
+    if (ids.every(x => read.includes(x))) return;
+    persist(READ_NOTIF_KEY, Array.from(new Set([...read, ...ids])), setRead);
+  }, [read, expandIds]);
 
   const readIds = useMemo(() => new Set(read), [read]);
 
@@ -22205,6 +22279,7 @@ type NotificationRouterCtx = {
   setClientToOpenId: (id: string | null) => void;
   setApprovalFocusId: (id: string | null) => void;
   setEmailLogId: (id: string | null) => void;
+  setCampaignGroupId: (id: string | null) => void;
   setContractViewId: (id: string | null) => void;
 };
 
@@ -22271,6 +22346,13 @@ const routeNotification = (
       // subject, recipient, body, status. The fetch happens in the
       // sheet against the RLS-scoped owner_select policy.
       ctx.setEmailLogId(target.queueId);
+      break;
+    }
+    case "campaign_recipients": {
+      // Collapsed campaign row — open the full "who did this go to"
+      // list. The recipients ride on the notification itself, so the
+      // sheet resolves the group id against the live bell list.
+      ctx.setCampaignGroupId(target.groupId);
       break;
     }
     case "contract_view": {
@@ -22767,7 +22849,9 @@ const NotificationsSheet = ({ open, onClose, items, unreadCount, dismiss, snooze
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); dismiss(n.id); }}
-                      aria-label="Dismiss notification"
+                      aria-label={n.groupIds?.length
+                        ? `Dismiss ${n.title.toLowerCase()}`
+                        : "Dismiss notification"}
                       title="Dismiss"
                       className="p-2.5 rounded-full active:scale-[0.92] transition"
                       style={{ color: C.danger, background: "transparent", border: 0 }}
@@ -22781,6 +22865,70 @@ const NotificationsSheet = ({ open, onClose, items, unreadCount, dismiss, snooze
           </div>
         </>
       )}
+    </Sheet>
+  );
+};
+
+// Who a collapsed "Campaign sent" bell row actually went to. The
+// recipients are already on the notification (they came from the same
+// query that built the bell), so this renders without a fetch. Tapping
+// a name opens that individual send in the email detail sheet.
+const CampaignRecipientsSheet = ({ group, onClose, onOpenEmail }: {
+  group: NotifItem | null;
+  onClose: () => void;
+  onOpenEmail: (queueId: string) => void;
+}) => {
+  const recipients = group?.recipients || [];
+  const subject = recipients.find(r => r.subject)?.subject || null;
+  return (
+    <Sheet open={!!group} onClose={onClose} title="Campaign recipients">
+      <div className="space-y-3 pb-6">
+        <Card className="p-3.5">
+          {subject && (
+            <p className="text-sm font-semibold" style={{ color: C.espresso, overflowWrap: "anywhere" }}>{subject}</p>
+          )}
+          <p className="text-[11px] mt-0.5" style={{ color: C.muted }}>
+            Sent to {recipients.length} client{recipients.length === 1 ? "" : "s"}
+            {group?.meta ? ` · ${group.meta}` : ""}
+          </p>
+        </Card>
+        <div className="space-y-2">
+          {recipients.map((r, i) => {
+            const tappable = !!r.queueId;
+            return (
+              <Card key={r.queueId || `${r.email || r.name}-${i}`} className="p-0 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => { if (r.queueId) onOpenEmail(r.queueId); }}
+                  disabled={!tappable}
+                  aria-label={tappable ? `Open the email sent to ${r.name}` : r.name}
+                  className="flex items-center gap-3 p-3.5 w-full text-left active:scale-[0.99] transition"
+                  style={{
+                    background: "transparent",
+                    border: 0,
+                    cursor: tappable ? "pointer" : "default",
+                    color: "inherit",
+                    font: "inherit",
+                    appearance: "none",
+                    WebkitAppearance: "none",
+                  }}
+                >
+                  <div className="rounded-xl p-2 shrink-0" style={{ background: C.ivory }}>
+                    <Mail size={16} style={{ color: C.muted }} />
+                  </div>
+                  <div className="min-w-0 flex-1" style={{ pointerEvents: "none" }}>
+                    <p className="text-sm font-semibold" style={{ color: C.espresso, overflowWrap: "anywhere" }}>{r.name}</p>
+                    {r.email && (
+                      <p className="text-[11px] mt-0.5" style={{ color: C.muted, overflowWrap: "anywhere" }}>{r.email}</p>
+                    )}
+                  </div>
+                  {tappable && <ChevronRight size={16} style={{ color: C.muted, flexShrink: 0 }} />}
+                </button>
+              </Card>
+            );
+          })}
+        </div>
+      </div>
     </Sheet>
   );
 };
@@ -42380,7 +42528,12 @@ const CampaignComposerSheet = ({
 
         <Field
           label={isSms ? "Text message" : "Message"}
-          hint="Use {{client_name}}, {{studio_name}}, {{book_url}} to personalize."
+          hint={isDropTemplate
+            // {{dates}} is filled in per drop with the window clients
+            // can actually book ("September through October 31st"), so
+            // it's only meaningful on the announcement template.
+            ? "Use {{client_name}}, {{studio_name}}, {{book_url}} to personalize. {{dates}} becomes the dates that just opened."
+            : "Use {{client_name}}, {{studio_name}}, {{book_url}} to personalize."}
         >
           <Textarea
             value={body}
@@ -44818,6 +44971,8 @@ export default function App() {
   // "Confirmation emailed" / etc. row opens this sheet showing the
   // actual notification_queue row (subject, recipient, body, status).
   const [emailLogId, setEmailLogId] = useState<string | null>(null);
+  // Id of the collapsed campaign bell row whose recipient list is open.
+  const [campaignGroupId, setCampaignGroupId] = useState<string | null>(null);
   const [contractViewId, setContractViewId] = useState<string | null>(null);
   const [commPickerCtx, setCommPickerCtx] = useState<CommContext | null>(null);
   const [activeComm, setActiveComm] = useState<(CommContext & { templateKey: CommTemplateKey }) | null>(null);
@@ -44889,6 +45044,7 @@ export default function App() {
       setClientToOpenId,
       setApprovalFocusId,
       setEmailLogId,
+      setCampaignGroupId,
       setContractViewId,
     });
   }, [notifications, store.appointments]);
@@ -44939,6 +45095,7 @@ export default function App() {
       setClientToOpenId,
       setApprovalFocusId,
       setEmailLogId,
+      setCampaignGroupId,
       setContractViewId,
     });
     return true;
@@ -45506,6 +45663,16 @@ export default function App() {
           setActive("clients");
           setClientToOpenId(id);
         }}
+      />
+      {/* Recipient list behind a collapsed "Campaign sent" bell row.
+          Resolved from the live bell list so it stays in sync if the
+          poll refreshes while the sheet is open. */}
+      <CampaignRecipientsSheet
+        group={campaignGroupId
+          ? (notifications.items.find(n => n.id === campaignGroupId) || null)
+          : null}
+        onClose={() => setCampaignGroupId(null)}
+        onOpenEmail={(queueId) => setEmailLogId(queueId)}
       />
       <EmailDetailSheet
         queueId={emailLogId}
