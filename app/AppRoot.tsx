@@ -42528,7 +42528,12 @@ const CampaignComposerSheet = ({
 
         <Field
           label={isSms ? "Text message" : "Message"}
-          hint="Use {{client_name}}, {{studio_name}}, {{book_url}} to personalize."
+          hint={isDropTemplate
+            // {{dates}} is filled in per drop with the window clients
+            // can actually book ("September through October 31st"), so
+            // it's only meaningful on the announcement template.
+            ? "Use {{client_name}}, {{studio_name}}, {{book_url}} to personalize. {{dates}} becomes the dates that just opened."
+            : "Use {{client_name}}, {{studio_name}}, {{book_url}} to personalize."}
         >
           <Textarea
             value={body}
