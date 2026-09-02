@@ -24930,6 +24930,82 @@ const SmsNotificationsToggleSection = ({ userId }: { userId: string }) => {
   );
 };
 
+// Owner-facing email reports: the nightly sales summary and the month
+// in review that lands on the first. Both are ON by default, and both
+// emails tell the reader they can be turned off in Settings, so this is
+// the thing that turns them off.
+//
+// Reads and writes go through get_report_email_prefs /
+// set_report_email_prefs (see 20261260000000_monthly_review_report.sql)
+// rather than touching shop_settings directly: the browser holds no
+// write grant on that table, and a stylist who has never opened the
+// shop has no row there at all, which the RPC reads as "both on".
+const EmailReportsTogglesSection = ({ userId }: { userId: string }) => {
+  const [daily, setDaily] = useState<boolean | null>(null);
+  const [monthly, setMonthly] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.rpc("get_report_email_prefs");
+      if (cancelled || error) return;
+      setDaily((data as any)?.dailySalesSummaryEnabled !== false);
+      setMonthly((data as any)?.monthlyReviewEnabled !== false);
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  // Only the toggle that moved is sent; the other stays null so the RPC
+  // leaves it as it is. That keeps the two switches independent even if
+  // a save is in flight when the second one is tapped.
+  const persist = useCallback(async (patch: { daily?: boolean; monthly?: boolean }) => {
+    setBusy(true);
+    if (patch.daily !== undefined) setDaily(patch.daily);
+    if (patch.monthly !== undefined) setMonthly(patch.monthly);
+    try {
+      const supabase = getSupabase();
+      await supabase.rpc("set_report_email_prefs", {
+        daily_in: patch.daily ?? null,
+        monthly_in: patch.monthly ?? null,
+      });
+    } finally {
+      setBusy(false);
+    }
+  }, [userId]);
+
+  if (daily === null || monthly === null) return null;
+
+  return (
+    <div className="mt-4 pt-3 space-y-2" style={{ borderTop: `1px solid ${C.hairline}` }}>
+      <p className="text-[10px] uppercase tracking-widest font-bold mb-1" style={{ color: C.muted, letterSpacing: "0.12em" }}>
+        Email reports
+      </p>
+      <p className="text-[11px] mb-2" style={{ color: C.muted }}>
+        Sales recaps emailed to you. Nothing is sent for a day or a month with no sales.
+      </p>
+      <div className="flex items-center justify-between py-1">
+        <div className="min-w-0 pr-3">
+          <p className="text-sm font-semibold" style={{ color: C.espresso }}>Daily summary</p>
+          <p className="text-[11px]" style={{ color: C.muted }}>Yesterday&apos;s totals, sent overnight</p>
+        </div>
+        <Toggle checked={daily} onChange={(v) => void persist({ daily: v })} />
+      </div>
+      <div className="flex items-center justify-between py-1">
+        <div className="min-w-0 pr-3">
+          <p className="text-sm font-semibold" style={{ color: C.espresso }}>Month in review</p>
+          <p className="text-[11px]" style={{ color: C.muted }}>
+            Last month&apos;s numbers, best day, and top sellers, sent on the 1st
+          </p>
+        </div>
+        <Toggle checked={monthly} onChange={(v) => void persist({ monthly: v })} />
+      </div>
+      {busy && <p className="text-[11px] text-right" style={{ color: C.muted }}>Saving…</p>}
+    </div>
+  );
+};
+
 const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport }: {
   email: string | null;
   mode: AuthMode;
@@ -25637,6 +25713,9 @@ const AccountScreen = ({ email, mode, sync, userId, onBack, onSignOut, onExport 
                 </Button>
                 {testStatus && <p className="text-[11px] mt-2 text-center" style={{ color: testStatus.startsWith("Couldn't") ? C.danger : C.success }}>{testStatus}</p>}
               </>
+            )}
+            {mode === "authed" && userId && (
+              <EmailReportsTogglesSection userId={userId} />
             )}
             {SMS_ENABLED && mode === "authed" && userId && (
               <SmsNotificationsToggleSection userId={userId} />
