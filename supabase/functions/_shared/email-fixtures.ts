@@ -1,4 +1,4 @@
-// Preview + test fixtures for the account and billing lifecycle emails.
+// Preview + test fixtures for the account, billing, and report emails.
 //
 // These are the ONLY place sample names, dates, prices, and URLs appear.
 // No production template contains a hard-coded person, amount, or token:
@@ -20,6 +20,7 @@ import {
   renderVerifyEmail,
   renderWelcome,
 } from "./lifecycle-emails.ts";
+import { renderMonthlyReview } from "./monthly-review-email.ts";
 import type { RenderedEmail } from "./email-kit.ts";
 
 export type Fixture = {
@@ -34,6 +35,7 @@ export type Fixture = {
     | "4. Trial ending soon"
     | "5. Subscription confirmed"
     | "6. Payment failed"
+    | "7. Month in review"
     | "Other auth emails";
   /** What this fixture is here to prove. */
   note: string;
@@ -62,6 +64,60 @@ const LONG_NAME = "Anastasia Chidinmaobi Oluwafunmilayo-Beauregard";
 const LONG_URL =
   "https://braidbosspro.app/auth/callback?token=PREVIEW_ONLY_NOT_A_REAL_TOKEN_00000000000000000000000000000000&type=signup&redirect_to=https%3A%2F%2Fbraidbosspro.app%2Fauth%2Fcallback%3Fsource%3Demail%26campaign%3Dnone";
 const SHORT_URL = "https://braidbosspro.app/auth/callback?token=PREVIEW_ONLY_NOT_A_REAL_TOKEN&type=signup";
+
+// A believable month for a braider working Thursday through Saturday:
+// weekday averages that peak on Saturday, afternoons that out-earn
+// mornings, and a mix of services and shop items.
+const MONTH_FULL = {
+  studioName: "SBW Braiding",
+  monthLabel: "August 2026",
+  prevMonthLabel: "July 2026",
+  currency: "USD",
+  revenue: 6420,
+  prevRevenue: 5480,
+  salesCount: 27,
+  prevSalesCount: 23,
+  customersServed: 22,
+  newCustomers: 8,
+  returningCustomers: 14,
+  daysWithSales: 13,
+  bestWeekday: "Saturday",
+  bestWeekdayAvg: 780,
+  avgDailySales: 494,
+  byWeekday: [
+    { weekday: "Sunday", sales: 0 },
+    { weekday: "Monday", sales: 0 },
+    { weekday: "Tuesday", sales: 180 },
+    { weekday: "Wednesday", sales: 240 },
+    { weekday: "Thursday", sales: 420 },
+    { weekday: "Friday", sales: 610 },
+    { weekday: "Saturday", sales: 780 },
+  ],
+  byHour: [
+    { hour: 8, sales: 320 },
+    { hour: 9, sales: 640 },
+    { hour: 11, sales: 980 },
+    { hour: 13, sales: 1420 },
+    { hour: 15, sales: 1860 },
+    { hour: 17, sales: 900 },
+    { hour: 19, sales: 300 },
+  ],
+  busiestDate: "2026-08-15",
+  busiestDateSales: 1240,
+  topServiceName: "Knotless Box Braids",
+  topServiceSales: 2480,
+  items: [
+    { name: "Knotless Box Braids", count: 8, sales: 2480 },
+    { name: "Boho Knotless", count: 5, sales: 1650 },
+    { name: "Stitch Braids", count: 6, sales: 1290 },
+    { name: "Edge Control 4oz", count: 14, sales: 336 },
+    { name: "Braid Spray", count: 9, sales: 264 },
+  ],
+};
+
+const LONG_STUDIO = "Crowned & Coiled Protective Styling Studio of Greater Los Angeles";
+const LONG_SERVICE =
+  "Waist Length Boho Knotless Braids with Human Hair Curls and Scalp Treatment";
 
 export const FIXTURES: Fixture[] = [
   // ---- 1. Verify your email ----------------------------------------
@@ -483,6 +539,94 @@ export const FIXTURES: Fixture[] = [
     group: "6. Payment failed",
     note: "No name, no card, no plan, no invoice link. Every row drops out and the email still reads as a complete, actionable message.",
     render: () => renderPaymentFailed({}),
+  },
+
+  // ---- 7. Month in review -------------------------------------------
+  // The report the stylist gets on the first of the month. Every block
+  // below the headline figure is optional, so these fixtures exist to
+  // prove the layout holds as they drop away one at a time.
+  {
+    id: "monthly-review-full",
+    label: "Month in review, full data",
+    group: "7. Month in review",
+    note: "A busy month with every section populated and a month-over-month gain. This is the build to review first.",
+    render: () => renderMonthlyReview(MONTH_FULL),
+  },
+  {
+    id: "monthly-review-down",
+    label: "Month in review, down on last month",
+    group: "7. Month in review",
+    note: "The delta pill flips to coral. A slower month must still read as a report, not a scolding.",
+    render: () =>
+      renderMonthlyReview({
+        ...MONTH_FULL,
+        revenue: 3120,
+        prevRevenue: 5480,
+        salesCount: 14,
+        prevSalesCount: 23,
+      }),
+  },
+  {
+    id: "monthly-review-first",
+    label: "Month in review, first month with sales",
+    group: "7. Month in review",
+    note: "No prior month to compare against, so the comparison pill and the sales delta line both disappear rather than claiming infinite growth.",
+    render: () =>
+      renderMonthlyReview({
+        ...MONTH_FULL,
+        prevMonthLabel: null,
+        prevRevenue: 0,
+        prevSalesCount: 0,
+        newCustomers: 11,
+        returningCustomers: 0,
+      }),
+  },
+  {
+    id: "monthly-review-sparse",
+    label: "Month in review, one appointment",
+    group: "7. Month in review",
+    note: "The realistic floor: a single sale, no shop orders, no recorded appointment time. The hour chart and the biggest-day card drop out and the report still closes properly.",
+    render: () =>
+      renderMonthlyReview({
+        studioName: "SBW Braiding",
+        monthLabel: "August 2026",
+        prevMonthLabel: "July 2026",
+        currency: "USD",
+        revenue: 215,
+        prevRevenue: 0,
+        salesCount: 1,
+        prevSalesCount: 0,
+        customersServed: 1,
+        newCustomers: 0,
+        returningCustomers: 1,
+        daysWithSales: 1,
+        bestWeekday: "Saturday",
+        bestWeekdayAvg: 215,
+        avgDailySales: 215,
+        byWeekday: [{ weekday: "Saturday", sales: 215 }],
+        byHour: [],
+        busiestDate: null,
+        busiestDateSales: 0,
+        topServiceName: null,
+        topServiceSales: 0,
+        items: [],
+      }),
+  },
+  {
+    id: "monthly-review-long-names",
+    label: "Month in review, long studio and service names",
+    group: "7. Month in review",
+    note: "Long names must wrap inside the item table instead of stretching the 600px shell, and the subject line must stay readable.",
+    render: () =>
+      renderMonthlyReview({
+        ...MONTH_FULL,
+        studioName: LONG_STUDIO,
+        topServiceName: LONG_SERVICE,
+        items: [
+          { name: LONG_SERVICE, count: 6, sales: 2040 },
+          { name: "Marley Twists & Scalp Treatment (Add-On Bundle)", count: 3, sales: 810 },
+        ],
+      }),
   },
 
   // ---- Other auth emails --------------------------------------------

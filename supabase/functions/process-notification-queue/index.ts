@@ -38,6 +38,9 @@ import {
   renderTrialStarted,
   renderWelcome,
 } from "../_shared/lifecycle-emails.ts";
+// Month in review. Same _shared arrangement as the lifecycle mail so the
+// dev preview route and the unit tests render the exact markup sent here.
+import { renderMonthlyReview } from "../_shared/monthly-review-email.ts";
 
 // =====================================================================
 // Env
@@ -71,6 +74,7 @@ const OWNER_FACING_NOTIFICATION_TYPES = new Set<string>([
   "booking_refund_manual_stylist",
   "review_received",
   "daily_sales_summary",
+  "monthly_review",
   "founding_welcome",
   // Account + billing lifecycle (see _shared/lifecycle-emails.ts). These
   // go TO the stylist about her own account, so the From name is the
@@ -2490,6 +2494,60 @@ const numOrNull = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+// ---- monthly_review (owner month in review) -------------------------
+// Adapter over the shared renderer in _shared/monthly-review-email.ts.
+// The queue row carries only data, so this maps jsonb into the
+// template's argument shape and supplies the two links, which are
+// deployment config rather than report data. Enqueued by
+// process_monthly_review_reports() at the stylist's local midnight on
+// the first of the month, and only for a month that took money, so the
+// headline figure is always real.
+const asItems = (v: unknown) =>
+  (Array.isArray(v) ? v : [])
+    .map((it: any) => ({
+      name: String(it?.name ?? ""),
+      count: numOrNull(it?.count),
+      sales: Number(it?.sales) || 0,
+    }))
+    .filter((it) => it.name !== "");
+
+const renderMonthlyReviewRow = (p: Record<string, any>): Rendered => {
+  const base = APP_BASE;
+  return renderMonthlyReview({
+    studioName: p.studioName ?? null,
+    monthLabel: String(p.monthLabel ?? ""),
+    prevMonthLabel: p.prevMonthLabel ?? null,
+    currency: p.currency ?? "USD",
+    revenue: Number(p.revenue) || 0,
+    prevRevenue: numOrNull(p.prevRevenue),
+    salesCount: Number(p.salesCount) || 0,
+    prevSalesCount: numOrNull(p.prevSalesCount),
+    customersServed: Number(p.customersServed) || 0,
+    newCustomers: Number(p.newCustomers) || 0,
+    returningCustomers: Number(p.returningCustomers) || 0,
+    daysWithSales: numOrNull(p.daysWithSales),
+    bestWeekday: p.bestWeekday ?? null,
+    bestWeekdayAvg: numOrNull(p.bestWeekdayAvg),
+    avgDailySales: numOrNull(p.avgDailySales),
+    byWeekday: (Array.isArray(p.byWeekday) ? p.byWeekday : []).map((r: any) => ({
+      weekday: String(r?.weekday ?? ""),
+      sales: Number(r?.sales) || 0,
+    })),
+    byHour: (Array.isArray(p.byHour) ? p.byHour : []).map((r: any) => ({
+      hour: Number(r?.hour),
+      sales: Number(r?.sales) || 0,
+    })),
+    busiestDate: p.busiestDate ?? null,
+    busiestDateSales: numOrNull(p.busiestDateSales),
+    topServiceName: p.topServiceName ?? null,
+    topServiceSales: numOrNull(p.topServiceSales),
+    items: asItems(p.items),
+    dashboardUrl: base,
+    settingsUrl: `${base}/settings`,
+    baseUrl: base,
+  });
+};
+
 // ---- braid_care_guide (editable post-service aftercare guide) --------
 // Renders the studio's stored, editable care-guide content (see
 // app/lib/care-guide.ts) into the branded email. Email-safe markup only —
@@ -2700,6 +2758,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderSmsCreditAlert(row.payload || {}, true);
     case "daily_sales_summary":
       return renderDailySalesSummary(row.payload || {});
+    case "monthly_review":
+      return renderMonthlyReviewRow(row.payload || {});
     default:
       return renderGeneric(row);
   }

@@ -125,6 +125,12 @@ Every queue row carries a `dedupe_key text unique` (nullable). Patterns:
 | appt_reminder_48h | `appt_reminder_48h:<appointment_id>` |
 | appt_reminder_24h | `appt_reminder_24h:<appointment_id>` |
 | appt_reminder_2h | `appt_reminder_2h:<appointment_id>` |
+| daily_sales_summary | `daily_summary:<user_id>:<local_date>` |
+| monthly_review | `monthly_review:<user_id>:<YYYY-MM>` |
+
+The two recurring reports key on the period they summarize rather than on a
+row id, so the hourly job that fires them at each stylist's local midnight can
+run in every timezone without ever sending the same period twice.
 
 The worker uses a no-op `ON CONFLICT (dedupe_key) DO NOTHING` insert. Webhook retries, double-tap signing, edge function re-invocations — all safe.
 
