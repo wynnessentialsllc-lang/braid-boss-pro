@@ -346,7 +346,11 @@ export type ActivationState = {
   stripeChargesEnabled: boolean;
 };
 
-const ACTIVATION_STEPS: Array<{
+// Exported so every surface that shows setup progress — this push/email
+// generator, the dashboard "finish setting up" checklist, and nothing
+// else — reads the same five steps in the same order with the same
+// copy. Never duplicate this list; import it.
+export const ACTIVATION_STEPS: Array<{
   key: keyof Omit<ActivationState, "signupIso">;
   done: (s: ActivationState) => boolean;
   title: string;
