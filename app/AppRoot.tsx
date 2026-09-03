@@ -6154,14 +6154,14 @@ const dayOfYear = (d: Date): number => {
   return Math.floor((d.getTime() - start.getTime()) / 86_400_000);
 };
 
-const DailyTipCard = ({ onOpen }: { onOpen: () => void }) => {
+const DailyTipCard = ({ onOpen }: { onOpen: (lessonId: string) => void }) => {
   if (ALL_EDUCATION_LESSONS.length === 0) return null;
   const idx = dayOfYear(new Date()) % ALL_EDUCATION_LESSONS.length;
   const { category, lesson } = ALL_EDUCATION_LESSONS[idx];
   return (
     <button
       type="button"
-      onClick={() => { trackEvent("daily_tip_clicked", { category: "education", metadata: { lessonId: lesson.id } }); onOpen(); }}
+      onClick={() => { trackEvent("daily_tip_clicked", { category: "education", metadata: { lessonId: lesson.id } }); onOpen(lesson.id); }}
       className="w-full text-left active:scale-[0.99] transition"
     >
       <Card className="p-4" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
@@ -6178,7 +6178,7 @@ const DailyTipCard = ({ onOpen }: { onOpen: () => void }) => {
   );
 };
 
-const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, openQuickClient, openQuickTx, openSettings, openServices, openAvailability, openAccount, openEducationHub, openInventory, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, cloudReady = true, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openReports?: (focus?: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openServices?: () => void; openAvailability?: () => void; openAccount?: () => void; openEducationHub?: () => void; openInventory?: () => void; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; cloudReady?: boolean; openAppointmentRecord?: (a: any) => void }) => {
+const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, openQuickClient, openQuickTx, openSettings, openServices, openAvailability, openAccount, openEducationHub, openInventory, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, cloudReady = true, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openReports?: (focus?: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openServices?: () => void; openAvailability?: () => void; openAccount?: () => void; openEducationHub?: (lessonId?: string) => void; openInventory?: () => void; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; cloudReady?: boolean; openAppointmentRecord?: (a: any) => void }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
@@ -6508,7 +6508,7 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           openAccount={openAccount}
         />
 
-        <DailyTipCard onOpen={openEducationHub || (() => setActive("studio"))} />
+        <DailyTipCard onOpen={(lessonId) => (openEducationHub ? openEducationHub(lessonId) : setActive("studio"))} />
 
         {/* TODAY'S CHAIR — moved up to sit right under the welcome card,
             so "who's in the chair today" is the first thing you see
@@ -19452,7 +19452,7 @@ const EducationHighlight = ({ text, matchers }: { text: string; matchers: Educat
   );
 };
 
-const EducationLessonCard = ({ lesson, categoryName, snippet, matchers, isOpen, onToggle }: {
+const EducationLessonCard = ({ lesson, categoryName, snippet, matchers, isOpen, onToggle, id }: {
   lesson: EducationLesson;
   categoryName: string;
   // Result preview — omitted while browsing, where the title is enough.
@@ -19460,8 +19460,9 @@ const EducationLessonCard = ({ lesson, categoryName, snippet, matchers, isOpen, 
   matchers: EducationMatcher[];
   isOpen: boolean;
   onToggle: () => void;
+  id?: string;
 }) => (
-  <Card className="p-4 active:scale-[0.99]" onClick={onToggle}>
+  <Card id={id} className="p-4 active:scale-[0.99]" onClick={onToggle}>
     <div className="flex items-start justify-between gap-3">
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold" style={{ color: C.espresso, lineHeight: 1.35 }}>
@@ -19528,12 +19529,44 @@ const EducationChip = ({ label, count, active, onClick }: {
   </button>
 );
 
-const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
+const EducationHubScreen = ({ onBack, focusLessonId }: { onBack: () => void; focusLessonId?: string | null }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount
   useEffect(() => { trackEvent("braider_education_hub_view", { category: "feature" }); }, []);
   const [query, setQuery] = useState("");
   const [activeCat, setActiveCat] = useState<string>("all");
   const [openLesson, setOpenLesson] = useState<string | null>(null);
+
+  // Deep-link straight to one lesson (e.g. the dashboard's "Tip of the
+  // day" card) instead of dropping the braider at the top of ~90
+  // lessons to search for it herself. Narrows to the lesson's own
+  // category so it's the very next thing on screen, opens it expanded,
+  // and scrolls it into view. Keyed on the id itself (not just "did
+  // this run once") so tapping a second, different tip while the hub
+  // is already open re-focuses instead of doing nothing.
+  const focusedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusLessonId || focusedRef.current === focusLessonId) return;
+    const cat = EDUCATION_CATEGORIES.find(c => c.lessons.some(l => l.id === focusLessonId));
+    if (!cat) return;
+    focusedRef.current = focusLessonId;
+    setActiveCat(cat.id);
+    setOpenLesson(focusLessonId);
+  }, [focusLessonId]);
+
+  // Separate from the effect above on purpose: that effect's setState
+  // calls and this scroll need to straddle a render, not race inside
+  // the same one. Keying on `openLesson` (rather than scrolling inline
+  // above) guarantees this only runs once the narrowed, expanded card
+  // has actually committed to the DOM — a same-tick requestAnimationFrame
+  // measured the pre-narrow layout and silently scrolled nowhere.
+  useEffect(() => {
+    if (!focusLessonId || openLesson !== focusLessonId) return;
+    const id = `edu-lesson-${focusLessonId}`;
+    const t = setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+    return () => clearTimeout(t);
+  }, [openLesson, focusLessonId]);
 
   const trimmed = query.trim();
   const searching = normalizeEducationText(trimmed).length >= EDUCATION_MIN_QUERY;
@@ -19731,6 +19764,7 @@ const EducationHubScreen = ({ onBack }: { onBack: () => void }) => {
                 {cat.lessons.map(lesson => (
                   <EducationLessonCard
                     key={lesson.id}
+                    id={`edu-lesson-${lesson.id}`}
                     lesson={lesson}
                     categoryName={cat.name}
                     matchers={matchers}
@@ -20869,7 +20903,7 @@ const SettingsScreen = ({ store, onBack, openBossGrowthGuide, openEducationHub, 
                   </div>
                 </Card>
                 {openEducationHub && (
-                  <Card className="p-4 active:scale-[0.99]" onClick={openEducationHub}>
+                  <Card className="p-4 active:scale-[0.99]" onClick={() => openEducationHub()}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3 flex-1 min-w-0">
                         <SettingsRowIcon icon={<ScrollText size={15} />} />
@@ -45061,6 +45095,15 @@ export default function App() {
   const [moneyPeriod, setMoneyPeriod] = useState<string | null>(null);
   const goToMoney = (p: string) => { setMoneyPeriod(p); setActive("money"); };
   const [secondary, setSecondary] = useState<string | null>(null); // policies | settings | savedQuotes | reminders | reminderSettings | presets | timer | timerSessions
+  // Which lesson the Education Hub should jump straight to (e.g. the
+  // dashboard's "Tip of the day" card) instead of opening at the top of
+  // ~90 lessons. Cleared on the way out so a later plain "open the hub"
+  // tap doesn't inherit a stale focus from a previous visit.
+  const [eduFocusLessonId, setEduFocusLessonId] = useState<string | null>(null);
+  const openEducationHub = useCallback((lessonId?: string) => {
+    setEduFocusLessonId(lessonId || null);
+    setSecondary("educationHub");
+  }, []);
 
   // Per-screen scroll memory. The app scrolls at the document level (see
   // Frame: min-height:100dvh, no overflow container). A screen you open
@@ -45652,7 +45695,7 @@ export default function App() {
               openServices={() => setSecondary("services")}
               openAvailability={() => setSecondary("availability")}
               openAccount={() => setSecondary("account")}
-              openEducationHub={() => setSecondary("educationHub")}
+              openEducationHub={openEducationHub}
               openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }}
               openReminders={() => { setNotifOpen(true); notifications.markAllRead(); }}
               notifBadgeCount={notifications.unreadCount}
@@ -45678,7 +45721,7 @@ export default function App() {
               store={store}
               onBack={() => setActive("dashboard")}
               openBossGrowthGuide={() => setSecondary("bossGrowthGuide")}
-              openEducationHub={() => setSecondary("educationHub")}
+              openEducationHub={openEducationHub}
               openReminderSettings={() => setSecondary("reminderSettings")}
               openCommunicationLog={() => setSecondary("communicationLog")}
               openAccount={() => setSecondary("account")}
@@ -45755,8 +45798,13 @@ export default function App() {
         />
       )}
       {secondary === "bossGrowthGuide" && <BossGrowthGuideScreen store={store} onBack={() => setSecondary("settings")} />}
-      {secondary === "educationHub" && <EducationHubScreen onBack={() => setSecondary("settings")} />}
-      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={() => setSecondary("educationHub")} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openClasses={() => setSecondary("classes")} openVideos={() => setSecondary("videos")} openSupport={() => setSecondary("support")} openTapToPay={() => setSecondary("tapToPay")} />}
+      {secondary === "educationHub" && (
+        <EducationHubScreen
+          focusLessonId={eduFocusLessonId}
+          onBack={() => { setEduFocusLessonId(null); setSecondary("settings"); }}
+        />
+      )}
+      {secondary === "settings" && <SettingsScreen store={store} onBack={() => setSecondary(null)} openBossGrowthGuide={() => setSecondary("bossGrowthGuide")} openEducationHub={openEducationHub} openReminderSettings={() => setSecondary("reminderSettings")} openCommunicationLog={() => setSecondary("communicationLog")} openAccount={() => setSecondary("account")} openDiscounts={() => setSecondary("discounts")} openServices={() => setSecondary("services")} openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }} openMarketing={() => setSecondary("marketing")} openReferrals={() => setSecondary("referrals")} openMarketplace={() => setSecondary("marketplace")} openGiftCards={() => setSecondary("giftCards")} openLoyalty={() => setSecondary("loyalty")} openSmsCredits={() => setSecondary("smsCredits")} openReports={() => setSecondary("reports")} openTaxPack={() => setSecondary("taxPack")} openPolicies={() => setSecondary("bookingPolicies")} openAvailability={() => setSecondary("availability")} openWaitlist={() => setSecondary("waitlist")} openIntelligence={() => setSecondary("intelligence")} openApprovals={() => setSecondary("approvals")} openContracts={() => setSecondary("contracts")} openReviews={() => setSecondary("reviews")} openInbox={() => setSecondary("inbox")} openIntakeForm={() => setSecondary("intakeForm")} openPackages={() => setSecondary("packages")} openProducts={() => setSecondary("products")} openClasses={() => setSecondary("classes")} openVideos={() => setSecondary("videos")} openSupport={() => setSecondary("support")} openTapToPay={() => setSecondary("tapToPay")} />}
       {secondary === "marketing" && <MarketingScreen store={store} onBack={() => setSecondary("settings")} openSocialTemplates={() => setSecondary("socialTemplates")} openCareGuide={() => setSecondary("careGuide")} />}
       {secondary === "careGuide" && <CareGuideScreen store={store} onBack={() => setSecondary("marketing")} />}
       {secondary === "socialTemplates" && <SocialTemplatesScreen store={store} onBack={() => setSecondary("marketing")} />}
