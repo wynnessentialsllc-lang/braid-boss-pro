@@ -133,6 +133,17 @@ export async function POST(req: Request) {
   const isFullPayment: boolean =
     session?.metadata?.payment_kind === "full" ||
     session?.payment_intent_data?.metadata?.payment_kind === "full";
+  // Platform booking fee actually charged on this session (see
+  // app/lib/booking-fee.ts) — stamped into metadata at checkout time so
+  // it survives even if the env var changes later. 0/absent means the
+  // fee was disabled for this session.
+  const bookingFeeCentsRaw =
+    session?.metadata?.booking_fee_cents ??
+    session?.payment_intent_data?.metadata?.booking_fee_cents;
+  const bookingFeeCents: number | null =
+    bookingFeeCentsRaw != null && Number.isFinite(Number(bookingFeeCentsRaw))
+      ? Math.max(0, Math.floor(Number(bookingFeeCentsRaw)))
+      : null;
 
   // Online package purchase — this endpoint is the configured Stripe
   // webhook for connected-account checkout.session.completed, so package
@@ -222,11 +233,13 @@ export async function POST(req: Request) {
           typeof session?.amount_total === "number"
             ? session.amount_total / 100
             : null,
+        booking_fee_cents_in: bookingFeeCents,
       })
     : await admin.rpc("mark_deposit_paid_via_webhook", {
         request_id_in: requestId,
         stripe_session_id_in: sessionId || null,
         stripe_payment_intent_in: paymentIntent || null,
+        booking_fee_cents_in: bookingFeeCents,
       });
   if (rpcErr) {
     // Surface the error so Stripe retries — it's likely a transient DB

@@ -60,6 +60,8 @@ type Snapshot = {
     sms_credits_sold: number;
     sms_credits_outstanding: number;
     sms_accounts_holding_credits: number;
+    booking_fee_revenue: number;
+    booking_fee_charges: number;
   };
   subscriptions: {
     total_braiders: number;
@@ -355,6 +357,10 @@ export default function AdminCommandCenter() {
               </p>
               <MetricRow label="MRR (est. at $14.99 / active sub)" value={usd(subs.mrr_estimate)} accent emphasis="strong" />
               <MetricRow label="Storefront platform fee" value={usd(rev.platform_fee)} />
+              <MetricRow
+                label="Booking fees charged"
+                value={`${usd(rev.booking_fee_revenue)} · ${num(rev.booking_fee_charges)}`}
+              />
               <MetricRow label="SMS credit revenue" value={usd(rev.sms_revenue)} />
               <MetricRow label="SMS credits sold" value={num(rev.sms_credits_sold)} />
               {/* Prepaid credits are collected up front and delivered
