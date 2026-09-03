@@ -11689,6 +11689,12 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         seriesId: a?.seriesId,
         multiDayGroupId: a?.multiDayGroupId ?? a?.multi_day_group_id ?? null,
         multiDaySessionLabel: a?.multiDaySessionLabel ?? null,
+        // Actual finish time the stylist logs against the service's
+        // preset Duration estimate — see the "Actual finish time" field
+        // below. Feeds a timerSessions row on save (same shape the Chair
+        // Timer produces) so it rolls into the existing Productivity tab
+        // without a separate reporting path.
+        actualEndTime: a?.actualEndTime ?? null,
         // Hair recipe carried from the pricing calculator. Rides through
         // the PATCH-style save and pre-fills the Materials-used sheet when
         // the appointment is marked completed.
@@ -12060,10 +12066,46 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       recurrenceIndex: form.recurrenceIndex ?? (isFirstInNewSeries ? 0 : form.recurrenceIndex),
       multiDayGroupId,
       multiDaySessionLabel: isNewMultiDaySplit ? "Day 1 of 2" : form.multiDaySessionLabel,
+      actualEndTime: form.actualEndTime || null,
     };
 
     const saved = await upsertAppointment(baseAppt);
     if (!saved) return; // Gated by upgrade sheet.
+
+    // Actual-finish-time logging: mirrors exactly what the Chair Timer
+    // would have recorded (same timerSessions shape), so a logged end
+    // time rolls into the SAME Productivity tab / "Time hogs" / Recent
+    // sessions rollup as a live-timed session — no separate reporting
+    // path to maintain. Keyed by appointmentId so re-saving with the
+    // same (or an edited) end time updates the one session in place
+    // instead of piling up duplicates.
+    if ((form.kind === "appointment" || !form.kind) && form.actualEndTime && form.date && form.time) {
+      const startDt = new Date(`${form.date}T${form.time}`);
+      let endDt = new Date(`${form.date}T${form.actualEndTime}`);
+      if (!isNaN(startDt.getTime()) && !isNaN(endDt.getTime())) {
+        if (endDt < startDt) endDt = new Date(endDt.getTime() + 86400000); // crossed midnight
+        const totalMs = endDt.getTime() - startDt.getTime();
+        const estimatedHours = Number(form.durationHours) || null;
+        const actualHr = totalMs / 3600000;
+        const totalPrice = Number(saved.totalPrice ?? form.totalPrice) || 0;
+        const existingSession = (store.timerSessions || []).find((s: any) => s.appointmentId === saved.id);
+        await store.upsertTimerSession({
+          id: existingSession?.id,
+          appointmentId: saved.id,
+          clientId: saved.clientId || form.clientId || null,
+          style: form.style || saved.style || "",
+          startedAt: startDt.toISOString(),
+          endedAt: endDt.toISOString(),
+          totalMs,
+          pausedMs: 0,
+          totalPrice,
+          hourlyEarned: actualHr > 0 ? totalPrice / actualHr : 0,
+          estimatedHours,
+          variance: estimatedHours ? (actualHr - estimatedHours) / estimatedHours : null,
+          notes: existingSession?.notes || "",
+        });
+      }
+    }
 
     // Reconcile account credit applied to this appointment's balance.
     // Idempotent: writes/clears the single redeem row for this appt and,
@@ -13460,6 +13502,35 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
                   { value: "cancelled", label: "Cancelled" },
                   { value: "no_show", label: "No-show" },
                 ]} />
+            </Field>
+          )}
+          {isAppointment && form.status === "completed" && form.id && !form.isAllDay && (
+            <Field
+              label="Actual finish time"
+              hint="Compares against your Duration estimate above"
+            >
+              <Input type="time" value={form.actualEndTime || ""} onChange={e => setForm({ ...form, actualEndTime: e.target.value })} />
+              {(() => {
+                if (!form.actualEndTime || !form.date || !form.time) return null;
+                const estHr = Number(form.durationHours) || 0;
+                if (estHr <= 0) return null;
+                const startDt = new Date(`${form.date}T${form.time}`);
+                let endDt = new Date(`${form.date}T${form.actualEndTime}`);
+                if (isNaN(startDt.getTime()) || isNaN(endDt.getTime())) return null;
+                if (endDt < startDt) endDt = new Date(endDt.getTime() + 86400000);
+                const actualHr = (endDt.getTime() - startDt.getTime()) / 3600000;
+                const variance = (actualHr - estHr) / estHr;
+                const overran = variance > 0.05;
+                const underran = variance < -0.05;
+                return (
+                  <p className="text-[11px] mt-1.5" style={{ color: overran ? C.warning : underran ? C.success : C.muted }}>
+                    {actualHr.toFixed(1)}h actual
+                    {overran && ` · ${Math.round(variance * 100)}% over your ${estHr}h estimate`}
+                    {underran && ` · ${Math.round(Math.abs(variance) * 100)}% under your ${estHr}h estimate`}
+                    {!overran && !underran && " · right on your estimate"}
+                  </p>
+                );
+              })()}
             </Field>
           )}
           {isAppointment && form.status === "no_show" && form.id && (
