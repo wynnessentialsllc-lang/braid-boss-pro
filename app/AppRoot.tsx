@@ -47,8 +47,10 @@ import {
 } from "./lib/analytics";
 import {
   DEFAULT_NOTIFICATION_PREFERENCES,
+  ACTIVATION_STEPS,
   type NotificationPreferences,
 } from "./lib/notification-rules";
+import { useActivationState } from "./lib/activation-state";
 import { runNotificationRules, splitDeliverable } from "./lib/notification-scheduler";
 import {
   type ReceiptRecord,
@@ -6038,7 +6040,145 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
   );
 };
 
-const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, openQuickClient, openQuickTx, openSettings, openInventory, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, cloudReady = true, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openReports?: (focus?: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openInventory?: () => void; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; cloudReady?: boolean; openAppointmentRecord?: (a: any) => void }) => {
+// Dashboard "finish setting up" checklist — reads ACTIVATION_STEPS in
+// lib/notification-rules, the exact same automatically-derived (never
+// manually toggled) five steps the day 1/3/7/14/21 email + push drip
+// reads, so the dashboard, the email, and the push nudge can never
+// disagree about what's left. Distinct from the older, self-reported
+// "Getting Started" checklist in Settings -> Support Center
+// (ONBOARDING_STEPS / useOnboardingProgress in lib/support.ts) — that
+// one tracks a different set of steps the stylist ticks off by hand;
+// this one reflects real account state and nothing else.
+//
+// Disappears entirely once every step is done — no dismiss button, no
+// stale nag. Held back until the once-ever welcome tour has already
+// been seen (or was never going to show, on a browser that already
+// cleared it), so a brand-new sign-in never gets two onboarding
+// surfaces competing for attention in the same glance.
+const ActivationChecklistCard = ({
+  userId, openSettings, openServices, openAvailability, openAccount,
+}: {
+  userId: string | null;
+  openSettings: () => void;
+  openServices?: () => void;
+  openAvailability?: () => void;
+  openAccount?: () => void;
+}) => {
+  const { state, loading } = useActivationState(userId);
+  const [tourSeen, setTourSeen] = useState(false);
+  useEffect(() => {
+    try { setTourSeen(window.localStorage.getItem(WELCOME_TOUR_KEY) === "1"); }
+    catch { setTourSeen(true); }
+  }, []);
+
+  if (!userId || loading || !state || !tourSeen) return null;
+  const doneCount = ACTIVATION_STEPS.filter((step) => step.done(state)).length;
+  if (doneCount >= ACTIVATION_STEPS.length) return null;
+  const percent = Math.round((doneCount / ACTIVATION_STEPS.length) * 100);
+
+  const actionFor = (key: string): (() => void) => {
+    switch (key) {
+      case "servicesCount": return openServices || openSettings;
+      case "hasOpenAvailability": return openAvailability || openSettings;
+      case "bookingLinkActive": return openAccount || openSettings;
+      default: return openSettings; // businessNameSet, stripeChargesEnabled
+    }
+  };
+
+  return (
+    <div>
+      <SectionTitle>Finish setting up</SectionTitle>
+      <Card className="p-4">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[13px] font-semibold" style={{ color: C.espresso }}>{percent}% complete</p>
+          <p className="text-[11.5px]" style={{ color: C.muted }}>{doneCount} / {ACTIVATION_STEPS.length}</p>
+        </div>
+        <div style={{ height: 8, background: C.hairline, borderRadius: 999, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${percent}%`, background: GRADIENTS.primary, transition: "width 220ms ease" }} />
+        </div>
+        <div className="mt-3 space-y-1.5">
+          {ACTIVATION_STEPS.map((step) => {
+            const isDone = step.done(state);
+            return (
+              <button
+                key={step.key}
+                type="button"
+                disabled={isDone}
+                onClick={() => {
+                  trackEvent("activation_nudge_clicked", { category: "activation", metadata: { surface: "dashboard_card", step: step.key } });
+                  actionFor(step.key)();
+                }}
+                className="w-full flex items-center gap-3 p-2.5 rounded-xl text-left"
+                style={{ background: C.ivory, border: `1px solid ${C.hairline}`, cursor: isDone ? "default" : "pointer" }}
+              >
+                <span aria-hidden style={{
+                  width: 22, height: 22, borderRadius: 999, flexShrink: 0,
+                  display: "grid", placeItems: "center",
+                  background: isDone ? GRADIENTS.primary : "transparent",
+                  border: isDone ? "none" : `1.5px solid ${C.muted}`,
+                  color: "#FFFFFF",
+                }}>
+                  {isDone && <Check size={13} />}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[13.5px] font-medium" style={{ color: isDone ? C.muted : C.espresso, textDecoration: isDone ? "line-through" : "none" }}>
+                    {step.title}
+                  </span>
+                  {!isDone && (
+                    <span className="block text-[12px] mt-0.5" style={{ color: C.muted, lineHeight: 1.4 }}>{step.body}</span>
+                  )}
+                </span>
+                {!isDone && <ChevronRight size={16} style={{ color: C.muted, flexShrink: 0 }} />}
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+// "Tip of the day" — a lightweight, always-on feature-education card
+// pulled from the same Braider Education Hub lessons that Settings ->
+// Braider Education Hub renders (see lib/braider-education-content), so
+// there is exactly one place lesson copy lives. Picked deterministically
+// by calendar day (not random) so it reads the same all day and changes
+// once at midnight. Runs independently of the checklist above — it
+// keeps rotating even after every setup step is done, since its job is
+// ongoing feature awareness for every braider, not onboarding.
+const ALL_EDUCATION_LESSONS: Array<{ category: string; lesson: EducationLesson }> =
+  EDUCATION_CATEGORIES.flatMap((cat) => cat.lessons.map((lesson) => ({ category: cat.name, lesson })));
+
+const dayOfYear = (d: Date): number => {
+  const start = new Date(d.getFullYear(), 0, 0);
+  return Math.floor((d.getTime() - start.getTime()) / 86_400_000);
+};
+
+const DailyTipCard = ({ onOpen }: { onOpen: () => void }) => {
+  if (ALL_EDUCATION_LESSONS.length === 0) return null;
+  const idx = dayOfYear(new Date()) % ALL_EDUCATION_LESSONS.length;
+  const { category, lesson } = ALL_EDUCATION_LESSONS[idx];
+  return (
+    <button
+      type="button"
+      onClick={() => { trackEvent("daily_tip_clicked", { category: "education", metadata: { lessonId: lesson.id } }); onOpen(); }}
+      className="w-full text-left active:scale-[0.99] transition"
+    >
+      <Card className="p-4" style={{ background: C.ivory, border: `1px solid ${C.hairline}` }}>
+        <div className="flex items-center gap-2 mb-1.5">
+          <span aria-hidden style={{ width: 26, height: 26, borderRadius: 999, display: "grid", placeItems: "center", background: GRADIENTS.primary, color: "#FFFFFF", flexShrink: 0 }}>
+            <Lightbulb size={13} />
+          </span>
+          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.goldDeep }}>Tip of the day · {category}</p>
+        </div>
+        <p className="text-[13.5px] font-semibold" style={{ color: C.espresso }}>{lesson.title}</p>
+        <p className="text-[12px] mt-1" style={{ color: C.muted, lineHeight: 1.45 }}>{lesson.tryThisWeek}</p>
+      </Card>
+    </button>
+  );
+};
+
+const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, openQuickClient, openQuickTx, openSettings, openServices, openAvailability, openAccount, openEducationHub, openInventory, openReminders, openPresets, openTimer, openCommunication, openAnalytics, notifBadgeCount = 0, syncState, cloudReady = true, openAppointmentRecord }: { store: any; setActive: any; goToMoney: (p: string) => void; openReports?: (focus?: string) => void; openQuickAppt: any; openQuickClient: any; openQuickTx: any; openSettings: any; openServices?: () => void; openAvailability?: () => void; openAccount?: () => void; openEducationHub?: () => void; openInventory?: () => void; openReminders: any; openPresets: any; openTimer: any; openCommunication?: (ctx: CommContext) => void; openAnalytics?: () => void; notifBadgeCount?: number; syncState?: SyncState; cloudReady?: boolean; openAppointmentRecord?: (a: any) => void }) => {
   const { business, appointments, transactions, photos, recurringSeries, clients = [] } = store;
   const today = todayISO();
 
@@ -6359,6 +6499,16 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
           currency={business.currency}
           cloudReady={cloudReady}
         />
+
+        <ActivationChecklistCard
+          userId={store.userId || null}
+          openSettings={openSettings}
+          openServices={openServices}
+          openAvailability={openAvailability}
+          openAccount={openAccount}
+        />
+
+        <DailyTipCard onOpen={openEducationHub || (() => setActive("studio"))} />
 
         {/* TODAY'S CHAIR — moved up to sit right under the welcome card,
             so "who's in the chair today" is the first thing you see
@@ -45204,6 +45354,9 @@ export default function App() {
   const handleNotificationTap = useCallback((n: NotifItem) => {
     notifications.markRead(n.id);
     setNotifOpen(false);
+    if (n.kind === "activation_setup") {
+      trackEvent("activation_nudge_clicked", { category: "activation", metadata: { surface: "in_app_bell" } });
+    }
     routeNotification(n.target, {
       appointments: store.appointments,
       setActive,
@@ -45255,6 +45408,16 @@ export default function App() {
     // Everything else reuses the bell's router, so a push and its
     // matching bell row land on exactly the same screen. PushTarget and
     // NotificationTarget are deliberate mirrors of one another.
+    //
+    // "educationHub" is currently only ever stamped by the activation
+    // drip (see getActivationNotifications / process_activation_nudges),
+    // so it doubles as a reliable signal here without threading the
+    // notification's own `kind` through the URL. If a future notification
+    // type reuses this target, split this into a dedicated target kind
+    // rather than letting the two clicks blur together.
+    if (target.kind === "educationHub") {
+      trackEvent("activation_nudge_clicked", { category: "activation", metadata: { surface: "push_or_email" } });
+    }
     routeNotification(target as NotificationTarget, {
       appointments: appointmentsRef.current,
       setActive,
@@ -45486,6 +45649,10 @@ export default function App() {
               openQuickClient={openQuickClient}
               openQuickTx={openQuickTx}
               openSettings={() => setSecondary("settings")}
+              openServices={() => setSecondary("services")}
+              openAvailability={() => setSecondary("availability")}
+              openAccount={() => setSecondary("account")}
+              openEducationHub={() => setSecondary("educationHub")}
               openInventory={() => { setInventoryBack("settings"); setSecondary("inventory"); }}
               openReminders={() => { setNotifOpen(true); notifications.markAllRead(); }}
               notifBadgeCount={notifications.unreadCount}
