@@ -3342,6 +3342,7 @@ const AppointmentRow = ({ appt, business, onClick, compact, recurringSeries }: {
               return <Pill tone="gold">{pct}% deposit</Pill>;
             })()}
             {series && <Pill tone="gold"><Repeat size={10} /> {cadenceLabel(series.cadence)}</Pill>}
+            {appt.multiDaySessionLabel && <Pill tone="gold"><CalendarPlus size={10} /> {appt.multiDaySessionLabel}</Pill>}
             {isLate && <Pill tone="danger">Late</Pill>}
           </div>
           <p style={{ fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600, color: C.espresso, lineHeight: 1.15 }} className="truncate">
@@ -3911,8 +3912,8 @@ const RebookingScreen = ({
   const [dismissOp, setDismissOp] = useState<RebookingOpportunity | null>(null);
 
   const opportunities = useMemo(
-    () => computeRebookingOpportunities(clients, appointments, today),
-    [clients, appointments, today],
+    () => computeRebookingOpportunities(clients, appointments, today, store.servicesApi?.services || []),
+    [clients, appointments, today, store.servicesApi?.services],
   );
 
   // Snooze / stop reminders for a client by flagging their record; the
@@ -6290,8 +6291,8 @@ const Dashboard = ({ store, setActive, goToMoney, openReports, openQuickAppt, op
   // urgency tiering. The dashboard card surfaces the top 3; the full
   // list lives at active === "rebooking".
   const rebookingOpportunities = useMemo(
-    () => computeRebookingOpportunities(clients, appointments, today),
-    [clients, appointments, today],
+    () => computeRebookingOpportunities(clients, appointments, today, store.servicesApi?.services || []),
+    [clients, appointments, today, store.servicesApi?.services],
   );
   const rebookingSummary = useMemo(
     () => summarizeOpportunities(rebookingOpportunities),
@@ -11427,6 +11428,17 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
   const [customDays, setCustomDays] = useState<string | number>(28);
   const [occurrences, setOccurrences] = useState<string | number>(6);
 
+  // Multi-day / split booking (e.g. a long install started one day,
+  // finished the next). Only offered on a brand-new appointment — once
+  // saved, form.multiDayGroupId is set and the read-only summary below
+  // takes over instead, so this never tries to re-split an existing
+  // booking. session 2 is created as a $0 calendar placeholder; all the
+  // price/deposit stays on session 1. See handleSave and
+  // 20261265000000_multi_day_appointments.sql.
+  const [multiDaySplit, setMultiDaySplit] = useState(false);
+  const [multiDaySecondDate, setMultiDaySecondDate] = useState("");
+  const [multiDaySecondTime, setMultiDaySecondTime] = useState("");
+
   // Reminders
   const [remindersEnabled, setRemindersEnabled] = useState(true);
   const [reminderChannel, setReminderChannel] = useState<EntityRecord | null>(null); // null = use default
@@ -11602,6 +11614,8 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         dependentName: a?.dependentName ?? null,
         id: a?.id,
         seriesId: a?.seriesId,
+        multiDayGroupId: a?.multiDayGroupId ?? a?.multi_day_group_id ?? null,
+        multiDaySessionLabel: a?.multiDaySessionLabel ?? null,
         // Hair recipe carried from the pricing calculator. Rides through
         // the PATCH-style save and pre-fills the Materials-used sheet when
         // the appointment is marked completed.
@@ -11616,6 +11630,9 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       setCadence(existingSeries?.cadence || "4w");
       setCustomDays(existingSeries?.customIntervalDays || 28);
       setOccurrences(existingSeries?.occurrencesPlanned || 6);
+      setMultiDaySplit(false);
+      setMultiDaySecondDate("");
+      setMultiDaySecondTime("");
       setRemindersEnabled(a?.remindersEnabled !== false);
       setReminderChannel(a?.reminderChannel || null);
       setSmsOptIn(!!a?.smsOptIn);
@@ -11909,6 +11926,12 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       seriesId = undefined;
     }
 
+    // Multi-day split: only offered (and only ever fires) on a brand-new
+    // appointment with no group yet — form.multiDayGroupId is set from
+    // here on, so this can't fire again on a later edit.
+    const isNewMultiDaySplit = multiDaySplit && !form.multiDayGroupId && !!multiDaySecondDate;
+    const multiDayGroupId = isNewMultiDaySplit ? `mdg_${uid()}` : (form.multiDayGroupId || undefined);
+
     // Guard: when a deposit was entered but no payment date is set,
     // stamp today. Without this the dashboard "Deposits (week)" KPI
     // and the per-appointment receipt PDF both miss the payment
@@ -11953,6 +11976,8 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       smsOptIn,
       isRecurringInstance: !!seriesId,
       recurrenceIndex: form.recurrenceIndex ?? (isFirstInNewSeries ? 0 : form.recurrenceIndex),
+      multiDayGroupId,
+      multiDaySessionLabel: isNewMultiDaySplit ? "Day 1 of 2" : form.multiDaySessionLabel,
     };
 
     const saved = await upsertAppointment(baseAppt);
@@ -12367,6 +12392,37 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         ...recurringSeries.find(s => s.id === seriesId),
         occurrencesGenerated: Number(occurrences),
       });
+    }
+
+    // Multi-day split: create the second session as a $0 calendar
+    // placeholder sharing session 1's multiDayGroupId. All the money
+    // (totalPrice/depositPaid) stays on session 1 — reusing the
+    // existing per-row deposit/balance math unchanged means nothing in
+    // revenue reporting needs to be taught about linked rows; this row
+    // simply contributes $0. The stylist marks the real balance
+    // collected on whichever session the client actually pays it on,
+    // same "mark paid" flow as any other appointment.
+    if (isNewMultiDaySplit) {
+      const day2 = await upsertAppointment({
+        clientId, clientName,
+        clientPhone: form.clientPhone, clientEmail: form.clientEmail,
+        style: form.style,
+        date: multiDaySecondDate, time: multiDaySecondTime || form.time,
+        durationHours: form.durationHours,
+        depositPaid: 0,
+        totalPrice: 0,
+        status: "scheduled",
+        notes: form.notes,
+        multiDayGroupId,
+        multiDaySessionLabel: "Day 2 of 2",
+        remindersEnabled,
+      });
+      if (day2) {
+        await scheduleRemindersForAppointment({
+          ...day2, remindersEnabled,
+          clientPhone: form.clientPhone, clientEmail: form.clientEmail,
+        });
+      }
     }
 
     // Inventory wire-up. When the stylist marks an appointment
@@ -14236,6 +14292,50 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         </Card>
         )}
 
+        {/* MULTI-DAY / SPLIT BOOKING — appointments only. A long install
+            started one day and finished the next: session 2 books as its
+            own $0 calendar placeholder linked to this one, sharing the
+            price/deposit already on this session. Once linked
+            (form.multiDayGroupId is set) this becomes a read-only summary
+            instead — the split only ever happens once. */}
+        {isAppointment && (
+        <Card className="p-4">
+          {form.multiDayGroupId ? (
+            <div className="flex items-center gap-2">
+              <CalendarPlus size={16} style={{ color: C.gold }} />
+              <span className="text-sm" style={{ color: C.espresso }}>
+                Part of a multi-day booking · {form.multiDaySessionLabel || "linked session"}
+              </span>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <CalendarPlus size={16} style={{ color: C.gold }} />
+                  <span className="font-semibold text-sm" style={{ color: C.espresso }}>Continues on another day</span>
+                </div>
+                <Toggle checked={multiDaySplit} onChange={setMultiDaySplit} />
+              </div>
+              {multiDaySplit && (
+                <div className="space-y-3 mt-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Day 2 date">
+                      <Input type="date" value={multiDaySecondDate} onChange={e => setMultiDaySecondDate(e.target.value)} />
+                    </Field>
+                    <Field label="Day 2 time">
+                      <Input type="time" value={multiDaySecondTime || form.time} onChange={e => setMultiDaySecondTime(e.target.value)} />
+                    </Field>
+                  </div>
+                  <p className="text-xs" style={{ color: C.muted }}>
+                    Adds a second session for the same client on the date above, linked to this one. The price and deposit stay on this session — mark the balance paid on whichever day the client actually pays it.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+        </Card>
+        )}
+
         {/* CLIENT NOTIFICATIONS — say yes/no to emailing the client about
             this booking or change, and see the contract that goes with it. */}
         {isAppointment && (
@@ -15130,14 +15230,16 @@ const ClientRebookingInsightCard = ({
   clientId,
   appointments,
   business,
+  services,
 }: {
   clientId: string;
   appointments: any[];
   business: any;
+  services?: any[];
 }) => {
   const insight = useMemo(
-    () => computeClientRebookingInsight(clientId, appointments, todayISO()),
-    [clientId, appointments],
+    () => computeClientRebookingInsight(clientId, appointments, todayISO(), services || []),
+    [clientId, appointments, services],
   );
   if (!insight) return null;
 
@@ -16731,6 +16833,7 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
                 clientId={form.id}
                 appointments={appointments}
                 business={business}
+                services={store.servicesApi?.services || []}
               />
             )}
             {form.id && (
@@ -22007,7 +22110,7 @@ const buildNotifications = (store: any): NotifItem[] => {
   // due-or-overdue client, but the bell stays conservative: it only
   // nudges once a client is clearly overdue (days_overdue >= 8, i.e.
   // medium/high urgency), never the moment they enter the style window.
-  const rebookDue = computeRebookingOpportunities(safeClients, safeAppts, today)
+  const rebookDue = computeRebookingOpportunities(safeClients, safeAppts, today, store.servicesApi?.services || [])
     .filter((o) => o.days_overdue >= 8)
     .slice(0, 3);
   for (const op of rebookDue) {

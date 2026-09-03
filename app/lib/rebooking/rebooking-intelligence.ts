@@ -12,10 +12,21 @@
 //   let us notice that a knotless client from 7 weeks ago is overdue
 //   even if she's only been in once. This module is now the single
 //   source of truth for rebooking across the app — the Rebooking
-//   opportunities card, the "Rebook due" retention tile, and the
-//   notification bell all read from it. (An older cadence-based
-//   `getRebookingCandidates` detector in page.tsx was retired once every
-//   surface moved here.)
+//   opportunities card, the "Rebook due" retention tile, the client
+//   profile's insight card, and the notification bell all read from it.
+//   (An older cadence-based `getRebookingCandidates` detector in
+//   page.tsx was retired once every surface moved here.)
+//
+// Two window sources, one precedence rule:
+//   A stylist can set services.rebook_after_weeks (Settings → Services)
+//   — the same field process_rebook_nudges() reads to auto-send the
+//   client-facing "time to refresh" email. Callers pass the live
+//   `services` array in and resolveRebookWeeks() prefers a service's
+//   configured window over the hardcoded STYLE_PATTERNS table below,
+//   so this card and that email can't recommend two different dates
+//   for the same style. A service with no configured window (or an
+//   appointment with no service link — a walk-in, an older record)
+//   falls back to matching the style name against STYLE_PATTERNS.
 
 // Match against the lower-cased trimmed style string. Order matters:
 // more specific phrases ("loc maintenance") must be tested before
@@ -50,6 +61,29 @@ export const recommendedRebookWeeks = (style: string | null | undefined): number
   return DEFAULT_REBOOK_WEEKS;
 };
 
+/**
+ * Same question as recommendedRebookWeeks, but a stylist-configured
+ * rebook_after_weeks on the appointment's service wins when it's set —
+ * the exact number the automated email nudge (process_rebook_nudges)
+ * already sends on. Without that, this is identical to
+ * recommendedRebookWeeks(style). Keeping both means every surface that
+ * shows a rebooking window (this in-app card, the client insight card,
+ * the notification bell, and the automated email) can agree once a
+ * stylist configures a service, while still working out of the box
+ * from style names for services nobody has configured yet.
+ */
+const resolveRebookWeeks = (
+  style: string | null | undefined,
+  serviceId: string | null | undefined,
+  servicesById: Map<string, ServiceLike>,
+): number => {
+  if (serviceId) {
+    const weeks = servicesById.get(String(serviceId))?.rebook_after_weeks;
+    if (typeof weeks === "number" && weeks > 0) return weeks;
+  }
+  return recommendedRebookWeeks(style);
+};
+
 export type RebookingUrgency = "low" | "medium" | "high";
 
 export type RebookingOpportunity = {
@@ -76,6 +110,25 @@ type ApptLike = {
   paymentStatus?: string;
   style?: string;
   totalPrice?: number | string;
+  serviceId?: string | null;
+};
+
+// A stylist-configured rebook window (Settings → Services), the same
+// field the automated rebook_after_weeks email nudge already reads
+// (see process_rebook_nudges in supabase/migrations). Optional — most
+// callers pass the live `services` array; tests and any caller with no
+// services handy simply fall back to the style-name table below.
+type ServiceLike = {
+  id?: string;
+  rebook_after_weeks?: number | null;
+};
+
+const buildServicesById = (services: ServiceLike[]): Map<string, ServiceLike> => {
+  const map = new Map<string, ServiceLike>();
+  for (const s of services) {
+    if (s && s.id != null) map.set(String(s.id), s);
+  }
+  return map;
 };
 
 type ClientLike = {
@@ -187,8 +240,10 @@ export const computeRebookingOpportunities = (
   clients: ClientLike[] = [],
   appointments: ApptLike[] = [],
   todayIso: string,
+  services: ServiceLike[] = [],
 ): RebookingOpportunity[] => {
   if (!Array.isArray(clients) || !Array.isArray(appointments)) return [];
+  const servicesById = buildServicesById(services);
 
   // Index appointments by clientId once. O(N) instead of O(N×M).
   const byClient = new Map<string, ApptLike[]>();
@@ -227,7 +282,7 @@ export const computeRebookingOpportunities = (
     const last = completed[0];
     const lastDate = last.date as string;
 
-    const weeks = recommendedRebookWeeks(last.style);
+    const weeks = resolveRebookWeeks(last.style, last.serviceId, servicesById);
     const windowDays = weeks * 7;
     const recommendedRebookDate = addDaysISO(lastDate, windowDays);
     const daysOverdue = daysBetweenISO(recommendedRebookDate, todayIso);
@@ -335,6 +390,7 @@ export const computeClientRebookingInsight = (
   clientId: string,
   appointments: ApptLike[],
   todayIso: string,
+  services: ServiceLike[] = [],
 ): ClientRebookingInsight | null => {
   if (!clientId || !Array.isArray(appointments)) return null;
 
@@ -349,7 +405,7 @@ export const computeClientRebookingInsight = (
   const last = completed[0];
   const lastDate = last.date as string;
 
-  const weeks = recommendedRebookWeeks(last.style);
+  const weeks = resolveRebookWeeks(last.style, last.serviceId, buildServicesById(services));
   const recommended = addDaysISO(lastDate, weeks * 7);
   const overdue = daysBetweenISO(recommended, todayIso);
 

@@ -102,6 +102,11 @@ const TABLE_COLUMNS: Record<SyncTable, ColumnMap> = {
     payment_notes: r => cleanString(r.paymentNotes),
     notes: r => cleanString(r.notes),
     series_id: r => cleanString(r.seriesId),
+    // Links the sessions of one multi-day/split booking (e.g. a long
+    // install started one day, finished the next). Shared across every
+    // session's row; distinct from series_id, which links independent
+    // recurring occurrences instead. See 20261265000000_multi_day_appointments.sql.
+    multi_day_group_id: r => cleanString(r.multiDayGroupId),
     discount_id: r => cleanString(r.discountId),
     discount_name: r => cleanString(r.discountName),
     discount_amount: r => (r.discountAmount == null ? null : cleanNumber(r.discountAmount)),
@@ -295,6 +300,7 @@ export const fromCloudRow = (table: SyncTable, row: any): any => {
       base.paymentNotes = base.paymentNotes ?? row.payment_notes;
       base.notes = base.notes ?? row.notes;
       base.seriesId = base.seriesId ?? row.series_id;
+      base.multiDayGroupId = base.multiDayGroupId ?? row.multi_day_group_id;
       base.discountId = base.discountId ?? row.discount_id;
       base.discountName = base.discountName ?? row.discount_name;
       base.discountAmount = base.discountAmount ?? row.discount_amount;
