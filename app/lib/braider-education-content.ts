@@ -746,6 +746,32 @@ export const EDUCATION_CATEGORIES: EducationCategory[] = [
           "Write 3-5 sentences for each of Shipping, Return, Refund and paste them into the Shop policies card. Then open your own cart and click the policies link below the Checkout button to confirm they show up.",
         relatedTool: "Shop → Products → Shipping → Shop policies",
       },
+      {
+        id: "set-service-rebook-window",
+        title: "How to set a custom rebooking reminder for a service",
+        readMinutes: 2,
+        body: [
+          "Every style has its own natural wear time — knotless braids don't need a refresh on the same clock as cornrows. Open Settings → Services & styles, edit a service, and find the \"Rebook nudge\" field. Enter how many weeks after this service a client is typically due back; leave it blank and that service just won't get an auto-nudge.",
+          "A suggested number appears next to the field for common style names (knotless, cornrows, locs, and more) — tap \"Use N weeks\" to accept it, or type your own. Nothing overwrites a number you've already set on purpose.",
+          "This one field drives everything: the automated email that goes out to the client on your behalf, the Rebooking Opportunities card you see in-app, the retention tile, and the notification bell all read the same window now — set it once here and every surface agrees.",
+        ],
+        tryThisWeek:
+          "Open your two or three most-booked services and set a Rebook nudge on each, using the suggested number as a starting point.",
+        relatedTool: "Settings → Services & styles → (edit a service) → Rebook nudge",
+      },
+      {
+        id: "book-multi-day-appointment",
+        title: "How to book an appointment that continues on another day",
+        readMinutes: 2,
+        body: [
+          "A long install doesn't always finish in one sitting. When you create a new appointment, look for \"Continues on another day\" right below \"Make recurring.\" Turn it on, pick the date (and time, if different) for day 2, and save — a linked second session is created automatically for the same client.",
+          "The price and deposit you entered stay on day 1; day 2 shows as its own $0 placeholder on your calendar so nothing gets double-counted in your revenue. Both sessions carry a gold \"Day 1 of 2\" / \"Day 2 of 2\" pill so you can spot them at a glance, and each gets its own reminder.",
+          "Mark the balance paid on whichever day the client actually pays it — day 1 if she pays up front, day 2 if she settles up once the style is finished. This only appears as an option on a brand-new appointment; once a booking is linked, editing it shows a read-only note instead so it can't accidentally split twice.",
+        ],
+        tryThisWeek:
+          "Next time you book a style that runs long, turn on \"Continues on another day\" instead of creating a second appointment by hand, and confirm both sessions show their Day 1/Day 2 pill on your calendar.",
+        relatedTool: "Calendar → New Appointment → Continues on another day",
+      },
     ],
   },
   {
