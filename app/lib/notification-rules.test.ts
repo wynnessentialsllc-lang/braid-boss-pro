@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   getAppointmentReminderNotifications,
+  getActivationNotifications,
   getRetentionNotifications,
   shouldSendNotification,
   formatNotificationPayload,
   DEFAULT_NOTIFICATION_PREFERENCES,
+  type ActivationState,
   type NotificationRule,
 } from "./notification-rules";
 import { decodeTargetUrl } from "./notification-target-url";
@@ -266,5 +268,89 @@ describe("getAppointmentReminderNotifications — date formatting", () => {
     expect(out[0].kind).toBe("appt_48h");
     expect(out[0].body).toBe("Boho Knotless Bob on 6/9/2026 at 9 AM.");
     expect(out[0].body).not.toContain("2026-06-09");
+  });
+});
+
+
+describe("getActivationNotifications", () => {
+  const FULLY_SET_UP: ActivationState = {
+    signupIso: "2026-06-01T00:00:00.000Z",
+    businessNameSet: true,
+    servicesCount: 3,
+    hasOpenAvailability: true,
+    bookingLinkActive: true,
+    stripeChargesEnabled: true,
+  };
+  // 2026-06-04T09:00 — 3 days after the fixture's signupIso.
+  const DAY_3 = new Date(2026, 5, 4, 9, 0, 0).getTime();
+
+  it("says nothing once every setup step is done", () => {
+    const out = getActivationNotifications(FULLY_SET_UP, DEFAULT_NOTIFICATION_PREFERENCES, DAY_3);
+    expect(out).toHaveLength(0);
+  });
+
+  it("surfaces only the single next step, not the whole checklist", () => {
+    const out = getActivationNotifications(
+      { ...FULLY_SET_UP, servicesCount: 0, stripeChargesEnabled: false },
+      DEFAULT_NOTIFICATION_PREFERENCES,
+      DAY_3,
+    );
+    expect(out).toHaveLength(1);
+    // Services comes before Stripe in the fixed step order, so with both
+    // incomplete it names services, not Stripe.
+    expect(out[0].title).toBe("Add your first service");
+  });
+
+  it("advances to the next step once the first is done", () => {
+    const out = getActivationNotifications(
+      { ...FULLY_SET_UP, hasOpenAvailability: false, stripeChargesEnabled: false },
+      DEFAULT_NOTIFICATION_PREFERENCES,
+      DAY_3,
+    );
+    expect(out[0].title).toBe("Set your open days");
+  });
+
+  it("deep-links into the Braider Education Hub", () => {
+    const out = getActivationNotifications(
+      { ...FULLY_SET_UP, businessNameSet: false },
+      DEFAULT_NOTIFICATION_PREFERENCES,
+      DAY_3,
+    );
+    const payload = formatNotificationPayload(out[0]);
+    expect(decodeTargetUrl(payload.data.url, ORIGIN)).toEqual({ kind: "educationHub" });
+  });
+
+  it("says nothing before day 1 or with no signup date on file", () => {
+    const sameDay = new Date(2026, 5, 1, 0, 0, 1).getTime();
+    expect(
+      getActivationNotifications({ ...FULLY_SET_UP, servicesCount: 0 }, DEFAULT_NOTIFICATION_PREFERENCES, sameDay),
+    ).toHaveLength(0);
+    expect(
+      getActivationNotifications(
+        { ...FULLY_SET_UP, servicesCount: 0, signupIso: null },
+        DEFAULT_NOTIFICATION_PREFERENCES,
+        DAY_3,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("stops nagging once the coaching window has passed", () => {
+    // 25 days after signup — past the 21-day window.
+    const day25 = new Date(2026, 5, 26, 9, 0, 0).getTime();
+    const out = getActivationNotifications(
+      { ...FULLY_SET_UP, servicesCount: 0 },
+      DEFAULT_NOTIFICATION_PREFERENCES,
+      day25,
+    );
+    expect(out).toHaveLength(0);
+  });
+
+  it("respects the businessInsights preference toggle", () => {
+    const out = getActivationNotifications(
+      { ...FULLY_SET_UP, servicesCount: 0 },
+      { ...DEFAULT_NOTIFICATION_PREFERENCES, businessInsights: false },
+      DAY_3,
+    );
+    expect(out).toHaveLength(0);
   });
 });

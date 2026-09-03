@@ -41,6 +41,9 @@ import {
 // Month in review. Same _shared arrangement as the lifecycle mail so the
 // dev preview route and the unit tests render the exact markup sent here.
 import { renderMonthlyReview } from "../_shared/monthly-review-email.ts";
+// Activation nudge (onboarding "setup steps left" checkpoint mail). Same
+// _shared arrangement as the other report/lifecycle mail.
+import { renderActivationNudge } from "../_shared/activation-nudge-email.ts";
 
 // =====================================================================
 // Env
@@ -75,6 +78,7 @@ const OWNER_FACING_NOTIFICATION_TYPES = new Set<string>([
   "review_received",
   "daily_sales_summary",
   "monthly_review",
+  "activation_nudge",
   "founding_welcome",
   // Account + billing lifecycle (see _shared/lifecycle-emails.ts). These
   // go TO the stylist about her own account, so the From name is the
@@ -2494,6 +2498,42 @@ const numOrNull = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+// ---- activation_nudge (owner onboarding checkpoint) -------------------
+// Adapter over the shared renderer in _shared/activation-nudge-email.ts.
+// The queue row's payload is untyped jsonb built by the SQL side that
+// decides which checkpoint day this is and what's still incomplete, so
+// every field is read defensively rather than trusted as typed.
+const asActivationSteps = (v: unknown) =>
+  (Array.isArray(v) ? v : [])
+    .map((it: any) => ({
+      key: String(it?.key ?? ""),
+      done: Boolean(it?.done),
+      title: String(it?.title ?? ""),
+      body: String(it?.body ?? ""),
+      actionUrl: String(it?.actionUrl ?? ""),
+      lessonUrl: String(it?.lessonUrl ?? ""),
+    }))
+    .filter((it) => it.key !== "" && it.title !== "") as Array<{
+      key: "businessName" | "services" | "availability" | "stripe" | "bookingLink";
+      done: boolean;
+      title: string;
+      body: string;
+      actionUrl: string;
+      lessonUrl: string;
+    }>;
+
+const renderActivationNudgeRow = (p: Record<string, any>): Rendered => {
+  const base = lifecycleBase(p);
+  return renderActivationNudge({
+    firstName: p.firstName ?? null,
+    studioName: p.studioName ?? null,
+    daysSinceStart: Number(p.daysSinceStart) || 0,
+    steps: asActivationSteps(p.steps),
+    dashboardUrl: p.dashboardUrl ?? null,
+    baseUrl: base,
+  });
+};
+
 // ---- monthly_review (owner month in review) -------------------------
 // Adapter over the shared renderer in _shared/monthly-review-email.ts.
 // The queue row carries only data, so this maps jsonb into the
@@ -2760,6 +2800,8 @@ const renderForRow = (row: ClaimedRow): Rendered => {
       return renderDailySalesSummary(row.payload || {});
     case "monthly_review":
       return renderMonthlyReviewRow(row.payload || {});
+    case "activation_nudge":
+      return renderActivationNudgeRow(row.payload || {});
     default:
       return renderGeneric(row);
   }

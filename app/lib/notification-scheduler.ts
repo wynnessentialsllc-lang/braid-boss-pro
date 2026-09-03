@@ -7,10 +7,12 @@
 
 import {
   getAppointmentReminderNotifications,
+  getActivationNotifications,
   getBalanceDueNotifications,
   getRetentionNotifications,
   getBusinessInsightNotifications,
   shouldSendNotification,
+  type ActivationState,
   type NotificationRule,
   type NotificationPreferences,
 } from "./notification-rules";
@@ -23,6 +25,13 @@ export type SchedulerInput = {
   preferences: NotificationPreferences;
   vipThreshold?: number;
   deliveredHistory?: Record<string, string>;
+  /**
+   * Setup-progress signals for the activation nudge. Optional: the
+   * caller only has these when it has already loaded the profile row
+   * (client) or queried it (the server sweep). Omitting it entirely
+   * skips the generator rather than firing on guessed defaults.
+   */
+  activation?: ActivationState | null;
 };
 
 const PRIORITY_RANK: Record<NotificationRule["priority"], number> = {
@@ -62,6 +71,7 @@ export const runNotificationRules = (input: SchedulerInput): NotificationRule[] 
     ...getBalanceDueNotifications(appointments, todayIso, preferences),
     ...getRetentionNotifications(clients, appointments, todayIso, preferences, vipThreshold),
     ...getBusinessInsightNotifications({ appointments, today: todayIso }, preferences),
+    ...(input.activation ? getActivationNotifications(input.activation, preferences, nowMs) : []),
   ];
 
   // Dedup by id first (id collisions are rare but possible across

@@ -21557,7 +21557,12 @@ export type NotificationTarget =
   | { kind: "booking_approval"; requestId: string }
   | { kind: "email_log"; queueId: string }
   | { kind: "campaign_recipients"; groupId: string }
-  | { kind: "contract_view"; contractId: string };
+  | { kind: "contract_view"; contractId: string }
+  | { kind: "educationHub" }
+  | { kind: "services" }
+  | { kind: "availability" }
+  | { kind: "settings" }
+  | { kind: "account" };
 
 type NotifItem = {
   id: string;
@@ -22333,6 +22338,21 @@ const routeNotification = (
       break;
     case "clientsTab":
       ctx.setActive("clients");
+      break;
+    case "educationHub":
+      ctx.setSecondary("educationHub");
+      break;
+    case "services":
+      ctx.setSecondary("services");
+      break;
+    case "availability":
+      ctx.setSecondary("availability");
+      break;
+    case "settings":
+      ctx.setSecondary("settings");
+      break;
+    case "account":
+      ctx.setSecondary("account");
       break;
     case "booking_approval": {
       // Stash the request id so the Approvals queue can scroll to and
@@ -34815,6 +34835,19 @@ const SubscriptionStatusCard = ({
     );
   }
 
+  // Signed up, the 30-day trial period has passed, and they never
+  // converted to a paid Stripe subscription — distinct from never
+  // having had a subscription at all. Same CTA/checkout flow as the
+  // never-subscribed fallback below, different surrounding copy.
+  const trialExpired = membership.trialExpired;
+  const headline = trialExpired
+    ? "Your free trial ended"
+    : `${SUBSCRIPTION_TRIAL_DAYS}-day free trial, then ${SUBSCRIPTION_PRICE_LABEL}`;
+  const blurb = trialExpired
+    ? "Subscribe to keep adding new clients and appointments. Everything you already have is still right here — nothing was deleted."
+    : "Every feature unlocked — unlimited clients, reminders, marketing, storefront, and more. No contracts. Cancel anytime.";
+  const ctaLabel = trialExpired ? "Subscribe now" : `Start ${SUBSCRIPTION_TRIAL_DAYS}-day free trial`;
+
   return (
     <Card className="p-4">
       <div className="flex items-center gap-3 mb-3">
@@ -34832,12 +34865,12 @@ const SubscriptionStatusCard = ({
             Braid Boss Pro
           </p>
           <p className="text-sm font-semibold mt-0.5" style={{ color: C.espresso }}>
-            {SUBSCRIPTION_TRIAL_DAYS}-day free trial, then {SUBSCRIPTION_PRICE_LABEL}
+            {headline}
           </p>
         </div>
       </div>
       <p className="text-[11px] mb-3" style={{ color: C.muted }}>
-        Every feature unlocked — unlimited clients, reminders, marketing, storefront, and more. No contracts. Cancel anytime.
+        {blurb}
       </p>
       {isNative ? (
         <NativePlanNotice />
@@ -34860,7 +34893,7 @@ const SubscriptionStatusCard = ({
               boxShadow: "0 8px 20px -10px rgba(91, 33, 182, 0.6)",
             }}
           >
-            {busy ? "Starting…" : `Start ${SUBSCRIPTION_TRIAL_DAYS}-day free trial`}
+            {busy ? "Starting…" : ctaLabel}
           </button>
           {err && <p className="text-[11px] mt-2 text-center" style={{ color: C.danger }}>{err}</p>}
         </>
@@ -34870,11 +34903,16 @@ const SubscriptionStatusCard = ({
 };
 
 const UpgradeSheet = ({
-  feature, userId, mode, onClose, onSignInPrompt,
+  feature, userId, mode, trialExpired, onClose, onSignInPrompt,
 }: {
   feature: GatedFeature | null;
   userId: string | null;
   mode: AuthMode;
+  // Signed-in user whose 30-day trial period has passed without
+  // converting to a paid subscription (subscription_status is still
+  // 'trialing' but subscription_current_period_end is in the past).
+  // Distinct from simply being at a numeric guest/free-plan limit.
+  trialExpired?: boolean;
   onClose: () => void;
   onSignInPrompt: () => void;
 }) => {
@@ -34887,11 +34925,20 @@ const UpgradeSheet = ({
   const [subError, setSubError] = useState<string | null>(null);
   const [subPlan, setSubPlan] = useState<SubscriptionPlan>("monthly");
   const isNative = useIsNativePlatform();
-  // Signed-in accounts aren't "guests" — they're on the free plan. Only
-  // true guest sessions see the "guest workspace" wording.
-  const headline = mode === "authed"
-    ? "You've reached the limits of the free plan."
-    : UPGRADE_HEADLINE;
+  // Three distinct cases:
+  //  - Guest (never signed in): existing "guest workspace" wording.
+  //  - Authed, trial expired: new copy — nothing was deleted, they just
+  //    need to subscribe to add anything new.
+  //  - Authed, on the free plan / at a numeric guest-limit cap: existing
+  //    "free plan limits" wording.
+  const headline = trialExpired
+    ? "Your 30-day free trial has ended."
+    : mode === "authed"
+      ? "You've reached the limits of the free plan."
+      : UPGRADE_HEADLINE;
+  const body = trialExpired
+    ? "Nothing was deleted — every client, appointment, and record you already have is still right here. Subscribe to keep adding new ones."
+    : UPGRADE_BODY;
 
   return (
     <Sheet open={open} onClose={onClose} title="Braid Boss Pro">
@@ -34918,13 +34965,17 @@ const UpgradeSheet = ({
         >
           ✨ {headline}
         </p>
-        {limit !== null && (
+        {/* This "why you're seeing this" line is about the numeric
+            guest/free-plan cap — it doesn't apply (and would be
+            misleading) once the block is because the trial ended, since
+            that blocks regardless of how many records they have. */}
+        {!trialExpired && limit !== null && (
           <p className="mt-2" style={{ color: C.muted, fontSize: 13 }}>
             {featureName} are capped at {limit} on the free workspace.
           </p>
         )}
         <p className="mt-3" style={{ color: C.coffee, fontSize: 14, lineHeight: 1.5 }}>
-          {UPGRADE_BODY}
+          {body}
         </p>
 
         {/* Four pillar chips — one-time / lifetime / future upgrades /
@@ -44542,7 +44593,7 @@ export default function App() {
     }
   }, [auth.mode, authIntent]);
   const rawStore = useStorage();
-  const { premium } = usePremiumStatus(auth.userId);
+  const { premium, trialExpired } = usePremiumStatus(auth.userId);
   const discountsApi = useDiscounts(auth.userId);
   const servicesApi = useServices(auth.userId);
   const serviceCategoriesApi = useServiceCategories(auth.userId);
@@ -44636,7 +44687,12 @@ export default function App() {
       fn: (rec: any, ...rest: Args) => R,
     ) => async (rec: any, ...rest: Args): Promise<R | null> => {
       const isNew = !rec || typeof rec !== "object" || !rec.id;
-      if (isNew && hasReachedGuestLimit(feature, list?.length ?? 0, premium)) {
+      // Blocked once EITHER the numeric guest limit is hit, OR the
+      // signed-in user's free trial has lapsed without converting to a
+      // paid subscription — the latter blocks regardless of how many
+      // records they already have (their existing data stays readable
+      // and editable; only creating something new is gated).
+      if (isNew && (trialExpired || hasReachedGuestLimit(feature, list?.length ?? 0, premium))) {
         requestUpgrade(feature);
         return null;
       }
@@ -44674,7 +44730,7 @@ export default function App() {
         const billable = (rawStore.appointments as any[])
           .filter(a => !a?.kind || a.kind === "appointment");
         const isNew = !rec || typeof rec !== "object" || !rec.id;
-        if (isNew && hasReachedGuestLimit("appointments", billable.length, premium)) {
+        if (isNew && (trialExpired || hasReachedGuestLimit("appointments", billable.length, premium))) {
           requestUpgrade("appointments");
           return null;
         }
@@ -44683,7 +44739,7 @@ export default function App() {
       upsertTransaction: gateNew("transactions", rawStore.transactions, rawStore.upsertTransaction),
       upsertQuote: gateNew("calculations", rawStore.quotes, rawStore.upsertQuote),
     };
-  }, [rawStore, auth.userId, auth.email, premium, requestUpgrade, shopOrders, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, clientReviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi, messagesApi, intakeFormApi, packagesApi]);
+  }, [rawStore, auth.userId, auth.email, premium, trialExpired, requestUpgrade, shopOrders, discountsApi, servicesApi, serviceCategoriesApi, reviewsApi, clientReviewsApi, productsApi, policiesApi, availabilityApi, waitlistApi, approvalsApi, messagesApi, intakeFormApi, packagesApi]);
 
   const sync = useCloudSync(auth.userId, store);
 
@@ -44776,6 +44832,38 @@ export default function App() {
         // wipes localStorage during a long idle period (the cause of the
         // re-appearing pop-ups).
         const history = await loadDeliveredHistoryRemote(auth.userId!);
+        // Activation-nudge signals. Services and availability are already
+        // loaded in this component (servicesApi/availabilityApi feed the
+        // store above); the booking link and signup date aren't, so they
+        // get one small extra query here rather than threading state down
+        // from the screens that own them.
+        let activation: Parameters<typeof runNotificationRules>[0]["activation"] = null;
+        try {
+          const [{ data: profileRow }, { count: linkCount }] = await Promise.all([
+            supabase
+              .from("profiles")
+              .select("business_name, full_name, subscription_started_at, stripe_connect_charges_enabled")
+              .eq("id", auth.userId)
+              .maybeSingle(),
+            supabase
+              .from("booking_links")
+              .select("id", { count: "exact", head: true })
+              .eq("user_id", auth.userId)
+              .eq("active", true),
+          ]);
+          if (profileRow) {
+            activation = {
+              signupIso: (profileRow as any).subscription_started_at ?? null,
+              businessNameSet: !!((profileRow as any).business_name || (profileRow as any).full_name),
+              servicesCount: servicesApi.services.length,
+              hasOpenAvailability: availabilityApi.rules.some((r) => r.is_open),
+              bookingLinkActive: (linkCount ?? 0) > 0,
+              stripeChargesEnabled: (profileRow as any).stripe_connect_charges_enabled === true,
+            };
+          }
+        } catch {
+          activation = null; // best-effort — the reminder scheduler still runs without it
+        }
         const rules = runNotificationRules({
           clients: store.clients,
           appointments: store.appointments,
@@ -44783,6 +44871,7 @@ export default function App() {
           nowMs: Date.now(),
           preferences: prefs,
           deliveredHistory: history,
+          activation,
         });
         const { toSend } = splitDeliverable(rules, history, new Date());
         // Authoritative re-check against the DB so a cancellation made
@@ -45788,6 +45877,7 @@ export default function App() {
         feature={upgradeFor}
         userId={auth.userId}
         mode={auth.mode}
+        trialExpired={trialExpired}
         onClose={closeUpgrade}
         onSignInPrompt={() => { closeUpgrade(); setSecondary("account"); }}
       />

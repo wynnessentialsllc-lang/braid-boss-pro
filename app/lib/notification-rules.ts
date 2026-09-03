@@ -322,6 +322,102 @@ export const getBusinessInsightNotifications = (
   return out;
 };
 
+// A stylist who signed up but never finished setting up her business
+// has nothing else in this file to tell her that: appointment/balance/
+// retention nudges all depend on having at least one client or booking,
+// which is exactly what she doesn't have yet. This is the one generator
+// that looks at SETUP progress rather than booking activity, and it is
+// the thing that turns "signed up" into "actually running her book."
+//
+// Deliberately data-driven, same rule as the email side (see
+// process_activation_nudges in the DB): if nothing is left to finish,
+// this returns [] and says nothing at all — a fully set-up account
+// should never see a nag it has already outgrown. When something IS
+// left, it surfaces only the single next step (not the whole list),
+// because a checklist of five things reads as homework and a checklist
+// of one reads as a next tap.
+export type ActivationState = {
+  /** ISO timestamp of when this account's trial/account started. Null skips the generator entirely — no reliable "how long have they had this" to reason from. */
+  signupIso: string | null;
+  businessNameSet: boolean;
+  servicesCount: number;
+  hasOpenAvailability: boolean;
+  bookingLinkActive: boolean;
+  stripeChargesEnabled: boolean;
+};
+
+const ACTIVATION_STEPS: Array<{
+  key: keyof Omit<ActivationState, "signupIso">;
+  done: (s: ActivationState) => boolean;
+  title: string;
+  body: string;
+}> = [
+  {
+    key: "businessNameSet",
+    done: (s) => s.businessNameSet,
+    title: "Add your business name",
+    body: "Clients see this on every booking page and receipt. Takes ten seconds in Settings.",
+  },
+  {
+    key: "servicesCount",
+    done: (s) => s.servicesCount > 0,
+    title: "Add your first service",
+    body: "Set a price and length for one style. You can add the rest later — one is enough to start taking bookings.",
+  },
+  {
+    key: "hasOpenAvailability",
+    done: (s) => s.hasOpenAvailability,
+    title: "Set your open days",
+    body: "Pick the days and hours clients can actually book you.",
+  },
+  {
+    key: "stripeChargesEnabled",
+    done: (s) => s.stripeChargesEnabled,
+    title: "Connect Stripe",
+    body: "This is how deposits and payments land in your own account. Braid Boss Pro never holds your money.",
+  },
+  {
+    key: "bookingLinkActive",
+    done: (s) => s.bookingLinkActive,
+    title: "Turn on your booking link",
+    body: "This is the link you actually share. Nothing above matters to a client until this is live.",
+  },
+];
+
+// Coaching window only — past this many days since signup the trial is
+// either converted or nearly over, and a different message (trial
+// ending) is the more useful one. Stop nagging rather than compete
+// with it.
+const ACTIVATION_NUDGE_WINDOW_DAYS = 21;
+
+export const getActivationNotifications = (
+  state: ActivationState,
+  prefs: NotificationPreferences,
+  nowMs: number,
+): NotificationRule[] => {
+  if (!prefs.businessInsights) return [];
+  if (!state.signupIso) return [];
+  const signupMs = new Date(state.signupIso).getTime();
+  if (!isFinite_(signupMs)) return [];
+  const daysSinceSignup = Math.floor((nowMs - signupMs) / 86_400_000);
+  if (daysSinceSignup < 1 || daysSinceSignup > ACTIVATION_NUDGE_WINDOW_DAYS) return [];
+
+  const next = ACTIVATION_STEPS.find((step) => !step.done(state));
+  if (!next) return [];
+
+  return [{
+    id: "activation_setup",
+    kind: "activation_setup",
+    category: "business",
+    priority: "medium",
+    title: next.title,
+    body: next.body,
+    action: { label: "Open the setup guide", target: "tab:educationHub" },
+  }];
+};
+
+// ---- scheduling / dedup ------------------------------------------------
+
 // ---- scheduling / dedup ------------------------------------------------
 
 // Has this exact rule id been delivered recently (e.g. last 12 hours)?
@@ -376,6 +472,8 @@ export const formatNotificationPayload = (rule: NotificationRule): {
     target = { kind: "schedule" };
   } else if (rule.action?.target === "tab:clients") {
     target = { kind: "clientsTab" };
+  } else if (rule.action?.target === "tab:educationHub") {
+    target = { kind: "educationHub" };
   }
   const url = encodeTargetUrl(target);
   return {

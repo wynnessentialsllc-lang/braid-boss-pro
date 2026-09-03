@@ -59,6 +59,30 @@ const LIVE_SUBSCRIPTION_STATUSES = new Set(["trialing", "active", "past_due"]);
 export const isSubscriptionActive = (status: string | null | undefined): boolean =>
   !!status && LIVE_SUBSCRIPTION_STATUSES.has(status);
 
+// A signup gets a 30-day trial with no card on file: subscription_status
+// is written as 'trialing' with subscription_current_period_end set to
+// the trial cutoff. If that date has passed and the status is STILL
+// 'trialing' (i.e. they never converted to a paid Stripe subscription,
+// which would have moved the status to 'active'), the trial has lapsed.
+//
+// Only 'trialing' is subject to this cutoff — an 'active' subscriber's
+// period_end is just their next billing-cycle rollover, not an access
+// cutoff, so a past period_end on any other status never counts as
+// "expired" here.
+//
+// An unparseable/missing period end is NOT treated as expired — that's
+// the safe default (never punish someone before they even have a period
+// end recorded).
+export const isTrialExpired = (
+  status: string | null | undefined,
+  currentPeriodEnd: string | null | undefined,
+): boolean => {
+  if (status !== "trialing" || !currentPeriodEnd) return false;
+  const endMs = new Date(currentPeriodEnd).getTime();
+  if (Number.isNaN(endMs)) return false;
+  return endMs < Date.now();
+};
+
 export type AuthMode = "loading" | "guest" | "authed";
 
 export const isGuestUser = (mode: AuthMode | undefined | null): boolean =>
@@ -67,6 +91,35 @@ export const isGuestUser = (mode: AuthMode | undefined | null): boolean =>
 export const hasLifetimeAccess = (
   profile: { lifetime_access?: boolean | null } | null | undefined,
 ): boolean => !!profile?.lifetime_access;
+
+// Overall access read, folding lifetime/founding grants and subscription
+// status (including the trial-expiry cutoff above) into one shape a
+// caller can act on: `premium` gates feature access, `trialExpired`
+// specifically flags the "signed up, trial lapsed, never converted"
+// state so callers can show different copy / block record creation
+// even though `premium` alone already covers the access decision.
+export type AccessState = { premium: boolean; trialExpired: boolean };
+
+export type AccessProfile = {
+  lifetime_access?: boolean | null;
+  founding_access?: boolean | null;
+  subscription_status?: string | null;
+  subscription_current_period_end?: string | null;
+};
+
+export const computeAccessState = (
+  profile: AccessProfile | null | undefined,
+): AccessState => {
+  const trialExpired = isTrialExpired(
+    profile?.subscription_status,
+    profile?.subscription_current_period_end,
+  );
+  const premium =
+    hasLifetimeAccess(profile) ||
+    !!profile?.founding_access ||
+    (isSubscriptionActive(profile?.subscription_status) && !trialExpired);
+  return { premium, trialExpired };
+};
 
 // Generic limit check. `count` is the live entity count (clients.length etc.).
 // Returns true if creating one MORE would exceed the limit and the user
@@ -119,15 +172,20 @@ const writeCachedLifetime = (userId: string, unlocked: boolean): void => {
 
 export const usePremiumStatus = (
   userId: string | null,
-): { premium: boolean; loading: boolean } => {
+): { premium: boolean; loading: boolean; trialExpired: boolean } => {
   const [premium, setPremium] = useState<boolean>(() =>
     userId ? readCachedLifetime(userId) : false,
   );
+  // No cached fast-path for this one — until the DB read resolves we
+  // default to "not expired" (the safe default: never punish before we
+  // know).
+  const [trialExpired, setTrialExpired] = useState<boolean>(false);
   const [loading, setLoading] = useState(!!userId);
 
   useEffect(() => {
     if (!userId) {
       setPremium(false);
+      setTrialExpired(false);
       setLoading(false);
       return;
     }
@@ -139,18 +197,17 @@ export const usePremiumStatus = (
       try {
         const { getSupabase } = await import("./supabase");
         const supabase = getSupabase();
-        // Access = grandfathered lifetime/founding OR a live subscription.
+        // Access = grandfathered lifetime/founding OR a live subscription
+        // that hasn't run past its trial cutoff.
         const { data } = await supabase
           .from("profiles")
-          .select("lifetime_access, founding_access, subscription_status")
+          .select("lifetime_access, founding_access, subscription_status, subscription_current_period_end")
           .eq("id", userId)
           .maybeSingle();
         if (cancelled) return;
-        const next =
-          !!data?.lifetime_access ||
-          !!data?.founding_access ||
-          isSubscriptionActive(data?.subscription_status);
+        const { premium: next, trialExpired: expired } = computeAccessState(data);
         setPremium(next);
+        setTrialExpired(expired);
         writeCachedLifetime(userId, next);
       } finally {
         if (!cancelled) setLoading(false);
@@ -174,5 +231,5 @@ export const usePremiumStatus = (
     };
   }, [userId]);
 
-  return { premium, loading };
+  return { premium, loading, trialExpired };
 };

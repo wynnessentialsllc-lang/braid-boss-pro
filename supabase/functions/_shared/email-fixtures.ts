@@ -21,6 +21,7 @@ import {
   renderWelcome,
 } from "./lifecycle-emails.ts";
 import { renderMonthlyReview } from "./monthly-review-email.ts";
+import { renderActivationNudge, type ActivationStep } from "./activation-nudge-email.ts";
 import type { RenderedEmail } from "./email-kit.ts";
 
 export type Fixture = {
@@ -36,6 +37,7 @@ export type Fixture = {
     | "5. Subscription confirmed"
     | "6. Payment failed"
     | "7. Month in review"
+    | "8. Activation nudge"
     | "Other auth emails";
   /** What this fixture is here to prove. */
   note: string;
@@ -118,6 +120,66 @@ const MONTH_FULL = {
 const LONG_STUDIO = "Crowned & Coiled Protective Styling Studio of Greater Los Angeles";
 const LONG_SERVICE =
   "Waist Length Boho Knotless Braids with Human Hair Curls and Scalp Treatment";
+
+// Setup steps for the activation nudge. Copy and deep links mirror the
+// app's own setup flow (see SETUP_STEPS in lifecycle-emails.ts) and the
+// four "setup-page" lessons in app/lib/braider-education-content.ts —
+// the query params are illustrative only, not load-bearing for the
+// renderer, which just places them in hrefs.
+const ACTIVATION_STEP_CONTENT: Record<
+  ActivationStep["key"],
+  Omit<ActivationStep, "key" | "done">
+> = {
+  businessName: {
+    title: "Add your business name",
+    body: "Clients see this on your booking page and in every email you send them.",
+    actionUrl: "https://braidbosspro.app/?n=settings",
+    lessonUrl: "https://braidbosspro.app/?n=educationHub&lesson=customize-booking-page",
+  },
+  services: {
+    title: "Add your first service",
+    body: "Set a price, duration, and deposit so clients can actually book you.",
+    actionUrl: "https://braidbosspro.app/?n=services",
+    lessonUrl: "https://braidbosspro.app/?n=educationHub&lesson=build-services-menu",
+  },
+  availability: {
+    title: "Set your availability",
+    body: "Choose the days and hours you want clients to see open.",
+    actionUrl: "https://braidbosspro.app/?n=availability",
+    lessonUrl: "https://braidbosspro.app/?n=educationHub&lesson=set-availability",
+  },
+  stripe: {
+    title: "Connect Stripe",
+    body: "Let deposits and payments go straight to your bank account.",
+    actionUrl: "https://braidbosspro.app/?n=stripeConnect",
+    lessonUrl: "https://braidbosspro.app/?n=educationHub&lesson=connect-stripe",
+  },
+  bookingLink: {
+    title: "Claim your booking link",
+    body: "Get a shareable link for Instagram, TikTok, and anywhere clients find you.",
+    actionUrl: "https://braidbosspro.app/?n=bookingPage",
+    lessonUrl: "https://braidbosspro.app/?n=educationHub&lesson=customize-booking-page",
+  },
+};
+
+const ACTIVATION_STEP_ORDER: ActivationStep["key"][] = [
+  "businessName",
+  "services",
+  "availability",
+  "stripe",
+  "bookingLink",
+];
+
+const activationStep = (
+  key: ActivationStep["key"],
+  done: boolean,
+  overrides: Partial<Omit<ActivationStep, "key" | "done">> = {},
+): ActivationStep => ({
+  key,
+  done,
+  ...ACTIVATION_STEP_CONTENT[key],
+  ...overrides,
+});
 
 export const FIXTURES: Fixture[] = [
   // ---- 1. Verify your email ----------------------------------------
@@ -298,6 +360,21 @@ export const FIXTURES: Fixture[] = [
     note: "Worst case: no name, no plan, no dates, no amount. The email still reads as a complete message.",
     render: () => renderTrialStarted({ now: NOW_AT_SIGNUP }),
   },
+  {
+    id: "trial-no-stripe-yet",
+    label: "Trial started, no Stripe object at all (the real signup flow)",
+    group: "3. Free trial started",
+    note: "Every trial now starts automatically at signup with no card collected — no Stripe subscription exists yet, so there is nothing to cancel and no billing portal to point at. The plan/dates/setup content still renders in full; only the closing line changes to \"add a card before your trial ends\" rather than \"cancel anytime.\"",
+    render: () =>
+      renderTrialStarted({
+        firstName: "Sheree",
+        planLabel: "Monthly",
+        now: NOW_AT_SIGNUP,
+        trialStart: TRIAL_START,
+        trialEnd: TRIAL_END,
+        timeZone: "America/Los_Angeles",
+      }),
+  },
 
   // ---- 4. Trial ending ----------------------------------------------
   {
@@ -386,6 +463,20 @@ export const FIXTURES: Fixture[] = [
         currency: "usd",
         interval: "month",
         cancelAtPeriodEnd: true,
+        timeZone: "America/Los_Angeles",
+      }),
+  },
+  {
+    id: "ending-no-stripe-yet",
+    label: "Trial ending, no Stripe object at all (the real signup flow)",
+    group: "4. Trial ending soon",
+    note: "Every trial now starts automatically at signup with no card collected. Nothing is set to auto-charge and there is no billing portal to send anyone to, so the copy and CTA both change: \"Subscribe now\" instead of \"Manage or cancel my subscription.\"",
+    render: () =>
+      renderTrialEnding({
+        firstName: "Sheree",
+        now: NOW_BEFORE_TRIAL_END,
+        planLabel: "Monthly",
+        trialEnd: TRIAL_END,
         timeZone: "America/Los_Angeles",
       }),
   },
@@ -626,6 +717,103 @@ export const FIXTURES: Fixture[] = [
           { name: LONG_SERVICE, count: 6, sales: 2040 },
           { name: "Marley Twists & Scalp Treatment (Add-On Bundle)", count: 3, sales: 810 },
         ],
+      }),
+  },
+
+  // ---- 8. Activation nudge -------------------------------------------
+  // The onboarding "setup steps left" checkpoint mail, sent at day 1 / 3
+  // / 7 / 14 / 21 of the free trial. These fixtures prove the checklist
+  // holds as steps complete one by one, and that a caller error (nothing
+  // left, or nothing supplied at all) still renders cleanly.
+  {
+    id: "activation-day1-none-done",
+    label: "Activation nudge, day 1, nothing done yet",
+    group: "8. Activation nudge",
+    note: "The first checkpoint. Every step is still open, and the tone is welcoming rather than a scolding.",
+    render: () =>
+      renderActivationNudge({
+        firstName: "Sheree",
+        studioName: "SBW Braiding",
+        daysSinceStart: 1,
+        steps: ACTIVATION_STEP_ORDER.map((key) => activationStep(key, false)),
+        dashboardUrl: "https://braidbosspro.app",
+      }),
+  },
+  {
+    id: "activation-day7-mixed",
+    label: "Activation nudge, day 7, a realistic mix",
+    group: "8. Activation nudge",
+    note: "One week in: two steps done and checked off, three still open. The whole checklist stays visible, not just what's left.",
+    render: () =>
+      renderActivationNudge({
+        firstName: "Nia",
+        studioName: "Nia's Knotless",
+        daysSinceStart: 7,
+        steps: [
+          activationStep("businessName", true),
+          activationStep("services", true),
+          activationStep("availability", false),
+          activationStep("stripe", false),
+          activationStep("bookingLink", false),
+        ],
+        dashboardUrl: "https://braidbosspro.app",
+      }),
+  },
+  {
+    id: "activation-day14-one-left",
+    label: "Activation nudge, day 14, one step left",
+    group: "8. Activation nudge",
+    note: "Almost finished: only Stripe is still open. Copy turns more direct without any deadline pressure.",
+    render: () =>
+      renderActivationNudge({
+        firstName: "Sheree",
+        studioName: "SBW Braiding",
+        daysSinceStart: 14,
+        steps: [
+          activationStep("businessName", true),
+          activationStep("services", true),
+          activationStep("availability", true),
+          activationStep("stripe", false),
+          activationStep("bookingLink", true),
+        ],
+        dashboardUrl: "https://braidbosspro.app",
+      }),
+  },
+  {
+    id: "activation-day21-all-done",
+    label: "Activation nudge, everything already done",
+    group: "8. Activation nudge",
+    note: "Defensive case: the SQL side should never enqueue this once every step is complete, but a bad call still has to render as a clean 'you're all set' message rather than a broken or empty checklist.",
+    render: () =>
+      renderActivationNudge({
+        firstName: "Sheree",
+        studioName: "SBW Braiding",
+        daysSinceStart: 21,
+        steps: ACTIVATION_STEP_ORDER.map((key) => activationStep(key, true)),
+        dashboardUrl: "https://braidbosspro.app",
+      }),
+  },
+  {
+    id: "activation-long-names",
+    label: "Activation nudge, long studio and step names",
+    group: "8. Activation nudge",
+    note: "Long studio and step copy must wrap inside the checklist row instead of stretching the 600px shell.",
+    render: () =>
+      renderActivationNudge({
+        firstName: LONG_NAME,
+        studioName: LONG_STUDIO,
+        daysSinceStart: 3,
+        steps: [
+          activationStep("businessName", true),
+          activationStep("services", false, {
+            title: "Add your first Waist Length Boho Knotless Braids with Scalp Treatment service",
+            body: "Set a price, duration, and deposit for every style so clients can actually book the appointment they want.",
+          }),
+          activationStep("availability", false),
+          activationStep("stripe", false),
+          activationStep("bookingLink", false),
+        ],
+        dashboardUrl: "https://braidbosspro.app",
       }),
   },
 

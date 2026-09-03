@@ -35,7 +35,12 @@ export type PushTarget =
   | { kind: "inbox" }
   | { kind: "packages" }
   | { kind: "styleRequests" }
-  | { kind: "waitlist" };
+  | { kind: "waitlist" }
+  | { kind: "educationHub" }
+  | { kind: "services" }
+  | { kind: "availability" }
+  | { kind: "settings" }
+  | { kind: "account" };
 
 export type PushTargetKind = PushTarget["kind"];
 
@@ -65,6 +70,11 @@ const STANDALONE_KINDS = new Set<string>([
   "packages",
   "styleRequests",
   "waitlist",
+  "educationHub",
+  "services",
+  "availability",
+  "settings",
+  "account",
 ]);
 
 /** Read the id field off a target, whatever the kind calls it. */
