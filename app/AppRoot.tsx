@@ -2591,6 +2591,74 @@ const Select = ({ value, onChange, options }: {
   </div>
 );
 
+// Typeahead client picker — a native <select> on iOS renders as a plain
+// scrollable list with no way to type-to-filter (no keyboard, no search),
+// which is painful once a braider has more than a handful of clients. This
+// swaps in a text input that filters the list as you type, closes on pick
+// or outside-click, and falls back to the full list when the field is
+// empty/focused so it still works as a browsable dropdown.
+const ClientCombobox = ({ clients, value, onChange, placeholder = "Search clients..." }: {
+  clients: { id: string; name: string }[];
+  value: string;
+  onChange: (id: string) => void;
+  placeholder?: string;
+}) => {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const selected = clients.find(c => c.id === value);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocDown = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocDown);
+    return () => document.removeEventListener("mousedown", onDocDown);
+  }, [open]);
+
+  const filtered = query.trim()
+    ? clients.filter(c => c.name.toLowerCase().includes(query.trim().toLowerCase()))
+    : clients;
+
+  const pick = (id: string) => { onChange(id); setQuery(""); setOpen(false); };
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <div className="relative">
+        <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: C.muted }} />
+        <input
+          value={open ? query : (selected?.name ?? "")}
+          onChange={e => { setQuery(e.target.value); if (!open) setOpen(true); }}
+          onFocus={() => { setQuery(""); setOpen(true); }}
+          placeholder={selected ? selected.name : placeholder}
+          className="w-full rounded-xl pl-9 pr-3.5 py-3 text-[15px] outline-none transition"
+          style={{ background: C.paper, border: `1px solid ${C.hairline}`, color: C.ink }}
+        />
+      </div>
+      {open && (
+        <div className="absolute z-30 left-0 right-0 mt-1 rounded-xl overflow-y-auto"
+          style={{ background: C.paper, border: `1px solid ${C.hairline}`, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", maxHeight: 240 }}>
+          {value && (
+            <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => pick("")}
+              className="w-full text-left px-3.5 py-2.5 text-[14px] active:bg-black/5" style={{ color: C.muted }}>
+              — Select client —
+            </button>
+          )}
+          {filtered.length === 0 ? (
+            <div className="px-3.5 py-2.5 text-[14px]" style={{ color: C.muted }}>No matching clients</div>
+          ) : filtered.map(c => (
+            <button key={c.id} type="button" onMouseDown={e => e.preventDefault()} onClick={() => pick(c.id)}
+              className="w-full text-left px-3.5 py-2.5 text-[14px] active:bg-black/5" style={{ color: C.ink }}>
+              {c.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const Pill = ({ children, tone = "neutral" }: {
   children: React.ReactNode;
   tone?: "neutral" | "gold" | "success" | "warning" | "danger" | "dark";
@@ -13178,8 +13246,8 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
             ) : (
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <Select value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value, dependentId: null, dependentName: null })}
-                    options={[{ value: "", label: "— Select client —" }, ...clients.map(c => ({ value: c.id, label: c.name }))]} />
+                  <ClientCombobox value={form.clientId} clients={clients}
+                    onChange={id => setForm({ ...form, clientId: id, dependentId: null, dependentName: null })} />
                 </div>
                 <Button variant="outline" icon={<UserPlus size={16} />} onClick={() => setShowNewClient(true)}>New</Button>
               </div>
