@@ -18611,12 +18611,15 @@ const ActiveTimerScreen = ({ store, prefillAppt, onBack, onComplete }) => {
   // when no active timer and no setup, build setup form (only for non-simple mode)
   useEffect(() => {
     if (!timer && !setup && !isSimpleMode) {
+      // Appointments carry the estimate as durationHours/totalPrice; a
+      // quote-shaped prefill (hours/finalPrice) is accepted too so this
+      // still works if a future caller passes one of those instead.
       const base = prefillAppt ? {
         appointmentId: prefillAppt.id, clientId: prefillAppt.clientId,
         clientName: store.clientById(prefillAppt.clientId)?.name || "",
         style: prefillAppt.style || "",
-        estimatedHours: Number(prefillAppt.hours) || null,
-        estimatedTotal: Number(prefillAppt.finalPrice) || null,
+        estimatedHours: Number(prefillAppt.durationHours ?? prefillAppt.hours) || null,
+        estimatedTotal: Number(prefillAppt.totalPrice ?? prefillAppt.finalPrice) || null,
       } : { appointmentId: null, clientId: null, clientName: "", style: "", estimatedHours: null, estimatedTotal: null };
       // eslint-disable-next-line react-hooks/set-state-in-effect -- prop/store-driven sync, intentional
       setSetup(base);
