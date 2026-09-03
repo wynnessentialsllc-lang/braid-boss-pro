@@ -96,7 +96,7 @@ type Snapshot = {
   };
   stripe: { connected: number; charges_enabled: number; payouts_enabled: number };
   trend: {
-    deposits_by_day: Array<{ day: string; cents: number }>;
+    deposits_by_day: Array<{ day: string; amount: number }>;
     bookings_by_day: Array<{ day: string; n: number }>;
   };
 };
@@ -175,7 +175,7 @@ export default function AdminCommandCenter() {
     const map = new Map<string, number>();
     for (const r of data.trend.deposits_by_day) {
       const d = new Date(r.day);
-      if (!Number.isNaN(d.getTime())) map.set(d.toISOString().slice(0, 10), r.cents);
+      if (!Number.isNaN(d.getTime())) map.set(d.toISOString().slice(0, 10), r.amount);
     }
     const values: number[] = [];
     const days: Date[] = [];
@@ -333,7 +333,7 @@ export default function AdminCommandCenter() {
                   height={64}
                   highlightIndex="last"
                   labels={depositSeries.days.map(fmtDay)}
-                  valueFormat={(cents) => usd(cents / 100)}
+                  valueFormat={usd}
                   startLabel={depositSeries.days.length ? fmtDay(depositSeries.days[0]) : undefined}
                   endLabel="Today"
                   ariaLabel={`Deposit revenue per day, last ${windowDays} days`}
