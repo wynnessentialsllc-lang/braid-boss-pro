@@ -11762,8 +11762,6 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       setForm({ ...form, serviceId: null });
       return;
     }
-    const overwriteEmpty = (current: any, next: any) =>
-      mode === "replace" ? next : (current && current !== "" && current !== 0 ? current : next);
     const dur = Number(svc.duration_hours) || 0;
     setForm(prev => {
       // Switching to a DIFFERENT service invalidates the previous menu's
@@ -11774,6 +11772,17 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       // orphan rows) from the service the client is switching away from.
       // Re-applying the SAME service leaves the current picks intact.
       const serviceChanged = String(svc.id) !== String(prev.serviceId ?? "");
+      // "fill" only protects fields the user actually typed by hand.
+      // Once a service was already picked, the style/duration/price on
+      // screen were themselves catalog-derived from THAT service, not
+      // hand-typed — so picking a second, different service needs to
+      // overwrite them the same as "replace" would, or the ticket is
+      // left showing one service's name next to another's price and
+      // duration. Only the very first pick (prev.serviceId still null)
+      // honors "fill" and defers to anything the stylist already typed.
+      const effectiveMode = mode === "replace" || (serviceChanged && prev.serviceId) ? "replace" : mode;
+      const overwriteEmpty = (current: any, next: any) =>
+        effectiveMode === "replace" ? next : (current && current !== "" && current !== 0 ? current : next);
       const prevAddons: any[] = Array.isArray(prev.addons) ? prev.addons : [];
       const strippedPrice = serviceChanged
         ? prevAddons.reduce((s, a) => s + (Number(a?.price) || 0), 0) : 0;
@@ -11791,7 +11800,7 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
         // Surface deposit_amount in the notes/prep area only — the
         // appointment's own depositPaid field reflects what the
         // STYLIST has actually collected, not the required amount.
-        notes: mode === "replace" || !prev.notes
+        notes: effectiveMode === "replace" || !prev.notes
           ? (svc.prep_instructions ? `${svc.prep_instructions}${prev.notes ? `\n\n${prev.notes}` : ""}` : prev.notes)
           : prev.notes,
         ...(serviceChanged
