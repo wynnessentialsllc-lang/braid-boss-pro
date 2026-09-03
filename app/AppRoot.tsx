@@ -10297,9 +10297,14 @@ const DayCalendarView = ({
             >
               <div className="flex items-start justify-between gap-1.5">
                 <p className="text-[12.5px] font-semibold leading-tight truncate min-w-0" style={{ color: C.espresso }}>{titleLine}</p>
-                {isAppt && height >= 42 && (cancelled
-                  ? <Pill tone="danger">Cancelled</Pill>
-                  : <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>)}
+                {isAppt && height >= 42 && (
+                  <div className="flex items-center gap-1 shrink-0">
+                    {a.multiDaySessionLabel && <Pill tone="gold">{a.multiDaySessionLabel.replace(/^Day\s+/i, "")}</Pill>}
+                    {cancelled
+                      ? <Pill tone="danger">Cancelled</Pill>
+                      : <Pill tone={PAYMENT_STATUS_TONE[ps]}>{PAYMENT_STATUS_LABEL[ps]}</Pill>}
+                  </div>
+                )}
               </div>
               {height >= 34 && <p className="text-[11px] truncate" style={{ color: C.coffee, opacity: 0.9, marginTop: 1 }}>{serviceLine}</p>}
               {height >= 56 && <p className="text-[10.5px] truncate" style={{ color: C.muted, marginTop: 1 }}>{timeRange}</p>}
@@ -10387,7 +10392,7 @@ const WeekCalendarView = ({
                       ? `${fmtTime(a.time)} · Off`
                       : isPersonalBlock
                         ? `${fmtTime(a.time)} · Personal`
-                        : `${fmtTime(a.time)} · ${a.style || "Service"}${a.dependentName ? ` · for ${a.dependentName}` : ""}`;
+                        : `${fmtTime(a.time)} · ${a.style || "Service"}${a.dependentName ? ` · for ${a.dependentName}` : ""}${a.multiDaySessionLabel ? ` · ${a.multiDaySessionLabel.replace(/^Day\s+/i, "")}` : ""}`;
                   return (
                     <button
                       type="button"
