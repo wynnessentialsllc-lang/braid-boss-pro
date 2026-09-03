@@ -20,6 +20,7 @@ import { useEffect, useState } from "react";
 import { getSupabase } from "./supabase";
 import { TRIAL_DAYS } from "./plan";
 import { trackEvent } from "./track";
+import { isTrialExpired } from "./guest-limits";
 
 // PASTE YOUR STRIPE PAYMENT LINK HERE.
 // Create it in the Stripe Dashboard → Payment links → New:
@@ -252,10 +253,15 @@ export type FoundingMembershipState = {
   active: boolean | null;          // any access — grandfathered OR live subscription
   grandfathered: boolean;          // legacy lifetime or founding (one-time, forever)
   subscriptionStatus: string | null;
-  subscriptionActive: boolean;     // trialing / active / past_due
+  subscriptionActive: boolean;     // trialing / active / past_due, and not trial-expired
   subscriptionPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
   activatedAt: string | null;
+  // Signed up, 30-day trial period has passed, and they never converted
+  // to a paid Stripe subscription (status is still 'trialing'). See
+  // guest-limits.isTrialExpired — same logic, imported rather than
+  // duplicated.
+  trialExpired: boolean;
 };
 
 // Statuses that count as a live subscription. Kept in sync with
@@ -273,6 +279,7 @@ export const useFoundingMembership = (
     subscriptionPeriodEnd: null,
     cancelAtPeriodEnd: false,
     activatedAt: null,
+    trialExpired: false,
   });
 
   useEffect(() => {
@@ -280,7 +287,7 @@ export const useFoundingMembership = (
       setState({
         active: false, grandfathered: false, subscriptionStatus: null,
         subscriptionActive: false, subscriptionPeriodEnd: null,
-        cancelAtPeriodEnd: false, activatedAt: null,
+        cancelAtPeriodEnd: false, activatedAt: null, trialExpired: false,
       });
       return;
     }
@@ -297,15 +304,21 @@ export const useFoundingMembership = (
       const legacy = !!data?.lifetime_access;
       const grandfathered = founding || legacy;
       const subStatus = (data?.subscription_status as string | null) ?? null;
-      const subActive = !!subStatus && LIVE_SUB.has(subStatus);
+      const periodEnd = data?.subscription_current_period_end ?? null;
+      // An expired trial no longer counts as "active" — the product
+      // intent is that a lapsed trial reverts to free-plan behavior
+      // until the person actually subscribes.
+      const trialExpired = isTrialExpired(subStatus, periodEnd);
+      const subActive = !!subStatus && LIVE_SUB.has(subStatus) && !trialExpired;
       setState({
         active: grandfathered || subActive,
         grandfathered,
         subscriptionStatus: subStatus,
         subscriptionActive: subActive,
-        subscriptionPeriodEnd: data?.subscription_current_period_end ?? null,
+        subscriptionPeriodEnd: periodEnd,
         cancelAtPeriodEnd: !!data?.subscription_cancel_at_period_end,
         activatedAt: data?.founding_paid_at ?? null,
+        trialExpired,
       });
     };
     void refresh();

@@ -372,7 +372,7 @@ describe("trial started email", () => {
   it("still reads as a complete email with nothing but defaults", () => {
     const r = renderTrialStarted({});
     expect(r.html).toContain("Hi there,");
-    expect(r.html).toContain("Fourteen days. Every feature.");
+    expect(r.html).toContain("30 days. Every feature.");
     expect(r.html).not.toContain("undefined");
     expect(r.html).not.toContain("null");
     expect(r.html).not.toContain("NaN");
@@ -380,6 +380,28 @@ describe("trial started email", () => {
 
   it("tells the recipient how to cancel", () => {
     expect(renderTrialStarted(full).html).toContain("Manage subscription");
+  });
+
+  it("has nothing to cancel when no Stripe object exists yet — the real signup flow", () => {
+    // Every trial now starts automatically at signup with no card
+    // collected: there is no Stripe subscription behind it at all, so
+    // pointing someone at "Manage subscription" would be a dead end.
+    const noStripeYet = {
+      firstName: "Sheree",
+      planLabel: "Monthly",
+      trialStart: 1_755_000_000,
+      trialEnd: 1_756_209_600,
+      timeZone: "America/Los_Angeles",
+    };
+    const html = renderTrialStarted(noStripeYet).html;
+    expect(html).not.toContain("Manage subscription");
+    expect(html).not.toContain("Cancel anytime");
+    expect(html).toContain("nothing to cancel");
+    expect(html).toContain("Add a payment method anytime before your trial ends");
+    // The plan/dates/setup content is unaffected — only the closing
+    // billing line changes.
+    expect(html).toContain("Monthly");
+    expect(html).toContain("30 days. Every feature.");
   });
 });
 
@@ -442,6 +464,29 @@ describe("trial ending email", () => {
     const r = renderTrialEnding({ ...base, manageUrl: "https://braidbosspro.app/" });
     expect(r.html).toContain("Manage or cancel my subscription");
     expect(r.text).toContain("Manage or cancel my subscription: https://braidbosspro.app/");
+  });
+
+  it("has nothing to charge or manage when no Stripe object exists yet — the real signup flow", () => {
+    // Every trial now starts automatically at signup with no card
+    // collected. Warning that a charge is coming, or pointing at a
+    // billing portal, would both be false — neither exists yet.
+    const noStripeYet = {
+      firstName: "Sheree",
+      planLabel: "Monthly",
+      trialEnd: 1_756_209_600,
+      timeZone: "America/Los_Angeles",
+      now: 1_756_209_600 - 3 * 86_400,
+    };
+    const r = renderTrialEnding(noStripeYet);
+    expect(r.html).not.toContain("subscription will begin");
+    expect(r.html).not.toContain("Manage or cancel my subscription");
+    expect(r.html).not.toContain("Stripe billing portal");
+    expect(r.html).toContain("Nothing is set to be charged");
+    expect(r.html).toContain("Subscribe now");
+    expect(r.text).toContain("Subscribe now:");
+    expect(r.text).not.toContain("Manage or cancel my subscription:");
+    // Still names when the trial ends — only the billing framing changes.
+    expect(r.html).toContain("August 26, 2025");
   });
 });
 

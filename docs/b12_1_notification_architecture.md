@@ -127,6 +127,9 @@ Every queue row carries a `dedupe_key text unique` (nullable). Patterns:
 | appt_reminder_2h | `appt_reminder_2h:<appointment_id>` |
 | daily_sales_summary | `daily_summary:<user_id>:<local_date>` |
 | monthly_review | `monthly_review:<user_id>:<YYYY-MM>` |
+| stylist_trial_started | `stylist_trial_started:<user_id>` (fired once, either by the signup trigger or the one-time backfill) |
+| stylist_trial_ending (local, card-less trial) | `local_trial_ending:<user_id>:<YYYY-MM-DD period end>` |
+| activation_nudge | `activation_nudge:<user_id>:<checkpoint day, one of 1/3/7/14/21>` |
 
 The two recurring reports key on the period they summarize rather than on a
 row id, so the hourly job that fires them at each stylist's local midnight can

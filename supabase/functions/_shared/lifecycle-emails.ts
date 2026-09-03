@@ -555,7 +555,14 @@ export const renderTrialStarted = (args: TrialStartedArgs): RenderedEmail => {
         )}`;
   const card = maskedCard(args.cardBrand, args.cardLast4);
   const days = daysUntil(args.trialEnd, args.now);
-
+  // A real Stripe subscription is what makes "Manage subscription" (the
+  // billing portal) a valid thing to point at, and only a live
+  // subscription/price object can produce `amount` here — a missing card
+  // alone does not mean there is nothing to manage (Stripe can report a
+  // subscription with no default payment method yet). Every trial now
+  // starts automatically at signup with no Stripe object at all, so
+  // `amount` being absent is what actually distinguishes that flow.
+  const hasStripeSubscription = !!amount;
   const subject = "Your 30-day Braid Boss Pro trial has started";
   const preheader = "Every feature is open. Here is what to do first.";
 
@@ -585,7 +592,7 @@ export const renderTrialStarted = (args: TrialStartedArgs): RenderedEmail => {
       padding: "40px 32px 46px",
       content: [
         eyebrow("Your free trial is active", "rgba(255,255,255,0.82)"),
-        headline("Fourteen days. Every feature. Let's get you booked.", {
+        headline("30 days. Every feature. Let's get you booked.", {
           color: C.white,
           size: 36,
         }),
@@ -614,7 +621,9 @@ export const renderTrialStarted = (args: TrialStartedArgs): RenderedEmail => {
             ])}
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:16px 0 0;"><tr><td style="height:1px;background-color:${C.hairline};font-size:0;line-height:0;">&nbsp;</td></tr></table>
             ${p(
-              "Cancel anytime from Account then Manage subscription inside Braid Boss Pro.",
+              hasStripeSubscription
+                ? "Cancel anytime from Account then Manage subscription inside Braid Boss Pro."
+                : "No card on file, nothing to cancel. Add a payment method anytime before your trial ends, from Account inside Braid Boss Pro, to keep your access.",
               { color: C.muted, size: 13, margin: "14px 0 0" },
             )}
           </td></tr>
@@ -692,7 +701,7 @@ export const renderTrialStarted = (args: TrialStartedArgs): RenderedEmail => {
   const text = textBody([
     "BRAID BOSS PRO / YOUR FREE TRIAL IS ACTIVE",
     "",
-    "Fourteen days. Every feature. Let's get you booked.",
+    "30 days. Every feature. Let's get you booked.",
     "",
     openingCopy,
     "",
@@ -755,6 +764,12 @@ export const renderTrialEnding = (args: TrialEndingArgs): RenderedEmail => {
       : `${money(args.amountMinor, args.currency || "usd")}${intervalSuffix(args.interval)}`;
   const card = maskedCard(args.cardBrand, args.cardLast4);
   const cancelling = args.cancelAtPeriodEnd === true;
+  // Same signal as renderTrialStarted: only a real Stripe subscription
+  // can produce `amount` here. Every trial starts locally with no card
+  // and no Stripe object at all, so for that case nothing is set to
+  // auto-charge and there is no billing portal to send anyone to --
+  // saying otherwise would be a false promise (or false warning).
+  const hasStripeSubscription = !!amount;
 
   const subject =
     days === null
@@ -764,15 +779,19 @@ export const renderTrialEnding = (args: TrialEndingArgs): RenderedEmail => {
         : `Your Braid Boss Pro trial ends in ${days} ${days === 1 ? "day" : "days"}`;
   const preheader = "Your dashboard and setup are waiting. Here is what happens next.";
 
-  const bodyCopy = cancelling
+  const bodyCopy = !hasStripeSubscription
     ? `${greeting(args.firstName)}, your Braid Boss Pro trial ends${
         endLabel ? ` on ${endLabel}` : " soon"
-      }. Your subscription is currently set to stop at the end of the trial, so no payment will be taken. You can turn it back on any time before then and keep everything you have set up.`
-    : `${greeting(args.firstName)}, your Braid Boss Pro trial ends${
-        endLabel ? ` on ${endLabel}` : " soon"
-      }. After that, your${args.planLabel ? ` ${args.planLabel}` : ""} subscription will begin${
-        amount ? ` at ${amount}` : ""
-      }, unless you cancel before the trial ends.`;
+      }. Nothing is set to be charged, there is no card on file. Subscribe before then to keep adding new clients and appointments -- everything you have already built stays exactly where it is either way.`
+    : cancelling
+      ? `${greeting(args.firstName)}, your Braid Boss Pro trial ends${
+          endLabel ? ` on ${endLabel}` : " soon"
+        }. Your subscription is currently set to stop at the end of the trial, so no payment will be taken. You can turn it back on any time before then and keep everything you have set up.`
+      : `${greeting(args.firstName)}, your Braid Boss Pro trial ends${
+          endLabel ? ` on ${endLabel}` : " soon"
+        }. After that, your${args.planLabel ? ` ${args.planLabel}` : ""} subscription will begin${
+          amount ? ` at ${amount}` : ""
+        }, unless you cancel before the trial ends.`;
 
   const bands = [
     masthead(base),
@@ -821,18 +840,25 @@ export const renderTrialEnding = (args: TrialEndingArgs): RenderedEmail => {
           { color: C.body, size: 15, margin: "12px 0 0" },
         ),
         button({
-          label: "Continue with Braid Boss Pro",
-          url: dashboardUrl,
+          label: hasStripeSubscription ? "Continue with Braid Boss Pro" : "Subscribe now",
+          url: hasStripeSubscription ? dashboardUrl : manageUrl,
           bg: C.ink,
           marginTop: 26,
         }),
-        `<p style="margin:18px 0 0;font-family:${FONT_BODY};font-size:14px;line-height:1.6;"><a href="${escUrl(
-          manageUrl,
-        )}" style="color:${C.purple};text-decoration:underline;">Manage or cancel my subscription</a></p>`,
-        p(
-          "Manage subscription lives inside Braid Boss Pro under Account. It opens the Stripe billing portal, where you can update your card or cancel in one tap.",
-          { color: C.muted, size: 13, margin: "8px 0 0" },
-        ),
+        hasStripeSubscription
+          ? [
+              `<p style="margin:18px 0 0;font-family:${FONT_BODY};font-size:14px;line-height:1.6;"><a href="${escUrl(
+                manageUrl,
+              )}" style="color:${C.purple};text-decoration:underline;">Manage or cancel my subscription</a></p>`,
+              p(
+                "Manage subscription lives inside Braid Boss Pro under Account. It opens the Stripe billing portal, where you can update your card or cancel in one tap.",
+                { color: C.muted, size: 13, margin: "8px 0 0" },
+              ),
+            ].join("")
+          : p(
+              "Subscribing takes a minute, from Account inside Braid Boss Pro. No commitment beyond that -- cancel any time after.",
+              { color: C.muted, size: 13, margin: "8px 0 0" },
+            ),
       ].join(""),
     }),
     footer({ base, reason: REASON.billing }),
@@ -852,9 +878,13 @@ export const renderTrialEnding = (args: TrialEndingArgs): RenderedEmail => {
     intervalLabel(args.interval) ? `Billing interval: ${intervalLabel(args.interval)}` : "",
     card ? `Payment method: ${card}` : "",
     "",
-    `Continue with Braid Boss Pro: ${dashboardUrl}`,
-    `Manage or cancel my subscription: ${manageUrl}`,
-    "Manage subscription lives inside Braid Boss Pro under Account.",
+    hasStripeSubscription
+      ? `Continue with Braid Boss Pro: ${dashboardUrl}`
+      : `Subscribe now: ${manageUrl}`,
+    hasStripeSubscription ? `Manage or cancel my subscription: ${manageUrl}` : "",
+    hasStripeSubscription
+      ? "Manage subscription lives inside Braid Boss Pro under Account."
+      : "Subscribing takes a minute, from Account inside Braid Boss Pro.",
     textFooter(REASON.billing),
   ]);
 

@@ -1,19 +1,34 @@
 // Create a Stripe Checkout Session for the Braid Boss Pro monthly
-// subscription — $14.99/mo with a 30-day free trial, charged to the
-// PLATFORM Stripe account (not a Connect account).
+// subscription — $14.99/mo, charged to the PLATFORM Stripe account (not
+// a Connect account).
 //
 // Pattern matches /api/founding-checkout: no Stripe SDK, inline
 // price_data (no pre-created Stripe Price needed), raw fetch to the
 // REST API. The subscription is bound to the signed-in user via
 // client_reference_id so the webhook can stamp the right profile.
 //
-// The 30-day trial is configured with subscription_data[trial_period_days].
+// Trial handling: every new signup already gets a 30-day LOCAL trial the
+// moment they sign up (profiles.subscription_status = 'trialing',
+// profiles.subscription_current_period_end ~30 days out), wired up
+// elsewhere, before any Stripe object exists. Giving a fresh Stripe-side
+// trial_period_days on top of that would let someone double their free
+// period just by starting checkout. So this route looks up the caller's
+// profile and, when they're still within that local trial, converts the
+// REMAINING time into subscription_data[trial_end] (an exact timestamp)
+// instead of trial_period_days (a duration). Anyone whose local trial has
+// already lapsed — or whose profile can't be read at all — is charged
+// immediately with no Stripe trial, since they've already had their free
+// month. See computeTrialParam() in ./trial.ts for the exact rule (split
+// out of this file because Next.js type-checks route.ts against a closed
+// set of allowed exports and rejects any other named export).
+//
 // A card IS collected up front (default payment_method_collection), so
 // the subscription auto-converts to a paid charge when the trial ends
 // unless the user cancels through the billing portal (/api/subscribe/portal).
 
 import { NextResponse } from "next/server";
-import { TRIAL_DAYS } from "../../lib/plan";
+import { createClient } from "@supabase/supabase-js";
+import { computeTrialParam, type TrialParam } from "./trial";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,8 +63,13 @@ const baseUrlOf = (req: Request): string => {
 
 export async function POST(req: Request) {
   let stripeSecret: string;
+  let supabaseUrl: string;
+  let supabaseServiceKey: string;
   try {
     stripeSecret = env("STRIPE_SECRET_KEY");
+    // Same fallback order as app/api/subscribe/webhook/route.ts.
+    supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || env("SUPABASE_URL");
+    supabaseServiceKey = env("SUPABASE_SERVICE_ROLE_KEY");
   } catch (e: any) {
     return fail(500, e?.message || "Server is not configured.");
   }
@@ -72,10 +92,43 @@ export async function POST(req: Request) {
     return fail(400, "Sign in before starting your subscription.");
   }
 
+  // How much (if any) of the user's existing local trial to carry over
+  // into the Stripe subscription. Fail-soft by design: any problem
+  // reading the profile falls through to "no trial" rather than ever
+  // turning this into a 500 — a broken lookup must not block checkout.
+  let trialParam: TrialParam = { kind: "none" };
+  try {
+    const admin = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data: profile, error } = await admin
+      .from("profiles")
+      .select("subscription_status, subscription_current_period_end")
+      .eq("id", userId)
+      .single();
+    if (!error && profile) {
+      trialParam = computeTrialParam(
+        profile.subscription_status ?? null,
+        profile.subscription_current_period_end ?? null,
+        Date.now(),
+      );
+    }
+  } catch {
+    trialParam = { kind: "none" };
+  }
+
+  // Stripe's own hosted checkout page shows this line, so it has to
+  // match what trialParam actually decided above — most people reaching
+  // checkout are NOT getting a fresh 30-day trial (they either already
+  // spent it, or are converting partway through it), and a page that
+  // promises one anyway is a real, customer-facing broken promise.
+  const priceLabel = planKey === "annual" ? "$149/year" : "$14.99/month";
   const priceBlurb =
-    planKey === "annual"
-      ? "Full access to Braid Boss Pro. 30-day free trial, then $149/year. Cancel anytime."
-      : "Full access to Braid Boss Pro. 30-day free trial, then $14.99/month. Cancel anytime.";
+    trialParam.kind === "trial_end"
+      ? `Full access to Braid Boss Pro. Your free trial continues through ${new Date(
+          trialParam.value * 1000,
+        ).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}, then ${priceLabel}. Cancel anytime.`
+      : `Full access to Braid Boss Pro. ${priceLabel}, billed today. Cancel anytime.`;
 
   // Inline recurring price_data — no stored Stripe Product/Price, same
   // as the rest of the app's Stripe usage.
@@ -88,7 +141,10 @@ export async function POST(req: Request) {
   form.set("line_items[0][price_data][recurring][interval]", plan.interval);
   form.set("line_items[0][price_data][product_data][name]", `Braid Boss Pro — ${plan.label}`);
   form.set("line_items[0][price_data][product_data][description]", priceBlurb);
-  form.set("subscription_data[trial_period_days]", String(TRIAL_DAYS));
+  // subscription_data accepts trial_period_days OR trial_end, never both.
+  if (trialParam.kind === "trial_end") {
+    form.set("subscription_data[trial_end]", String(trialParam.value));
+  }
   form.set("subscription_data[metadata][purpose]", "subscription");
   form.set("subscription_data[metadata][user_id]", userId);
   form.set("subscription_data[metadata][plan]", planKey);

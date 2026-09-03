@@ -128,7 +128,10 @@ const sweepUser = async (
     .toISOString()
     .slice(0, 10);
 
-  const [apptRes, clientRes, deliveredRes] = await Promise.all([
+  const [
+    apptRes, clientRes, deliveredRes,
+    profileRes, servicesRes, availabilityRes, bookingLinkRes,
+  ] = await Promise.all([
     admin.from("appointments").select("*").eq("user_id", userId).gte("appt_date", since),
     admin.from("clients").select("*").eq("user_id", userId),
     admin
@@ -139,6 +142,25 @@ const sweepUser = async (
         "delivered_at",
         new Date(now.getTime() - DELIVERY_WINDOW_DAYS * 86400_000).toISOString(),
       ),
+    // Activation nudge signals. Every one of these is a plain count/flag
+    // query — none needs fromCloudRow's camelCase merge, since the rule
+    // generator only asks "is this done yet," not for the full record.
+    admin
+      .from("profiles")
+      .select("business_name, full_name, subscription_started_at, stripe_connect_charges_enabled")
+      .eq("id", userId)
+      .maybeSingle(),
+    admin.from("services").select("id", { count: "exact", head: true }).eq("user_id", userId),
+    admin
+      .from("availability_rules")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("is_open", true),
+    admin
+      .from("booking_links")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("active", true),
   ]);
 
   // Map through the same cloud-row decoder the client uses, so the rule
@@ -152,6 +174,13 @@ const sweepUser = async (
     if (row?.rule_id) deliveredHistory[row.rule_id] = row.delivered_at;
   }
 
+  const profileRow = profileRes.data as {
+    business_name?: string | null;
+    full_name?: string | null;
+    subscription_started_at?: string | null;
+    stripe_connect_charges_enabled?: boolean | null;
+  } | null;
+
   const rules = runNotificationRules({
     clients,
     appointments,
@@ -159,6 +188,16 @@ const sweepUser = async (
     nowMs: nowMsForTz(timezone, now),
     preferences,
     deliveredHistory,
+    activation: profileRow
+      ? {
+          signupIso: profileRow.subscription_started_at ?? null,
+          businessNameSet: !!(profileRow.business_name || profileRow.full_name),
+          servicesCount: servicesRes.count ?? 0,
+          hasOpenAvailability: (availabilityRes.count ?? 0) > 0,
+          bookingLinkActive: (bookingLinkRes.count ?? 0) > 0,
+          stripeChargesEnabled: profileRow.stripe_connect_charges_enabled === true,
+        }
+      : null,
   });
   const { toSend } = splitDeliverable(rules, deliveredHistory, now);
   base.considered = toSend.length;
