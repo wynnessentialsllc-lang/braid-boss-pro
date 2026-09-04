@@ -99,6 +99,15 @@ export async function POST(req: Request) {
     return fail(422, "No saved card on file. No-show fees need a card saved at the deposit step.");
   }
 
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("platform_approved")
+    .eq("id", userId)
+    .maybeSingle();
+  if (!profile?.platform_approved) {
+    return fail(409, "Your account is pending a manual review before you can charge cards.");
+  }
+
   // Platform application fee in basis points (default 0), mirroring the
   // deposit checkout.
   const feeBps = (() => {

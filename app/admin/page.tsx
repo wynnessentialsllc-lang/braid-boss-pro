@@ -99,6 +99,16 @@ type Snapshot = {
     deposits_by_day: Array<{ day: string; amount: number }>;
     bookings_by_day: Array<{ day: string; n: number }>;
   };
+  pending_approval: Array<{
+    id: string;
+    email: string | null;
+    business_name: string | null;
+    full_name: string | null;
+    stripe_connect_account_id: string | null;
+    stripe_connect_status: string | null;
+    stripe_connect_charges_enabled: boolean;
+    created_at: string;
+  }>;
 };
 
 const usd = (n: number): string =>
@@ -142,6 +152,7 @@ export default function AdminCommandCenter() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [windowDays, setWindowDays] = useState(30);
+  const [reviewing, setReviewing] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -166,6 +177,40 @@ export default function AdminCommandCenter() {
   }, [windowDays]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Approve or reject a stylist pending manual review. Optimistically
+  // drops the row from the local list so the queue feels responsive,
+  // then reloads to pick up any other change (e.g. their charges_
+  // enabled flipping in the meantime).
+  const reviewStylist = useCallback(async (userId: string, approved: boolean) => {
+    setReviewing((prev) => ({ ...prev, [userId]: true }));
+    try {
+      const supabase = getSupabase();
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) { setErr("Sign in required."); return; }
+      const res = await fetch("/api/admin/approve-stylist", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ user_id: userId, approved }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { setErr(body?.error || `status_${res.status}`); return; }
+      setData((prev) =>
+        prev
+          ? { ...prev, pending_approval: prev.pending_approval.filter((s) => s.id !== userId) }
+          : prev,
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't update that stylist.");
+    } finally {
+      setReviewing((prev) => {
+        const next = { ...prev };
+        delete next[userId];
+        return next;
+      });
+    }
+  }, []);
 
   // Deposit-revenue series padded to one bucket per day in the window.
   // Carries the day alongside each value so the chart can label its
@@ -435,6 +480,74 @@ export default function AdminCommandCenter() {
                 <MetricRow label="· booked via public page" value={num(bk.public_booking_share)} />
               </div>
             </PreviewStyleCard>
+
+            {/* ---- Pending stylist approvals ---- */}
+            {data.pending_approval.length > 0 && (
+              <PreviewStyleCard padding={18} style={{ borderColor: C.danger }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <SectionEyebrow tone="muted">Pending stylist approval</SectionEyebrow>
+                  <StatusPill tone="danger">{data.pending_approval.length} waiting</StatusPill>
+                </div>
+                <p style={{ margin: "4px 0 12px", fontSize: 11, color: C.muted }}>
+                  Connected Stripe but not yet cleared to take real charges. Nothing on
+                  their storefront can charge a card until you approve.
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {data.pending_approval.map((s) => {
+                    const busy = !!reviewing[s.id];
+                    return (
+                      <div
+                        key={s.id}
+                        style={{
+                          display: "flex", justifyContent: "space-between", alignItems: "center",
+                          gap: 10, padding: "10px 0", borderTop: `1px solid ${C.hairlineSoft}`,
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: C.espresso, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {s.business_name || s.full_name || s.email || s.id}
+                          </p>
+                          <p style={{ margin: "2px 0 0", fontSize: 11, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {s.email || "no email on file"} · {s.stripe_connect_status || "onboarding"}
+                            {s.stripe_connect_charges_enabled ? " · charges enabled" : ""} ·{" "}
+                            {new Date(s.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => reviewStylist(s.id, true)}
+                            style={{
+                              appearance: "none", borderRadius: 99, padding: "6px 12px",
+                              fontSize: 11.5, fontWeight: 600, letterSpacing: "0.02em",
+                              background: C.success, color: "#fff", border: "none",
+                              cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
+                            }}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => reviewStylist(s.id, false)}
+                            style={{
+                              appearance: "none", borderRadius: 99, padding: "6px 12px",
+                              fontSize: 11.5, fontWeight: 600, letterSpacing: "0.02em",
+                              background: "transparent", color: C.danger,
+                              border: `1px solid ${C.danger}`,
+                              cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
+                            }}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </PreviewStyleCard>
+            )}
 
             {/* ---- Stripe readiness ---- */}
             <PreviewStyleCard padding={18}>
