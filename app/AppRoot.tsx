@@ -8660,7 +8660,9 @@ const Studio = ({ store }) => {
 
   const saveService = async () => {
     if (!serviceForm.name?.trim()) return;
+    const isFirstService = !serviceForm.id && (services.services?.length || 0) === 0;
     await services.upsert(serviceForm);
+    if (isFirstService) trackEvent("first_service_added", { category: "activation" });
     setServiceForm({});
     setEditingService(null);
   };
@@ -9152,7 +9154,9 @@ const Calculator = ({ store, prefillFromQuote, onClearPrefill, openSavedQuotes, 
       discountName: selectedDiscount?.name ?? null,
       discountAmount: result.discountAmount || 0,
     };
+    const isFirstQuote = !quote.id && (store.quotes?.length || 0) === 0;
     await upsertQuote(quote);
+    if (isFirstQuote) trackEvent("first_quote_saved", { category: "activation" });
     setShowSaveSheet(false);
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1800);
@@ -11982,8 +11986,10 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
     let clientId = form.clientId;
     let clientName = form.clientName;
     if (showNewClient && newClientName.trim()) {
+      const isFirstClient = (clients?.length || 0) === 0;
       const newC = await upsertClient({ name: newClientName.trim(), phone: form.clientPhone, email: form.clientEmail });
       if (!newC) return; // Gated by upgrade sheet — bail without saving the appointment.
+      if (isFirstClient) trackEvent("first_client_added", { category: "activation" });
       clientId = newC.id; clientName = newC.name;
     } else if (clientId) {
       const c = clients.find(x => x.id === clientId);
@@ -12069,8 +12075,19 @@ const AppointmentSheet = ({ open, appt, store, onClose, openTimerForAppt, openCo
       actualEndTime: form.actualEndTime || null,
     };
 
+    // Activation funnel — the account's very first real appointment,
+    // and (separately) the first time any deposit is actually on the
+    // books, whether that's this same save or a later edit to an
+    // existing appointment.
+    const isFirstAppointment = !appt?.id && (form.kind === "appointment" || !form.kind)
+      && (appointments || []).filter((x: any) => (x?.kind || "appointment") === "appointment").length === 0;
+    const hadNoDepositBefore = !(appointments || []).some((x: any) => (Number(x?.depositPaid) || 0) > 0);
+    const isFirstDeposit = hadNoDepositBefore && (Number(baseAppt.depositPaid) || 0) > 0;
+
     const saved = await upsertAppointment(baseAppt);
     if (!saved) return; // Gated by upgrade sheet.
+    if (isFirstAppointment) trackEvent("first_appointment_created", { category: "activation" });
+    if (isFirstDeposit) trackEvent("first_deposit_paid", { category: "activation" });
 
     // Actual-finish-time logging: mirrors exactly what the Chair Timer
     // would have recorded (same timerSessions shape), so a logged end
@@ -16944,7 +16961,11 @@ const ClientSheet = ({ open, client, store, onClose, openCommunication, openQuic
     const dependents = (form.dependents || [])
       .filter((d: any) => String(d?.name || "").trim())
       .map((d: any) => ({ id: d.id, name: String(d.name).trim(), note: String(d.note || "").trim() }));
+    // Activation funnel — only the account's very first client, and only
+    // a genuine new save (form.id absent), never an edit.
+    const isFirstClient = !form.id && (store.clients?.length || 0) === 0;
     await upsertClient({ ...form, dependents });
+    if (isFirstClient) trackEvent("first_client_added", { category: "activation" });
     onClose();
   };
 
@@ -24395,6 +24416,7 @@ const AuthGate = ({ onContinueGuest, onBack, initialTab = "signin" }: {
           category: "activation",
           metadata: { confirmation_required: !data?.session, surface: "auth_screen" },
         });
+        trackEvent("account_created", { category: "activation", metadata: { surface: "auth_screen" } });
         // If email confirmation is turned off, signUp returns a live
         // session and the braider is already in — the auth listener takes
         // over and this gate unmounts. Nothing to show.
@@ -24832,6 +24854,7 @@ const AuthSheet = ({ open, initialMode, onClose, onAuthed }: {
           category: "activation",
           metadata: { confirmation_required: !data?.session, surface: "auth_sheet" },
         });
+        trackEvent("account_created", { category: "activation", metadata: { surface: "auth_sheet" } });
         // Some Supabase configs auto-sign-in on signup; if so the
         // listener will flip mode → authed and the sheet closes
         // naturally via onClose. If email confirmation is required
@@ -43583,6 +43606,14 @@ const WelcomeOnboarding = ({
   const last = slides.length - 1;
   const [index, setIndex] = useState(0);
 
+  // Activation funnel steps 1-2. View fires once per mount (this
+  // component only ever mounts for the once-ever tour); the click
+  // fires the first time she actually moves past the intro slide,
+  // whether by button or arrow key — autoplay's own auto-advance
+  // bypasses this (it calls setIndex directly, not next()), so it
+  // can't be mistaken for a real interaction.
+  useEffect(() => { trackEvent("welcome_intro_view", { category: "activation" }); }, []);
+
   const reducedMotion = useMemo(() => {
     if (typeof window === "undefined" || !window.matchMedia) return false;
     try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
@@ -43598,7 +43629,10 @@ const WelcomeOnboarding = ({
     setAutoplay(false);
     setIndex(((next % slides.length) + slides.length) % slides.length);
   }, [slides.length]);
-  const next = useCallback(() => goTo(index + 1), [goTo, index]);
+  const next = useCallback(() => {
+    if (index === 0) trackEvent("get_started_click", { category: "activation" });
+    goTo(index + 1);
+  }, [goTo, index]);
   const prev = useCallback(() => goTo(index - 1), [goTo, index]);
 
   const finish = useCallback(() => { goToTab("dashboard"); onFinish(); }, [goToTab, onFinish]);

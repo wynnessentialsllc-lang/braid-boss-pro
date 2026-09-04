@@ -5,8 +5,9 @@
 // /api/stripe-connect/* routes so the publishable key isn't required
 // and the access token never leaves the device.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getSupabase } from "./supabase";
+import { trackEvent } from "./track";
 
 export type ConnectStatus =
   | "not_connected"
@@ -125,6 +126,23 @@ export const useStripeConnect = (userId: string | null): {
     return () => { cancelled = true; };
   }, [refresh]);
 
+  // Activation funnel — fire once, the first time this account's
+  // charges_enabled flips true. A localStorage flag (not just "was
+  // false last render") survives this hook re-mounting on every page
+  // load long after the account connected, which would otherwise look
+  // like a false→true transition every single time.
+  const trackedCompleteRef = useRef(false);
+  useEffect(() => {
+    if (!userId || !profile.stripe_connect_charges_enabled || trackedCompleteRef.current) return;
+    const flagKey = `bbp-stripe-connect-completed-tracked-${userId}`;
+    try {
+      if (window.localStorage.getItem(flagKey) === "1") { trackedCompleteRef.current = true; return; }
+      window.localStorage.setItem(flagKey, "1");
+    } catch { /* private mode — fall through and track anyway */ }
+    trackedCompleteRef.current = true;
+    trackEvent("stripe_connect_completed", { category: "activation" });
+  }, [userId, profile.stripe_connect_charges_enabled]);
+
   const syncFromStripe = useCallback(async () => {
     const token = await getAccessToken();
     if (!token) { setError("Sign in required."); return; }
@@ -155,6 +173,7 @@ export const useStripeConnect = (userId: string | null): {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || !body?.url) throw new Error(body?.error || `onboard_${res.status}`);
+      trackEvent("stripe_connect_started", { category: "activation" });
       return String(body.url);
     } catch (e: any) {
       setError(e?.message || "Couldn't start Stripe onboarding.");
