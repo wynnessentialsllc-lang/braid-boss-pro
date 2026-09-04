@@ -72,7 +72,7 @@ export async function POST(req: Request) {
 
   const { data: profile } = await admin
     .from("profiles")
-    .select("stripe_connect_account_id, stripe_connect_charges_enabled")
+    .select("stripe_connect_account_id, stripe_connect_charges_enabled, platform_approved")
     .eq("id", userId)
     .maybeSingle();
 
@@ -80,6 +80,9 @@ export async function POST(req: Request) {
   if (!acctId) return fail(409, "Connect Stripe first (Settings → Payments) to charge cards here.");
   if (!profile?.stripe_connect_charges_enabled) {
     return fail(409, "Your Stripe account isn't ready to take charges yet.");
+  }
+  if (!profile?.platform_approved) {
+    return fail(409, "Your account is pending a manual review before you can charge cards. This is usually quick — check back soon.");
   }
 
   const baseUrl = baseUrlOf(req);

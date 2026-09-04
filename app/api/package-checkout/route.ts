@@ -79,12 +79,12 @@ export async function POST(req: Request) {
 
   const { data: profile } = await admin
     .from("profiles")
-    .select("stripe_connect_account_id, stripe_connect_charges_enabled")
+    .select("stripe_connect_account_id, stripe_connect_charges_enabled, platform_approved")
     .eq("id", tpl.user_id)
     .maybeSingle();
   const acctId = profile?.stripe_connect_account_id || null;
   if (!acctId) return fail(409, "This stylist hasn't connected Stripe yet.");
-  if (!profile?.stripe_connect_charges_enabled) {
+  if (!profile?.stripe_connect_charges_enabled || !profile?.platform_approved) {
     return fail(409, "This stylist's Stripe account isn't ready to take charges.");
   }
 
