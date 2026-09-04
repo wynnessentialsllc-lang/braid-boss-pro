@@ -108,7 +108,28 @@ type Snapshot = {
     stripe_connect_status: string | null;
     stripe_connect_charges_enabled: boolean;
     created_at: string;
+    services_count: number;
+    clients_count: number;
+    minutes_to_stripe_sync: number | null;
+    email_looks_generated: boolean;
   }>;
+};
+
+// Fraud-review checklist, run against each pending stylist server-side.
+// None of these prove fraud alone — they're the same tells the Aug 25
+// card-testing wave shared, surfaced so the admin doesn't have to check
+// each one by hand.
+type RiskFlag = { label: string; tone: "danger" | "warning" };
+const riskFlags = (s: Snapshot["pending_approval"][number]): RiskFlag[] => {
+  const flags: RiskFlag[] = [];
+  if (s.email_looks_generated) flags.push({ label: "email looks auto-generated", tone: "danger" });
+  if (s.services_count === 0 && s.clients_count === 0) {
+    flags.push({ label: "0 services, 0 clients", tone: "danger" });
+  }
+  if (s.minutes_to_stripe_sync != null && s.minutes_to_stripe_sync <= 15) {
+    flags.push({ label: "Stripe set up in <15 min", tone: "warning" });
+  }
+  return flags;
 };
 
 const usd = (n: number): string =>
@@ -495,11 +516,12 @@ export default function AdminCommandCenter() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {data.pending_approval.map((s) => {
                     const busy = !!reviewing[s.id];
+                    const flags = riskFlags(s);
                     return (
                       <div
                         key={s.id}
                         style={{
-                          display: "flex", justifyContent: "space-between", alignItems: "center",
+                          display: "flex", justifyContent: "space-between", alignItems: "flex-start",
                           gap: 10, padding: "10px 0", borderTop: `1px solid ${C.hairlineSoft}`,
                         }}
                       >
@@ -512,8 +534,19 @@ export default function AdminCommandCenter() {
                             {s.stripe_connect_charges_enabled ? " · charges enabled" : ""} ·{" "}
                             {new Date(s.created_at).toLocaleDateString()}
                           </p>
+                          <p style={{ margin: "2px 0 0", fontSize: 11, color: C.muted }}>
+                            {num(s.services_count)} {s.services_count === 1 ? "service" : "services"} ·{" "}
+                            {num(s.clients_count)} {s.clients_count === 1 ? "client" : "clients"}
+                          </p>
+                          {flags.length > 0 && (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                              {flags.map((f) => (
+                                <StatusPill key={f.label} tone={f.tone}>{f.label}</StatusPill>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                        <div style={{ display: "flex", gap: 6, flexShrink: 0, marginTop: 1 }}>
                           <button
                             type="button"
                             disabled={busy}
