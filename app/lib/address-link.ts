@@ -145,6 +145,33 @@ export const findAddresses = (text: string): DetectedAddress[] => {
   return found.filter((f, i, all) => i === 0 || f.start >= all[i - 1].end);
 };
 
+/**
+ * The address to show a client for a studio-based appointment.
+ *
+ * Precedence, most specific first:
+ *   1. A configured studio location that is a real street address —
+ *      the stylist set it deliberately, so it wins outright.
+ *   2. A street address the stylist wrote into the agreement body.
+ *      Studios whose only saved location is "City, ST" still get a
+ *      usable address this way, with nothing to re-enter.
+ *   3. The configured location as-is (typically "City, ST"). Not enough
+ *      to navigate by, but better than leaving the client with nothing.
+ *
+ * Returns "" when there's nothing worth showing — including when the
+ * configured value is a placeholder ("TBD", "mobile"), which should
+ * never render as a destination.
+ */
+export const resolveServiceAddress = (
+  configured: string | null | undefined,
+  contractBody: string | null | undefined,
+): string => {
+  const set = normalizeWhitespace(String(configured ?? ""));
+  if (set && findAddresses(set).length > 0) return set;
+  const fromContract = findAddresses(String(contractBody ?? ""))[0]?.value ?? "";
+  if (fromContract) return fromContract;
+  return isLikelyAddress(set) ? set : "";
+};
+
 /** Collapse a multi-line address into a single map-query string. */
 export const normalizeAddressQuery = (address: string): string =>
   String(address || "")

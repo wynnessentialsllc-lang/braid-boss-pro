@@ -5108,18 +5108,20 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         const n = Number(trimmed);
         return Number.isFinite(n) && n >= 0 && n <= 80 ? Math.round(n) : null;
       })();
-      // City + state is the new source of truth. When at least one
-      // is provided we sync the legacy location_text column so
-      // surfaces still reading it (emails, etc.) stay accurate.
-      // When BOTH are blank we leave the existing location_text
-      // untouched so a user who has only a legacy chip doesn't lose
-      // it just by opening the sheet.
+      // What a booked client is told to navigate to. `location_text` is
+      // what studio_location_text() reads — and through it the
+      // confirmation + reminder emails and the appointment portal — so
+      // the street address wins when one is set, with city + state as
+      // the fallback (enough to orient someone, not enough to drive to).
+      // This composed value used to be computed here and then never
+      // added to the patch, so location_text never synced at all.
       const composedLocation = (() => {
         const c = businessCity.trim();
         const s = businessState.trim();
         if (c && s) return `${c}, ${s}`;
         return c || s || null;
       })();
+      const locationOut = locationText.trim() || composedLocation;
       // Header theme is whitelisted client-side too (the DB CHECK is
       // the real guard) — an unknown value saves as 'classic' so the
       // public page can't be pushed into an undefined layout.
@@ -5145,6 +5147,7 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
         banner_image_url: bannerImageUrl.trim() || null,
         business_city: businessCity.trim() || null,
         business_state: businessState.trim() || null,
+        location_text: locationOut,
         instagram_url: instagramUrl.trim() || null,
         tiktok_url: tiktokUrl.trim() || null,
         website_url: websiteUrl.trim() || null,
@@ -5712,10 +5715,12 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
           </p>
         </div>
 
-        {/* Location → City + State. The legacy free-form `Location`
-            input was removed to avoid two fields that produce the
-            same chip; the public booking page already preferred
-            structured city/state over the legacy text. */}
+        {/* Location. City + State is the PUBLIC chip shown to anyone
+            browsing; the studio address below is the private one, sent
+            only to clients who've actually booked. They were collapsed
+            into one field once, which left every studio's confirmation
+            and reminder emails saying "Dallas, TX" — a city, not a
+            door — so clients messaged to ask where to go. */}
         <div className="grid grid-cols-2 gap-3">
           <Field label="City" hint="Shown as a small chip under your studio name.">
             <Input value={businessCity} onChange={(e) => setBusinessCity(e.target.value)} placeholder="Dallas" />
@@ -5724,6 +5729,17 @@ const CustomizeBookingPageSheet = ({ open, onClose, link, onSaved, userId }: {
             <Input value={businessState} onChange={(e) => setBusinessState(e.target.value)} placeholder="TX" maxLength={2} />
           </Field>
         </div>
+        <Field
+          label="Studio address"
+          hint="Private"
+          help="Only sent to clients who've booked — never shown on your public page. Appears in their confirmation and reminder emails and on their appointment page, with a tap-for-directions link. Leave blank for mobile-only services, which use the client's own address instead."
+        >
+          <Input
+            value={locationText}
+            onChange={(e) => setLocationText(e.target.value)}
+            placeholder="5309 Knowlton St, Los Angeles, CA 90045"
+          />
+        </Field>
 
         {/* Mobile Services panel — stylist-wide travel base + radius
             + blocklist. Each individual service is opted in via its

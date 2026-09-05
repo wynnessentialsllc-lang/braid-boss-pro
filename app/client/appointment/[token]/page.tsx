@@ -14,6 +14,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { getSupabase } from "../../../lib/supabase";
 import { listPortalMessages, postPortalMessage, uploadPortalMessagePhoto, type PortalMessage } from "../../../lib/messages";
+import { resolveServiceAddress } from "../../../lib/address-link";
+import { DirectionsCard } from "../../../components/DirectionsCard";
 
 const C = {
   espresso: "#15111A", coffee: "#3D3447", paper: "#FFFFFF",
@@ -57,6 +59,15 @@ type PortalState = {
   } | null;
   cancel_token: string | null;
   reschedule_token: string | null;
+  /**
+   * Where the appointment happens, for the "Where" card. Both come back
+   * null for a mobile service (that one is at the CLIENT's address, so
+   * the studio's would mislead). `contract_body` is carried only so the
+   * address the stylist wrote into the agreement can be recovered when
+   * no street address is configured — see resolveServiceAddress.
+   */
+  studio_address: string | null;
+  contract_body: string | null;
 };
 
 const fmtDate = (iso: string | null): string => {
@@ -373,6 +384,15 @@ export default function ClientAppointmentPortal() {
     return () => { cancelled = true; };
   }, [token]);
 
+  // The day-of question this portal exists to answer. A configured
+  // street address wins; otherwise we recover one from the agreement
+  // text, so studios whose saved location is only "City, ST" still
+  // give the client something they can navigate to.
+  const serviceAddress = useMemo(
+    () => resolveServiceAddress(state?.studio_address, state?.contract_body),
+    [state?.studio_address, state?.contract_body],
+  );
+
   if (loading) {
     return <Wrap><Card><p style={{ margin: 0, textAlign: "center", color: C.muted }}>Loading your appointment…</p></Card></Wrap>;
   }
@@ -438,6 +458,21 @@ export default function ClientAppointmentPortal() {
           <span style={{ fontSize: 13, color: C.espresso, fontWeight: 500 }}>{s.client_name || "—"}</span>
         </div>
       </Card>
+
+      {/* Where to go. Sits right under the date/time because that's the
+          pair clients check on the morning of — before this card the
+          portal listed everything about the appointment except how to
+          reach it. Hidden once cancelled: there's nowhere to go. */}
+      {!isCancelled && serviceAddress && (
+        <DirectionsCard
+          address={serviceAddress}
+          // Match the surrounding <Card> so it reads as one of them.
+          style={{
+            marginTop: 0, marginBottom: 14, borderRadius: 18,
+            boxShadow: "0 6px 22px -16px rgba(21,17,26,0.20)",
+          }}
+        />
+      )}
 
       <Card>
         <SectionTitle>Payment</SectionTitle>

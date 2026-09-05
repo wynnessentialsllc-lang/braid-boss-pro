@@ -4,6 +4,7 @@ import {
   isLikelyAddress,
   mapsDirectionsUrl,
   normalizeAddressQuery,
+  resolveServiceAddress,
   splitByAddresses,
 } from "./address-link";
 
@@ -149,5 +150,57 @@ describe("mapsDirectionsUrl", () => {
   it("returns an empty string for empty input", () => {
     expect(mapsDirectionsUrl("")).toBe("");
     expect(mapsDirectionsUrl("   \n ")).toBe("");
+  });
+});
+
+// The day-of "where do I go" question, as it actually reached support:
+// a studio saved as only "Los Angeles, CA" whose real street address
+// lived in the agreement body, so the client messaged to ask.
+describe("resolveServiceAddress", () => {
+  const CONTRACT = [
+    "Appointment Prep:",
+    "Please arrive with hair washed and blow dried.",
+    "",
+    "Location:",
+    "5309 Knowlton St., LA, CA 90045",
+    "Call (310) 431-1700 for entry",
+    "",
+    "Parking:",
+    "Street parking available.",
+  ].join("\n");
+
+  it("prefers a configured street address over the agreement body", () => {
+    expect(resolveServiceAddress("742 Evergreen Terrace, Dallas, TX 75201", CONTRACT))
+      .toBe("742 Evergreen Terrace, Dallas, TX 75201");
+  });
+
+  it("recovers the address from the agreement when only city/state is saved", () => {
+    expect(resolveServiceAddress("Los Angeles, CA", CONTRACT))
+      .toBe("5309 Knowlton St., LA, CA 90045");
+  });
+
+  it("recovers the address when nothing at all is configured", () => {
+    expect(resolveServiceAddress(null, CONTRACT)).toBe("5309 Knowlton St., LA, CA 90045");
+    expect(resolveServiceAddress("", CONTRACT)).toBe("5309 Knowlton St., LA, CA 90045");
+  });
+
+  it("falls back to city/state when the agreement has no address", () => {
+    expect(resolveServiceAddress("Los Angeles, CA", "Please arrive on time."))
+      .toBe("Los Angeles, CA");
+  });
+
+  it("returns nothing when there is nothing to show", () => {
+    expect(resolveServiceAddress(null, null)).toBe("");
+    expect(resolveServiceAddress("", "")).toBe("");
+    expect(resolveServiceAddress("   ", "Bring your own hair.")).toBe("");
+  });
+
+  it("never offers a placeholder as a destination", () => {
+    expect(resolveServiceAddress("TBD", null)).toBe("");
+    expect(resolveServiceAddress("Mobile — we come to you", null)).toBe("");
+  });
+
+  it("keeps a placeholder from hiding a real address in the agreement", () => {
+    expect(resolveServiceAddress("TBD", CONTRACT)).toBe("5309 Knowlton St., LA, CA 90045");
   });
 });
