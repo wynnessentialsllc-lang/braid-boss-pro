@@ -14,9 +14,15 @@ const isCanceledStatus = (status: unknown): boolean =>
 const isCanceledAppointment = (a: any): boolean => isCanceledStatus(a?.status);
 const collected = (a: any): number => {
   if (!a || isCanceledAppointment(a)) return 0;
+  const total = num(a.totalPrice);
+  // Paid in full (balance settled after a deposit, or a flat full
+  // payment) takes priority over the deposit field — otherwise a
+  // booking whose balance was later paid off keeps reading as only
+  // its original deposit, undercounting collected revenue.
+  if (a.balancePaid === true || a.balance_paid === true) return total;
+  if (num(a.balanceDue) === 0 && total > 0) return total;
   const dep = num(a.depositPaid);
   if (dep > 0) return dep;
-  if (num(a.balanceDue) === 0 && num(a.totalPrice) > 0) return num(a.totalPrice);
   return 0;
 };
 const isPaidLike = (a: any): boolean =>
